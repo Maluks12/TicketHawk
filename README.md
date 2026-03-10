@@ -5,6 +5,8 @@ A full-stack events booking platform.
 - **Backend:** Go + Gin + PostgreSQL + Redis (`events-db/`)
 - **Mobile App:** React Native + Expo + NativeWind (`EventsApp/`)
 
+> All commands are written for **PowerShell** on Windows.
+
 ---
 
 ## Prerequisites
@@ -21,21 +23,19 @@ Install these before anything else.
 | golang-migrate CLI | latest | https://github.com/golang-migrate/migrate |
 | Expo Go (phone) | latest | App Store / Google Play |
 
-> **Windows users:** Use PowerShell for all commands below.
-
 ---
 
 ## Backend Setup (`events-db/`)
 
-### 1. Clone and navigate
+### 1. Navigate to the backend
 
-```bash
+```powershell
 cd events-db
 ```
 
 ### 2. Install Go dependencies
 
-```bash
+```powershell
 go mod download
 ```
 
@@ -60,15 +60,23 @@ All dependencies are declared in `go.mod`. The key direct dependencies are:
 | `golang.org/x/crypto` | bcrypt password hashing |
 | `github.com/stretchr/testify` | Test assertions |
 
-### 3. Create the database
+### 3. Install Air (live reload for development)
 
-```bash
+`air` watches your Go files and automatically restarts the server on changes so you don't have to stop and re-run manually. Install it once globally:
+
+```powershell
+go install github.com/air-verse/air@latest
+```
+
+### 4. Create the database
+
+```powershell
 psql -U postgres -c "CREATE DATABASE events_db;"
 ```
 
-### 4. Run migrations
+### 5. Run migrations
 
-```bash
+```powershell
 migrate -path ./migrations -database "postgresql://postgres:yourpassword@localhost:5432/events_db?sslmode=disable" up
 ```
 
@@ -86,7 +94,7 @@ This runs all 9 migrations in order:
 | `000008` | Guest bookings table |
 | `000009` | `refresh_tokens` table |
 
-### 5. Create `.env` file
+### 6. Create `.env` file
 
 Create `events-db/.env` with the following variables:
 
@@ -133,26 +141,34 @@ ENABLE_EMAIL_VERIFICATION=false
 ENABLE_WAITLIST=false
 ```
 
-### 6. Start Redis
+### 7. Start Redis
 
-```bash
-# macOS / Linux
-redis-server
-
-# Windows (if installed as a service)
+```powershell
+# If installed as a Windows service
 net start Redis
+
+# If running the Redis executable directly
+redis-server
 ```
 
-### 7. Run the server
+### 8. Run the server
 
-```bash
+**With Air (recommended — auto-restarts on file changes):**
+
+```powershell
+air
+```
+
+**Without Air (one-off run):**
+
+```powershell
 go run cmd/api/main.go
 ```
 
 The server starts on `http://localhost:8080`. Check it's healthy:
 
-```bash
-curl http://localhost:8080/health
+```powershell
+Invoke-RestMethod http://localhost:8080/health
 ```
 
 Expected response:
@@ -166,29 +182,29 @@ Expected response:
 
 The tests require a separate test database running on port **5433**. Start it with Docker:
 
-```bash
-docker run -d --name test-postgres \
-  -e POSTGRES_USER=testuser \
-  -e POSTGRES_PASSWORD=testpass \
-  -e POSTGRES_DB=test_db \
+```powershell
+docker run -d --name test-postgres `
+  -e POSTGRES_USER=testuser `
+  -e POSTGRES_PASSWORD=testpass `
+  -e POSTGRES_DB=test_db `
   -p 5433:5432 postgres:15
 ```
 
 Then run all tests:
 
-```bash
+```powershell
 go test ./...
 ```
 
 Run only the payment/webhook tests:
 
-```bash
+```powershell
 go test ./internal/services/... -v -run "TestWebhook|TestPayment"
 ```
 
-You also need testify installed (it's in `go.mod` already, but if missing):
+If testify is missing (it's in `go.mod` already, but if not fetched):
 
-```bash
+```powershell
 go get github.com/stretchr/testify@latest
 ```
 
@@ -198,25 +214,19 @@ go get github.com/stretchr/testify@latest
 
 ### 1. Navigate to the app directory
 
-```bash
+```powershell
 cd EventsApp
 ```
 
 ### 2. Create the `.npmrc` file to avoid peer dependency conflicts
 
 ```powershell
-# PowerShell
 "legacy-peer-deps=true" | Out-File -FilePath .npmrc -Encoding utf8
-```
-
-```bash
-# macOS / Linux
-echo "legacy-peer-deps=true" > .npmrc
 ```
 
 ### 3. Install dependencies
 
-```bash
+```powershell
 npm install --legacy-peer-deps
 ```
 
@@ -224,7 +234,7 @@ npm install --legacy-peer-deps
 
 These must use `npx expo install` (not plain `npm install`) so Expo picks compatible versions:
 
-```bash
+```powershell
 npx expo install expo-router react-native-safe-area-context react-native-screens expo-linking expo-constants expo-status-bar
 npx expo install expo-secure-store
 npx expo install expo-web-browser expo-auth-session
@@ -235,7 +245,7 @@ npx expo install axios zustand
 
 ### 5. Install dev dependencies
 
-```bash
+```powershell
 npm install --save-dev tailwindcss
 ```
 
@@ -271,11 +281,15 @@ Open `lib/api.ts` and replace the IP address with your machine's local IP:
 export const API_BASE_URL = 'http://YOUR_LOCAL_IP:8080';
 ```
 
-Find your local IP:
-- **Windows:** `ipconfig` → look for IPv4 Address
-- **macOS/Linux:** `ifconfig` → look for `inet` under your network adapter
+Find your local IP in PowerShell:
 
-> Do not use `localhost` — the phone/emulator cannot reach your machine's localhost. You must use the actual LAN IP (e.g. `192.168.1.5`).
+```powershell
+ipconfig
+```
+
+Look for **IPv4 Address** under your active network adapter (e.g. `192.168.1.5`).
+
+> Do not use `localhost` — the phone/emulator cannot reach your machine's localhost. You must use the actual LAN IP.
 
 ### 8. Config files
 
@@ -313,7 +327,7 @@ module.exports = withNativeWind(config, { input: './global.css' });
 
 ### 9. Start the app
 
-```bash
+```powershell
 npx expo start
 ```
 
@@ -362,10 +376,10 @@ EventsProject/
 ## Common Issues
 
 **`npm install` peer dependency errors**
-Always use `npx expo install` for Expo packages, and add `legacy-peer-deps=true` to `.npmrc`.
+Always use `npx expo install` for Expo packages, and make sure `.npmrc` has `legacy-peer-deps=true`.
 
 **App can't connect to the API**
-Make sure `API_BASE_URL` in `lib/api.ts` uses your machine's LAN IP, not `localhost`.
+Make sure `API_BASE_URL` in `lib/api.ts` uses your machine's LAN IP from `ipconfig`, not `localhost`.
 
 **`migrate: no migration`**
 Make sure you're running `migrate` from inside the `events-db/` directory and the `-path` flag points to `./migrations`.
@@ -375,3 +389,10 @@ Start Redis before running the server. The server will still start but rate limi
 
 **`JWT_SECRET must be at least 32 characters`**
 Your `.env` JWT_SECRET is too short. Use a random 32+ character string.
+
+**`air: command not found`**
+Run `go install github.com/air-verse/air@latest` and make sure your Go bin directory is on your PATH:
+```powershell
+$env:PATH += ";$env:GOPATH\bin"
+```
+To make this permanent, add it to your PowerShell profile (`$PROFILE`).
