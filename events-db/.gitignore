@@ -28,6 +28,7 @@ tmp/
 *.test
 coverage/
 coverage.html
+coverage
 
 # ========================
 # IDE & Editor
