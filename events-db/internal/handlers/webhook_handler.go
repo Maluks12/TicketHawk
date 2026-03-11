@@ -20,7 +20,10 @@ func StitchWebhookHandler(
     // Initialise verifier once at startup — not per request
     wh, err := svix.NewWebhook(webhookSecret)
     if err != nil {
-        log.Fatalf("invalid webhook secret: %v", err)
+        log.Printf("ERROR: invalid webhook secret — check STITCH_WEBHOOK_SECRET is in 'whsec_<base64>' format: %v", err)
+        return func(c *gin.Context) {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": "webhook handler misconfigured"})
+        }
     }
  
     return func(c *gin.Context) {

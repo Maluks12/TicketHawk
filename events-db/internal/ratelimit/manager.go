@@ -13,12 +13,12 @@ type Manager struct {
 	limiters map[string]*TokenBucketLimiter
 }
 
-func (m *Manager) Ping(context context.Context) any {
-	panic("unimplemented")
+func (m *Manager) Ping(ctx context.Context) error {
+	return m.client.Ping(ctx).Err()
 }
 
 func (m *Manager) Client() *redis.Client {
-	panic("unimplemented")
+	return m.client
 }
 
 func NewManager(redisAddr string) (*Manager, error) {
