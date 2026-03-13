@@ -65,12 +65,14 @@ func main() {
 	workers.StartExpiryWorker(pool, ctx, 15*time.Minute, 1*time.Minute)
 	log.Info().Msg("booking expiry worker started")
 
+	bookingJobs := make(chan string, 256)
+	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
 	// ==========================================
 	// Services
 	// ==========================================
 	emailService := services.NewEmailService(cfg)
 	qrService := services.NewQRService(pool, cfg)
-	paymentService := services.NewPaymentService(pool, cfg)
+	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
 	// ==========================================
 	// Initialize Rate Limit Manager

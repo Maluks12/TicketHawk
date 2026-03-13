@@ -27,20 +27,20 @@ var (
 ) // change back to const when done testing
 
 type stitchToken struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
+	AccessToken string    `json:"access_token"`
+	TokenType   string    `json:"token_type"`
+	ExpiresIn   int       `json:"expires_in"`
 	ExpiresAt   time.Time `json:"-"`
 }
 
 type graphQLRequest struct {
-	Query string `json:"query"`
+	Query     string                 `json:"query"`
 	Variables map[string]interface{} `json:"variables"`
 }
 
 type graphQLResponse struct {
-	Data json.RawMessage `json:"data"`
-	Errors []graphQLError `json:"errors"`
+	Data   json.RawMessage `json:"data"`
+	Errors []graphQLError  `json:"errors"`
 }
 
 type graphQLError struct {
@@ -48,40 +48,46 @@ type graphQLError struct {
 }
 
 type secureFieldsPaymentResponse struct {
-  ClientCardPaymentInitiate struct {
-    PaymentInitiation struct {
-      ID          string `json:"id"`
-      ClientToken string `json:"clientToken"`
-    } `json:"paymentInitiation"`
-  } `json:"clientCardPaymentInitiate"`
+	ClientCardPaymentInitiate struct {
+		PaymentInitiation struct {
+			ID          string `json:"id"`
+			ClientToken string `json:"clientToken"`
+		} `json:"paymentInitiation"`
+	} `json:"clientCardPaymentInitiate"`
 }
 
 type refundPaymentResponse struct {
 	ClientRefundInitiate struct {
-		ID string `json:"id"`
+		ID     string `json:"id"`
 		Status string `json:"status"`
 	} `json:"clientRefundInitiate"`
 }
 
 type PaymentService struct {
-	pool *pgxpool.Pool
-	cfg *config.Config
-	httpClient *http.Client
-	tokenMu sync.Mutex
+	pool        *pgxpool.Pool
+	cfg         *config.Config
+	httpClient  *http.Client
+	tokenMu     sync.Mutex
 	cachedToken *stitchToken
+	// jobChan receives a BookingJob for every newly confirmed payment.
+	// The booking worker drains this channel and handles QR + email.
+	// Use a buffered channel (e.g. make(chan workers.BookingJob, 256)) so the
+	// webhook handler never blocks.
+	jobChan chan<- string
 }
 
-func NewPaymentService(pool *pgxpool.Pool, cfg *config.Config) *PaymentService {
-	return &PaymentService {
+func NewPaymentService(pool *pgxpool.Pool, cfg *config.Config, jobChan chan<- string) *PaymentService {
+	return &PaymentService{
 		pool: pool,
-		cfg: cfg,
-		httpClient: &http.Client {
+		cfg:  cfg,
+		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		jobChan: jobChan,
 	}
 }
 
-func (s*PaymentService) getAccessToken(ctx context.Context) (string, error) {
+func (s *PaymentService) getAccessToken(ctx context.Context) (string, error) {
 	s.tokenMu.Lock()
 	defer s.tokenMu.Unlock()
 
@@ -95,7 +101,7 @@ func (s*PaymentService) getAccessToken(ctx context.Context) (string, error) {
 	formData.Set("client_secret", s.cfg.StitchClientSecret)
 	formData.Set("audience", stitchTokenAudience)
 	formData.Set("scope", "client_paymentrequest")
-	
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stitchTokenURL, strings.NewReader(formData.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("creating token request: %w", err)
@@ -103,11 +109,9 @@ func (s*PaymentService) getAccessToken(ctx context.Context) (string, error) {
 	req.Header.Set("Content-type", "application/x-www-form-urlencoded")
 
 	resp, err := s.httpClient.Do(req)
-
 	if err != nil {
 		return "", fmt.Errorf("fetching stitch token: %w", err)
 	}
-
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
@@ -115,7 +119,7 @@ func (s*PaymentService) getAccessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("stitch token endpoint returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var tok stitchToken 
+	var tok stitchToken
 	if err := json.Unmarshal(body, &tok); err != nil {
 		return "", fmt.Errorf("decoding token response: %w", err)
 	}
@@ -149,22 +153,21 @@ func (s *PaymentService) graphQL(ctx context.Context, query string, variables ma
 	if err != nil {
 		return fmt.Errorf("graphql request: %w", err)
 	}
-
 	defer resp.Body.Close()
 
-	respBody,_ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("stitch graphql returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var gqlResp graphQLResponse 
+	var gqlResp graphQLResponse
 	if err := json.Unmarshal(respBody, &gqlResp); err != nil {
 		return fmt.Errorf("decoding graphql response: %w", err)
 	}
 
 	if len(gqlResp.Errors) > 0 {
 		msgs := make([]string, len(gqlResp.Errors))
-		for i, e:= range gqlResp.Errors {
+		for i, e := range gqlResp.Errors {
 			msgs[i] = e.Message
 		}
 		return fmt.Errorf("graphql errors: %s", strings.Join(msgs, "; "))
@@ -199,42 +202,35 @@ func (s *PaymentService) CreatePaymentIntent(booking *models.Booking) (clientTok
 
 	variables := map[string]interface{}{
 		"input": map[string]interface{}{
-		"amount": map[string]interface{}{
-			"quantity": amountCents,
-			"currency": booking.Currency,
-		},
-		"payerReference":       booking.BookingNumber,
-		"merchantReference":    booking.BookingNumber,
-		"beneficiaryReference": booking.BookingNumber,
-		"externalReference":    booking.ID,
+			"amount": map[string]interface{}{
+				"quantity": amountCents,
+				"currency": booking.Currency,
+			},
+			"payerReference":       booking.BookingNumber,
+			"merchantReference":    booking.BookingNumber,
+			"beneficiaryReference": booking.BookingNumber,
+			"externalReference":    booking.ID,
 		},
 	}
 
 	var result secureFieldsPaymentResponse
 	if err := s.graphQL(ctx, mutation, variables, &result); err != nil {
-		return "", "", fmt.Errorf( "creating stitch secure fields session: %w", err)
+		return "", "", fmt.Errorf("creating stitch secure fields session: %w", err)
 	}
 
 	pi := result.ClientCardPaymentInitiate.PaymentInitiation
 	if pi.ID == "" || pi.ClientToken == "" {
-		return "", "", errors.New(
-		"stitch returned empty payment ID or client token",
-		)
+		return "", "", errors.New("stitch returned empty payment ID or client token")
 	}
-	
-	if err := s.createPaymentRecord(
-		ctx, booking, pi.ID, "",  // no URL to store
-		); err != nil {
-		log.Printf(
-		"WARNING: failed to persist payment record "+
-		"for booking %s: %v", booking.ID, err,
-		)
+
+	if err := s.createPaymentRecord(ctx, booking, pi.ID, ""); err != nil {
+		log.Printf("WARNING: failed to persist payment record for booking %s: %v", booking.ID, err)
 	}
 
 	return pi.ClientToken, pi.ID, nil
 }
 
-func (s*PaymentService) createPaymentRecord(ctx context.Context, booking *models.Booking, requestID, paymentURL string) error {
+func (s *PaymentService) createPaymentRecord(ctx context.Context, booking *models.Booking, requestID, paymentURL string) error {
 	query := `
 		INSERT INTO payments (
         booking_id, payment_gateway, payment_intent_id,
@@ -318,7 +314,6 @@ func (s *PaymentService) ProcessRefund(bookingID string) error {
 	return nil
 }
 
-
 type StitchWebhookEvent struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
@@ -348,7 +343,7 @@ func (s *PaymentService) HandleWebhook(event *StitchWebhookEvent) error {
 	case "payment_initiation_request.updated":
 		return s.handlePaymentUpdate(ctx, event.Data)
 	case "card_payment.updated": // Secure Fields card payments
-    	return s.handlePaymentUpdate(ctx, event.Data)
+		return s.handlePaymentUpdate(ctx, event.Data)
 	default:
 		log.Printf("stitch webhook: unhandled event type %q", event.Type)
 		return nil
@@ -367,7 +362,7 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 	}
 
 	internalStatus := stitchStatusToInternal(pr.Status)
-	paymentMethod  := stitchMethodToInternal(pr.Payer.PaymentMethod)
+	paymentMethod := stitchMethodToInternal(pr.Payer.PaymentMethod)
 
 	var transactionID *string
 	if len(pr.Transactions) > 0 {
@@ -382,20 +377,22 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 		SELECT status, booking_id FROM payments
 		WHERE stitch_payment_request_id = $1
 	`
-	err := s.pool.QueryRow(ctx, queryStatus,pr.ID).Scan(&currentStatus, &bookingID)
+	err := s.pool.QueryRow(ctx, queryStatus, pr.ID).Scan(&currentStatus, &bookingID)
 	if err != nil {
 		log.Printf("webhook: no payment record for stitch ID %s, ignoring", pr.ID)
 		return nil
 	}
 
+	// Idempotency guard — Stitch may deliver the same webhook more than once
 	if currentStatus == string(models.PaymentCompleted) || currentStatus == string(models.PaymentRefunded) {
-		log.Printf("webhook: payment %s already %s, sacking duplicate", pr.ID, currentStatus)
+		log.Printf("webhook: payment %s already %s, ignoring duplicate", pr.ID, currentStatus)
+		return nil
 	}
 
-	// Update payment row and get the associated booking ID
+	// Update payment row
 	query := `
 		UPDATE payments
-			SET status           = $1::text,
+			SET status       = $1::text,
 		    payment_method   = $2::payment_method_type,
 		    transaction_id   = COALESCE($3, transaction_id),
 		    webhook_received = TRUE,
@@ -420,40 +417,53 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 	}
 
 	log.Printf("stitch webhook: %s → status=%s method=%s booking=%s", pr.ID, internalStatus, paymentMethod, bookingID)
+
+	// Enqueue QR + email job for confirmed payments.
+	// Non-blocking send: if the channel is full we log and move on — the
+	// webhook must return quickly so Stitch does not retry.
+	if internalStatus == models.PaymentCompleted {
+		select {
+		case s.jobChan <- bookingID:
+			log.Printf("stitch webhook: enqueued booking job for %s", bookingID)
+		default:
+			log.Printf("WARNING: booking job channel full, dropping job for %s — consider increasing buffer size", bookingID)
+		}
+	}
+
 	return nil
 }
 
 func (s *PaymentService) syncBookingStatus(ctx context.Context, bookingID string, status models.PaymentStatus) error {
-    // Always keep payment_status in sync on the booking row
-    _, err := s.pool.Exec(ctx, `
+	// Always keep payment_status in sync on the booking row
+	_, err := s.pool.Exec(ctx, `
         UPDATE bookings
         SET payment_status = $1,
             updated_at     = CURRENT_TIMESTAMP
         WHERE id = $2
     `, string(status), bookingID)
-    if err != nil {
-        return err
-    }
+	if err != nil {
+		return err
+	}
 
-    // Only transition booking_status for terminal payment outcomes
-    var bookingStatus models.BookingStatus
-    switch status {
-    case models.PaymentCompleted:
-        bookingStatus = models.BookingConfirmed
-    case models.PaymentFailed:
-        bookingStatus = models.BookingCancelled
-    default:
-        return nil
-    }
+	// Only transition booking_status for terminal payment outcomes
+	var bookingStatus models.BookingStatus
+	switch status {
+	case models.PaymentCompleted:
+		bookingStatus = models.BookingConfirmed
+	case models.PaymentFailed:
+		bookingStatus = models.BookingCancelled
+	default:
+		return nil
+	}
 
-    _, err = s.pool.Exec(ctx, `
+	_, err = s.pool.Exec(ctx, `
         UPDATE bookings
         SET booking_status = $1::text,
             confirmed_at   = CASE WHEN $1::text = 'confirmed' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
             updated_at     = CURRENT_TIMESTAMP
         WHERE id = $2
     `, string(bookingStatus), bookingID)
-    return err
+	return err
 }
 
 // ============================================================

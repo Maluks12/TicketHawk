@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config" // Aliased to avoid collision
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,23 +24,23 @@ import (
 
 type QRService struct {
 	pool *pgxpool.Pool
-	cfg *config.Config
+	cfg  *config.Config
 }
 
 func NewQRService(pool *pgxpool.Pool, cfg *config.Config) *QRService {
-	return & QRService{
+	return &QRService{
 		pool: pool,
-		cfg: cfg,
+		cfg:  cfg,
 	}
 }
 
 type QRPayload struct {
-	BookingID string `json:"booking_id"`
-	BookingNumber string `json:"booking_number"`
-	EventID string `json:"event_id"`
-	UserID string `json:"user_id"`
-	Quantity int `json:"quantity"`
-	IssuedAt time.Time `json:"issued_at"`
+	BookingID     string    `json:"booking_id"`
+	BookingNumber string    `json:"booking_number"`
+	EventID       string    `json:"event_id"`
+	UserID        string    `json:"user_id"`
+	Quantity      int       `json:"quantity"`
+	IssuedAt      time.Time `json:"issued_at"`
 }
 
 func (s *QRService) GenerateQRCode(bookingID string) error {
@@ -57,14 +57,24 @@ func (s *QRService) GenerateQRCode(bookingID string) error {
 	payload.BookingID = bookingID
 	payload.IssuedAt = time.Now()
 
+	// user_id is NULL for guest bookings — scan into *string to handle safely
+	var userID *string
+
 	err := s.pool.QueryRow(ctx, query, bookingID).Scan(
 		&payload.BookingNumber,
 		&payload.EventID,
-		&payload.UserID,
+		&userID,
 		&payload.Quantity,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to get booking: %w", err)
+	}
+
+	// Guests have no user_id — fall back to booking ID as the unique identifier
+	if userID != nil {
+		payload.UserID = *userID
+	} else {
+		payload.UserID = bookingID
 	}
 
 	encryptedData, err := s.encryptPayload(payload)
@@ -95,14 +105,13 @@ func (s *QRService) GenerateQRCode(bookingID string) error {
 }
 
 func (s *QRService) VerifyQRCode(encryptedData string) (*QRPayload, error) {
-	ctx,cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	payload, err := s.decryptPayload(encryptedData)
 	if err != nil {
 		return nil, fmt.Errorf("invalid QR code: %w", err)
 	}
-
 
 	query := `
 		SELECT b.id, b.booking_status, e.start_time, e.end_time
@@ -126,14 +135,14 @@ func (s *QRService) VerifyQRCode(encryptedData string) (*QRPayload, error) {
 	}
 
 	if status != string(models.BookingConfirmed) {
-		return nil, fmt.Errorf("booking is not confirmed: %w", err)
+		return nil, fmt.Errorf("booking is not confirmed")
 	}
 
 	now := time.Now()
-
 	if now.Before(startTime.Add(-2*time.Hour)) || now.After(endTime.Add(2*time.Hour)) {
-		return nil, fmt.Errorf("WR code not valid for this time")
+		return nil, fmt.Errorf("QR code not valid for this time")
 	}
+
 	return payload, nil
 }
 
@@ -159,7 +168,6 @@ func (s *QRService) encryptPayload(payload QRPayload) (string, error) {
 	}
 
 	ciphertext := gcm.Seal(nonce, nonce, jsonData, nil)
-
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
@@ -199,39 +207,38 @@ func (s *QRService) decryptPayload(encryptedData string) (*QRPayload, error) {
 }
 
 func (s *QRService) uploadQRCode(bookingID string, pngData []byte) (string, error) {
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-    // Change config. to awsconfig. everywhere below ↓
-    cfg, err := awsconfig.LoadDefaultConfig(ctx,        // ← awsconfig not config
-        awsconfig.WithCredentialsProvider(              // ← awsconfig not config
-            credentials.NewStaticCredentialsProvider(
-                s.cfg.R2AccessKey,
-                s.cfg.R2SecretKey,
-                "",
-            ),
-        ),
-        awsconfig.WithRegion("auto"),                   // ← awsconfig not config
-    )
-    if err != nil {
-        return "", fmt.Errorf("failed to load AWS config: %w", err)
-    }
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(
+				s.cfg.R2AccessKey,
+				s.cfg.R2SecretKey,
+				"",
+			),
+		),
+		awsconfig.WithRegion("auto"),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
 
-    client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-        o.BaseEndpoint = aws.String(s.cfg.R2URL)
-    })
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(s.cfg.R2URL)
+	})
 
-    filename := fmt.Sprintf("qr-codes/%s.png", bookingID)
+	filename := fmt.Sprintf("qr-codes/%s.png", bookingID)
 
-    _, err = client.PutObject(ctx, &s3.PutObjectInput{
-        Bucket:      aws.String(s.cfg.R2Bucket),
-        Key:         aws.String(filename),
-        Body:        bytes.NewReader(pngData),         // ← bytes package
-        ContentType: aws.String("image/png"),
-    })
-    if err != nil {
-        return "", fmt.Errorf("failed to upload QR code: %w", err)
-    }
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(s.cfg.R2Bucket),
+		Key:         aws.String(filename),
+		Body:        bytes.NewReader(pngData),
+		ContentType: aws.String("image/png"),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to upload QR code: %w", err)
+	}
 
-    return fmt.Sprintf("%s/%s/%s", s.cfg.R2URL, s.cfg.R2Bucket, filename), nil
+	return fmt.Sprintf("%s/%s/%s", s.cfg.R2URL, s.cfg.R2Bucket, filename), nil
 }

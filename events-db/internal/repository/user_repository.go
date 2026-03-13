@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"events-db/internal/models"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -157,3 +158,29 @@ func RevokeAllUserTokens(pool *pgxpool.Pool, userID string) error {
 
 	return err
 }
+
+func GetUserByIDForEmail(pool *pgxpool.Pool, id string) (*models.User, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+ 
+	query := `
+		SELECT id, email, first_name, last_name, role, created_at
+		FROM users
+		WHERE id = $1
+	`
+ 
+	var user models.User
+	err := pool.QueryRow(ctx, query, id).Scan(
+		&user.ID,
+		&user.Email,
+		&user.FirstName,
+		&user.LastName,
+		&user.Role,
+		&user.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetUserByIDForEmail: %w", err)
+	}
+	return &user, nil
+}
+ 
