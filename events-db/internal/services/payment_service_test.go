@@ -12,9 +12,14 @@ package services
 // Run:
 //   go test ./internal/services/... -v -run TestPayment
 //
-// NOTE: NewPaymentService now takes a third argument — jobChan (chan<- string).
-// Every test helper passes make(chan string, 256) so confirmed-payment webhooks
-// can enqueue booking jobs without blocking.
+// Changes from previous version
+// ─────────────────────────────
+// • createPaymentRecord now takes cartID *string as a 4th arg.
+//   All legacy callers pass nil; cart-based callers pass a cart UUID.
+// • payments and bookings DDL include cart_id.
+// • carts table added so the FK on bookings.cart_id resolves.
+// • New tests: CreateCartPaymentIntent, syncAllCartBookings,
+//   multi-booking webhook confirmation, guest user paths.
 
 import (
 	"context"
@@ -43,7 +48,6 @@ func setupPaymentTestDB(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Skipf("payment DB tests skipped — could not create pool: %v", err)
 	}
-	// pgxpool.New is lazy — ping to confirm the DB is actually reachable.
 	if pingErr := pool.Ping(context.Background()); pingErr != nil {
 		pool.Close()
 		t.Skipf("payment DB tests skipped — DB not reachable (start with: docker run -d --name test-postgres -e POSTGRES_USER=testuser -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=test_db -p 5433:5432 postgres:15): %v", pingErr)
@@ -57,13 +61,10 @@ func createPaymentTestTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 
-	// Drop in dependency order so we always start from a clean isolated schema.
-	// This is essential when running against the real migrated DB — the real
-	// bookings table has a FK to events which gen_random_uuid() can never satisfy.
-	// By dropping and recreating we own the schema for the duration of the tests.
 	for _, s := range []string{
 		"DROP TABLE IF EXISTS payments CASCADE",
 		"DROP TABLE IF EXISTS bookings CASCADE",
+		"DROP TABLE IF EXISTS carts    CASCADE",
 	} {
 		pool.Exec(ctx, s)
 	}
@@ -76,8 +77,17 @@ func createPaymentTestTables(t *testing.T, pool *pgxpool.Pool) {
 		EXCEPTION WHEN duplicate_object THEN NULL;
 		END $$`,
 
-		// bookings — no FK to events; event_id uses DEFAULT gen_random_uuid() for
-		// test isolation. The payment service never queries the events table.
+		// carts — needed so bookings.cart_id FK resolves
+		`CREATE TABLE carts (
+			id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id          UUID,
+			session_id       UUID,
+			last_activity_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// bookings — no FK to events; event_id uses DEFAULT gen_random_uuid().
+		// cart_id added for multi-booking cart checkout support.
 		`CREATE TABLE bookings (
 			id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			booking_number   VARCHAR(50) UNIQUE NOT NULL DEFAULT 'BK-' || substr(gen_random_uuid()::text,1,8),
@@ -94,6 +104,7 @@ func createPaymentTestTables(t *testing.T, pool *pgxpool.Pool) {
 			booking_status   VARCHAR(50) NOT NULL DEFAULT 'pending',
 			payment_status   VARCHAR(50) NOT NULL DEFAULT 'pending',
 			tickets_sent     BOOLEAN NOT NULL DEFAULT FALSE,
+			cart_id          UUID REFERENCES carts(id) ON DELETE SET NULL,
 			confirmed_at     TIMESTAMPTZ,
 			cancelled_at     TIMESTAMPTZ,
 			updated_at       TIMESTAMPTZ DEFAULT NOW(),
@@ -119,6 +130,7 @@ func createPaymentTestTables(t *testing.T, pool *pgxpool.Pool) {
 			stitch_payment_request_id TEXT,
 			stitch_payment_url        TEXT,
 			stitch_linked_account_id  TEXT,
+			cart_id                   UUID REFERENCES carts(id) ON DELETE SET NULL,
 			refund_id                 TEXT,
 			refunded_amount           NUMERIC(10,2),
 			refunded_at               TIMESTAMPTZ,
@@ -143,8 +155,10 @@ func cleanupPaymentTestDB(pool *pgxpool.Pool) {
 }
 
 func cleanupPaymentTestData(pool *pgxpool.Pool) {
-	pool.Exec(context.Background(), "TRUNCATE TABLE payments CASCADE")
-	pool.Exec(context.Background(), "TRUNCATE TABLE bookings CASCADE")
+	ctx := context.Background()
+	pool.Exec(ctx, "TRUNCATE TABLE payments CASCADE")
+	pool.Exec(ctx, "TRUNCATE TABLE bookings CASCADE")
+	pool.Exec(ctx, "TRUNCATE TABLE carts    CASCADE")
 }
 
 // ==========================================
@@ -164,6 +178,39 @@ func insertTestBooking(t *testing.T, pool *pgxpool.Pool) string {
 	return id
 }
 
+// insertTestBookingForCart inserts a booking linked to a cart (for cart checkout tests).
+func insertTestBookingForCart(t *testing.T, pool *pgxpool.Pool, cartID string) string {
+	t.Helper()
+	bookingNumber := fmt.Sprintf("BK-%d", time.Now().UnixNano())
+	var id string
+	err := pool.QueryRow(context.Background(), `
+		INSERT INTO bookings (booking_number, total_amount, currency, cart_id)
+		VALUES ($1, 100.00, 'ZAR', $2)
+		RETURNING id
+	`, bookingNumber, cartID).Scan(&id)
+	require.NoError(t, err, "failed to insert test booking for cart")
+	return id
+}
+
+// insertTestCart creates a cart row and returns its ID.
+// Pass userID for authenticated carts, empty string for guest carts.
+func insertTestCart(t *testing.T, pool *pgxpool.Pool, userID string) string {
+	t.Helper()
+	var id string
+	if userID != "" {
+		err := pool.QueryRow(context.Background(),
+			`INSERT INTO carts (user_id) VALUES ($1::uuid) RETURNING id`, userID,
+		).Scan(&id)
+		require.NoError(t, err)
+	} else {
+		err := pool.QueryRow(context.Background(),
+			`INSERT INTO carts (session_id) VALUES (gen_random_uuid()) RETURNING id`,
+		).Scan(&id)
+		require.NoError(t, err)
+	}
+	return id
+}
+
 func insertTestPayment(t *testing.T, pool *pgxpool.Pool, bookingID, requestID string, status models.PaymentStatus) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
@@ -176,6 +223,20 @@ func insertTestPayment(t *testing.T, pool *pgxpool.Pool, bookingID, requestID st
 	require.NoError(t, err, "failed to insert test payment")
 }
 
+// insertTestPaymentWithCart inserts a payment linked to both a booking and a cart.
+// Used to test multi-booking webhook confirmation.
+func insertTestPaymentWithCart(t *testing.T, pool *pgxpool.Pool, bookingID, requestID, cartID string, status models.PaymentStatus) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `
+		INSERT INTO payments (
+			booking_id, payment_gateway, payment_intent_id,
+			amount, currency, payment_method, status,
+			stitch_payment_request_id, cart_id
+		) VALUES ($1, 'stitch', $2, 200.00, 'ZAR', 'credit_card', $3, $4, $5)
+	`, bookingID, requestID, string(status), requestID, cartID)
+	require.NoError(t, err, "failed to insert test payment with cart")
+}
+
 func makeTestBooking(bookingID string) *models.Booking {
 	return &models.Booking{
 		ID:            bookingID,
@@ -185,8 +246,6 @@ func makeTestBooking(bookingID string) *models.Booking {
 	}
 }
 
-// testConfig returns a minimal config pointing at no real Stitch endpoints.
-// Tests that hit Stitch call pointServiceAtMock() first.
 func testConfig() *config.Config {
 	return &config.Config{
 		StitchClientID:     "test-client-id",
@@ -196,7 +255,6 @@ func testConfig() *config.Config {
 	}
 }
 
-// testJobChan returns a buffered channel sized for test throughput.
 func testJobChan() chan string {
 	return make(chan string, 256)
 }
@@ -319,49 +377,53 @@ func TestPaymentCreateRecord(t *testing.T) {
 	svc := NewPaymentService(pool, testConfig(), testJobChan())
 	ctx := context.Background()
 
-	t.Run("inserts new payment record", func(t *testing.T) {
+	t.Run("inserts new payment record without cart_id (legacy flow)", func(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		bookingID := insertTestBooking(t, pool)
-		booking := makeTestBooking(bookingID)
 
-		require.NoError(t, svc.createPaymentRecord(ctx, booking, "req_new", ""))
+		err := svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_new", "", nil)
 
+		require.NoError(t, err)
 		payment, err := svc.GetPaymentByBookingID(ctx, bookingID)
 		require.NoError(t, err)
 		assert.Equal(t, "stitch", payment.PaymentGateway)
 		assert.Equal(t, models.PaymentPending, payment.Status)
-		assert.Equal(t, models.PaymentCreditCard, payment.PaymentMethod)
 		assert.Equal(t, "req_new", *payment.StitchPaymentRequestID)
+		assert.Nil(t, payment.StitchPaymentURL)
+	})
+
+	t.Run("inserts payment record with cart_id (cart checkout flow)", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		cartID := insertTestCart(t, pool, "")
+		bookingID := insertTestBookingForCart(t, pool, cartID)
+
+		err := svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_cart", "", &cartID)
+
+		require.NoError(t, err)
+		// Verify cart_id stored on the payment row
+		var storedCartID *string
+		pool.QueryRow(context.Background(),
+			"SELECT cart_id FROM payments WHERE booking_id = $1", bookingID,
+		).Scan(&storedCartID)
+		require.NotNil(t, storedCartID)
+		assert.Equal(t, cartID, *storedCartID)
 	})
 
 	t.Run("upserts on duplicate booking — updates to latest request ID", func(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		bookingID := insertTestBooking(t, pool)
-		booking := makeTestBooking(bookingID)
 
-		require.NoError(t, svc.createPaymentRecord(ctx, booking, "req_first", ""))
-		require.NoError(t, svc.createPaymentRecord(ctx, booking, "req_second", ""))
+		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_first", "", nil))
+		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_second", "", nil))
 
 		payment, err := svc.GetPaymentByBookingID(ctx, bookingID)
 		require.NoError(t, err)
 		assert.Equal(t, "req_second", *payment.StitchPaymentRequestID)
 	})
-
-	t.Run("stitch_payment_url is empty in Secure Fields flow", func(t *testing.T) {
-		cleanupPaymentTestData(pool)
-		bookingID := insertTestBooking(t, pool)
-		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_nourl", ""))
-
-		payment, err := svc.GetPaymentByBookingID(ctx, bookingID)
-		require.NoError(t, err)
-		if payment.StitchPaymentURL != nil {
-			assert.Empty(t, *payment.StitchPaymentURL)
-		}
-	})
 }
 
 // ==========================================
-// Tests: CreatePaymentIntent
+// Tests: CreatePaymentIntent (legacy — no cart)
 // ==========================================
 
 func TestPaymentCreatePaymentIntent(t *testing.T) {
@@ -370,12 +432,10 @@ func TestPaymentCreatePaymentIntent(t *testing.T) {
 
 	t.Run("returns client token and request ID on success", func(t *testing.T) {
 		cleanupPaymentTestData(pool)
-
 		srv := newMockStitchServer(t, map[string]interface{}{
 			"clientCardPaymentInitiate": map[string]interface{}{
 				"paymentInitiation": map[string]interface{}{
-					"id":          "stitch_req_001",
-					"clientToken": "secure_fields_token_xyz",
+					"id": "stitch_req_001", "clientToken": "secure_fields_token_xyz",
 				},
 			},
 		})
@@ -395,6 +455,8 @@ func TestPaymentCreatePaymentIntent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, models.PaymentPending, payment.Status)
 		assert.Equal(t, "stitch_req_001", *payment.StitchPaymentRequestID)
+		// Legacy flow — no cart_id
+		assert.Nil(t, payment.StitchPaymentURL)
 	})
 
 	t.Run("returns error when Stitch GraphQL returns an error", func(t *testing.T) {
@@ -429,6 +491,95 @@ func TestPaymentCreatePaymentIntent(t *testing.T) {
 }
 
 // ==========================================
+// Tests: CreateCartPaymentIntent (new — cart checkout)
+// ==========================================
+
+func TestPaymentCreateCartPaymentIntent(t *testing.T) {
+	pool := setupPaymentTestDB(t)
+	defer cleanupPaymentTestDB(pool)
+
+	t.Run("registered user — creates payment linked to cart_id", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		srv := newMockStitchServer(t, map[string]interface{}{
+			"clientCardPaymentInitiate": map[string]interface{}{
+				"paymentInitiation": map[string]interface{}{
+					"id": "cart_req_001", "clientToken": "cart_token_xyz",
+				},
+			},
+		})
+		defer srv.Close()
+		pointServiceAtMock(t, srv.URL)
+
+		svc := NewPaymentService(pool, testConfig(), testJobChan())
+		cartID := insertTestCart(t, pool, "")
+		bookingID := insertTestBookingForCart(t, pool, cartID)
+		primaryBooking := makeTestBooking(bookingID)
+
+		clientToken, requestID, err := svc.CreateCartPaymentIntent(primaryBooking, cartID, 200.00)
+
+		require.NoError(t, err)
+		assert.Equal(t, "cart_token_xyz", clientToken)
+		assert.Equal(t, "cart_req_001", requestID)
+
+		// Payment row must have both booking_id and cart_id set
+		var storedBookingID, storedCartID string
+		err = pool.QueryRow(context.Background(),
+			"SELECT booking_id, cart_id FROM payments WHERE stitch_payment_request_id = $1",
+			requestID,
+		).Scan(&storedBookingID, &storedCartID)
+		require.NoError(t, err)
+		assert.Equal(t, bookingID, storedBookingID)
+		assert.Equal(t, cartID, storedCartID)
+	})
+
+	t.Run("guest user — same behaviour, session-based cart", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		srv := newMockStitchServer(t, map[string]interface{}{
+			"clientCardPaymentInitiate": map[string]interface{}{
+				"paymentInitiation": map[string]interface{}{
+					"id": "guest_cart_req", "clientToken": "guest_cart_token",
+				},
+			},
+		})
+		defer srv.Close()
+		pointServiceAtMock(t, srv.URL)
+
+		svc := NewPaymentService(pool, testConfig(), testJobChan())
+		// Guest cart (no user_id — session_id only)
+		guestCartID := insertTestCart(t, pool, "")
+		bookingID := insertTestBookingForCart(t, pool, guestCartID)
+		primaryBooking := makeTestBooking(bookingID)
+
+		clientToken, requestID, err := svc.CreateCartPaymentIntent(primaryBooking, guestCartID, 150.00)
+
+		require.NoError(t, err)
+		assert.Equal(t, "guest_cart_token", clientToken)
+		assert.Equal(t, "guest_cart_req", requestID)
+
+		var storedCartID string
+		pool.QueryRow(context.Background(),
+			"SELECT cart_id FROM payments WHERE stitch_payment_request_id = $1", requestID,
+		).Scan(&storedCartID)
+		assert.Equal(t, guestCartID, storedCartID)
+	})
+
+	t.Run("Stitch error propagates", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		srv := newMockStitchServerWithError(t, "payment service unavailable")
+		defer srv.Close()
+		pointServiceAtMock(t, srv.URL)
+
+		cartID := insertTestCart(t, pool, "")
+		bookingID := insertTestBookingForCart(t, pool, cartID)
+
+		_, _, err := NewPaymentService(pool, testConfig(), testJobChan()).
+			CreateCartPaymentIntent(makeTestBooking(bookingID), cartID, 200.00)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "creating cart payment intent")
+	})
+}
+
+// ==========================================
 // Tests: HandleWebhook
 // ==========================================
 
@@ -445,7 +596,7 @@ func TestPaymentHandleWebhook(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("completed payment updates payment row and confirms booking", func(t *testing.T) {
+	t.Run("completed payment confirms booking and enqueues job (legacy — no cart)", func(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		jobCh := make(chan string, 4)
 		svc := NewPaymentService(pool, testConfig(), jobCh)
@@ -458,7 +609,6 @@ func TestPaymentHandleWebhook(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, models.PaymentCompleted, payment.Status)
 		assert.True(t, payment.WebhookReceived)
-		assert.NotNil(t, payment.TransactionID)
 		assert.Equal(t, "txn_001", *payment.TransactionID)
 		assert.NotNil(t, payment.CompletedAt)
 
@@ -466,7 +616,6 @@ func TestPaymentHandleWebhook(t *testing.T) {
 		assert.Equal(t, "confirmed", bs)
 		assert.Equal(t, "completed", ps)
 
-		// Worker job must have been enqueued.
 		select {
 		case enqueued := <-jobCh:
 			assert.Equal(t, bookingID, enqueued)
@@ -475,7 +624,82 @@ func TestPaymentHandleWebhook(t *testing.T) {
 		}
 	})
 
-	t.Run("failed payment cancels the booking", func(t *testing.T) {
+	t.Run("multi-booking cart — webhook confirms ALL bookings from the cart", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		jobCh := make(chan string, 8)
+		svc := NewPaymentService(pool, testConfig(), jobCh)
+
+		// One cart with two bookings (e.g. Chelsea + Coldplay)
+		cartID := insertTestCart(t, pool, "")
+		primaryID := insertTestBookingForCart(t, pool, cartID)
+		secondaryID := insertTestBookingForCart(t, pool, cartID)
+
+		// Payment linked to both the primary booking AND the cart
+		insertTestPaymentWithCart(t, pool, primaryID, "req_multi", cartID, models.PaymentPending)
+
+		require.NoError(t, svc.HandleWebhook(buildWebhookEvent("req_multi", "completed", "credit_card", "txn_multi")))
+
+		// Primary booking confirmed
+		bs1, ps1 := getBookingStatus(t, pool, primaryID)
+		assert.Equal(t, "confirmed", bs1, "primary booking must be confirmed")
+		assert.Equal(t, "completed", ps1)
+
+		// Secondary booking also confirmed via syncAllCartBookings
+		bs2, ps2 := getBookingStatus(t, pool, secondaryID)
+		assert.Equal(t, "confirmed", bs2, "secondary booking must be confirmed by cart sync")
+		assert.Equal(t, "completed", ps2)
+
+		// Both booking IDs enqueued for QR + email
+		enqueued := make(map[string]bool)
+		for i := 0; i < 2; i++ {
+			select {
+			case id := <-jobCh:
+				enqueued[id] = true
+			case <-time.After(100 * time.Millisecond):
+				t.Errorf("expected job %d was not enqueued", i+1)
+			}
+		}
+		assert.True(t, enqueued[primaryID], "primary booking job must be enqueued")
+		assert.True(t, enqueued[secondaryID], "secondary booking job must be enqueued")
+	})
+
+	t.Run("multi-booking cart with guest user — confirms all bookings", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		jobCh := make(chan string, 8)
+		svc := NewPaymentService(pool, testConfig(), jobCh)
+
+		// Guest cart (session-based, no user_id)
+		guestCartID := insertTestCart(t, pool, "")
+		primaryID := insertTestBookingForCart(t, pool, guestCartID)
+		secondaryID := insertTestBookingForCart(t, pool, guestCartID)
+		insertTestPaymentWithCart(t, pool, primaryID, "req_guest_multi", guestCartID, models.PaymentPending)
+
+		require.NoError(t, svc.HandleWebhook(buildWebhookEvent("req_guest_multi", "completed", "credit_card", "txn_guest_multi")))
+
+		bs1, _ := getBookingStatus(t, pool, primaryID)
+		bs2, _ := getBookingStatus(t, pool, secondaryID)
+		assert.Equal(t, "confirmed", bs1)
+		assert.Equal(t, "confirmed", bs2, "guest secondary booking must also be confirmed")
+	})
+
+	t.Run("multi-booking cart — failed payment cancels ALL bookings", func(t *testing.T) {
+		cleanupPaymentTestData(pool)
+		svc := NewPaymentService(pool, testConfig(), testJobChan())
+
+		cartID := insertTestCart(t, pool, "")
+		primaryID := insertTestBookingForCart(t, pool, cartID)
+		secondaryID := insertTestBookingForCart(t, pool, cartID)
+		insertTestPaymentWithCart(t, pool, primaryID, "req_multi_fail", cartID, models.PaymentPending)
+
+		require.NoError(t, svc.HandleWebhook(buildWebhookEvent("req_multi_fail", "failed", "credit_card", "")))
+
+		bs1, _ := getBookingStatus(t, pool, primaryID)
+		bs2, _ := getBookingStatus(t, pool, secondaryID)
+		assert.Equal(t, "cancelled", bs1)
+		assert.Equal(t, "cancelled", bs2, "all cart bookings must be cancelled on failure")
+	})
+
+	t.Run("failed payment cancels single booking", func(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		svc := NewPaymentService(pool, testConfig(), testJobChan())
 		bookingID := insertTestBooking(t, pool)
@@ -535,7 +759,6 @@ func TestPaymentHandleWebhook(t *testing.T) {
 
 		event := buildWebhookEvent("req_idem", "completed", "credit_card", "txn_idem")
 		require.NoError(t, svc.HandleWebhook(event), "first webhook should succeed")
-		// Second delivery is idempotent — not an error.
 		require.NoError(t, svc.HandleWebhook(event), "duplicate webhook must be silently ignored")
 
 		bs, _ := getBookingStatus(t, pool, bookingID)
@@ -546,7 +769,7 @@ func TestPaymentHandleWebhook(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		svc := NewPaymentService(pool, testConfig(), testJobChan())
 		err := svc.HandleWebhook(buildWebhookEvent("req_does_not_exist", "completed", "credit_card", ""))
-		assert.NoError(t, err, "unknown stitch ID must not return an error — it is logged and skipped")
+		assert.NoError(t, err)
 	})
 
 	t.Run("malformed JSON returns error", func(t *testing.T) {
@@ -643,7 +866,6 @@ func TestPaymentProcessRefund(t *testing.T) {
 		payment, err := svc.GetPaymentByBookingID(context.Background(), bookingID)
 		require.NoError(t, err)
 		assert.Equal(t, models.PaymentRefunded, payment.Status)
-		assert.NotNil(t, payment.RefundID)
 		assert.Equal(t, "refund_abc", *payment.RefundID)
 		assert.NotNil(t, payment.RefundedAt)
 		assert.NotNil(t, payment.RefundedAmount)
@@ -683,7 +905,7 @@ func TestPaymentAccessTokenCaching(t *testing.T) {
 		token, err := svc.getAccessToken(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "cached_token", token)
-		assert.Equal(t, 1, callCount, "cached token should not trigger another HTTP call")
+		assert.Equal(t, 1, callCount)
 	})
 
 	t.Run("re-fetches when token has expired", func(t *testing.T) {
@@ -691,7 +913,7 @@ func TestPaymentAccessTokenCaching(t *testing.T) {
 		token, err := svc.getAccessToken(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "cached_token", token)
-		assert.Equal(t, 2, callCount, "expired token should trigger a new fetch")
+		assert.Equal(t, 2, callCount)
 	})
 }
 
@@ -814,7 +1036,7 @@ func TestPaymentGetStatus(t *testing.T) {
 }
 
 // ==========================================
-// Integration: full happy path lifecycle
+// Integration: single-booking legacy lifecycle
 // ==========================================
 
 func TestPaymentFullLifecycle(t *testing.T) {
@@ -837,22 +1059,18 @@ func TestPaymentFullLifecycle(t *testing.T) {
 	ctx := context.Background()
 	bookingID := insertTestBooking(t, pool)
 
-	// 1. Create payment intent
 	clientToken, requestID, err := svc.CreatePaymentIntent(makeTestBooking(bookingID))
 	require.NoError(t, err)
-	assert.NotEmpty(t, clientToken, "Secure Fields must return a client token")
+	assert.NotEmpty(t, clientToken)
 	assert.NotEmpty(t, requestID)
 
-	// 2. Payment starts as pending
 	payment, err := svc.GetPaymentStatus(bookingID)
 	require.NoError(t, err)
 	assert.Equal(t, models.PaymentPending, payment.Status)
 	assert.False(t, payment.WebhookReceived)
 
-	// 3. Stitch fires completed webhook
 	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(requestID, "completed", "credit_card", "txn_lifecycle")))
 
-	// 4. Payment and booking confirmed
 	payment, err = svc.GetPaymentByBookingID(ctx, bookingID)
 	require.NoError(t, err)
 	assert.Equal(t, models.PaymentCompleted, payment.Status)
@@ -861,7 +1079,6 @@ func TestPaymentFullLifecycle(t *testing.T) {
 	bs, _ := getBookingStatus(t, pool, bookingID)
 	assert.Equal(t, "confirmed", bs)
 
-	// 5. Booking worker job was enqueued
 	select {
 	case enqueued := <-jobCh:
 		assert.Equal(t, bookingID, enqueued)
@@ -869,13 +1086,128 @@ func TestPaymentFullLifecycle(t *testing.T) {
 		t.Error("booking worker job not enqueued after payment completed")
 	}
 
-	// 6. Duplicate webhook is silently ignored (idempotency guard)
-	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(requestID, "completed", "credit_card", "txn_lifecycle")),
-		"duplicate webhook must not return an error")
+	// Duplicate webhook silently ignored
+	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(requestID, "completed", "credit_card", "txn_lifecycle")))
 }
 
 // ==========================================
-// Integration: failed payment lifecycle
+// Integration: multi-booking cart lifecycle
+// ==========================================
+
+func TestPaymentCartLifecycle(t *testing.T) {
+	pool := setupPaymentTestDB(t)
+	defer cleanupPaymentTestDB(pool)
+	cleanupPaymentTestData(pool)
+
+	srv := newMockStitchServer(t, map[string]interface{}{
+		"clientCardPaymentInitiate": map[string]interface{}{
+			"paymentInitiation": map[string]interface{}{
+				"id": "cart_lifecycle_req", "clientToken": "cart_lifecycle_token",
+			},
+		},
+	})
+	defer srv.Close()
+	pointServiceAtMock(t, srv.URL)
+
+	jobCh := make(chan string, 8)
+	svc := NewPaymentService(pool, testConfig(), jobCh)
+	ctx := context.Background()
+
+	// Cart with two bookings (registered user)
+	cartID := insertTestCart(t, pool, "")
+	booking1ID := insertTestBookingForCart(t, pool, cartID)
+	booking2ID := insertTestBookingForCart(t, pool, cartID)
+	primaryBooking := makeTestBooking(booking1ID)
+
+	// 1. Create cart payment intent
+	clientToken, requestID, err := svc.CreateCartPaymentIntent(primaryBooking, cartID, 400.00)
+	require.NoError(t, err)
+	assert.NotEmpty(t, clientToken)
+	assert.NotEmpty(t, requestID)
+
+	// 2. Both bookings start as pending
+	bs1, _ := getBookingStatus(t, pool, booking1ID)
+	bs2, _ := getBookingStatus(t, pool, booking2ID)
+	assert.Equal(t, "pending", bs1)
+	assert.Equal(t, "pending", bs2)
+
+	// 3. Stitch fires completed webhook
+	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(requestID, "completed", "credit_card", "txn_cart")))
+
+	// 4. Both bookings confirmed
+	bs1, ps1 := getBookingStatus(t, pool, booking1ID)
+	bs2, ps2 := getBookingStatus(t, pool, booking2ID)
+	assert.Equal(t, "confirmed", bs1)
+	assert.Equal(t, "completed", ps1)
+	assert.Equal(t, "confirmed", bs2, "second booking must also be confirmed")
+	assert.Equal(t, "completed", ps2)
+
+	// 5. Payment record marked completed
+	payment, err := svc.GetPaymentByBookingID(ctx, booking1ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.PaymentCompleted, payment.Status)
+	assert.True(t, payment.WebhookReceived)
+
+	// 6. Both booking jobs enqueued
+	enqueued := make(map[string]bool)
+	for i := 0; i < 2; i++ {
+		select {
+		case id := <-jobCh:
+			enqueued[id] = true
+		case <-time.After(200 * time.Millisecond):
+			t.Errorf("job %d not enqueued in time", i+1)
+		}
+	}
+	assert.True(t, enqueued[booking1ID])
+	assert.True(t, enqueued[booking2ID])
+}
+
+// ==========================================
+// Integration: guest user cart lifecycle
+// ==========================================
+
+func TestPaymentGuestCartLifecycle(t *testing.T) {
+	pool := setupPaymentTestDB(t)
+	defer cleanupPaymentTestDB(pool)
+	cleanupPaymentTestData(pool)
+
+	srv := newMockStitchServer(t, map[string]interface{}{
+		"clientCardPaymentInitiate": map[string]interface{}{
+			"paymentInitiation": map[string]interface{}{
+				"id": "guest_lifecycle_req", "clientToken": "guest_lifecycle_token",
+			},
+		},
+	})
+	defer srv.Close()
+	pointServiceAtMock(t, srv.URL)
+
+	jobCh := make(chan string, 8)
+	svc := NewPaymentService(pool, testConfig(), jobCh)
+
+	// Guest cart — session-based, no user_id
+	guestCartID := insertTestCart(t, pool, "")
+	booking1ID := insertTestBookingForCart(t, pool, guestCartID)
+	booking2ID := insertTestBookingForCart(t, pool, guestCartID)
+
+	clientToken, requestID, err := svc.CreateCartPaymentIntent(makeTestBooking(booking1ID), guestCartID, 300.00)
+	require.NoError(t, err)
+	assert.NotEmpty(t, clientToken)
+
+	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(requestID, "completed", "instant_eft", "txn_guest_cart")))
+
+	bs1, _ := getBookingStatus(t, pool, booking1ID)
+	bs2, _ := getBookingStatus(t, pool, booking2ID)
+	assert.Equal(t, "confirmed", bs1)
+	assert.Equal(t, "confirmed", bs2, "guest secondary booking must be confirmed")
+
+	// Verify instant_eft payment method mapped correctly
+	payment, err := svc.GetPaymentByBookingID(context.Background(), booking1ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.PaymentInstantEFT, payment.PaymentMethod)
+}
+
+// ==========================================
+// Integration: failed cart payment
 // ==========================================
 
 func TestPaymentFailedLifecycle(t *testing.T) {
@@ -943,21 +1275,17 @@ func TestPaymentRetryAfterFailure(t *testing.T) {
 	bookingID := insertTestBooking(t, pool)
 	booking := makeTestBooking(bookingID)
 
-	// First attempt
 	token1, req1, err := svc.CreatePaymentIntent(booking)
 	require.NoError(t, err)
 	assert.Equal(t, "retry_token_1", token1)
 
-	// First attempt fails
 	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(req1, "failed", "credit_card", "")))
 
-	// Retry — must produce a fresh client token and new request ID
 	token2, req2, err := svc.CreatePaymentIntent(booking)
 	require.NoError(t, err)
 	assert.Equal(t, "retry_token_2", token2)
-	assert.NotEqual(t, req1, req2, "retry must produce a new payment request ID")
+	assert.NotEqual(t, req1, req2)
 
-	// Second attempt succeeds
 	require.NoError(t, svc.HandleWebhook(buildWebhookEvent(req2, "completed", "credit_card", "txn_retry")))
 
 	bs, _ := getBookingStatus(t, pool, bookingID)

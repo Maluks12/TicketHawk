@@ -26,6 +26,18 @@ var (
 	stitchGateway       = "stitch"
 ) // change back to const when done testing
 
+func SetStitchBaseURLs(tokenURL, graphQLURL, audience string) (restore func()) {
+	origToken, origGQL, origAud := stitchTokenURL, stitchGraphQLURL, stitchTokenAudience
+	stitchTokenURL = tokenURL
+	stitchGraphQLURL = graphQLURL
+	stitchTokenAudience = audience
+	return func() {
+		stitchTokenURL = origToken
+		stitchGraphQLURL = origGQL
+		stitchTokenAudience = origAud
+	}
+} // remove in production
+
 type stitchToken struct {
 	AccessToken string    `json:"access_token"`
 	TokenType   string    `json:"token_type"`
@@ -223,24 +235,29 @@ func (s *PaymentService) CreatePaymentIntent(booking *models.Booking) (clientTok
 		return "", "", errors.New("stitch returned empty payment ID or client token")
 	}
 
-	if err := s.createPaymentRecord(ctx, booking, pi.ID, ""); err != nil {
+	if err := s.createPaymentRecord(ctx, booking, pi.ID, "", nil); err != nil {
 		log.Printf("WARNING: failed to persist payment record for booking %s: %v", booking.ID, err)
 	}
 
 	return pi.ClientToken, pi.ID, nil
 }
 
-func (s *PaymentService) createPaymentRecord(ctx context.Context, booking *models.Booking, requestID, paymentURL string) error {
+// createPaymentRecord persists a payment row linked to a booking.
+// cartID is optional — pass a non-nil pointer for cart-based (multi-booking)
+// checkouts so the webhook handler can confirm ALL bookings from the same cart.
+func (s *PaymentService) createPaymentRecord(ctx context.Context, booking *models.Booking, requestID, paymentURL string, cartID *string) error {
 	query := `
 		INSERT INTO payments (
         booking_id, payment_gateway, payment_intent_id,
         amount, currency, payment_method, status,
-        stitch_payment_request_id, stitch_payment_url
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        stitch_payment_request_id, stitch_payment_url,
+        cart_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     ON CONFLICT (booking_id)
     DO UPDATE SET
         stitch_payment_request_id = EXCLUDED.stitch_payment_request_id,
         stitch_payment_url        = EXCLUDED.stitch_payment_url,
+        cart_id                   = EXCLUDED.cart_id,
         webhook_received          = FALSE,
         status                    = 'pending',
         updated_at                = CURRENT_TIMESTAMP
@@ -255,8 +272,61 @@ func (s *PaymentService) createPaymentRecord(ctx context.Context, booking *model
 		string(models.PaymentPending),
 		requestID,
 		paymentURL,
+		cartID,
 	)
 	return err
+}
+
+// CreateCartPaymentIntent creates a Stitch payment intent for a full cart checkout.
+// primaryBooking is the first booking created from the cart; cartID links the payment
+// to ALL bookings from the cart so the webhook can confirm them all at once.
+func (s *PaymentService) CreateCartPaymentIntent(primaryBooking *models.Booking, cartID string, totalAmount float64) (clientToken string, paymentRequestID string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	amountCents := int64(totalAmount * 100)
+
+	mutation := `
+		mutation InitiateCardPayment($input: ClientCardPaymentInitiateInput!) {
+			clientCardPaymentInitiate(input: $input) {
+				paymentInitiation {
+					id
+					clientToken
+				}
+			}
+		}
+	`
+
+	variables := map[string]interface{}{
+		"input": map[string]interface{}{
+			"amount": map[string]interface{}{
+				"quantity": amountCents,
+				"currency": primaryBooking.Currency,
+			},
+			"payerReference":       primaryBooking.BookingNumber,
+			"merchantReference":    primaryBooking.BookingNumber,
+			"beneficiaryReference": primaryBooking.BookingNumber,
+			"externalReference":    cartID,
+		},
+	}
+
+	var result secureFieldsPaymentResponse
+	if err := s.graphQL(ctx, mutation, variables, &result); err != nil {
+		return "", "", fmt.Errorf("creating cart payment intent: %w", err)
+	}
+
+	pi := result.ClientCardPaymentInitiate.PaymentInitiation
+	if pi.ID == "" || pi.ClientToken == "" {
+		return "", "", errors.New("stitch returned empty payment ID or client token")
+	}
+
+	// Link the payment to the primary booking AND to the full cart so the
+	// webhook can confirm every booking from the cart in one pass.
+	if err := s.createPaymentRecord(ctx, primaryBooking, pi.ID, "", &cartID); err != nil {
+		log.Printf("WARNING: failed to persist cart payment record for cart %s: %v", cartID, err)
+	}
+
+	return pi.ClientToken, pi.ID, nil
 }
 
 func (s *PaymentService) ProcessRefund(bookingID string) error {
@@ -372,12 +442,15 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 
 	var currentStatus string
 	var bookingID string
+	var cartID *string
 
+	// Fetch current status, primary booking ID, and optional cart_id.
+	// cart_id is set for cart-based (multi-booking) checkouts.
 	queryStatus := `
-		SELECT status, booking_id FROM payments
+		SELECT status, booking_id, cart_id FROM payments
 		WHERE stitch_payment_request_id = $1
 	`
-	err := s.pool.QueryRow(ctx, queryStatus, pr.ID).Scan(&currentStatus, &bookingID)
+	err := s.pool.QueryRow(ctx, queryStatus, pr.ID).Scan(&currentStatus, &bookingID, &cartID)
 	if err != nil {
 		log.Printf("webhook: no payment record for stitch ID %s, ignoring", pr.ID)
 		return nil
@@ -393,11 +466,11 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 	query := `
 		UPDATE payments
 			SET status       = $1::text,
-		    payment_method   = $2::payment_method_type,
-		    transaction_id   = COALESCE($3, transaction_id),
-		    webhook_received = TRUE,
-		    completed_at     = CASE WHEN $1::text = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
-		    updated_at       = CURRENT_TIMESTAMP
+			    payment_method   = $2::payment_method_type,
+			    transaction_id   = COALESCE($3, transaction_id),
+			    webhook_received = TRUE,
+			    completed_at     = CASE WHEN $1::text = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END,
+			    updated_at       = CURRENT_TIMESTAMP
 		WHERE stitch_payment_request_id = $4
 		RETURNING booking_id
 	`
@@ -412,25 +485,87 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 		return fmt.Errorf("updating payment for stitch request %s: %w", pr.ID, err)
 	}
 
+	// Sync the primary booking status (existing behaviour — covers single-event carts
+	// and the legacy per-booking checkout flow).
 	if err := s.syncBookingStatus(ctx, bookingID, internalStatus); err != nil {
 		log.Printf("WARNING: payment updated but booking sync failed for %s: %v", bookingID, err)
 	}
 
 	log.Printf("stitch webhook: %s → status=%s method=%s booking=%s", pr.ID, internalStatus, paymentMethod, bookingID)
 
-	// Enqueue QR + email job for confirmed payments.
-	// Non-blocking send: if the channel is full we log and move on — the
-	// webhook must return quickly so Stitch does not retry.
 	if internalStatus == models.PaymentCompleted {
-		select {
-		case s.jobChan <- bookingID:
-			log.Printf("stitch webhook: enqueued booking job for %s", bookingID)
-		default:
-			log.Printf("WARNING: booking job channel full, dropping job for %s — consider increasing buffer size", bookingID)
+		// For cart-based checkouts, confirm ALL pending bookings that share the
+		// same cart_id — not just the primary booking stored on the payment row.
+		// For the legacy per-booking flow, cartID is nil and we skip this.
+		if cartID != nil {
+			additionalIDs, syncErr := s.syncAllCartBookings(ctx, *cartID, bookingID, internalStatus)
+			if syncErr != nil {
+				log.Printf("WARNING: failed to sync cart bookings for cart %s: %v", *cartID, syncErr)
+			}
+			// Enqueue QR + email jobs for every booking in the cart
+			allBookingIDs := append([]string{bookingID}, additionalIDs...)
+			for _, id := range allBookingIDs {
+				select {
+				case s.jobChan <- id:
+					log.Printf("stitch webhook: enqueued booking job for %s", id)
+				default:
+					log.Printf("WARNING: booking job channel full, dropping job for %s", id)
+				}
+			}
+		} else {
+			// Legacy single-booking flow
+			select {
+			case s.jobChan <- bookingID:
+				log.Printf("stitch webhook: enqueued booking job for %s", bookingID)
+			default:
+				log.Printf("WARNING: booking job channel full, dropping job for %s — consider increasing buffer size", bookingID)
+			}
 		}
 	}
 
 	return nil
+}
+
+// syncAllCartBookings confirms (or cancels) every booking from a cart-based checkout
+// except the primary booking (already handled by the caller via syncBookingStatus).
+// Returns the IDs of all additional bookings that were updated.
+func (s *PaymentService) syncAllCartBookings(ctx context.Context, cartID, primaryBookingID string, status models.PaymentStatus) ([]string, error) {
+	var bookingStatus models.BookingStatus
+	switch status {
+	case models.PaymentCompleted:
+		bookingStatus = models.BookingConfirmed
+	case models.PaymentFailed:
+		bookingStatus = models.BookingCancelled
+	default:
+		return nil, nil
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		UPDATE bookings
+		SET booking_status = $1::text,
+		    payment_status = $2::text,
+		    confirmed_at   = CASE WHEN $1::text = 'confirmed' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
+		    updated_at     = CURRENT_TIMESTAMP
+		WHERE cart_id = $3
+		  AND id      != $4
+		  AND booking_status = 'pending'
+		RETURNING id
+	`, string(bookingStatus), string(status), cartID, primaryBookingID)
+	if err != nil {
+		return nil, fmt.Errorf("syncing cart bookings: %w", err)
+	}
+	defer rows.Close()
+
+	var additionalIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		additionalIDs = append(additionalIDs, id)
+		log.Printf("stitch webhook: confirmed additional booking %s from cart %s", id, cartID)
+	}
+	return additionalIDs, nil
 }
 
 func (s *PaymentService) syncBookingStatus(ctx context.Context, bookingID string, status models.PaymentStatus) error {
