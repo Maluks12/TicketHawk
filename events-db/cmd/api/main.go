@@ -61,6 +61,7 @@ func main() {
 
 	// ==========================================
 	// Booking Expiry Worker
+	// (also runs reservation expiry + stale cart cleanup)
 	// ==========================================
 	workers.StartExpiryWorker(pool, ctx, 15*time.Minute, 1*time.Minute)
 	log.Info().Msg("booking expiry worker started")
@@ -106,9 +107,15 @@ func main() {
 	router.Use(gin.Recovery())
 
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{cfg.FrontendURL},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type", "X-Request-ID"},
+		AllowOrigins: []string{cfg.FrontendURL},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin",
+			"Authorization",
+			"Content-Type",
+			"X-Request-ID",
+			"X-Session-ID", // required for guest cart identification
+		},
 		ExposeHeaders:    []string{"X-Request-ID"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -228,6 +235,79 @@ func main() {
 	}
 
 	// ==========================================
+	// Public Merch Routes (no auth required)
+	// ==========================================
+	merch := router.Group("/events")
+	if rateLimitManager != nil {
+		merch.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   200,
+				RefillRate: 5.0,
+				TTL:        15 * time.Minute,
+			},
+			"merch-public",
+		))
+	}
+	{
+		// Full catalogue — used by the "view more" page
+		merch.GET("/:id/merch", handlers.GetEventMerchHandler(pool))
+		// Preview — first 4 items shown on the event details page
+		merch.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool))
+	}
+
+	// ==========================================
+	// Cart Routes (auth optional — guests use X-Session-ID header)
+	// ==========================================
+	cart := router.Group("/cart")
+	if rateLimitManager != nil {
+		cart.Use(middleware.RateLimitByIP(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   60,
+				RefillRate: 2.0,
+				TTL:        15 * time.Minute,
+			},
+			"cart",
+		))
+	}
+	{
+		cart.GET("", middleware.OptionalAuth(cfg), handlers.GetCartHandler(pool))
+		cart.POST("/items", middleware.OptionalAuth(cfg), handlers.AddCartItemHandler(pool))
+		cart.PATCH("/items/:id", middleware.OptionalAuth(cfg), handlers.UpdateCartItemHandler(pool))
+		cart.DELETE("/items/:id", middleware.OptionalAuth(cfg), handlers.DeleteCartItemHandler(pool))
+		cart.DELETE("", middleware.OptionalAuth(cfg), handlers.ClearCartHandler(pool))
+		// Called immediately after login to merge guest cart into user cart
+		cart.POST("/merge", middleware.AuthMiddleware(cfg), handlers.MergeCartHandler(pool))
+	}
+
+	// ==========================================
+	// Checkout Routes (auth optional)
+	// ==========================================
+	checkout := router.Group("/checkout")
+	if rateLimitManager != nil {
+		checkout.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   20,
+				RefillRate: 1.0 / 60.0,
+				TTL:        15 * time.Minute,
+			},
+			"checkout",
+		))
+	}
+	{
+		// Creates ticket reservations for all ticket items in the cart atomically
+		checkout.POST("/begin", middleware.OptionalAuth(cfg), handlers.CheckoutBeginHandler(pool))
+		// Resets the 10-minute window — called every 30s from the frontend
+		checkout.POST("/heartbeat", middleware.OptionalAuth(cfg), handlers.CheckoutHeartbeatHandler(pool))
+		// Releases all reservations — called via navigator.sendBeacon() on page leave
+		checkout.POST("/abandon", middleware.OptionalAuth(cfg), handlers.CheckoutAbandonHandler(pool))
+		// Creates a single Stitch payment intent for the full cart total
+		checkout.POST("/confirm", middleware.OptionalAuth(cfg), handlers.CheckoutConfirmHandler(pool, paymentService))
+	}
+
+	// ==========================================
 	// Guest Booking Routes (no auth required)
 	// ==========================================
 	guest := router.Group("/guest")
@@ -273,6 +353,29 @@ func main() {
 		admin.PUT("/users/promote/:id", controllers.PromoteUserHandler(pool))
 		admin.PUT("/users/demote/:id", controllers.DemoteUserHandler(pool))
 		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
+	}
+
+	// ==========================================
+	// Organiser Merch Management Routes
+	// ==========================================
+	orgMerch := router.Group("/organiser")
+	orgMerch.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	if rateLimitManager != nil {
+		orgMerch.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   50,
+				RefillRate: 2.0,
+				TTL:        15 * time.Minute,
+			},
+			"organiser-merch",
+		))
+	}
+	{
+		// Create a merch item attached to an event the organiser owns
+		orgMerch.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool))
+		// Add a size/colour variant to an existing merch item
+		orgMerch.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool))
 	}
 
 	// ==========================================
@@ -450,8 +553,9 @@ func main() {
 	// Protected Test Route
 	// ==========================================
 	router.GET("/protected-test", middleware.AuthMiddleware(cfg), handlers.TestProtectedHandler())
+
 	// ==========================================
-	// Start Server — Step 8: Graceful shutdown
+	// Start Server — Graceful shutdown
 	// ==========================================
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

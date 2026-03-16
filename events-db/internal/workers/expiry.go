@@ -9,21 +9,28 @@ import (
 )
 
 func StartExpiryWorker(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration, interval time.Duration) {
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select{
-			case <-ticker.C:
-				if err := expireBookings(pool, ctx, ttl); err != nil {
-					log.Printf("expiry worker: %v", err)
-				}
-			case <- ctx.Done():
-				return
-			}
-		}
-	} ()
+  go func() {
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+    for {
+      select {
+      case <-ticker.C:
+        if err := expireBookings(pool, ctx, ttl); err != nil {
+          log.Printf("expiry worker: bookings: %v", err)
+        }
+        if err := expireReservations(pool, ctx); err != nil {
+          log.Printf("expiry worker: reservations: %v", err)
+        }
+        if err := cleanupStaleCarts(pool, ctx); err != nil {
+          log.Printf("expiry worker: carts: %v", err)
+        }
+      case <-ctx.Done():
+        return
+      }
+    }
+  }()
 }
+
 
 func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) error {
 	tx, err := pool.Begin(ctx)
@@ -102,4 +109,64 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 
 	log.Printf("expiry worker: cancelled %d expired bookings", len(expired))
 	return nil
+}
+
+// expireReservations releases ticket_reservations past their expires_at,
+// decrementing reserved_count on the corresponding event atomically.
+func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
+  tx, err := pool.Begin(ctx)
+  if err != nil {
+    return err
+  }
+  defer tx.Rollback(ctx)
+ 
+  rows, err := tx.Query(ctx, `
+    SELECT id, event_id, quantity FROM ticket_reservations
+    WHERE expires_at < NOW()
+    FOR UPDATE SKIP LOCKED
+  `)
+  if err != nil {
+    return err
+  }
+  defer rows.Close()
+ 
+  type expiredRes struct{ id, eventID string; qty int }
+  var expired []expiredRes
+  for rows.Next() {
+    var r expiredRes
+    if err := rows.Scan(&r.id, &r.eventID, &r.qty); err != nil {
+      return err
+    }
+    expired = append(expired, r)
+  }
+  rows.Close()
+  if len(expired) == 0 {
+    return nil
+  }
+ 
+  for _, r := range expired {
+    tx.Exec(ctx,
+      `UPDATE events SET reserved_count = GREATEST(0, reserved_count - $1), updated_at = NOW()
+       WHERE id = $2`, r.qty, r.eventID)
+    tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id)
+  }
+ 
+  if err := tx.Commit(ctx); err != nil {
+    return err
+  }
+  log.Printf("expiry worker: released %d expired reservations", len(expired))
+  return nil
+}
+ 
+// cleanupStaleCarts deletes carts inactive for more than 24 hours.
+func cleanupStaleCarts(pool *pgxpool.Pool, ctx context.Context) error {
+  cmd, err := pool.Exec(ctx,
+    `DELETE FROM carts WHERE last_activity_at < NOW() - INTERVAL '24 hours'`)
+  if err != nil {
+    return err
+  }
+  if cmd.RowsAffected() > 0 {
+    log.Printf("expiry worker: cleaned up %d stale carts", cmd.RowsAffected())
+  }
+  return nil
 }

@@ -118,3 +118,59 @@ func AdminOnlyMiddleware() gin.HandlerFunc{
 		c.Next()
 	}
 }
+
+// OptionalAuth runs the JWT check but never aborts.
+// If a valid token is present, user_id and role are set in the context
+// exactly as AuthMiddleware does. If no token is present or it is invalid,
+// the request continues as a guest — handlers check c.Get("user_id") to
+// distinguish authenticated users from guests.
+// Used by cart and checkout routes which must work for both.
+func OptionalAuth(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.Next()
+			return
+		}
+ 
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == "" || tokenString == authHeader {
+			c.Next()
+			return
+		}
+ 
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte(cfg.JWTSecret), nil
+		})
+ 
+		if err != nil || !token.Valid {
+			c.Next()
+			return
+		}
+ 
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.Next()
+			return
+		}
+ 
+		if exp, ok := claims["exp"].(float64); ok {
+			if time.Now().After(time.Unix(int64(exp), 0)) {
+				c.Next()
+				return
+			}
+		}
+ 
+		if userID, ok := claims["user_id"].(string); ok {
+			c.Set("user_id", userID)
+		}
+		if role, ok := claims["role"].(string); ok {
+			c.Set("role", role)
+		}
+ 
+		c.Next()
+	}
+}
