@@ -20,6 +20,8 @@ package services
 // • carts table added so the FK on bookings.cart_id resolves.
 // • New tests: CreateCartPaymentIntent, syncAllCartBookings,
 //   multi-booking webhook confirmation, guest user paths.
+// • createPaymentRecord paymentURL arg changed from string to *string.
+//   All test call sites updated to pass nil instead of "".
 
 import (
 	"context"
@@ -381,7 +383,8 @@ func TestPaymentCreateRecord(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		bookingID := insertTestBooking(t, pool)
 
-		err := svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_new", "", nil)
+		// paymentURL is nil — must be stored as NULL, not empty string
+		err := svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_new", nil, nil)
 
 		require.NoError(t, err)
 		payment, err := svc.GetPaymentByBookingID(ctx, bookingID)
@@ -397,7 +400,7 @@ func TestPaymentCreateRecord(t *testing.T) {
 		cartID := insertTestCart(t, pool, "")
 		bookingID := insertTestBookingForCart(t, pool, cartID)
 
-		err := svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_cart", "", &cartID)
+		err := svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_cart", nil, &cartID)
 
 		require.NoError(t, err)
 		// Verify cart_id stored on the payment row
@@ -413,8 +416,8 @@ func TestPaymentCreateRecord(t *testing.T) {
 		cleanupPaymentTestData(pool)
 		bookingID := insertTestBooking(t, pool)
 
-		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_first", "", nil))
-		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_second", "", nil))
+		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_first", nil, nil))
+		require.NoError(t, svc.createPaymentRecord(ctx, makeTestBooking(bookingID), "req_second", nil, nil))
 
 		payment, err := svc.GetPaymentByBookingID(ctx, bookingID)
 		require.NoError(t, err)
@@ -455,7 +458,7 @@ func TestPaymentCreatePaymentIntent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, models.PaymentPending, payment.Status)
 		assert.Equal(t, "stitch_req_001", *payment.StitchPaymentRequestID)
-		// Legacy flow — no cart_id
+		// Legacy flow — no payment URL, must be NULL not empty string
 		assert.Nil(t, payment.StitchPaymentURL)
 	})
 
