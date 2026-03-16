@@ -37,6 +37,10 @@ func CheckoutBeginHandler(pool *pgxpool.Pool) gin.HandlerFunc {
         c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
         return
       }
+      if errors.Is(err, repository.ErrNoTicketItems) {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+      }
       c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create reservations"})
       return
     }

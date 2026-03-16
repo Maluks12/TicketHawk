@@ -18,13 +18,13 @@ func CreateUser(pool *pgxpool.Pool, user *models.User) (*models.User, error) {
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	query:= `
-		INSERT INTO users (email, password)
-		Values ($1, $2)
+	query := `
+		INSERT INTO users (email, password, role)
+		VALUES ($1, $2, $3)
 		RETURNING id, email, created_at
 	`
 
-	err := pool.QueryRow(ctx, query, user.Email, user.Password).Scan(
+	err := pool.QueryRow(ctx, query, user.Email, user.Password, user.Role).Scan(
 		&user.ID,
 		&user.Email,
 		&user.CreatedAt,
@@ -183,4 +183,3 @@ func GetUserByIDForEmail(pool *pgxpool.Pool, id string) (*models.User, error) {
 	}
 	return &user, nil
 }
- 

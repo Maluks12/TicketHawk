@@ -12,6 +12,7 @@ import (
  
 var ErrReservationNotFound = errors.New("reservation not found")
 var ErrInsufficientReservationCapacity = errors.New("insufficient ticket capacity for reservation")
+var ErrNoTicketItems = errors.New("cart has no ticket items")
  
 // CreateReservations atomically creates reservations for all ticket items in the cart.
 // It checks capacity (tickets_sold + reserved_count + qty <= max_capacity) inside a
@@ -50,7 +51,7 @@ func CreateReservations(pool *pgxpool.Pool, cartID string, userID, sessionID *st
   rows.Close()
  
   if len(ticketGroups) == 0 {
-    return nil, errors.New("cart has no ticket items")
+    return nil, ErrNoTicketItems
   }
  
   // Delete any existing reservations for this cart (re-entering checkout)
@@ -122,7 +123,7 @@ func RefreshReservations(pool *pgxpool.Pool, cartID string) (int, error) {
   rows, err := pool.Query(ctx, `
     UPDATE ticket_reservations
     SET expires_at = NOW() + INTERVAL '10 minutes'
-    WHERE cart_id = $1
+    WHERE cart_id = $1 AND expires_at > NOW()
     RETURNING expires_at
   `, cartID)
   if err != nil {

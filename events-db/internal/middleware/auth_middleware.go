@@ -83,20 +83,22 @@ func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 
 func OrganizerOnlyMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, exists := c.Get("role")
-		
-		if ! exists {
+		roleVal, exists := c.Get("role")
+		if !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 			c.Abort()
 			return
 		}
 
-		if role != models.RoleOrganizer && role != models.RoleAdmin {
+		// c.Set stores role as string (set by AuthMiddleware via JWT claims assertion).
+		// Must cast to string before comparing — interface{} != UserRole even with equal values.
+		role, ok := roleVal.(string)
+		if !ok || (role != string(models.RoleOrganizer) && role != string(models.RoleAdmin)) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Organizer access required",
 				"note": "Apply to become an organizer at /api/v1/user/apply-organizer",
 			})
-            c.Abort()
+			c.Abort()
 			return
 		}
 		c.Next()
