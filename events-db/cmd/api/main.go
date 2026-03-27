@@ -376,6 +376,10 @@ func main() {
 		orgMerch.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool))
 		// Add a size/colour variant to an existing merch item
 		orgMerch.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool))
+		orgMerch.POST("/events/:id/publish", handlers.PublishEventHandler(pool))
+		orgMerch.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool))
+		orgMerch.GET("/events", handlers.GetOrganizerEventsHandler(pool))
+
 	}
 
 	// ==========================================

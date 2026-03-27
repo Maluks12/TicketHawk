@@ -105,8 +105,7 @@ func CreateEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 		event, err := repository.CreateEvent(pool, &dto, userID.(string))
 
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			utils.InternalError(c, err, "descriptive-log-message")
 		}
 		 c.JSON(http.StatusCreated, gin.H{
 			"message": "Event created as draft",
@@ -128,7 +127,7 @@ func DeleteEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "Event deleted successfully"})
@@ -159,7 +158,7 @@ func TrendingEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.TrendingEvents(pool, limit, cursor)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 		c.JSON(200, gin.H{
@@ -226,7 +225,7 @@ func UpdateEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 		event, err := repository.UpdateEvents(pool, eventID, &dto, userID.(string))
 
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 
@@ -287,7 +286,7 @@ func GetAllEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.GetAllEvents(pool, limit, cursor)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 		c.JSON(200, gin.H{
@@ -320,7 +319,7 @@ func FeaturedEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.FeaturedEvents(pool, limit, cursor)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 		c.JSON(200, gin.H{
@@ -353,7 +352,7 @@ func ActiveEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.ActiveEvents(pool, limit, cursor)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 		c.JSON(200, gin.H{
@@ -394,7 +393,7 @@ func GetEventCategory(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.GetEventBycategory(pool, CategoryID, limit, cursor)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
 		c.JSON(200, gin.H{
