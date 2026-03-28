@@ -67,6 +67,22 @@ func main() {
 	log.Info().Msg("booking expiry worker started")
 
 	bookingJobs := make(chan string, 256)
+	// On startup: re-enqueue any confirmed bookings that never got their QR/email
+	rows, err := pool.Query(context.Background(), `
+		SELECT id FROM bookings
+		WHERE booking_status = 'confirmed'
+		AND qr_url IS NULL
+		AND created_at > NOW() - INTERVAL '24 hours'
+	`)
+	if err == nil {
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				bookingJobs <- id
+			}
+		}
+		rows.Close()
+	}
 	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
 	// ==========================================
 	// Services
