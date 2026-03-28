@@ -395,9 +395,7 @@ func main() {
 		admin.POST("/events",       handlers.CreateEventHandlers(pool, eventCache))
 		admin.PUT("/events/:id",    handlers.UpdateEventHandlers(pool, eventCache))
 		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool, eventCache))
-		// admin.GET("/events/category/:id", handlers.GetEventCategory(pool))
 		admin.DELETE("/events/:id", handlers.DeleteEventHandlers(pool))
-
 		admin.GET("/users", controllers.GetAllUsersHandler(pool))
 		admin.PUT("/users/promote/:id", controllers.PromoteUserHandler(pool))
 		admin.PUT("/users/demote/:id", controllers.DemoteUserHandler(pool))
