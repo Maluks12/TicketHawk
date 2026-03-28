@@ -6,6 +6,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
+	"fmt"
 	"log"
 	"time"
 
@@ -112,6 +113,25 @@ func processBookingJob(
 				bookingID, retryErr)
 		}
 		return
+	}
+
+	// Non-fatal notification — guest bookings have no user_id so skip them
+	if booking.UserID != nil {
+		notifErr := repository.CreateNotification(
+			pool, context.Background(),
+			*booking.UserID,
+			models.NotifBookingConfirmed,
+			"Booking Confirmed!",
+			fmt.Sprintf("Your booking for %s is confirmed. Check your email for your ticket.", event.Title),
+			map[string]string{
+				"booking_id":     booking.ID,
+				"event_id":       event.ID,
+				"booking_number": booking.BookingNumber,
+			},
+		)
+		if notifErr != nil {
+			log.Printf("booking worker: notification failed for %s: %v", booking.ID, notifErr)
+		}
 	}
 
 	log.Printf("booking worker: successfully processed booking %s", bookingID)

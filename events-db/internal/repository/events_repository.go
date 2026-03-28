@@ -236,6 +236,28 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 	if err != nil {
 		return fmt.Errorf("failed to update bookings: %w", err)
 	}
+
+	// Notify all confirmed attendees
+	notifRows, notifErr := tx.Query(ctx, `
+		SELECT DISTINCT user_id FROM bookings
+		WHERE event_id = $1 AND booking_status = 'confirmed'`, eventID)
+	if notifErr == nil {
+		defer notifRows.Close()
+		for notifRows.Next() {
+			var uid string
+			if err := notifRows.Scan(&uid); err != nil {
+				continue
+			}
+			_ = CreateNotification(
+				pool, ctx, uid,
+				models.NotifEventCancelled,
+				"Event Cancelled",
+				fmt.Sprintf("Unfortunately, %s has been cancelled. You will be refunded automatically.", reason),
+				map[string]string{"event_id": eventID},
+			)
+		}
+	}
+
 	return tx.Commit(ctx)
 } // new
 

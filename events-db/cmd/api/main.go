@@ -379,6 +379,25 @@ func main() {
 	}
 
 	// ==========================================
+	// Notification Routes (Auth required)
+	// ==========================================
+	notifs := router.Group("/notifications")
+	notifs.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		notifs.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"notifications",
+		))
+	}
+	{
+		notifs.GET("",            handlers.GetNotificationsHandler(pool))
+		notifs.GET("/unread",     handlers.GetUnreadCountHandler(pool))
+		notifs.PATCH("/:id/read", handlers.MarkReadHandler(pool))
+		notifs.POST("/read-all",  handlers.MarkAllReadHandler(pool))
+	}
+
+	// ==========================================
 	// Admin Routes (Composite rate limiting: IP + User)
 	// ==========================================
 	admin := router.Group("/admin")
