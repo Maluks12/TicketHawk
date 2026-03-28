@@ -12,47 +12,79 @@ import (
  
 var ErrMerchNotFound = errors.New("merchandise not found")
  
-// GetMerchandiseByEvent returns all active merch for an event with variants.
+// GetMerchandiseByEvent returns merch with variants in 2 queries (not N+1).
 func GetMerchandiseByEvent(pool *pgxpool.Pool, eventID string, limit int) ([]models.Merchandise, error) {
-  ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-  defer cancel()
- 
-  q := `SELECT id, event_id, name, description, base_price, category,
-              display_order, is_active, images::text, created_at, updated_at
-         FROM merchandise
-         WHERE event_id = $1 AND is_active = TRUE
-         ORDER BY display_order ASC, created_at ASC`
-  if limit > 0 {
-    q += fmt.Sprintf(" LIMIT %d", limit)
-  }
- 
-  rows, err := pool.Query(ctx, q, eventID)
-  if err != nil {
-    return nil, err
-  }
-  defer rows.Close()
- 
-  var items []models.Merchandise
-  for rows.Next() {
-    var m models.Merchandise
-    if err := rows.Scan(
-      &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
-      &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
-      &m.CreatedAt, &m.UpdatedAt,
-    ); err != nil {
-      return nil, err
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    // Query 1: fetch all merch items
+    q := `SELECT id, event_id, name, description, base_price, category,
+                 display_order, is_active, images::text, created_at, updated_at
+          FROM merchandise
+          WHERE event_id = $1 AND is_active = TRUE
+          ORDER BY display_order ASC, created_at ASC`
+    if limit > 0 {
+        q += fmt.Sprintf(" LIMIT %d", limit)
     }
-    items = append(items, m)
-  }
- 
-  // Attach variants to each item
-  for i, item := range items {
-    variants, err := GetVariantsByMerchandise(pool, item.ID)
-    if err == nil {
-      items[i].Variants = variants
+
+    rows, err := pool.Query(ctx, q, eventID)
+    if err != nil {
+        return nil, err
     }
-  }
-  return items, nil
+    defer rows.Close()
+
+    var items []models.Merchandise
+    var ids []string
+    for rows.Next() {
+        var m models.Merchandise
+        if err := rows.Scan(
+            &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+            &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+            &m.CreatedAt, &m.UpdatedAt,
+        ); err != nil {
+            return nil, err
+        }
+        items = append(items, m)
+        ids = append(ids, m.ID)
+    }
+
+    if len(items) == 0 {
+        return items, nil
+    }
+
+    // Query 2: fetch ALL variants for all items in one shot
+    varRows, err := pool.Query(ctx, `
+        SELECT id, merchandise_id, sku, attributes::text,
+               stock_quantity, price_override, is_active, created_at, updated_at
+        FROM merchandise_variants
+        WHERE merchandise_id = ANY($1) AND is_active = TRUE
+        ORDER BY created_at ASC
+    `, ids)
+    if err != nil {
+        return items, nil // variants failing shouldn't break merch display
+    }
+    defer varRows.Close()
+
+    // Group variants by merchandise_id
+    variantMap := make(map[string][]models.MerchandiseVariant)
+    for varRows.Next() {
+        var v models.MerchandiseVariant
+        if err := varRows.Scan(
+            &v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+            &v.StockQuantity, &v.PriceOverride, &v.IsActive,
+            &v.CreatedAt, &v.UpdatedAt,
+        ); err != nil {
+            continue
+        }
+        variantMap[v.MerchandiseID] = append(variantMap[v.MerchandiseID], v)
+    }
+
+    // Attach variants
+    for i, item := range items {
+        items[i].Variants = variantMap[item.ID]
+    }
+
+    return items, nil
 }
  
 // GetVariantsByMerchandise returns all active variants for a merchandise item.

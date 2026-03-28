@@ -6,6 +6,7 @@ import (
 	// "encoding/base64"
 	// "encoding/json"
 	"errors"
+	"events-db/internal/cache"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/utils"
@@ -21,39 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// type CreateEventInput struct {
-// 	Title         string    `json:"title" binding:"required"`
-// 	Descript      string    `json:"descript"`
-// 	CoverImageURL string    `json:"cover_image_url"`
-// 	StartTime     time.Time `json:"start_time" binding:"required"`
-// 	EndTime       time.Time `json:"end_time" binding:"required"`
-// 	Views         int       `json:"views"`
-// 	IsFeatured    bool      `json:"is_featured"`
-// 	ExpiresAt     time.Time `json:"expires_at" binding:"required"`
-// 	VenueName     string    `json:"venue_name" binding:"required"`
-// 	City          string    `json:"city" binding:"required"`
-// 	Address       string    `json:"address" binding:"required"`
-// 	Category      string    `json:"category" binding:"required"`
-// 	FeaturedUntil *time.Time `json:"featured_until"`
-// }
-
-// type UpdateEventInput struct {
-// 	Title         *string    `json:"title"`
-// 	Descript      *string    `json:"descript"`
-// 	CoverImageURL *string    `json:"cover_image_url"`
-// 	StartTime     *time.Time `json:"start_time"`
-// 	EndTime       *time.Time `json:"end_time"`
-// 	Views         *int       `json:"views"`
-// 	IsFeatured    *bool      `json:"is_featured"`
-// 	ExpiresAt     *time.Time `json:"expires_at"`
-// 	VenueName     *string    `json:"venue_name"`
-// 	City          *string    `json:"city"`
-// 	Address       *string    `json:"address"`
-// 	Category      *string    `json:"category"`
-// 	FeaturedUntil *time.Time `json:"featured_until"`
-// }
-
-func CreateEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _:= c.Get("user_id")
 		role, _:= c.Get("role")
@@ -80,6 +49,10 @@ func CreateEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 		if dto.EndTime.Before(dto.StartTime) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "End time must be after start time"})
 			return 
+		}
+
+		if ec != nil {
+			ec.BustOnPublish(c.Request.Context())
 		}
 
 		// if dto. && input.FeaturedUntil == nil {
@@ -135,7 +108,7 @@ func DeleteEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // fixed
 
-func TrendingEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func TrendingEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -156,11 +129,29 @@ func TrendingEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
+		if cursorStr == "" && ec != nil {
+            if page, ok := ec.GetTrending(c.Request.Context(), limit); ok {
+                c.JSON(http.StatusOK, gin.H{
+                    "data":        page.Events,
+                    "next_cursor": utils.EncodeCursor(page.NextCursor),
+                })
+                return
+            }
+        }
+
 		events, nextCursor, err := repository.TrendingEvents(pool, limit, cursor)
 		if err != nil {
 			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
+
+		if cursorStr == "" && ec != nil {
+            ec.SetTrending(c.Request.Context(), limit, cache.EventPage{
+                Events:     events,
+                NextCursor: nextCursor,
+            })
+        }
+
 		c.JSON(200, gin.H{
 			"data":        events,
 			"next_cursor": utils.EncodeCursor(nextCursor),
@@ -168,7 +159,7 @@ func TrendingEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // fixed
 
-func UpdateEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID ,_ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -181,6 +172,10 @@ func UpdateEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 				"details": utils.FormatValidationErrors(err),
 			})
 			return
+		}
+
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
 		}
 
 		// var categoryID *int
@@ -263,7 +258,7 @@ func GetEventByIDHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // fixed
 
-func GetAllEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func GetAllEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -284,11 +279,29 @@ func GetAllEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
+		if cursorStr == "" && ec != nil {
+            if page, ok := ec.GetRecentlyAdded(c.Request.Context(), limit); ok {
+                c.JSON(http.StatusOK, gin.H{
+                    "data":        page.Events,
+                    "next_cursor": utils.EncodeCursor(page.NextCursor),
+                })
+                return
+            }
+        }
+
 		events, nextCursor, err := repository.GetAllEvents(pool, limit, cursor)
 		if err != nil {
 			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
+
+		if cursorStr == "" && ec != nil {
+            ec.SetRecentlyAdded(c.Request.Context(), limit, cache.EventPage{
+                Events:     events,
+                NextCursor: nextCursor,
+            })
+        }
+
 		c.JSON(200, gin.H{
 			"data":        events,
 			"next_cursor": utils.EncodeCursor(nextCursor),
@@ -296,7 +309,7 @@ func GetAllEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // fixed
 
-func FeaturedEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func FeaturedEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -317,11 +330,29 @@ func FeaturedEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
+		if cursorStr == "" && ec != nil {
+            if page, ok := ec.GetFeatured(c.Request.Context(), limit); ok {
+                c.JSON(http.StatusOK, gin.H{
+                    "data":        page.Events,
+                    "next_cursor": utils.EncodeCursor(page.NextCursor),
+                })
+                return
+            }
+        }
+
 		events, nextCursor, err := repository.FeaturedEvents(pool, limit, cursor)
 		if err != nil {
 			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
+
+		if cursorStr == "" && ec != nil {
+            ec.SetFeatured(c.Request.Context(), limit, cache.EventPage{
+                Events:     events,
+                NextCursor: nextCursor,
+            })
+        }
+
 		c.JSON(200, gin.H{
 			"data":        events,
 			"next_cursor": utils.EncodeCursor(nextCursor),
@@ -329,7 +360,7 @@ func FeaturedEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-func ActiveEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func ActiveEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -350,11 +381,29 @@ func ActiveEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
+		if cursorStr == "" && ec != nil {
+            if page, ok := ec.GetHappeningSoon(c.Request.Context(), limit); ok {
+                c.JSON(http.StatusOK, gin.H{
+                    "data":        page.Events,
+                    "next_cursor": utils.EncodeCursor(page.NextCursor),
+                })
+                return
+            }
+        }
+
 		events, nextCursor, err := repository.ActiveEvents(pool, limit, cursor)
 		if err != nil {
 			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
+
+		if cursorStr == "" && ec != nil {
+            ec.SetHappeningSoon(c.Request.Context(), limit, cache.EventPage{
+                Events:     events,
+                NextCursor: nextCursor,
+            })
+        }
+
 		c.JSON(200, gin.H{
 			"data":        events,
 			"next_cursor": utils.EncodeCursor(nextCursor),
@@ -362,27 +411,10 @@ func ActiveEventsHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // potentially fixed
 
-func GetEventCategory(pool *pgxpool.Pool) gin.HandlerFunc {
+func GetEventCategory(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		cursorStr := c.Query("cursor")
-
-		limit := 20
-        if l := c.Query("limit"); l != "" {
-            if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
-                limit = parsed
-            }
-        }
-
-		var cursor *utils.Cursor
-		if cursorStr != "" {
-			var err error
-			cursor, err = utils.DecodeCursor(cursorStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cursor"})
-				return
-			}
-		}
 
 		CategoryID, err := strconv.Atoi(id)
 
@@ -391,11 +423,47 @@ func GetEventCategory(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		limit := 20
+        if l := c.Query("limit"); l != "" {
+            if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
+                limit = parsed
+            }
+        }
+
+		var cursor *utils.Cursor
+		if cursorStr != "" {
+			var err error
+			cursor, err = utils.DecodeCursor(cursorStr)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cursor"})
+				return
+			}
+		}
+
+		if cursorStr == "" && ec != nil {
+            if page, ok := ec.GetCategory(c.Request.Context(), CategoryID ,limit); ok {
+                c.JSON(http.StatusOK, gin.H{
+                    "data":        page.Events,
+                    "next_cursor": utils.EncodeCursor(page.NextCursor),
+                })
+                return
+            }
+        }
+
+		
 		events, nextCursor, err := repository.GetEventBycategory(pool, CategoryID, limit, cursor)
 		if err != nil {
 			utils.InternalError(c, err, "descriptive-log-message")
 			return
 		}
+
+		if cursorStr == "" && ec != nil {
+            ec.SetCategory(c.Request.Context(), CategoryID ,limit, cache.EventPage{
+                Events:     events,
+                NextCursor: nextCursor,
+            })
+        }
+
 		c.JSON(200, gin.H{
 			"data":        events,
 			"next_cursor": utils.EncodeCursor(nextCursor),
@@ -403,7 +471,7 @@ func GetEventCategory(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // potentially fixed
 
-func PublishEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -412,6 +480,10 @@ func PublishEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		if ec != nil {
+			ec.BustOnPublish(c.Request.Context())
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -468,7 +540,7 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 } // correct
 
-func CancelEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _:= c.Get("user_id")
 		eventID := c.Param("id")
@@ -486,6 +558,10 @@ func CancelEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
 		}
 
 		c.JSON(http.StatusOK, gin.H{

@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"events-db/internal/cache"
 	"events-db/internal/config"
 	"events-db/internal/controllers"
 	"events-db/internal/database"
@@ -22,6 +23,7 @@ import (
 	"events-db/internal/ratelimit"
 	"events-db/internal/services"
 	"events-db/internal/workers"
+
 	"github.com/gin-contrib/cors"
 )
 
@@ -110,6 +112,12 @@ func main() {
 	var rdb *redis.Client
 	if rateLimitManager != nil {
 		rdb = rateLimitManager.Client()
+	}
+
+	var eventCache *cache.EventCache
+	if rdb != nil {
+		eventCache = cache.NewEventCache(rdb)
+		log.Info().Msg("event cache initialised")
 	}
 
 	// ==========================================
@@ -243,11 +251,12 @@ func main() {
 		))
 	}
 	{
-		public.GET("/trending", handlers.TrendingEventHandlers(pool))
-		public.GET("", handlers.GetAllEventsHandlers(pool))
-		public.GET("/featured", handlers.FeaturedEventsHandlers(pool))
-		public.GET("/active", handlers.ActiveEventsHandlers(pool))
-		public.GET("/search", handlers.SearchEventsHandler(pool))
+		public.GET("/trending",    handlers.TrendingEventHandlers(pool, eventCache))
+		public.GET("",             handlers.GetAllEventsHandlers(pool, eventCache))
+		public.GET("/featured",    handlers.FeaturedEventsHandlers(pool, eventCache))
+		public.GET("/active",      handlers.ActiveEventsHandlers(pool, eventCache))
+		public.GET("/search",      handlers.SearchEventsHandler(pool))        // no cache
+		public.GET("/category/:id",handlers.GetEventCategory(pool, eventCache))
 	}
 
 	// ==========================================
@@ -267,9 +276,8 @@ func main() {
 	}
 	{
 		// Full catalogue — used by the "view more" page
-		merch.GET("/:id/merch", handlers.GetEventMerchHandler(pool))
-		// Preview — first 4 items shown on the event details page
-		merch.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool))
+		merch.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, eventCache))
+	merch.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 	}
 
 	// ==========================================
@@ -359,16 +367,16 @@ func main() {
 		))
 	}
 	{
-		admin.POST("/events", handlers.CreateEventHandlers(pool))
-		admin.PUT("/events/:id", handlers.UpdateEventHandlers(pool))
+		admin.POST("/events",       handlers.CreateEventHandlers(pool, eventCache))
+		admin.PUT("/events/:id",    handlers.UpdateEventHandlers(pool, eventCache))
 		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool))
-		admin.GET("/events/category/:id", handlers.GetEventCategory(pool))
+		// admin.GET("/events/category/:id", handlers.GetEventCategory(pool))
 		admin.DELETE("/events/:id", handlers.DeleteEventHandlers(pool))
 
 		admin.GET("/users", controllers.GetAllUsersHandler(pool))
 		admin.PUT("/users/promote/:id", controllers.PromoteUserHandler(pool))
 		admin.PUT("/users/demote/:id", controllers.DemoteUserHandler(pool))
-		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
+		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool)) //might have to add eventcache
 	}
 
 	// ==========================================
@@ -389,11 +397,11 @@ func main() {
 	}
 	{
 		// Create a merch item attached to an event the organiser owns
-		orgMerch.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool))
+		orgMerch.POST("/events/:id/merch",  handlers.OrgCreateMerchHandler(pool, eventCache))
 		// Add a size/colour variant to an existing merch item
-		orgMerch.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool))
-		orgMerch.POST("/events/:id/publish", handlers.PublishEventHandler(pool))
-		orgMerch.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool))
+		orgMerch.POST("/merch/:id/variants",handlers.OrgCreateVariantHandler(pool, eventCache))
+		orgMerch.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
+		orgMerch.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
 		orgMerch.GET("/events", handlers.GetOrganizerEventsHandler(pool))
 
 	}
