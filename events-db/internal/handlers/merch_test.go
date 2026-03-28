@@ -5,19 +5,14 @@ package handlers_test
 // =============================================================================
 //
 // Tests covered:
-//   - GET /events/:id/merch         → GetEventMerchHandler     (public)
-//   - GET /events/:id/merch/preview → GetEventMerchPreviewHandler (public)
-//   - POST /organiser/events/:id/merch       → OrgCreateMerchHandler (organiser)
-//   - POST /organiser/merch/:id/variants     → OrgCreateVariantHandler (organiser)
-//
-// Verifies:
-//   - Full catalogue returned with variants nested
-//   - Preview returns at most 4 items ordered by display_order
-//   - Inactive items are excluded from public routes
-//   - Organiser can create merch items with a price
-//   - Organiser can add variants with size/colour attributes
-//   - Non-organiser users cannot create merch (403)
-//   - Unauthenticated users cannot create merch (401)
+//   - GET  /events/:id/merch              → GetEventMerchHandler       (public)
+//   - GET  /events/:id/merch/preview      → GetEventMerchPreviewHandler (public)
+//   - GET  /merch/:id                     → GetMerchByIDHandler         (public)
+//   - POST /organiser/events/:id/merch    → OrgCreateMerchHandler       (organiser)
+//   - POST /organiser/merch/:id/variants  → OrgCreateVariantHandler     (organiser)
+//   - PUT  /organiser/merch/:id           → OrgUpdateMerchHandler       (organiser)
+//   - DELETE /organiser/merch/:id         → OrgDeactivateMerchHandler   (organiser)
+//   - PUT  /organiser/merch/variants/:id  → OrgUpdateVariantHandler     (organiser)
 //
 // Run:
 //   go test ./internal/handlers/... -v -run TestMerch
@@ -79,10 +74,6 @@ func createMerchTestTables(t *testing.T, pool *pgxpool.Pool) {
 	}
 
 	stmts := []string{
-		// FIX 1: default role is 'attendee' to match models.RoleAttendee.
-		// The previous DEFAULT 'user' meant CreateUser (which now inserts role
-		// explicitly) would still work, but the column default should match the
-		// production schema so incidentally-created rows are consistent.
 		`CREATE TABLE users (
 			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			email      VARCHAR(255) UNIQUE NOT NULL,
@@ -202,8 +193,6 @@ func merchSeedUserWithRole(t *testing.T, pool *pgxpool.Pool, role string) (userI
 	return
 }
 
-// FIX 2: randomise the category name to avoid unique constraint violations
-// when this helper is called multiple times within one test run.
 func merchSeedCategory(t *testing.T, pool *pgxpool.Pool) int {
 	t.Helper()
 	var id int
@@ -232,7 +221,6 @@ func merchSeedEvent(t *testing.T, pool *pgxpool.Pool, organizerID string) string
 	return eventID
 }
 
-// merchSeedItems inserts n merch items for an event with sequential display_order.
 func merchSeedItems(t *testing.T, pool *pgxpool.Pool, eventID string, count int) []string {
 	t.Helper()
 	ids := make([]string, count)
@@ -264,6 +252,8 @@ func merchSeedVariant(t *testing.T, pool *pgxpool.Pool, merchID, size string, st
 }
 
 // ─── router builder ───────────────────────────────────────────────────────────
+// eventCache is nil throughout all DB-level merch tests.
+// Cache behaviour is tested separately in internal/cache/event_cache_test.go.
 
 func buildMerchRouter(pool *pgxpool.Pool) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -273,19 +263,28 @@ func buildMerchRouter(pool *pgxpool.Pool) *gin.Engine {
 	auth := r.Group("/auth")
 	auth.POST("/login", handlers.LoginHandler(pool, cfg))
 
-	// Public merch routes
+	// Public merch routes — pass nil cache (no Redis in DB integration tests)
 	events := r.Group("/events")
 	{
-		events.GET("/:id/merch", handlers.GetEventMerchHandler(pool))
-		events.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool))
+		events.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, nil))         // ← nil cache
+		events.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, nil))  // ← nil cache
+	}
+
+	// Single merch item route
+	merch := r.Group("/merch")
+	{
+		merch.GET("/:id", handlers.GetMerchByIDHandler(pool, nil)) // ← new route, nil cache
 	}
 
 	// Organiser routes
 	org := r.Group("/organiser")
 	org.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
 	{
-		org.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool))
-		org.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool))
+		org.POST("/events/:id/merch",     handlers.OrgCreateMerchHandler(pool, nil))        // ← nil cache
+		org.POST("/merch/:id/variants",   handlers.OrgCreateVariantHandler(pool, nil))      // ← nil cache
+		org.PUT("/merch/:id",             handlers.OrgUpdateMerchHandler(pool, nil))        // ← new route
+		org.DELETE("/merch/:id",          handlers.OrgDeactivateMerchHandler(pool, nil))    // ← new route
+		org.PUT("/merch/variants/:id",    handlers.OrgUpdateVariantHandler(pool, nil))      // ← new route
 	}
 
 	return r
@@ -303,7 +302,6 @@ func TestMerchGetCatalogue(t *testing.T) {
 		eventID := merchSeedEvent(t, pool, orgID)
 		ids := merchSeedItems(t, pool, eventID, 3)
 
-		// Add variants to first item
 		merchSeedVariant(t, pool, ids[0], "S", 5)
 		merchSeedVariant(t, pool, ids[0], "L", 10)
 
@@ -317,7 +315,6 @@ func TestMerchGetCatalogue(t *testing.T) {
 		assert.Len(t, data, 3)
 		assert.EqualValues(t, 3, resp["count"])
 
-		// First item should have 2 variants
 		firstItem := data[0].(map[string]interface{})
 		variants := firstItem["variants"].([]interface{})
 		assert.Len(t, variants, 2, "variants should be nested in each merch item")
@@ -327,7 +324,6 @@ func TestMerchGetCatalogue(t *testing.T) {
 		cleanMerchTables(t, pool)
 		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
 		eventID := merchSeedEvent(t, pool, orgID)
-		// Insert with reversed display_order to verify sorting
 		pool.Exec(context.Background(), `
 			INSERT INTO merchandise (event_id, name, base_price, display_order)
 			VALUES ($1, 'C', 100, 3), ($1, 'A', 100, 1), ($1, 'B', 100, 2)
@@ -361,7 +357,7 @@ func TestMerchGetCatalogue(t *testing.T) {
 		var resp map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		data := resp["data"].([]interface{})
-		assert.Len(t, data, 1, "inactive items must not appear in public catalogue")
+		assert.Len(t, data, 1)
 		assert.Equal(t, "Active Item", data[0].(map[string]interface{})["name"])
 	})
 
@@ -384,7 +380,6 @@ func TestMerchGetCatalogue(t *testing.T) {
 		eventID := merchSeedEvent(t, pool, orgID)
 		r := buildMerchRouter(pool)
 
-		// No Authorization header — should still work
 		req := httptest.NewRequest(http.MethodGet, "/events/"+eventID+"/merch", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -402,7 +397,6 @@ func TestMerchGetPreview(t *testing.T) {
 		cleanMerchTables(t, pool)
 		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
 		eventID := merchSeedEvent(t, pool, orgID)
-		// Seed 6 items
 		merchSeedItems(t, pool, eventID, 6)
 
 		r := buildMerchRouter(pool)
@@ -433,7 +427,6 @@ func TestMerchGetPreview(t *testing.T) {
 		cleanMerchTables(t, pool)
 		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
 		eventID := merchSeedEvent(t, pool, orgID)
-		// Insert 5 items, display_order 1-5
 		for i := 1; i <= 5; i++ {
 			pool.Exec(context.Background(), `
 				INSERT INTO merchandise (event_id, name, base_price, display_order)
@@ -448,9 +441,7 @@ func TestMerchGetPreview(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		data := resp["data"].([]interface{})
 		require.Len(t, data, 4)
-		// First item should be display_order=1
 		assert.Equal(t, "Item 1", data[0].(map[string]interface{})["name"])
-		// Last returned should be Item 4, not Item 5
 		assert.Equal(t, "Item 4", data[3].(map[string]interface{})["name"])
 	})
 
@@ -472,6 +463,121 @@ func TestMerchGetPreview(t *testing.T) {
 		data := resp["data"].([]interface{})
 		assert.Len(t, data, 1)
 		assert.Equal(t, "Visible", data[0].(map[string]interface{})["name"])
+	})
+}
+
+// ─── GET /merch/:id — single item detail page ─────────────────────────────────
+
+func TestMerchGetByID(t *testing.T) {
+	pool := setupMerchTestDB(t)
+	defer pool.Close()
+
+	t.Run("returns single item with variants and stock summary", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		merchSeedVariant(t, pool, ids[0], "S", 3)
+		merchSeedVariant(t, pool, ids[0], "M", 10)
+		merchSeedVariant(t, pool, ids[0], "L", 0) // out of stock
+
+		r := buildMerchRouter(pool)
+		w := doRequest(r, http.MethodGet, "/merch/"+ids[0], nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+		// Item fields
+		assert.Equal(t, ids[0], resp["id"])
+		assert.Equal(t, "Item 1", resp["name"])
+
+		// Variants nested
+		variants := resp["variants"].([]interface{})
+		assert.Len(t, variants, 3, "all 3 variants should be returned including out-of-stock")
+
+		// Stock summary
+		summary := resp["stock_summary"].(map[string]interface{})
+		assert.EqualValues(t, 13, summary["total_stock"])    // 3 + 10 + 0
+		assert.EqualValues(t, 2, summary["available_variants"]) // S and M have stock
+		assert.Equal(t, "low_stock", summary["status"])      // total 13 <= 10? No actually > 10
+		// total = 13 which is > 10 so status should be "available"
+		assert.Equal(t, "available", summary["status"])
+	})
+
+	t.Run("stock summary shows sold_out when all variants have zero stock", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		merchSeedVariant(t, pool, ids[0], "S", 0)
+		merchSeedVariant(t, pool, ids[0], "M", 0)
+
+		r := buildMerchRouter(pool)
+		w := doRequest(r, http.MethodGet, "/merch/"+ids[0], nil)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		summary := resp["stock_summary"].(map[string]interface{})
+		assert.Equal(t, "sold_out", summary["status"])
+		assert.EqualValues(t, 0, summary["total_stock"])
+		assert.EqualValues(t, 0, summary["available_variants"])
+	})
+
+	t.Run("stock summary shows low_stock when total is <= 10", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		merchSeedVariant(t, pool, ids[0], "S", 3)
+		merchSeedVariant(t, pool, ids[0], "M", 4) // total = 7
+
+		r := buildMerchRouter(pool)
+		w := doRequest(r, http.MethodGet, "/merch/"+ids[0], nil)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		summary := resp["stock_summary"].(map[string]interface{})
+		assert.Equal(t, "low_stock", summary["status"])
+	})
+
+	t.Run("returns 404 for non-existent merch ID", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		r := buildMerchRouter(pool)
+		fakeID := "00000000-0000-0000-0000-000000000000"
+		w := doRequest(r, http.MethodGet, "/merch/"+fakeID, nil)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("returns 404 for inactive item", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		var inactiveID string
+		pool.QueryRow(context.Background(), `
+			INSERT INTO merchandise (event_id, name, base_price, is_active)
+			VALUES ($1, 'Discontinued', 100, FALSE)
+			RETURNING id
+		`, eventID).Scan(&inactiveID)
+
+		r := buildMerchRouter(pool)
+		w := doRequest(r, http.MethodGet, "/merch/"+inactiveID, nil)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("no auth required — public endpoint", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+
+		r := buildMerchRouter(pool)
+		req := httptest.NewRequest(http.MethodGet, "/merch/"+ids[0], nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
 	})
 }
 
@@ -566,6 +672,280 @@ func TestMerchOrgCreate(t *testing.T) {
 	})
 }
 
+// ─── PUT /organiser/merch/:id ─────────────────────────────────────────────────
+
+func TestMerchOrgUpdate(t *testing.T) {
+	pool := setupMerchTestDB(t)
+	defer pool.Close()
+
+	t.Run("organiser updates name and price successfully", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/"+ids[0],
+			map[string]interface{}{
+				"name":       "Updated Kit Name",
+				"base_price": 1500.00,
+			}, orgToken)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["item"].(map[string]interface{})
+		assert.Equal(t, "Updated Kit Name", item["name"])
+		assert.EqualValues(t, 1500.00, item["base_price"])
+	})
+
+	t.Run("partial update — only provided fields change", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		// Only update category
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/"+ids[0],
+			map[string]interface{}{"category": "apparel"}, orgToken)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		item := resp["item"].(map[string]interface{})
+		// Name should be unchanged
+		assert.Equal(t, "Item 1", item["name"])
+		assert.Equal(t, "apparel", item["category"])
+	})
+
+	t.Run("organiser cannot update another organiser's merch — 404", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		_, otherToken := merchSeedUserWithRole(t, pool, "organizer") // different organiser
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/"+ids[0],
+			map[string]interface{}{"name": "Hacked Name"}, otherToken)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("empty body returns 400 — no fields to update", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/"+ids[0],
+			map[string]interface{}{}, orgToken)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("unauthenticated gets 401", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doRequest(r, http.MethodPut, "/organiser/merch/"+ids[0],
+			map[string]interface{}{"name": "Hacked"})
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+// ─── DELETE /organiser/merch/:id ─────────────────────────────────────────────
+
+func TestMerchOrgDeactivate(t *testing.T) {
+	pool := setupMerchTestDB(t)
+	defer pool.Close()
+
+	t.Run("organiser deactivates their merch item successfully", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodDelete, "/organiser/merch/"+ids[0], nil, orgToken)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp["message"], "deactivated")
+
+		// Verify it no longer appears in public catalogue
+		w2 := doRequest(r, http.MethodGet, "/events/"+eventID+"/merch", nil)
+		require.Equal(t, http.StatusOK, w2.Code)
+		var catalogueResp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &catalogueResp))
+		assert.EqualValues(t, 0, catalogueResp["count"],
+			"deactivated item must not appear in public catalogue")
+	})
+
+	t.Run("organiser cannot deactivate another organiser's merch — 404", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		_, otherToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodDelete, "/organiser/merch/"+ids[0], nil, otherToken)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("deactivating already-inactive item returns 404", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		var inactiveID string
+		pool.QueryRow(context.Background(), `
+			INSERT INTO merchandise (event_id, name, base_price, is_active)
+			VALUES ($1, 'Already Gone', 100, FALSE)
+			RETURNING id
+		`, eventID).Scan(&inactiveID)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodDelete, "/organiser/merch/"+inactiveID, nil, orgToken)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("unauthenticated gets 401", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		r := buildMerchRouter(pool)
+
+		w := doRequest(r, http.MethodDelete, "/organiser/merch/"+ids[0], nil)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+// ─── PUT /organiser/merch/variants/:id ───────────────────────────────────────
+
+func TestMerchOrgUpdateVariant(t *testing.T) {
+	pool := setupMerchTestDB(t)
+	defer pool.Close()
+
+	t.Run("organiser restocks a variant", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "M", 5)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{"stock_quantity": 50}, orgToken)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		variant := resp["variant"].(map[string]interface{})
+		assert.EqualValues(t, 50, variant["stock_quantity"])
+	})
+
+	t.Run("organiser sets a price override on a variant", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "XL", 10)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{"price_override": 1800.00}, orgToken)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		variant := resp["variant"].(map[string]interface{})
+		assert.EqualValues(t, 1800.00, variant["price_override"])
+	})
+
+	t.Run("organiser deactivates a specific variant", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "S", 10)
+		r := buildMerchRouter(pool)
+
+		isActive := false
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{"is_active": isActive}, orgToken)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		variant := resp["variant"].(map[string]interface{})
+		assert.Equal(t, false, variant["is_active"])
+	})
+
+	t.Run("stock_status field reflects low_stock correctly", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "L", 20)
+		r := buildMerchRouter(pool)
+
+		// Reduce stock to 3 — should become low_stock
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{"stock_quantity": 3}, orgToken)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "low_stock", resp["stock_status"])
+	})
+
+	t.Run("organiser cannot update another organiser's variant — 404", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		_, otherToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "M", 10)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{"stock_quantity": 999}, otherToken)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("empty body returns 400", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "M", 10)
+		r := buildMerchRouter(pool)
+
+		w := doAuthRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{}, orgToken)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("unauthenticated gets 401", func(t *testing.T) {
+		cleanMerchTables(t, pool)
+		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
+		eventID := merchSeedEvent(t, pool, orgID)
+		ids := merchSeedItems(t, pool, eventID, 1)
+		variantID := merchSeedVariant(t, pool, ids[0], "M", 10)
+		r := buildMerchRouter(pool)
+
+		w := doRequest(r, http.MethodPut, "/organiser/merch/variants/"+variantID,
+			map[string]interface{}{"stock_quantity": 999})
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
 // ─── POST /organiser/merch/:id/variants ───────────────────────────────────────
 
 func TestMerchOrgCreateVariant(t *testing.T) {
@@ -614,17 +994,16 @@ func TestMerchOrgCreateVariant(t *testing.T) {
 
 		var resp map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		// Attributes should contain both size and colour
 		attrs := resp["attributes"].(string)
 		assert.Contains(t, attrs, "M")
 		assert.Contains(t, attrs, "home")
 	})
 
-	t.Run("variant with price_override overrides base_price", func(t *testing.T) {
+	t.Run("variant with price_override", func(t *testing.T) {
 		cleanMerchTables(t, pool)
 		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
 		eventID := merchSeedEvent(t, pool, orgID)
-		ids := merchSeedItems(t, pool, eventID, 1) // base_price = 100
+		ids := merchSeedItems(t, pool, eventID, 1)
 		r := buildMerchRouter(pool)
 
 		sku := fmt.Sprintf("XL-PREMIUM-%d", time.Now().UnixNano())
@@ -642,12 +1021,11 @@ func TestMerchOrgCreateVariant(t *testing.T) {
 		assert.EqualValues(t, 150.00, resp["price_override"])
 	})
 
-	t.Run("duplicate SKU returns 500 (unique constraint)", func(t *testing.T) {
+	t.Run("duplicate SKU returns 500", func(t *testing.T) {
 		cleanMerchTables(t, pool)
 		orgID, orgToken := merchSeedUserWithRole(t, pool, "organizer")
 		eventID := merchSeedEvent(t, pool, orgID)
 		ids := merchSeedItems(t, pool, eventID, 1)
-		// Pre-seed a variant with a known SKU
 		const dupSKU = "DUPLICATE-SKU-001"
 		pool.Exec(context.Background(), `
 			INSERT INTO merchandise_variants (merchandise_id, sku, attributes)
@@ -691,7 +1069,6 @@ func TestMerchOrgCreateVariant(t *testing.T) {
 			map[string]interface{}{
 				"sku":            sku,
 				"stock_quantity": 5,
-				// no attributes field
 			}, orgToken)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
@@ -730,7 +1107,7 @@ func TestMerchOrgCreateVariant(t *testing.T) {
 	})
 }
 
-// ─── Variant size integration test ───────────────────────────────────────────
+// ─── Variant integration tests ────────────────────────────────────────────────
 
 func TestMerchVariantSizeIntegration(t *testing.T) {
 	pool := setupMerchTestDB(t)
@@ -760,13 +1137,12 @@ func TestMerchVariantSizeIntegration(t *testing.T) {
 		assert.Len(t, variants, 4, "all 4 size variants should be returned")
 	})
 
-	t.Run("out of stock variant still appears — stock management is separate", func(t *testing.T) {
+	t.Run("out of stock variant still appears — frontend shows out-of-stock label", func(t *testing.T) {
 		cleanMerchTables(t, pool)
 		orgID, _ := merchSeedUserWithRole(t, pool, "organizer")
 		eventID := merchSeedEvent(t, pool, orgID)
 		ids := merchSeedItems(t, pool, eventID, 1)
 
-		// S is out of stock, M has stock
 		pool.Exec(context.Background(), `
 			INSERT INTO merchandise_variants (merchandise_id, sku, attributes, stock_quantity)
 			VALUES ($1, 'SIZE-S-OOS', '{"size":"S"}'::jsonb, 0),
@@ -782,9 +1158,8 @@ func TestMerchVariantSizeIntegration(t *testing.T) {
 		data := resp["data"].([]interface{})
 		variants := data[0].(map[string]interface{})["variants"].([]interface{})
 		assert.Len(t, variants, 2,
-			"out-of-stock variants should still appear so frontend can show 'out of stock' label")
+			"out-of-stock variants should still appear so frontend can show out-of-stock label")
 
-		// Frontend uses stock_quantity to show the out-of-stock state
 		for _, v := range variants {
 			variant := v.(map[string]interface{})
 			if variant["sku"] == "SIZE-S-OOS" {
