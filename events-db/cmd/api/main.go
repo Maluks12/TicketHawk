@@ -239,6 +239,7 @@ func main() {
 	// Public Event Routes
 	// ==========================================
 	public := router.Group("/events")
+	public.Use(middleware.OptionalAuth(cfg)) // ← ADD: gives RateLimitByUser a user_id when available
 	if rateLimitManager != nil {
 		public.Use(middleware.RateLimitByUser(
 			rateLimitManager,
@@ -251,18 +252,19 @@ func main() {
 		))
 	}
 	{
-		public.GET("/trending",    handlers.TrendingEventHandlers(pool, eventCache))
-		public.GET("",             handlers.GetAllEventsHandlers(pool, eventCache))
-		public.GET("/featured",    handlers.FeaturedEventsHandlers(pool, eventCache))
-		public.GET("/active",      handlers.ActiveEventsHandlers(pool, eventCache))
-		public.GET("/search",      handlers.SearchEventsHandler(pool))        // no cache
-		public.GET("/category/:id",handlers.GetEventCategory(pool, eventCache))
+		public.GET("/trending",     handlers.TrendingEventHandlers(pool, eventCache))
+		public.GET("",              handlers.GetAllEventsHandlers(pool, eventCache))
+		public.GET("/featured",     handlers.FeaturedEventsHandlers(pool, eventCache))
+		public.GET("/active",       handlers.ActiveEventsHandlers(pool, eventCache))
+		public.GET("/search",       handlers.SearchEventsHandler(pool))
+		public.GET("/category/:id", handlers.GetEventCategory(pool, eventCache))
 	}
 
 	// ==========================================
-	// Public Merch Routes (no auth required)
+	// Public Merch Routes
 	// ==========================================
 	merch := router.Group("/events")
+	merch.Use(middleware.OptionalAuth(cfg)) // ← ADD: same reason
 	if rateLimitManager != nil {
 		merch.Use(middleware.RateLimitByUser(
 			rateLimitManager,
@@ -275,10 +277,30 @@ func main() {
 		))
 	}
 	{
-		// Full catalogue — used by the "view more" page
 		merch.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, eventCache))
-	merch.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
+		merch.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 	}
+
+	// ==========================================
+	// Single Merch Item Route
+	// ==========================================
+	merchItem := router.Group("/merch")
+	merchItem.Use(middleware.OptionalAuth(cfg)) // ← ADD: same reason
+	if rateLimitManager != nil {
+		merchItem.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   200,
+				RefillRate: 5.0,
+				TTL:        15 * time.Minute,
+			},
+			"merch-item",
+		))
+	}
+	{
+		merchItem.GET("/:id", handlers.GetMerchByIDHandler(pool, eventCache))
+	}
+
 
 	// ==========================================
 	// Cart Routes (auth optional — guests use X-Session-ID header)
@@ -396,14 +418,21 @@ func main() {
 		))
 	}
 	{
-		// Create a merch item attached to an event the organiser owns
-		orgMerch.POST("/events/:id/merch",  handlers.OrgCreateMerchHandler(pool, eventCache))
-		// Add a size/colour variant to an existing merch item
-		orgMerch.POST("/merch/:id/variants",handlers.OrgCreateVariantHandler(pool, eventCache))
+		// Event management
 		orgMerch.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
 		orgMerch.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
-		orgMerch.GET("/events", handlers.GetOrganizerEventsHandler(pool))
+		orgMerch.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 
+		// Merch — create
+		orgMerch.POST("/events/:id/merch",     handlers.OrgCreateMerchHandler(pool, eventCache))
+
+		// Merch — edit and remove                                              ← ADDED
+		orgMerch.PUT("/merch/:id",             handlers.OrgUpdateMerchHandler(pool, eventCache))     // ← ADDED
+		orgMerch.DELETE("/merch/:id",          handlers.OrgDeactivateMerchHandler(pool, eventCache)) // ← ADDED
+
+		// Variants — create and edit                                           ← ADDED
+		orgMerch.POST("/merch/:id/variants",   handlers.OrgCreateVariantHandler(pool, eventCache))
+		orgMerch.PUT("/merch/variants/:id",    handlers.OrgUpdateVariantHandler(pool, eventCache))   // ← ADDED
 	}
 
 	// ==========================================

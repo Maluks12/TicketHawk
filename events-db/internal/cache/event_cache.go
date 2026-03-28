@@ -25,14 +25,11 @@ const (
 	TTLCategory      = 60 * time.Second
 	TTLMerchPreview  = 300 * time.Second
 	TTLMerchFull     = 300 * time.Second
+	TTLMerchItem     = 300 * time.Second // ← added
 )
 
 type EventCache struct {
 	rdb *redis.Client
-}
-
-func (c *EventCache) GetAllEventsHandlers(context context.Context, limit int) (any, any) {
-	panic("unimplemented")
 }
 
 func NewEventCache(rdb *redis.Client) *EventCache {
@@ -52,6 +49,7 @@ func keyCategory(categoryID, limit int) string {
 }
 func keyMerchPreview(eventID string) string { return fmt.Sprintf("merch:%s:preview", eventID) }
 func keyMerchFull(eventID string) string    { return fmt.Sprintf("merch:%s:full", eventID) }
+func keyMerchItem(merchID string) string    { return fmt.Sprintf("merch:item:%s", merchID) } // ← added
 
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
@@ -166,7 +164,7 @@ func (c *EventCache) SetCategory(ctx context.Context, categoryID, limit int, p E
 	c.set(ctx, keyCategory(categoryID, limit), p, TTLCategory)
 }
 
-// ── Merch ─────────────────────────────────────────────────────────────────────
+// ── Merch lists ───────────────────────────────────────────────────────────────
 
 func (c *EventCache) GetMerchPreview(ctx context.Context, eventID string) ([]models.Merchandise, bool) {
 	var items []models.Merchandise
@@ -182,6 +180,16 @@ func (c *EventCache) GetMerchFull(ctx context.Context, eventID string) ([]models
 }
 func (c *EventCache) SetMerchFull(ctx context.Context, eventID string, items []models.Merchandise) {
 	c.set(ctx, keyMerchFull(eventID), items, TTLMerchFull)
+}
+
+// ── Merch single item ─────────────────────────────────────────────────────────  ← added block
+
+func (c *EventCache) GetMerchItem(ctx context.Context, merchID string) (*models.MerchandiseDetail, bool) {
+	var item models.MerchandiseDetail
+	return &item, c.get(ctx, keyMerchItem(merchID), &item)
+}
+func (c *EventCache) SetMerchItem(ctx context.Context, merchID string, item *models.MerchandiseDetail) {
+	c.set(ctx, keyMerchItem(merchID), item, TTLMerchItem)
 }
 
 // ── Bust helpers ──────────────────────────────────────────────────────────────
@@ -219,10 +227,15 @@ func (c *EventCache) BustOnEventUpdate(ctx context.Context) {
 	c.delPattern(ctx, "events:*")
 }
 
-// BustMerch — call when merch or a variant is created/updated for an event
-func (c *EventCache) BustMerch(ctx context.Context, eventID string) {
-	c.del(ctx,
+// BustMerch — call when merch or a variant is created/updated for an event.
+// Pass optional merchIDs to also bust individual item caches.         ← updated
+func (c *EventCache) BustMerch(ctx context.Context, eventID string, merchIDs ...string) {
+	keys := []string{
 		keyMerchPreview(eventID),
 		keyMerchFull(eventID),
-	)
+	}
+	for _, id := range merchIDs {
+		keys = append(keys, keyMerchItem(id))
+	}
+	c.del(ctx, keys...)
 }

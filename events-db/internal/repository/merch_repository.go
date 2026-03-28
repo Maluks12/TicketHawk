@@ -211,3 +211,315 @@ func DecrementVariantStock(pool *pgxpool.Pool, variantID string, qty int) error 
   }
   return nil
 }
+
+// GetMerchandiseByID returns a single merch item with all its variants.
+// Returns ErrMerchNotFound if the item doesn't exist or is inactive.
+func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.MerchandiseDetail, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    var m models.Merchandise
+    err := pool.QueryRow(ctx, `
+        SELECT id, event_id, name, description, base_price, category,
+               display_order, is_active, images::text, created_at, updated_at
+        FROM merchandise
+        WHERE id = $1 AND is_active = TRUE
+    `, merchID).Scan(
+        &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+        &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+        &m.CreatedAt, &m.UpdatedAt,
+    )
+    if err != nil {
+        return nil, ErrMerchNotFound
+    }
+
+    variants, err := GetVariantsByMerchandise(pool, merchID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to load variants: %w", err)
+    }
+    m.Variants = variants
+
+    detail := &models.MerchandiseDetail{Merchandise: m}
+    detail.ComputeStockSummary()
+    return detail, nil
+}
+
+// GetMerchandiseByEventFiltered returns merch for an event with optional
+// category and attribute filters. Attribute filter is a JSON key-value pair
+// e.g. filterKey="size", filterValue="L"
+func GetMerchandiseByEventFiltered(
+    pool    *pgxpool.Pool,
+    eventID string,
+    limit   int,
+    category    *string,
+    filterKey   *string,
+    filterValue *string,
+) ([]models.Merchandise, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    args := []any{eventID}
+    where := "WHERE event_id = $1 AND is_active = TRUE"
+
+    if category != nil && *category != "" {
+        args = append(args, *category)
+        where += fmt.Sprintf(" AND category = $%d", len(args))
+    }
+
+    // Attribute filter — queries inside the JSONB attributes column
+    // e.g. filterKey="size", filterValue="L" → variants.attributes->>'size' = 'L'
+    // We join on variants to filter at the item level
+    variantJoin := ""
+    if filterKey != nil && filterValue != nil && *filterKey != "" {
+        args = append(args, *filterKey, *filterValue)
+        variantJoin = fmt.Sprintf(`
+            AND id IN (
+                SELECT merchandise_id FROM merchandise_variants
+                WHERE is_active = TRUE
+                AND attributes->>$%d = $%d
+            )`, len(args)-1, len(args))
+    }
+
+    limitClause := ""
+    if limit > 0 {
+        args = append(args, limit)
+        limitClause = fmt.Sprintf("LIMIT $%d", len(args))
+    }
+
+    q := fmt.Sprintf(`
+        SELECT id, event_id, name, description, base_price, category,
+               display_order, is_active, images::text, created_at, updated_at
+        FROM merchandise
+        %s %s
+        ORDER BY display_order ASC, created_at ASC
+        %s
+    `, where, variantJoin, limitClause)
+
+    rows, err := pool.Query(ctx, q, args...)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var items []models.Merchandise
+    var ids []string
+    for rows.Next() {
+        var m models.Merchandise
+        if err := rows.Scan(
+            &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+            &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+            &m.CreatedAt, &m.UpdatedAt,
+        ); err != nil {
+            return nil, err
+        }
+        items = append(items, m)
+        ids = append(ids, m.ID)
+    }
+
+    if len(items) == 0 {
+        return items, nil
+    }
+
+    // Fetch all variants in one query
+    varRows, err := pool.Query(ctx, `
+        SELECT id, merchandise_id, sku, attributes::text,
+               stock_quantity, price_override, is_active, created_at, updated_at
+        FROM merchandise_variants
+        WHERE merchandise_id = ANY($1) AND is_active = TRUE
+        ORDER BY created_at ASC
+    `, ids)
+    if err != nil {
+        return items, nil
+    }
+    defer varRows.Close()
+
+    variantMap := make(map[string][]models.MerchandiseVariant)
+    for varRows.Next() {
+        var v models.MerchandiseVariant
+        if err := varRows.Scan(
+            &v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+            &v.StockQuantity, &v.PriceOverride, &v.IsActive,
+            &v.CreatedAt, &v.UpdatedAt,
+        ); err != nil {
+            continue
+        }
+        variantMap[v.MerchandiseID] = append(variantMap[v.MerchandiseID], v)
+    }
+
+    for i, item := range items {
+        items[i].Variants = variantMap[item.ID]
+    }
+
+    return items, nil
+}
+
+// UpdateMerchandise updates allowed fields on a merch item.
+// Verifies the item belongs to an event owned by organizerID.
+func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMerchandiseDTO, organizerID string) (*models.Merchandise, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    // Verify ownership — organiser must own the event this merch belongs to
+    var eventID string
+    err := pool.QueryRow(ctx, `
+        SELECT m.event_id FROM merchandise m
+        JOIN events e ON e.id = m.event_id
+        WHERE m.id = $1 AND e.organizer_id = $2 AND m.is_active = TRUE
+    `, merchID, organizerID).Scan(&eventID)
+    if err != nil {
+        return nil, ErrMerchNotFound
+    }
+
+    // Build dynamic SET clause — only update provided fields
+    sets := []string{"updated_at = NOW()"}
+    args := []any{}
+
+    if dto.Name != nil {
+        args = append(args, *dto.Name)
+        sets = append(sets, fmt.Sprintf("name = $%d", len(args)))
+    }
+    if dto.Description != nil {
+        args = append(args, *dto.Description)
+        sets = append(sets, fmt.Sprintf("description = $%d", len(args)))
+    }
+    if dto.BasePrice != nil {
+        args = append(args, *dto.BasePrice)
+        sets = append(sets, fmt.Sprintf("base_price = $%d", len(args)))
+    }
+    if dto.Category != nil {
+        args = append(args, *dto.Category)
+        sets = append(sets, fmt.Sprintf("category = $%d", len(args)))
+    }
+    if dto.DisplayOrder != nil {
+        args = append(args, *dto.DisplayOrder)
+        sets = append(sets, fmt.Sprintf("display_order = $%d", len(args)))
+    }
+    if dto.IsActive != nil {
+        args = append(args, *dto.IsActive)
+        sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
+    }
+    if dto.Images != nil {
+        args = append(args, *dto.Images)
+        sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args)))
+    }
+
+    // len(args) == 0 means no user-supplied fields were provided,
+    // even though sets already contains "updated_at = NOW()"
+    if len(args) == 0 {
+        return nil, fmt.Errorf("no fields to update")
+    }
+
+    args = append(args, merchID)
+    query := fmt.Sprintf(`
+        UPDATE merchandise SET %s
+        WHERE id = $%d
+        RETURNING id, event_id, name, description, base_price, category,
+                  display_order, is_active, images::text, created_at, updated_at
+    `, joinSets(sets), len(args))
+
+    var m models.Merchandise
+    err = pool.QueryRow(ctx, query, args...).Scan(
+        &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+        &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+        &m.CreatedAt, &m.UpdatedAt,
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to update merchandise: %w", err)
+    }
+    return &m, nil
+}
+
+// DeactivateMerchandise soft-deletes a merch item (sets is_active = false).
+// Verifies organiser ownership before deactivating.
+func DeactivateMerchandise(pool *pgxpool.Pool, merchID string, organizerID string) error {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    cmd, err := pool.Exec(ctx, `
+        UPDATE merchandise m
+        SET is_active = FALSE, updated_at = NOW()
+        FROM events e
+        WHERE m.event_id = e.id
+        AND m.id = $1
+        AND e.organizer_id = $2
+        AND m.is_active = TRUE
+    `, merchID, organizerID)
+    if err != nil {
+        return fmt.Errorf("failed to deactivate merchandise: %w", err)
+    }
+    if cmd.RowsAffected() == 0 {
+        return ErrMerchNotFound
+    }
+    return nil
+}
+
+// UpdateVariant updates stock quantity, price override, or active status.
+// Verifies organiser ownership through the merchandise → event chain.
+func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO, organizerID string) (*models.MerchandiseVariant, string, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    // Verify ownership and get eventID for cache busting
+    var eventID string
+    err := pool.QueryRow(ctx, `
+        SELECT e.id FROM merchandise_variants mv
+        JOIN merchandise m ON m.id = mv.merchandise_id
+        JOIN events e ON e.id = m.event_id
+        WHERE mv.id = $1 AND e.organizer_id = $2
+    `, variantID, organizerID).Scan(&eventID)
+    if err != nil {
+        return nil, "", ErrMerchNotFound
+    }
+
+    sets := []string{"updated_at = NOW()"}
+    args := []any{}
+
+    if dto.StockQuantity != nil {
+        args = append(args, *dto.StockQuantity)
+        sets = append(sets, fmt.Sprintf("stock_quantity = $%d", len(args)))
+    }
+    if dto.PriceOverride != nil {
+        args = append(args, *dto.PriceOverride)
+        sets = append(sets, fmt.Sprintf("price_override = $%d", len(args)))
+    }
+    if dto.IsActive != nil {
+        args = append(args, *dto.IsActive)
+        sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
+    }
+
+    if len(args) == 0 {
+        return nil, "", fmt.Errorf("no fields to update")
+    }
+
+    args = append(args, variantID)
+    query := fmt.Sprintf(`
+        UPDATE merchandise_variants SET %s
+        WHERE id = $%d
+        RETURNING id, merchandise_id, sku, attributes::text,
+                  stock_quantity, price_override, is_active, created_at, updated_at
+    `, joinSets(sets), len(args))
+
+    var v models.MerchandiseVariant
+    err = pool.QueryRow(ctx, query, args...).Scan(
+        &v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+        &v.StockQuantity, &v.PriceOverride, &v.IsActive,
+        &v.CreatedAt, &v.UpdatedAt,
+    )
+    if err != nil {
+        return nil, "", fmt.Errorf("failed to update variant: %w", err)
+    }
+    // Return eventID so the handler can bust the right cache keys
+    return &v, eventID, nil
+}
+
+// joinSets is a small helper to comma-join SET clauses.
+func joinSets(sets []string) string {
+    result := ""
+    for i, s := range sets {
+        if i > 0 {
+            result += ", "
+        }
+        result += s
+    }
+    return result
+}

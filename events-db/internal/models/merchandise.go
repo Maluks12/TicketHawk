@@ -72,3 +72,51 @@ type UpdateVariantDTO struct {
 	PriceOverride *float64 `json:"price_override" binding:"omitempty,gt=0"`
 	IsActive      *bool    `json:"is_active"`
 }
+
+// StockStatus returns a user-friendly stock level string.
+// Call this after scanning a variant — used by the dedicated merch page.
+func (v *MerchandiseVariant) StockStatus() string {
+    switch {
+    case v.StockQuantity == 0:
+        return "sold_out"
+    case v.StockQuantity <= 5:
+        return "low_stock"
+    default:
+        return "available"
+    }
+}
+
+// MerchandiseDetail is the full response for a single merch item page.
+// It embeds the item and adds computed fields the list view doesn't need.
+type MerchandiseDetail struct {
+    Merchandise
+    StockSummary MerchandiseStockSummary `json:"stock_summary"`
+}
+
+type MerchandiseStockSummary struct {
+    TotalStock     int    `json:"total_stock"`
+    AvailableCount int    `json:"available_variants"` // variants with stock > 0
+    Status         string `json:"status"`             // available | low_stock | sold_out
+}
+
+// ComputeStockSummary fills in the StockSummary field from the attached variants.
+func (d *MerchandiseDetail) ComputeStockSummary() {
+    total := 0
+    available := 0
+    for _, v := range d.Variants {
+        total += v.StockQuantity
+        if v.StockQuantity > 0 {
+            available++
+        }
+    }
+    d.StockSummary.TotalStock = total
+    d.StockSummary.AvailableCount = available
+    switch {
+    case total == 0:
+        d.StockSummary.Status = "sold_out"
+    case total <= 10:
+        d.StockSummary.Status = "low_stock"
+    default:
+        d.StockSummary.Status = "available"
+    }
+}
