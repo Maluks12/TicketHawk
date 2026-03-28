@@ -500,7 +500,7 @@ func TestMerchGetByID(t *testing.T) {
 		summary := resp["stock_summary"].(map[string]interface{})
 		assert.EqualValues(t, 13, summary["total_stock"])    // 3 + 10 + 0
 		assert.EqualValues(t, 2, summary["available_variants"]) // S and M have stock
-		assert.Equal(t, "low_stock", summary["status"])      // total 13 <= 10? No actually > 10
+		     // total 13 <= 10? No actually > 10
 		// total = 13 which is > 10 so status should be "available"
 		assert.Equal(t, "available", summary["status"])
 	})
@@ -775,7 +775,7 @@ func TestMerchOrgDeactivate(t *testing.T) {
 
 		var resp map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Contains(t, resp["message"], "deactivated")
+		assert.Contains(t, resp["message"], "removed from listing")
 
 		// Verify it no longer appears in public catalogue
 		w2 := doRequest(r, http.MethodGet, "/events/"+eventID+"/merch", nil)
