@@ -65,34 +65,9 @@ func main() {
 	// Booking Expiry Worker
 	// (also runs reservation expiry + stale cart cleanup)
 	// ==========================================
-	workers.StartExpiryWorker(pool, ctx, 15*time.Minute, 1*time.Minute)
-	log.Info().Msg("booking expiry worker started")
-
-	bookingJobs := make(chan string, 256)
+	
 	// On startup: re-enqueue any confirmed bookings that never got their QR/email
-	rows, err := pool.Query(context.Background(), `
-		SELECT id FROM bookings
-		WHERE booking_status = 'confirmed'
-		AND qr_url IS NULL
-		AND created_at > NOW() - INTERVAL '24 hours'
-	`)
-	if err == nil {
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil {
-				bookingJobs <- id
-			}
-		}
-		rows.Close()
-	}
-	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
-	// ==========================================
-	// Services
-	// ==========================================
-	emailService := services.NewEmailService(cfg)
-	qrService := services.NewQRService(pool, cfg)
-	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
-
+	
 	// ==========================================
 	// Initialize Rate Limit Manager
 	// ==========================================
@@ -119,6 +94,34 @@ func main() {
 		eventCache = cache.NewEventCache(rdb)
 		log.Info().Msg("event cache initialised")
 	}
+
+	workers.StartExpiryWorker(pool, eventCache, ctx, 15*time.Minute, 1*time.Minute)
+	log.Info().Msg("booking expiry worker started")
+
+	bookingJobs := make(chan string, 256)
+
+	rows, err := pool.Query(context.Background(), `
+		SELECT id FROM bookings
+		WHERE booking_status = 'confirmed'
+		AND qr_url IS NULL
+		AND created_at > NOW() - INTERVAL '24 hours'
+	`)
+	if err == nil {
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				bookingJobs <- id
+			}
+		}
+		rows.Close()
+	}
+	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
+	// ==========================================
+	// Services
+	// ==========================================
+	emailService := services.NewEmailService(cfg)
+	qrService := services.NewQRService(pool, cfg)
+	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
 	// ==========================================
 	// Setup Router
@@ -391,7 +394,7 @@ func main() {
 	{
 		admin.POST("/events",       handlers.CreateEventHandlers(pool, eventCache))
 		admin.PUT("/events/:id",    handlers.UpdateEventHandlers(pool, eventCache))
-		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool))
+		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool, eventCache))
 		// admin.GET("/events/category/:id", handlers.GetEventCategory(pool))
 		admin.DELETE("/events/:id", handlers.DeleteEventHandlers(pool))
 
