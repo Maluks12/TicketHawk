@@ -2,33 +2,60 @@ package workers
 
 import (
 	"context"
+	"events-db/internal/cache"
 	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func StartExpiryWorker(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration, interval time.Duration) {
-  go func() {
-    ticker := time.NewTicker(interval)
-    defer ticker.Stop()
-    for {
-      select {
-      case <-ticker.C:
-        if err := expireBookings(pool, ctx, ttl); err != nil {
-          log.Printf("expiry worker: bookings: %v", err)
-        }
-        if err := expireReservations(pool, ctx); err != nil {
-          log.Printf("expiry worker: reservations: %v", err)
-        }
-        if err := cleanupStaleCarts(pool, ctx); err != nil {
-          log.Printf("expiry worker: carts: %v", err)
-        }
-      case <-ctx.Done():
-        return
-      }
-    }
-  }()
+func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context, ttl time.Duration, interval time.Duration) {
+	viewTicker := time.NewTicker(60 * time.Second) // flush views every 60s
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		defer viewTicker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := expireBookings(pool, ctx, ttl); err != nil {
+					log.Printf("expiry worker: bookings: %v", err)
+				}
+				if err := expireReservations(pool, ctx); err != nil {
+					log.Printf("expiry worker: reservations: %v", err)
+				}
+				if err := cleanupStaleCarts(pool, ctx); err != nil {
+					log.Printf("expiry worker: carts: %v", err)
+				}
+			case <-viewTicker.C:
+				flushViewCounts(pool, ec, ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+func flushViewCounts(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context) {
+	if ec == nil {
+		return
+	}
+	counts := ec.FlushViews(ctx)
+	if len(counts) == 0 {
+		return
+	}
+
+	for eventID, count := range counts {
+		_, err := pool.Exec(ctx,
+			`UPDATE events SET views = COALESCE(views, 0) + $1, updated_at = NOW()
+			 WHERE id = $2`, count, eventID)
+		if err != nil {
+			log.Printf("view flush: failed to update event %s: %v", eventID, err)
+		}
+	}
+	log.Printf("view flush: updated %d events", len(counts))
 }
 
 

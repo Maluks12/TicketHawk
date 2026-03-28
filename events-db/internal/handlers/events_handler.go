@@ -231,7 +231,7 @@ func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 	}
 } // fixed
 
-func GetEventByIDHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+func GetEventByIDHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		eventID := c.Param("id")
 
@@ -246,7 +246,11 @@ func GetEventByIDHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 			userID = &uidStr
 		}
 
-	_ = repository.IncrementViews(pool, eventID)
+		if ec != nil {
+			ec.IncrementView(c.Request.Context(), eventID)
+		} else {
+			_ = repository.IncrementViews(pool, eventID)
+		}
 
 	event,err := repository.GetEventByID(pool, eventID, userID)
 	if err != nil {
