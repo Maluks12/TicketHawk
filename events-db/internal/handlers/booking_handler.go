@@ -142,35 +142,76 @@ func GetBookingDetailsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentService) gin.HandlerFunc {
+func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentService, emailService *services.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
-		bookingID :=c.Param("id")
-
+		bookingID := c.Param("id")
+ 
 		var input struct {
 			Reason string `json:"reason" binding:"required,min=10,max=500"`
 		}
-
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed"})
 			return
 		}
-
-		err := repository.RequestRefund(pool, bookingID,userID.(string), input.Reason)
+ 
+		// Fetch booking + event for the notification emails.
+		booking, err := repository.GetBookingByID(pool, bookingID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+		if booking.UserID == nil || *booking.UserID != userID.(string) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+ 
+		event, err := repository.GetEventByID(pool, booking.EventID, nil)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+ 
+		// ── Cascade: update booking + cancel all assignment slots ─────────────
+		cancelledAssignees, err := repository.RequestRefundWithCascade(pool, bookingID, userID.(string), input.Reason)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-
-		err = paymentService.ProcessRefund(bookingID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process refund"})
+ 
+		// ── Process the payment refund via Stitch ─────────────────────────────
+		if err := paymentService.ProcessRefund(bookingID); err != nil {
+			// Payment refund failed — the booking and assignments are already
+			// marked cancelled in the DB. Log and surface the error but don't
+			// attempt to roll back the assignment cancellations; the admin
+			// dashboard can handle the payment reconciliation manually.
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process payment refund"})
 			return
 		}
-
-		c.JSON(http.StatusOK,gin.H{
-			"message": "Refund processed successfully",
-			"refund_status": "processing",
+ 
+		// ── Notify assignees whose claimed tickets are now void ───────────────
+		// Fired in a goroutine so the HTTP response is not delayed by SendGrid.
+		if len(cancelledAssignees) > 0 {
+			go func() {
+				for _, assignee := range cancelledAssignees {
+					if err := emailService.SendTicketInvalidationNotice(
+						assignee.Email,
+						assignee.Name,
+						event.Title,
+						event.StartTime.Format("Monday, 2 January 2006"),
+						booking.BookingNumber,
+					); err != nil {
+						// Non-fatal — log but continue notifying the rest.
+						_ = err
+					}
+				}
+			}()
+		}
+ 
+		c.JSON(http.StatusOK, gin.H{
+			"message":                   "Refund processed successfully",
+			"refund_status":             "processing",
+			"assignees_notified":        len(cancelledAssignees),
 		})
 	}
 }

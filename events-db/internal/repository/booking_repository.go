@@ -16,6 +16,12 @@ import (
 var ErrBookingNotFound = errors.New("booking not found")
 var ErrInsufficientCapacity = errors.New("insufficient tickets available")
 
+type CancelledAssignee struct {
+	Name  string
+	Email string
+	Slot  int
+}
+
 func createBookingTx(
 	pool *pgxpool.Pool,
 	eventID string,
@@ -377,4 +383,104 @@ func emailsMatch(a, b string) bool {
 	a = strings.ToLower(strings.TrimSpace(a))
 	b = strings.ToLower(strings.TrimSpace(b))
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+ 
+// RequestRefundWithCascade updates the booking to refund-requested status and
+// simultaneously cancels all ticket assignment slots. It returns the list of
+// assignees who had already claimed their tickets so the caller can notify them.
+func RequestRefundWithCascade(
+	pool *pgxpool.Pool,
+	bookingID string,
+	userID string,
+	reason string,
+) ([]CancelledAssignee, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+ 
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+ 
+	// ── Step 1: Update the booking (same conditions as before) ───────────────
+	cmd, err := tx.Exec(ctx, `
+		UPDATE bookings b
+		SET refund_requested_at = CURRENT_TIMESTAMP,
+		    refund_reason        = $1,
+		    booking_status       = $2
+		WHERE b.id        = $3
+		  AND b.user_id   = $4
+		  AND b.booking_status = $5
+		  AND EXISTS (
+		      SELECT 1 FROM events e
+		      WHERE e.id = b.event_id
+		        AND e.start_time > CURRENT_TIMESTAMP
+		  )
+	`, reason, models.BookingRefunded, bookingID, userID, models.BookingConfirmed)
+ 
+	if err != nil {
+		return nil, fmt.Errorf("update booking: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, fmt.Errorf("booking not found, already refunded, or event has already started")
+	}
+ 
+	// ── Step 2: Collect claimed assignees before wiping them ─────────────────
+	// We fetch everyone who already claimed so we can email them after commit.
+	// Slot 1 (the buyer) is excluded — they initiated the refund themselves.
+	rows, err := tx.Query(ctx, `
+		SELECT slot_number, assignee_name, assignee_email
+		FROM ticket_assignments
+		WHERE booking_id = $1
+		  AND status     = $2
+		  AND slot_number > 1
+	`, bookingID, models.AssignmentClaimed)
+	if err != nil {
+		return nil, fmt.Errorf("fetch claimed assignees: %w", err)
+	}
+ 
+	var notifyList []CancelledAssignee
+	for rows.Next() {
+		var a CancelledAssignee
+		var name, email *string
+		if err := rows.Scan(&a.Slot, &name, &email); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan assignee: %w", err)
+		}
+		if name != nil {
+			a.Name = *name
+		}
+		if email != nil {
+			a.Email = *email
+		}
+		if a.Email != "" {
+			notifyList = append(notifyList, a)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration: %w", err)
+	}
+ 
+	// ── Step 3: Cancel ALL assignment slots for this booking ─────────────────
+	// This covers unassigned, pending, and claimed in one sweep.
+	// Slot 1 (buyer) is included — their QR is also now invalid.
+	_, err = tx.Exec(ctx, `
+		UPDATE ticket_assignments
+		SET status     = 'cancelled',
+		    claim_token = NULL,
+		    expires_at  = NULL
+		WHERE booking_id = $1
+		  AND status    != 'cancelled'
+	`, bookingID)
+	if err != nil {
+		return nil, fmt.Errorf("cancel assignments: %w", err)
+	}
+ 
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+ 
+	return notifyList, nil
 }

@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"events-db/internal/cache"
+	"events-db/internal/repository"
 	"log"
 	"time"
 
@@ -29,6 +30,9 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 				if err := cleanupStaleCarts(pool, ctx); err != nil {
 					log.Printf("expiry worker: carts: %v", err)
 				}
+				if err := expirePendingAssignments(pool, ctx); err != nil {   // ← add
+		          log.Printf("expiry worker: assignments: %v", err)
+     			}
 			case <-viewTicker.C:
 				flushViewCounts(pool, ec, ctx)
 			case <-ctx.Done():
@@ -196,4 +200,8 @@ func cleanupStaleCarts(pool *pgxpool.Pool, ctx context.Context) error {
     log.Printf("expiry worker: cleaned up %d stale carts", cmd.RowsAffected())
   }
   return nil
+}
+
+func expirePendingAssignments(pool *pgxpool.Pool, ctx context.Context) error {
+	return repository.ExpirePendingAssignments(pool, ctx)
 }

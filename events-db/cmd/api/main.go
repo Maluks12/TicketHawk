@@ -589,7 +589,7 @@ func main() {
 		bookings.POST("", handlers.CreateBookingHandler(pool, paymentService))
 		bookings.GET("", handlers.GetUserBookingsHandler(pool))
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(pool))
-		bookings.POST("/:id/refund", handlers.RequestRefundHandler(pool, paymentService))
+		bookings.POST("/:id/refund", handlers.RequestRefundHandler(pool, paymentService, emailService))
 		bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(pool, qrService))
 	}
 

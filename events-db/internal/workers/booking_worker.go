@@ -53,76 +53,89 @@ func processBookingJob(
 	bookingID string,
 ) {
 	log.Printf("booking worker: processing job for booking %s", bookingID)
-
-	// 1. Fetch the full booking record
+ 
 	booking, err := repository.GetBookingByID(pool, bookingID)
 	if err != nil {
 		log.Printf("booking worker: failed to fetch booking %s: %v", bookingID, err)
 		return
 	}
-
-	// Guard: only proceed for confirmed bookings
 	if booking.BookingStatus != models.BookingConfirmed {
 		log.Printf("booking worker: booking %s is not confirmed (status=%s), skipping",
 			bookingID, booking.BookingStatus)
 		return
 	}
-
-	// Guard: skip if tickets already sent (handles duplicate webhook delivery)
 	if booking.TicketsSent {
 		log.Printf("booking worker: tickets already sent for booking %s, skipping", bookingID)
 		return
 	}
-
-	// 2. Fetch the event
+ 
 	event, err := repository.GetEventByID(pool, booking.EventID, nil)
 	if err != nil {
 		log.Printf("booking worker: failed to fetch event %s for booking %s: %v",
 			booking.EventID, bookingID, err)
 		return
 	}
-
-	// 3. Resolve the email recipient — guest or registered user
+ 
 	user, err := resolveEmailRecipient(pool, booking)
 	if err != nil {
 		log.Printf("booking worker: failed to resolve recipient for booking %s: %v",
 			bookingID, err)
 		return
 	}
-
-	// 4. Generate QR code (encrypts payload → uploads PNG to R2 → updates booking row)
-	if err := qrSvc.GenerateQRCode(bookingID); err != nil {
-		log.Printf("booking worker: QR generation failed for booking %s: %v", bookingID, err)
-		// Don't return — still attempt to send the email even without the QR.
-		// The email template gracefully handles an empty QRCodeURL.
+ 
+	// ── Step 1: Create assignment rows ────────────────────────────────────────
+	// Slot 1 is auto-claimed by the buyer; remaining slots start as unassigned.
+	if err := repository.CreateTicketAssignments(
+		pool,
+		bookingID,
+		booking.TicketQuantity,
+		user.GetFullName(),
+		user.Email,
+	); err != nil {
+		log.Printf("booking worker: failed to create assignments for booking %s: %v",
+			bookingID, err)
+		// Non-fatal — carry on and attempt QR + email for the buyer's slot.
 	}
-
-	// Re-fetch so the email template has the freshly written qr_code_url
-	booking, err = repository.GetBookingByID(pool, bookingID)
+ 
+	// ── Step 2: Generate a QR code for every assignment slot ─────────────────
+	assignments, err := fetchAssignmentIDsForBooking(pool, bookingID)
 	if err != nil {
-		log.Printf("booking worker: re-fetch after QR failed for booking %s: %v", bookingID, err)
-		return
+		log.Printf("booking worker: failed to fetch assignment IDs for %s: %v", bookingID, err)
 	}
-
-	// 5. Send the confirmation email, with one retry on transient failure
-	if err := emailSvc.SendBookingConfirmation(booking, event, user); err != nil {
+ 
+	var buyerQRURL string
+	for i, assignmentID := range assignments {
+		if err := qrSvc.GenerateQRCodeForAssignment(assignmentID); err != nil {
+			log.Printf("booking worker: QR generation failed for assignment %s: %v",
+				assignmentID, err)
+			continue
+		}
+		if i == 0 {
+			// Slot 1 QR URL — used in the buyer's confirmation email.
+			buyerQRURL = fetchQRURLForAssignment(pool, assignmentID)
+		}
+	}
+ 
+	// ── Step 3: Send buyer confirmation email (slot 1 QR) ────────────────────
+	if err := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); err != nil {
 		log.Printf("booking worker: email failed for booking %s: %v", bookingID, err)
 		time.Sleep(3 * time.Second)
-		if retryErr := emailSvc.SendBookingConfirmation(booking, event, user); retryErr != nil {
+		if retryErr := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); retryErr != nil {
 			log.Printf("booking worker: email retry also failed for booking %s: %v",
 				bookingID, retryErr)
 		}
 		return
 	}
-
-	// Non-fatal notification — guest bookings have no user_id so skip them
+ 
+	// ── Step 4: In-app notification ───────────────────────────────────────────
 	if booking.UserID != nil {
 		notifErr := repository.CreateNotification(
 			pool, context.Background(),
 			*booking.UserID,
 			models.NotifBookingConfirmed,
 			"Booking Confirmed!",
-			fmt.Sprintf("Your booking for %s is confirmed. Check your email for your ticket.", event.Title),
+			fmt.Sprintf("Your booking for %s is confirmed. You have %d ticket(s) to manage.",
+				event.Title, booking.TicketQuantity),
 			map[string]string{
 				"booking_id":     booking.ID,
 				"event_id":       event.ID,
@@ -133,8 +146,9 @@ func processBookingJob(
 			log.Printf("booking worker: notification failed for %s: %v", booking.ID, notifErr)
 		}
 	}
-
-	log.Printf("booking worker: successfully processed booking %s", bookingID)
+ 
+	log.Printf("booking worker: successfully processed booking %s (%d ticket slots)",
+		bookingID, booking.TicketQuantity)
 }
 
 // resolveEmailRecipient returns a *models.User suitable for use in email templates.
@@ -171,4 +185,44 @@ func resolveEmailRecipient(pool *pgxpool.Pool, booking *models.Booking) (*models
 	}
 
 	return repository.GetUserByIDForEmail(pool, *booking.UserID)
+}
+
+func fetchAssignmentIDsForBooking(pool *pgxpool.Pool, bookingID string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+ 
+	rows, err := pool.Query(ctx,
+		`SELECT id FROM ticket_assignments WHERE booking_id = $1 ORDER BY slot_number`,
+		bookingID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+ 
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+ 
+func fetchQRURLForAssignment(pool *pgxpool.Pool, assignmentID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+ 
+	var url *string
+	pool.QueryRow(ctx,
+		`SELECT qr_code_url FROM ticket_assignments WHERE id = $1`,
+		assignmentID,
+	).Scan(&url)
+ 
+	if url == nil {
+		return ""
+	}
+	return *url
 }
