@@ -597,15 +597,22 @@ func insertQRTestBooking(t *testing.T, pool *pgxpool.Pool, eventID string, statu
 }
 
 func insertQRTestAssignment(t *testing.T, pool *pgxpool.Pool, bookingID string, slot int, status string) string {
-	t.Helper()
-	var id string
-	err := pool.QueryRow(context.Background(), `
-		INSERT INTO ticket_assignments (booking_id, slot_number, status, claimed_at)
-		VALUES ($1, $2, $3, CASE WHEN $3 = 'claimed' THEN NOW() ELSE NULL END)
-		RETURNING id
-	`, bookingID, slot, status).Scan(&id)
-	require.NoError(t, err)
-	return id
+    t.Helper()
+
+    var claimedAt *time.Time
+    if status == "claimed" {
+        now := time.Now()
+        claimedAt = &now
+    }
+
+    var id string
+    err := pool.QueryRow(context.Background(), `
+        INSERT INTO ticket_assignments (booking_id, slot_number, status, claimed_at)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id
+    `, bookingID, slot, status, claimedAt).Scan(&id)
+    require.NoError(t, err)
+    return id
 }
 
 // TestQRGenerateCodeForAssignment verifies that GenerateQRCodeForAssignment

@@ -635,8 +635,8 @@ func (s *EmailService) renderBookingConfirmationWithQR(
 		Address         string
 		TicketQuantity  int
 		Currency        string
-		UnitPrice       float64
-		TotalAmount     float64
+		UnitPrice       string 
+        TotalAmount     string
 		QRBlock         string
 		MultiTicketNote string
 		BookingURL      string
@@ -651,8 +651,8 @@ func (s *EmailService) renderBookingConfirmationWithQR(
 		Address:         event.Address,
 		TicketQuantity:  booking.TicketQuantity,
 		Currency:        booking.Currency,
-		UnitPrice:       booking.UnitPrice,
-		TotalAmount:     booking.TotalAmount,
+		UnitPrice:   fmt.Sprintf("%.2f", booking.UnitPrice),
+        TotalAmount: fmt.Sprintf("%.2f", booking.TotalAmount),
 		QRBlock:         qrBlock,
 		MultiTicketNote: multiTicketNote,
 		BookingURL:      fmt.Sprintf("%s/bookings/%s", s.cfg.FrontendURL, booking.ID),

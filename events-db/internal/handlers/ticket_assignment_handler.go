@@ -46,7 +46,7 @@ func GetTicketAssignmentsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 func AssignTicketHandler(
 	pool *pgxpool.Pool,
 	emailSvc *services.EmailService,
-	cfg interface{ GetFrontendURL() string },
+	frontendURL string,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(string)
@@ -92,9 +92,7 @@ func AssignTicketHandler(
 			return
 		}
 
-		// Build claim URL and fire the invite email.
-		claimURL := fmt.Sprintf("%s/claim-ticket?token=%s",
-			cfg.GetFrontendURL(), claimToken)
+		claimURL := fmt.Sprintf("%s/claim-ticket?token=%s", frontendURL, claimToken)	
 		expiresAt := time.Now().Add(24 * time.Hour)
 
 		// Fetch buyer's name for the email.

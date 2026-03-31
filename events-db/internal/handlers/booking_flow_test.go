@@ -58,7 +58,7 @@ func setupBookingTestDB(t *testing.T) *pgxpool.Pool {
 func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-
+ 
 	drops := []string{
 		"DROP TABLE IF EXISTS ticket_assignments CASCADE",
 		"DROP TABLE IF EXISTS payments           CASCADE",
@@ -73,7 +73,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 	for _, s := range drops {
 		pool.Exec(ctx, s)
 	}
-
+ 
 	stmts := []string{
 		// Enums
 		`DO $$ BEGIN CREATE TYPE event_status AS ENUM ('draft','published','cancelled','completed');
@@ -86,7 +86,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 		 EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
 		`DO $$ BEGIN CREATE TYPE assignment_status AS ENUM ('unassigned','pending','claimed','revoked','cancelled');
 		 EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
-
+ 
 		// Users
 		`CREATE TABLE users (
 			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -98,7 +98,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
-
+ 
 		// Refresh tokens
 		`CREATE TABLE refresh_tokens (
 			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -108,7 +108,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			revoked    BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
-
+ 
 		// Categories
 		`CREATE TABLE categories (
 			id           SERIAL PRIMARY KEY,
@@ -118,7 +118,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			is_active    BOOLEAN DEFAULT TRUE,
 			created_at   TIMESTAMPTZ DEFAULT NOW()
 		)`,
-
+ 
 		// Organizers
 		`CREATE TABLE organizers (
 			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -126,35 +126,48 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			name       VARCHAR(255) NOT NULL,
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
-
-		// Events
+ 
+		// Events — matches every column GetEventByID selects and scans.
+		// FIX 1: added banner_image_url, latitude, longitude, featured_until,
+		//         refund_policy, terms_and_conditions, tags.
 		`CREATE TABLE events (
-			id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			title               VARCHAR(255) NOT NULL,
-			description         TEXT NOT NULL DEFAULT '',
-			start_time          TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
-			end_time            TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '8 days',
-			expires_at          TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days',
-			timezone            VARCHAR(50) NOT NULL DEFAULT 'SAST',
-			venue_name          VARCHAR(255) NOT NULL DEFAULT '',
-			address             TEXT NOT NULL DEFAULT '',
-			city                VARCHAR(255) NOT NULL DEFAULT '',
-			category_id         INTEGER NOT NULL REFERENCES categories(id),
-			price               DECIMAL(10,2) NOT NULL DEFAULT 0,
-			currency            VARCHAR(3) NOT NULL DEFAULT 'ZAR',
-			max_capacity        INTEGER,
-			tickets_sold        INTEGER NOT NULL DEFAULT 0,
-			allow_waitlist      BOOLEAN DEFAULT TRUE,
-			status              VARCHAR(50) NOT NULL DEFAULT 'published',
-			is_featured         BOOLEAN DEFAULT FALSE,
-			organizer_id        UUID REFERENCES users(id),
-			views               BIGINT DEFAULT 0,
-			created_at          TIMESTAMPTZ DEFAULT NOW(),
-			updated_at          TIMESTAMPTZ DEFAULT NOW(),
+			id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			title                VARCHAR(255) NOT NULL,
+			description          TEXT NOT NULL DEFAULT '',
+			cover_image_url      TEXT,
+			banner_image_url     TEXT,
+			start_time           TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+			end_time             TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '8 days',
+			expires_at           TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days',
+			timezone             VARCHAR(50) NOT NULL DEFAULT 'SAST',
+			venue_name           VARCHAR(255) NOT NULL DEFAULT '',
+			address              TEXT NOT NULL DEFAULT '',
+			city                 VARCHAR(255) NOT NULL DEFAULT '',
+			latitude             DECIMAL(10,8),
+			longitude            DECIMAL(11,8),
+			category_id          INTEGER NOT NULL REFERENCES categories(id),
+			price                DECIMAL(10,2) NOT NULL DEFAULT 0,
+			currency             VARCHAR(3) NOT NULL DEFAULT 'ZAR',
+			max_capacity         INTEGER,
+			tickets_sold         INTEGER NOT NULL DEFAULT 0,
+			allow_waitlist       BOOLEAN DEFAULT TRUE,
+			is_featured          BOOLEAN DEFAULT FALSE,
+			featured_until       TIMESTAMPTZ,
+			status               VARCHAR(50) NOT NULL DEFAULT 'published',
+			refund_policy        TEXT,
+			terms_and_conditions TEXT,
+			tags                 TEXT[],
+			views                BIGINT DEFAULT 0,
+			organizer_id         UUID REFERENCES users(id),
+			created_at           TIMESTAMPTZ DEFAULT NOW(),
+			updated_at           TIMESTAMPTZ DEFAULT NOW(),
 			CONSTRAINT chk_tickets CHECK (tickets_sold >= 0)
 		)`,
-
-		// Bookings
+ 
+		// Bookings — FIX 2: column names corrected to match production schema
+		//   refunded_request_at → refund_requested_at
+		//   refunded_reason     → refund_reason
+		// These must match what RequestRefundWithCascade's UPDATE statement uses.
 		`CREATE TABLE bookings (
 			id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			booking_number       VARCHAR(50) UNIQUE NOT NULL DEFAULT 'BK-' || substr(gen_random_uuid()::text,1,8),
@@ -180,8 +193,8 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			special_requirements TEXT,
 			promo_code           VARCHAR(100),
 			discount_amount      NUMERIC(10,2) NOT NULL DEFAULT 0,
-			refunded_request_at  TIMESTAMPTZ,
-			refunded_reason      TEXT,
+			refund_requested_at  TIMESTAMPTZ,
+			refund_reason        TEXT,
 			refunded_at          TIMESTAMPTZ,
 			refunded_amount      NUMERIC(10,2),
 			booking_notes        TEXT,
@@ -190,8 +203,8 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			created_at           TIMESTAMPTZ DEFAULT NOW(),
 			updated_at           TIMESTAMPTZ DEFAULT NOW()
 		)`,
-
-		// Ticket assignments — one row per individual ticket slot
+ 
+		// Ticket assignments
 		`CREATE TABLE ticket_assignments (
 			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			booking_id     UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
@@ -210,7 +223,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			updated_at     TIMESTAMPTZ DEFAULT NOW(),
 			CONSTRAINT uq_booking_slot UNIQUE (booking_id, slot_number)
 		)`,
-
+ 
 		// Payments
 		`CREATE TABLE payments (
 			id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -234,7 +247,7 @@ func createBookingTestTables(t *testing.T, pool *pgxpool.Pool) {
 			UNIQUE(booking_id)
 		)`,
 	}
-
+ 
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
 			t.Fatalf("booking table create failed: %v\nSQL: %s", err, s)
@@ -423,7 +436,7 @@ func buildBookingRouter(pool *pgxpool.Pool) *gin.Engine {
 
 	// Ticket assignment routes
 	bookings.GET("/:id/assignments", handlers.GetTicketAssignmentsHandler(pool))
-	// bookings.POST("/:id/assignments/:assignmentId", handlers.AssignTicketHandler(pool, emailSvc, cfg))
+	bookings.POST("/:id/assignments/:assignmentId", handlers.AssignTicketHandler(pool, emailSvc, cfg.FrontendURL))
 	bookings.DELETE("/:id/assignments/:assignmentId", handlers.RevokeAssignmentHandler(pool))
 
 	// Public routes

@@ -5,25 +5,44 @@ package workers
 // =============================================================================
 //
 // Tests covered:
-//   - StartBookingWorker: stops cleanly on context cancellation
-//   - StartBookingWorker: stops cleanly when channel is closed
-//   - processBookingJob: skips non-confirmed bookings
-//   - processBookingJob: skips bookings where tickets_sent = TRUE
-//   - processBookingJob: logs and continues when booking is not found
-//   - resolveEmailRecipient: returns constructed user for guest bookings
-//   - resolveEmailRecipient: returns fallback user when UserID is nil
-//   - resolveEmailRecipient: fetches registered user from DB
+//   Lifecycle
+//   - StartBookingWorker stops cleanly on context cancellation
+//   - StartBookingWorker stops cleanly when channel is closed
 //
-// Prerequisites — same Docker Postgres used by payment/webhook tests:
+//   processBookingJob guard conditions
+//   - Skips non-confirmed bookings (nil services prove no QR/email calls made)
+//   - Skips bookings where tickets_sent = TRUE (duplicate delivery guard)
+//   - Handles missing booking ID gracefully (no panic)
 //
+//   Assignment creation
+//   - Creates N assignment rows on a confirmed booking
+//   - Slot 1 is auto-claimed by the buyer
+//   - Remaining slots start as unassigned
+//
+//   fetchAssignmentIDsForBooking
+//   - Returns IDs in slot_number order
+//   - Returns empty slice for booking with no assignments
+//
+//   fetchQRURLForAssignment
+//   - Returns empty string when qr_code_url is NULL
+//   - Returns URL when set
+//
+//   resolveEmailRecipient
+//   - Guest booking returns constructed user from attendee fields
+//   - Guest booking with all-nil fields does not panic
+//   - Non-guest with nil UserID returns fallback user with attendee email
+//   - Non-guest with UserID fetches registered user from DB
+//   - Non-guest with non-existent UserID propagates error
+//
+//   Worker channel behaviour
+//   - Non-blocking send when channel is full
+//
+// Prerequisites:
 //   docker run -d --name test-postgres \
-//     -e POSTGRES_USER=testuser \
-//     -e POSTGRES_PASSWORD=testpass \
-//     -e POSTGRES_DB=test_db \
-//     -p 5433:5432 postgres:15
+//     -e POSTGRES_USER=testuser -e POSTGRES_PASSWORD=testpass \
+//     -e POSTGRES_DB=test_db -p 5433:5432 postgres:15
 //
-// Run:
-//   go test ./internal/workers/... -v -run TestWorker
+// Run:  go test ./internal/workers/... -v -run TestWorker
 // =============================================================================
 
 import (
@@ -34,6 +53,7 @@ import (
 
 	"events-db/internal/config"
 	"events-db/internal/models"
+	"events-db/internal/repository"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -42,13 +62,7 @@ import (
 
 const workerTestDBURL = "postgresql://testuser:testpass@localhost:5433/test_db"
 
-// minimalCfg returns a non-nil *config.Config with empty fields.
-// StartBookingWorker constructs EmailService and QRService eagerly, so it
-// needs a non-nil config even when no jobs will ever be processed (e.g. in
-// lifecycle tests that only exercise goroutine start/stop).
-func minimalCfg() *config.Config {
-	return &config.Config{}
-}
+func minimalCfg() *config.Config { return &config.Config{} }
 
 // ─── DB setup ─────────────────────────────────────────────────────────────────
 
@@ -58,10 +72,9 @@ func workerDB(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Skipf("worker DB tests skipped — could not create pool: %v", err)
 	}
-	// pgxpool.New is lazy — ping to confirm the DB is actually reachable.
 	if pingErr := pool.Ping(context.Background()); pingErr != nil {
 		pool.Close()
-		t.Skipf("worker DB tests skipped — DB not reachable (start with: docker run -d --name test-postgres -e POSTGRES_USER=testuser -e POSTGRES_PASSWORD=testpass -e POSTGRES_DB=test_db -p 5433:5432 postgres:15): %v", pingErr)
+		t.Skipf("worker DB tests skipped — DB not reachable: %v", pingErr)
 	}
 	workerMigrate(t, pool)
 	workerTruncate(t, pool)
@@ -72,53 +85,57 @@ func workerMigrate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
 
-	for _, s := range []string{
-		"DROP TABLE IF EXISTS bookings CASCADE",
-		"DROP TABLE IF EXISTS events   CASCADE",
-		"DROP TABLE IF EXISTS users    CASCADE",
-	} {
+	drops := []string{
+		"DROP TABLE IF EXISTS ticket_assignments CASCADE",
+		"DROP TABLE IF EXISTS bookings           CASCADE",
+		"DROP TABLE IF EXISTS events             CASCADE",
+		"DROP TABLE IF EXISTS users              CASCADE",
+		"DROP TYPE  IF EXISTS assignment_status",
+	}
+	for _, s := range drops {
 		pool.Exec(ctx, s)
 	}
 
-	for _, s := range []string{
-		// users — minimal schema needed by GetUserByIDForEmail
+	stmts := []string{
+		`DO $$ BEGIN CREATE TYPE assignment_status AS ENUM
+		 ('unassigned','pending','claimed','revoked','cancelled');
+		 EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+
 		`CREATE TABLE users (
 			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			email      VARCHAR(255) UNIQUE NOT NULL,
 			first_name VARCHAR(100),
 			last_name  VARCHAR(100),
 			password   TEXT NOT NULL DEFAULT '',
-			role       VARCHAR(50) NOT NULL DEFAULT 'user',
+			role       VARCHAR(50) NOT NULL DEFAULT 'attendee',
 			created_at TIMESTAMPTZ DEFAULT NOW(),
 			updated_at TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
-		// events — minimal schema needed by GetEventByID
 		`CREATE TABLE events (
-			id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			title               VARCHAR(255) NOT NULL DEFAULT 'Test Event',
-			description         TEXT NOT NULL DEFAULT '',
-			start_time          TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
-			end_time            TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '8 days',
-			expires_at          TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days',
-			timezone            VARCHAR(50) NOT NULL DEFAULT 'SAST',
-			venue_name          VARCHAR(255) NOT NULL DEFAULT '',
-			address             TEXT NOT NULL DEFAULT '',
-			city                VARCHAR(100) NOT NULL DEFAULT '',
-			price               NUMERIC(10,2) NOT NULL DEFAULT 0,
-			currency            VARCHAR(10) NOT NULL DEFAULT 'ZAR',
-			max_capacity        INTEGER,
-			tickets_sold        INTEGER NOT NULL DEFAULT 0,
-			allow_waitlist      BOOLEAN DEFAULT TRUE,
-			status              VARCHAR(50) NOT NULL DEFAULT 'published',
-			is_featured         BOOLEAN DEFAULT FALSE,
-			organizer_id        UUID REFERENCES users(id),
-			views               BIGINT DEFAULT 0,
-			created_at          TIMESTAMPTZ DEFAULT NOW(),
-			updated_at          TIMESTAMPTZ DEFAULT NOW()
+			id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			title           VARCHAR(255) NOT NULL DEFAULT 'Test Event',
+			description     TEXT NOT NULL DEFAULT '',
+			start_time      TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+			end_time        TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '8 days',
+			expires_at      TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days',
+			timezone        VARCHAR(50) NOT NULL DEFAULT 'SAST',
+			venue_name      VARCHAR(255) NOT NULL DEFAULT '',
+			address         TEXT NOT NULL DEFAULT '',
+			city            VARCHAR(100) NOT NULL DEFAULT '',
+			price           NUMERIC(10,2) NOT NULL DEFAULT 0,
+			currency        VARCHAR(10) NOT NULL DEFAULT 'ZAR',
+			max_capacity    INTEGER,
+			tickets_sold    INTEGER NOT NULL DEFAULT 0,
+			allow_waitlist  BOOLEAN DEFAULT TRUE,
+			status          VARCHAR(50) NOT NULL DEFAULT 'published',
+			is_featured     BOOLEAN DEFAULT FALSE,
+			organizer_id    UUID REFERENCES users(id),
+			views           BIGINT DEFAULT 0,
+			created_at      TIMESTAMPTZ DEFAULT NOW(),
+			updated_at      TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
-		// bookings — all columns used by GetBookingByID and processBookingJob
 		`CREATE TABLE bookings (
 			id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			booking_number      VARCHAR(50) UNIQUE NOT NULL
@@ -155,9 +172,30 @@ func workerMigrate(t *testing.T, pool *pgxpool.Pool) {
 			created_at          TIMESTAMPTZ DEFAULT NOW(),
 			updated_at          TIMESTAMPTZ DEFAULT NOW()
 		)`,
-	} {
+
+		`CREATE TABLE ticket_assignments (
+			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			booking_id     UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+			slot_number    INTEGER NOT NULL CHECK (slot_number >= 1),
+			status         assignment_status NOT NULL DEFAULT 'unassigned',
+			assignee_name  VARCHAR(200),
+			assignee_email VARCHAR(255),
+			claim_token    UUID UNIQUE,
+			assigned_at    TIMESTAMPTZ,
+			expires_at     TIMESTAMPTZ,
+			claimed_at     TIMESTAMPTZ,
+			revoked_at     TIMESTAMPTZ,
+			qr_code_data   TEXT,
+			qr_code_url    TEXT,
+			created_at     TIMESTAMPTZ DEFAULT NOW(),
+			updated_at     TIMESTAMPTZ DEFAULT NOW(),
+			CONSTRAINT uq_booking_slot UNIQUE (booking_id, slot_number)
+		)`,
+	}
+
+	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s); err != nil {
-			t.Skipf("worker DB tests skipped — migration failed (DB not ready?): %v", err)
+			t.Skipf("worker migration failed (DB not ready?): %v", err)
 		}
 	}
 }
@@ -165,9 +203,10 @@ func workerMigrate(t *testing.T, pool *pgxpool.Pool) {
 func workerTruncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	pool.Exec(ctx, "TRUNCATE bookings CASCADE")
-	pool.Exec(ctx, "TRUNCATE events   CASCADE")
-	pool.Exec(ctx, "TRUNCATE users    CASCADE")
+	pool.Exec(ctx, "TRUNCATE ticket_assignments CASCADE")
+	pool.Exec(ctx, "TRUNCATE bookings           CASCADE")
+	pool.Exec(ctx, "TRUNCATE events             CASCADE")
+	pool.Exec(ctx, "TRUNCATE users              CASCADE")
 }
 
 // ─── seed helpers ─────────────────────────────────────────────────────────────
@@ -194,21 +233,22 @@ func workerSeedEvent(t *testing.T, pool *pgxpool.Pool) string {
 	return id
 }
 
-// workerSeedBooking inserts a booking with the given status and tickets_sent flag.
-// Pass userID="" for a guest booking (is_guest=TRUE, user_id=NULL).
 func workerSeedBooking(
 	t *testing.T,
 	pool *pgxpool.Pool,
 	eventID, userID string,
 	status models.BookingStatus,
 	ticketsSent bool,
+	quantity int,
 ) string {
 	t.Helper()
+	if quantity < 1 {
+		quantity = 1
+	}
 	bn := fmt.Sprintf("BK-WRK-%d", time.Now().UnixNano())
 	var id string
 
 	if userID == "" {
-		// Guest booking
 		email := fmt.Sprintf("guest_%d@test.com", time.Now().UnixNano())
 		err := pool.QueryRow(context.Background(), `
 			INSERT INTO bookings (
@@ -216,38 +256,33 @@ func workerSeedBooking(
 				ticket_quantity, unit_price, subtotal, total_amount,
 				attendee_first_name, attendee_last_name, attendee_email,
 				booking_status, tickets_sent
-			) VALUES ($1, $2, NULL, TRUE, 1, 50.00, 50.00, 52.50,
-			          'Guest', 'User', $3, $4, $5)
+			) VALUES ($1, $2, NULL, TRUE, $3, 50.00, 50.00, 52.50,
+			          'Guest', 'User', $4, $5, $6)
 			RETURNING id
-		`, bn, eventID, email, string(status), ticketsSent).Scan(&id)
+		`, bn, eventID, quantity, email, string(status), ticketsSent).Scan(&id)
 		require.NoError(t, err)
 	} else {
 		err := pool.QueryRow(context.Background(), `
 			INSERT INTO bookings (
 				booking_number, event_id, user_id, is_guest,
 				ticket_quantity, unit_price, subtotal, total_amount,
+				attendee_first_name, attendee_last_name, attendee_email,
 				booking_status, tickets_sent
-			) VALUES ($1, $2, $3, FALSE, 1, 50.00, 50.00, 52.50, $4, $5)
+			) VALUES ($1, $2, $3, FALSE, $4, 50.00, 50.00, 52.50,
+			          'Test', 'User', 'test@test.com', $5, $6)
 			RETURNING id
-		`, bn, eventID, userID, string(status), ticketsSent).Scan(&id)
+		`, bn, eventID, userID, quantity, string(status), ticketsSent).Scan(&id)
 		require.NoError(t, err)
 	}
 	return id
 }
 
-// =============================================================================
-// TEST: StartBookingWorker — lifecycle
-// =============================================================================
+// ─── Lifecycle tests ──────────────────────────────────────────────────────────
 
 func TestWorkerStopsOnContextCancellation(t *testing.T) {
-	// Pure goroutine lifecycle test — no DB required.
-	// StartBookingWorker constructs EmailService/QRService eagerly, so cfg must
-	// be non-nil even though no jobs are ever processed in this test.
 	jobs := make(chan string, 4)
 	ctx, cancel := context.WithCancel(context.Background())
-
 	StartBookingWorker(nil, minimalCfg(), jobs, ctx)
-
 	time.Sleep(20 * time.Millisecond)
 	cancel()
 	time.Sleep(20 * time.Millisecond)
@@ -255,24 +290,16 @@ func TestWorkerStopsOnContextCancellation(t *testing.T) {
 }
 
 func TestWorkerStopsOnChannelClose(t *testing.T) {
-	// Pure goroutine lifecycle test — no DB required.
 	jobs := make(chan string, 4)
-	ctx := context.Background()
-
-	StartBookingWorker(nil, minimalCfg(), jobs, ctx)
-
+	StartBookingWorker(nil, minimalCfg(), jobs, context.Background())
 	time.Sleep(20 * time.Millisecond)
 	close(jobs)
 	time.Sleep(20 * time.Millisecond)
 	// No panic = pass.
 }
 
-// =============================================================================
-// TEST: processBookingJob — guard conditions (no email/QR calls)
-// =============================================================================
+// ─── processBookingJob guard conditions ──────────────────────────────────────
 
-// TestWorkerSkipsNonConfirmedBooking verifies processBookingJob returns
-// immediately without sending email or QR when the booking is pending.
 func TestWorkerSkipsNonConfirmedBooking(t *testing.T) {
 	pool := workerDB(t)
 	defer pool.Close()
@@ -280,13 +307,11 @@ func TestWorkerSkipsNonConfirmedBooking(t *testing.T) {
 
 	eventID := workerSeedEvent(t, pool)
 	userID := workerSeedUser(t, pool)
-	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingPending, false)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingPending, false, 1)
 
-	// Pass nil services — any attempt to use them would panic, proving the
-	// guard short-circuits before reaching email/QR logic.
+	// nil services — any email/QR call would panic, proving the guard fires first.
 	processBookingJob(pool, nil, nil, bookingID)
 
-	// Booking should remain unchanged (no tickets_sent update).
 	var ticketsSent bool
 	err := pool.QueryRow(context.Background(),
 		"SELECT tickets_sent FROM bookings WHERE id = $1", bookingID,
@@ -295,8 +320,6 @@ func TestWorkerSkipsNonConfirmedBooking(t *testing.T) {
 	assert.False(t, ticketsSent, "tickets_sent must remain FALSE for a non-confirmed booking")
 }
 
-// TestWorkerSkipsAlreadySentTickets verifies the duplicate-delivery guard:
-// a booking that already has tickets_sent=TRUE is silently skipped.
 func TestWorkerSkipsAlreadySentTickets(t *testing.T) {
 	pool := workerDB(t)
 	defer pool.Close()
@@ -304,13 +327,10 @@ func TestWorkerSkipsAlreadySentTickets(t *testing.T) {
 
 	eventID := workerSeedEvent(t, pool)
 	userID := workerSeedUser(t, pool)
-	// confirmed=TRUE, ticketsSent=TRUE — should be skipped without QR/email.
-	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, true)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, true, 2)
 
-	// nil services — any real call would panic.
 	processBookingJob(pool, nil, nil, bookingID)
 
-	// tickets_sent must still be TRUE and not set to FALSE.
 	var ticketsSent bool
 	err := pool.QueryRow(context.Background(),
 		"SELECT tickets_sent FROM bookings WHERE id = $1", bookingID,
@@ -319,37 +339,197 @@ func TestWorkerSkipsAlreadySentTickets(t *testing.T) {
 	assert.True(t, ticketsSent, "tickets_sent must remain TRUE — duplicate delivery guard")
 }
 
-// TestWorkerHandlesMissingBookingGracefully verifies that a booking ID that
-// doesn't exist in the DB is logged and skipped, not panicked.
 func TestWorkerHandlesMissingBookingGracefully(t *testing.T) {
 	pool := workerDB(t)
 	defer pool.Close()
-
-	// Non-existent ID — GetBookingByID will return an error; worker must not panic.
+	// A random UUID that doesn't exist in the DB.
 	processBookingJob(pool, nil, nil, "00000000-0000-0000-0000-000000000000")
+	// No panic = pass.
 }
 
-// =============================================================================
-// TEST: resolveEmailRecipient
-// =============================================================================
+// ─── Assignment creation ──────────────────────────────────────────────────────
 
-func TestResolveEmailRecipientGuestBooking(t *testing.T) {
+func TestWorkerCreatesAssignmentSlotsOnConfirmedBooking(t *testing.T) {
 	pool := workerDB(t)
 	defer pool.Close()
 	workerTruncate(t, pool)
 
-	first := "Jane"
-	last := "Doe"
-	email := "jane@guest.com"
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
 
-	guestBooking := &models.Booking{
+	const quantity = 4
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, quantity)
+
+	err := repository.CreateTicketAssignments(pool, bookingID, quantity, "Test User", "test@test.com")
+	require.NoError(t, err)
+
+	var count int
+	pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM ticket_assignments WHERE booking_id = $1`, bookingID,
+	).Scan(&count)
+	assert.Equal(t, quantity, count, "one assignment row must be created per ticket")
+}
+
+func TestWorkerSlot1IsAutoClaimedByBuyer(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 3)
+
+	err := repository.CreateTicketAssignments(pool, bookingID, 3, "Test User", "test@test.com")
+	require.NoError(t, err)
+
+	var slot1Status, slot1Email string
+	pool.QueryRow(context.Background(), `
+		SELECT status, assignee_email
+		FROM ticket_assignments
+		WHERE booking_id = $1 AND slot_number = 1
+	`, bookingID).Scan(&slot1Status, &slot1Email)
+
+	assert.Equal(t, "claimed", slot1Status, "slot 1 must be pre-claimed")
+	assert.Equal(t, "test@test.com", slot1Email, "slot 1 must be assigned to the buyer's email")
+}
+
+func TestWorkerRemainingSlotStartUnassigned(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 3)
+
+	err := repository.CreateTicketAssignments(pool, bookingID, 3, "Test User", "test@test.com")
+	require.NoError(t, err)
+
+	var unassignedCount int
+	pool.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM ticket_assignments
+		WHERE booking_id = $1 AND slot_number > 1 AND status = 'unassigned'
+	`, bookingID).Scan(&unassignedCount)
+
+	assert.Equal(t, 2, unassignedCount, "slots 2 and 3 must start as unassigned")
+}
+
+func TestWorkerCreateAssignmentsIsIdempotent(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 2)
+
+	// Calling twice (e.g. after a worker restart) must not create duplicate rows.
+	require.NoError(t, repository.CreateTicketAssignments(pool, bookingID, 2, "Test User", "test@test.com"))
+	require.NoError(t, repository.CreateTicketAssignments(pool, bookingID, 2, "Test User", "test@test.com"))
+
+	var count int
+	pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM ticket_assignments WHERE booking_id = $1`, bookingID,
+	).Scan(&count)
+	assert.Equal(t, 2, count, "idempotent call must not create duplicate rows (ON CONFLICT DO NOTHING)")
+}
+
+// ─── fetchAssignmentIDsForBooking ─────────────────────────────────────────────
+
+func TestFetchAssignmentIDsReturnsInSlotOrder(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 3)
+	require.NoError(t, repository.CreateTicketAssignments(pool, bookingID, 3, "Test User", "test@test.com"))
+
+	ids, err := fetchAssignmentIDsForBooking(pool, bookingID)
+	require.NoError(t, err)
+	assert.Len(t, ids, 3, "should return one ID per slot")
+
+	// Verify they are in slot_number order by checking the DB directly.
+	for i, id := range ids {
+		var slotNumber int
+		pool.QueryRow(context.Background(),
+			`SELECT slot_number FROM ticket_assignments WHERE id = $1`, id,
+		).Scan(&slotNumber)
+		assert.Equal(t, i+1, slotNumber, "IDs must be returned in ascending slot_number order")
+	}
+}
+
+func TestFetchAssignmentIDsReturnsEmptySliceForNoAssignments(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 1)
+
+	ids, err := fetchAssignmentIDsForBooking(pool, bookingID)
+	require.NoError(t, err)
+	assert.Empty(t, ids, "no assignment rows = empty slice, not an error")
+}
+
+// ─── fetchQRURLForAssignment ──────────────────────────────────────────────────
+
+func TestFetchQRURLReturnsEmptyWhenNull(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 1)
+	require.NoError(t, repository.CreateTicketAssignments(pool, bookingID, 1, "Test User", "test@test.com"))
+
+	ids, err := fetchAssignmentIDsForBooking(pool, bookingID)
+	require.NoError(t, err)
+	require.Len(t, ids, 1)
+
+	url := fetchQRURLForAssignment(pool, ids[0])
+	assert.Empty(t, url, "qr_code_url is NULL after creation — must return empty string")
+}
+
+func TestFetchQRURLReturnsURLWhenSet(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+	workerTruncate(t, pool)
+
+	eventID := workerSeedEvent(t, pool)
+	userID := workerSeedUser(t, pool)
+	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, false, 1)
+	require.NoError(t, repository.CreateTicketAssignments(pool, bookingID, 1, "Test User", "test@test.com"))
+
+	ids, err := fetchAssignmentIDsForBooking(pool, bookingID)
+	require.NoError(t, err)
+
+	expectedURL := "https://pub-test.r2.dev/qr-codes/test-slot.png"
+	_, err = pool.Exec(context.Background(),
+		`UPDATE ticket_assignments SET qr_code_url = $1 WHERE id = $2`, expectedURL, ids[0],
+	)
+	require.NoError(t, err)
+
+	url := fetchQRURLForAssignment(pool, ids[0])
+	assert.Equal(t, expectedURL, url)
+}
+
+// ─── resolveEmailRecipient ────────────────────────────────────────────────────
+
+func TestResolveEmailRecipientGuestBooking(t *testing.T) {
+	pool := workerDB(t)
+	defer pool.Close()
+
+	first, last, email := "Jane", "Doe", "jane@guest.com"
+	user, err := resolveEmailRecipient(pool, &models.Booking{
 		IsGuest:           true,
 		AttendeeFirstName: &first,
 		AttendeeLastName:  &last,
 		AttendeeEmail:     &email,
-	}
-
-	user, err := resolveEmailRecipient(pool, guestBooking)
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, user)
@@ -362,10 +542,8 @@ func TestResolveEmailRecipientGuestWithNilFields(t *testing.T) {
 	pool := workerDB(t)
 	defer pool.Close()
 
-	// All attendee fields are nil — must not panic.
-	guestBooking := &models.Booking{IsGuest: true}
-
-	user, err := resolveEmailRecipient(pool, guestBooking)
+	// All attendee fields nil — must not panic.
+	user, err := resolveEmailRecipient(pool, &models.Booking{IsGuest: true})
 
 	require.NoError(t, err)
 	require.NotNil(t, user)
@@ -377,13 +555,11 @@ func TestResolveEmailRecipientNilUserIDFallback(t *testing.T) {
 	defer pool.Close()
 
 	email := "fallback@test.com"
-	booking := &models.Booking{
+	user, err := resolveEmailRecipient(pool, &models.Booking{
 		IsGuest:       false,
-		UserID:        nil, // no user_id
+		UserID:        nil,
 		AttendeeEmail: &email,
-	}
-
-	user, err := resolveEmailRecipient(pool, booking)
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, user)
@@ -395,7 +571,6 @@ func TestResolveEmailRecipientRegisteredUser(t *testing.T) {
 	defer pool.Close()
 	workerTruncate(t, pool)
 
-	// Insert a real user so GetUserByIDForEmail finds them.
 	email := fmt.Sprintf("registered_%d@test.com", time.Now().UnixNano())
 	var userID string
 	err := pool.QueryRow(context.Background(), `
@@ -404,16 +579,12 @@ func TestResolveEmailRecipientRegisteredUser(t *testing.T) {
 	`, email).Scan(&userID)
 	require.NoError(t, err)
 
-	booking := &models.Booking{
-		IsGuest: false,
-		UserID:  &userID,
-	}
-
-	user, err := resolveEmailRecipient(pool, booking)
+	user, err := resolveEmailRecipient(pool, &models.Booking{IsGuest: false, UserID: &userID})
 
 	require.NoError(t, err)
 	require.NotNil(t, user)
 	assert.Equal(t, email, user.Email)
+	assert.Equal(t, "Alice", *user.FirstName)
 }
 
 func TestResolveEmailRecipientRegisteredUserNotFound(t *testing.T) {
@@ -422,51 +593,32 @@ func TestResolveEmailRecipientRegisteredUserNotFound(t *testing.T) {
 	workerTruncate(t, pool)
 
 	nonExistent := "00000000-0000-0000-0000-000000000000"
-	booking := &models.Booking{
-		IsGuest: false,
-		UserID:  &nonExistent,
-	}
-
-	// GetUserByIDForEmail returns an error for a missing user — resolveEmailRecipient
-	// should propagate it.
-	_, err := resolveEmailRecipient(pool, booking)
-	assert.Error(t, err, "fetching a non-existent user must return an error")
+	_, err := resolveEmailRecipient(pool, &models.Booking{IsGuest: false, UserID: &nonExistent})
+	assert.Error(t, err, "missing user must propagate the error")
 }
 
-// =============================================================================
-// TEST: Worker channel behaviour — non-blocking send when full
-// =============================================================================
+// ─── Channel behaviour ────────────────────────────────────────────────────────
 
-// TestWorkerJobChannelFullIsNonBlocking verifies that when the jobs channel is
-// at capacity the handler does not block. This mirrors the select/default logic
-// in payment_service.go: the webhook must return quickly even if the buffer is
-// full. We exercise this by filling the channel and confirming the process
-// function still returns promptly.
 func TestWorkerJobChannelFullIsNonBlocking(t *testing.T) {
-	jobs := make(chan string, 1) // tiny buffer
-	jobs <- "already-full"      // fill it
+	jobs := make(chan string, 1)
+	jobs <- "already-full"
 
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// The worker goroutine is running but the channel is full.
-	// Sending another job must not block.
 	started := make(chan struct{})
 	go func() {
 		close(started)
-		// Non-blocking send — mirrors the select/default in payment_service.go.
 		select {
 		case jobs <- "new-job":
 		default:
-			// Channel full — this is the expected path in this test.
+			// Channel full — expected path.
 		}
 	}()
-
 	<-started
 
 	done := make(chan struct{})
 	go func() {
-		// Drain the channel so the worker goroutine can exit cleanly.
 		for range jobs {
 		}
 		close(done)
