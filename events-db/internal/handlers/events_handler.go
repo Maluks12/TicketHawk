@@ -2,7 +2,7 @@ package handlers
 
 import (
 	// "context"
-	"context"
+	//"context"
 	// "encoding/base64"
 	// "encoding/json"
 	"errors"
@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
+	//"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -531,9 +531,7 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		events, nextCursor, err := repository.SearchEvents(pool, query, limit, cursor)
 
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			utils.InternalError(c, err, "failed to search events")
 			return
 		}
 
@@ -575,78 +573,96 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 	}
 } // new
 
+// func GetOrganizerEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+// 	return func(c *gin.Context) {
+// 		ctx, cancel := context.WithTimeout(context.Background(), 5 *time.Second)
+// 		defer cancel()
+
+// 		organizerID, _ := c.Get("user_id")
+// 		status := c.DefaultQuery("status", "all")
+
+// 		query := `
+// 			SELECT id, title, description, start_time, status, tickets_sold,
+// 			max_capacity, price, currency, created_at
+// 			FROM events
+// 			WHERE organizer_id = $1
+// 		`
+
+// 		args := []interface{}{organizerID}
+// 		if status != "all" {
+// 			query += `AND status = $2`
+// 			args = append(args, status)
+// 		}
+
+// 		query += `ORDER BY start_time DESC`
+
+// 		rows, err := pool.Query(ctx, query, args...)
+// 		if err != nil {
+// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch events"})
+// 			return
+// 		}
+
+// 		defer rows.Close()
+
+// 		events := []map[string]interface{}{}
+// 		for rows.Next() {
+// 			var id, title, description, status, currency string
+// 			var startTime, createdAt time.Time
+// 			var ticketsSold int
+// 			var maxCapacity *int
+// 			var price float64
+
+// 			err = rows.Scan(
+// 				&id, &title, 
+// 				&description, 
+// 				&startTime, 
+// 				&status, 
+// 				&ticketsSold, 
+// 				&maxCapacity, 
+// 				&price, 
+// 				&currency, 
+// 				&createdAt,
+// 			)
+// 			if err != nil {
+// 				continue
+// 			}
+
+// 			event := map[string]interface{}{
+// 				"id": id,
+// 				"title": title,
+// 				"description": description,
+// 				"start_time": startTime,
+// 				"status": status,
+// 				"tickets_sold": ticketsSold,
+// 				"max_capacity": maxCapacity,
+// 				"price": price,
+// 				"currency": currency,
+// 				"created_at": createdAt,
+// 			}
+// 			events = append(events, event)
+// 		}
+
+// 		 c.JSON(http.StatusOK, gin.H{
+//             "events": events,
+//             "total": len(events),
+//         })
+// 	}
+// } // Need to test and add cusor pagination potentially
+
 func GetOrganizerEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5 *time.Second)
-		defer cancel()
-
 		organizerID, _ := c.Get("user_id")
 		status := c.DefaultQuery("status", "all")
-
-		query := `
-			SELECT id, title, description, start_time, status, tickets_sold,
-			max_capacity, price, currency, created_at
-			FROM events
-			WHERE organizer_id = $1
-		`
-
-		args := []interface{}{organizerID}
-		if status != "all" {
-			query += `AND status = $2`
-			args = append(args, status)
-		}
-
-		query += `ORDER BY start_time DESC`
-
-		rows, err := pool.Query(ctx, query, args...)
+ 
+		events, err := repository.GetOrganizerEvents(pool, organizerID.(string), status)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch events"})
+			utils.InternalError(c, err, "failed to fetch organizer events")
 			return
 		}
-
-		defer rows.Close()
-
-		events := []map[string]interface{}{}
-		for rows.Next() {
-			var id, title, description, status, currency string
-			var startTime, createdAt time.Time
-			var ticketsSold int
-			var maxCapacity *int
-			var price float64
-
-			err = rows.Scan(
-				&id, &title, 
-				&description, 
-				&startTime, 
-				&status, 
-				&ticketsSold, 
-				&maxCapacity, 
-				&price, 
-				&currency, 
-				&createdAt,
-			)
-			if err != nil {
-				continue
-			}
-
-			event := map[string]interface{}{
-				"id": id,
-				"title": title,
-				"description": description,
-				"start_time": startTime,
-				"status": status,
-				"tickets_sold": ticketsSold,
-				"max_capacity": maxCapacity,
-				"price": price,
-				"currency": currency,
-				"created_at": createdAt,
-			}
-			events = append(events, event)
-		}
-
-		 c.JSON(http.StatusOK, gin.H{
-            "events": events,
-            "total": len(events),
-        })
+ 
+		c.JSON(http.StatusOK, gin.H{
+			"events": events,
+			"total":  len(events),
+		})
 	}
-} // Need to test and add cusor pagination potentially
+}

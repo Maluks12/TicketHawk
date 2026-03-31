@@ -274,11 +274,21 @@ func RefreshTokenHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc
 			"exp": time.Now().Add(15 * time.Minute).Unix(),		
 		}
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		accessToken, _ := token.SignedString([]byte(cfg.JWTSecret))
+		accessToken, err := token.SignedString([]byte(cfg.JWTSecret))
 
 		rawRefresh, hashedRefresh, _ := utils.GenerateResetToken()
 		expiresAt := time.Now().Add(7 * 24 * time.Hour)
-		repository.CreateRefreshToken(pool, userID, hashedRefresh, expiresAt)
+		
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			return
+		}
+
+		if err := repository.CreateRefreshToken(pool, userID, hashedRefresh, expiresAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
+			return
+		}
+
 
 		c.JSON(http.StatusOK, gin.H{
 			"access_tokens": accessToken,

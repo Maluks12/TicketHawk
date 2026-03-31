@@ -1,86 +1,100 @@
 package handlers
- 
+
 import (
-  "errors"
-  "events-db/internal/models"
-  "events-db/internal/repository"
-  "events-db/internal/services"
-  "net/http"
- 
-  "github.com/gin-gonic/gin"
-  "github.com/jackc/pgx/v5/pgxpool"
+	"errors"
+	"events-db/internal/models"
+	"events-db/internal/repository"
+	"events-db/internal/services"
+	"events-db/internal/utils"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
- 
+
 // CheckoutBeginHandler creates ticket reservations for every ticket item in
 // the cart. Merch items are not reserved — stock is checked at payment only.
 func CheckoutBeginHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-  return func(c *gin.Context) {
-    cart, err := cartOwner(c, pool)
-    if err != nil || cart == nil {
-      c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required"})
-      return
-    }
+	return func(c *gin.Context) {
+		cart, err := cartOwner(c, pool)
+		if err != nil || cart == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required"})
+			return
+		}
  
-    var userID *string
-    var sessionID *string
-    if uid, ok := c.Get("user_id"); ok {
-      s := uid.(string)
-      userID = &s
-    } else {
-      sid := c.GetHeader("X-Session-ID")
-      sessionID = &sid
-    }
+		var userID *string
+		var sessionID *string
+		if uid, ok := c.Get("user_id"); ok {
+			s := uid.(string)
+			userID = &s
+		} else {
+			sid := c.GetHeader("X-Session-ID")
+			sessionID = &sid
+		}
  
-    reservations, err := repository.CreateReservations(pool, cart.ID, userID, sessionID)
-    if err != nil {
-      if errors.Is(err, repository.ErrInsufficientReservationCapacity) {
-        c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-        return
-      }
-      if errors.Is(err, repository.ErrNoTicketItems) {
-        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-        return
-      }
-      c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create reservations"})
-      return
-    }
+		reservations, err := repository.CreateReservations(pool, cart.ID, userID, sessionID)
+		if err != nil {
+			if errors.Is(err, repository.ErrInsufficientReservationCapacity) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, repository.ErrNoTicketItems) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create reservations"})
+			return
+		}
  
-    // Build response with event titles
-    shortest := 600
-    summaries := make([]models.ReservationSummary, 0, len(reservations))
-    for _, r := range reservations {
-      secs := r.SecondsRemaining()
-      if secs < shortest {
-        shortest = secs
-      }
-      eventTitle := ""
-      if event, eErr := repository.GetEventByID(pool, r.EventID, nil); eErr == nil {
-        eventTitle = event.Title
-      }
-      summaries = append(summaries, models.ReservationSummary{
-        ReservationID: r.ID,
-        EventID:       r.EventID,
-        EventTitle:    eventTitle,
-        Quantity:      r.Quantity,
-        SecondsLeft:   secs,
-      })
-    }
-    // Compute cart total
-    full, _ := repository.GetCartWithItems(pool, cart.ID)
-    cartTotal := 0.0
-    if full != nil {
-      for _, item := range full.Items {
-        cartTotal += item.UnitPriceSnapshot * float64(item.Quantity)
-      }
-    }
+		// Collect all unique event IDs and fetch their titles in one query
+		// instead of calling GetEventByID once per reservation (N+1).
+		eventIDs := make([]string, 0, len(reservations))
+		seen := make(map[string]bool)
+		for _, r := range reservations {
+			if !seen[r.EventID] {
+				eventIDs = append(eventIDs, r.EventID)
+				seen[r.EventID] = true
+			}
+		}
+		eventTitles, err := repository.GetEventTitlesByIDs(pool, eventIDs)
+		if err != nil {
+			utils.InternalError(c, err, "failed to fetch event titles for checkout")
+			return
+		}
  
-    c.JSON(http.StatusOK, models.CheckoutBeginResponse{
-      Reservations: summaries,
-      SecondsLeft:  shortest,
-      CartTotal:    cartTotal,
-      Currency:     "ZAR",
-    })
-  }
+		// Build response using the pre-fetched title map.
+		shortest := 600
+		summaries := make([]models.ReservationSummary, 0, len(reservations))
+		for _, r := range reservations {
+			secs := r.SecondsRemaining()
+			if secs < shortest {
+				shortest = secs
+			}
+			summaries = append(summaries, models.ReservationSummary{
+				ReservationID: r.ID,
+				EventID:       r.EventID,
+				EventTitle:    eventTitles[r.EventID], // "" if not found — safe default
+				Quantity:      r.Quantity,
+				SecondsLeft:   secs,
+			})
+		}
+ 
+		// Compute cart total.
+		full, _ := repository.GetCartWithItems(pool, cart.ID)
+		cartTotal := 0.0
+		if full != nil {
+			for _, item := range full.Items {
+				cartTotal += item.UnitPriceSnapshot * float64(item.Quantity)
+			}
+		}
+ 
+		c.JSON(http.StatusOK, models.CheckoutBeginResponse{
+			Reservations: summaries,
+			SecondsLeft:  shortest,
+			CartTotal:    cartTotal,
+			Currency:     "ZAR",
+		})
+	}
 }
  
 // CheckoutHeartbeatHandler resets the 10-minute window on all active

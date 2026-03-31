@@ -52,11 +52,6 @@ func CreateBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Event is not available for booking"})
 			return
 		}
-		
-		if event.Status != models.EventPublished {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Event is not available for booking"})
-			return
-		}
 
 		booking, err := repository.CreateBooking(pool, &dto, userID.(string), event)
 		if err != nil {

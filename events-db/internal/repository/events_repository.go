@@ -18,6 +18,19 @@ var ErrEventNotFound = errors.New("event not found")
 var ErrEventSoldOut = errors.New("event is sold out")
 var ErrInsufficientCapcity = errors.New("insufficient tickets available")
 
+type OrganizerEventSummary struct {
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	StartTime   time.Time `json:"start_time"`
+	Status      string    `json:"status"`
+	TicketsSold int       `json:"tickets_sold"`
+	MaxCapacity *int      `json:"max_capacity,omitempty"`
+	Price       float64   `json:"price"`
+	Currency    string    `json:"currency"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID string ) (*models.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -895,3 +908,81 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
     return events, nextCursor, nil
 } //fixed
 
+func GetEventTitlesByIDs(pool *pgxpool.Pool, ids []string) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if len(ids) == 0 {
+		return map[string]string{}, nil
+	}
+ 
+	rows, err := pool.Query(ctx, `
+		SELECT id, title
+		FROM events
+		WHERE id = ANY($1)
+	`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch event titles: %w", err)
+	}
+	defer rows.Close()
+ 
+	titles := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, title string
+		if err := rows.Scan(&id, &title); err != nil {
+			return nil, fmt.Errorf("failed to scan event title row: %w", err)
+		}
+		titles[id] = title
+	}
+ 
+	return titles, nil
+}
+
+func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) ([]OrganizerEventSummary, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+ 
+	const baseQuery = `
+		SELECT id, title, description, start_time, status, tickets_sold,
+		       max_capacity, price, currency, created_at
+		FROM events
+		WHERE organizer_id = $1
+	`
+ 
+	var (
+		rows interface {
+			Next() bool
+			Scan(...any) error
+			Close()
+		}
+		err error
+	)
+ 
+	if status != "" && status != "all" {
+		// Note the leading space before AND — the original was missing this,
+		// which caused a syntax error like: "WHERE organizer_id = $1AND status = $2"
+		rows, err = pool.Query(ctx, baseQuery+` AND status = $2 ORDER BY start_time DESC`, organizerID, status)
+	} else {
+		rows, err = pool.Query(ctx, baseQuery+` ORDER BY start_time DESC`, organizerID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query organizer events: %w", err)
+	}
+	defer rows.Close()
+ 
+	events := make([]OrganizerEventSummary, 0)
+	for rows.Next() {
+		var e OrganizerEventSummary
+		if err := rows.Scan(
+			&e.ID, &e.Title, &e.Description, &e.StartTime,
+			&e.Status, &e.TicketsSold, &e.MaxCapacity,
+			&e.Price, &e.Currency, &e.CreatedAt,
+		); err != nil {
+			// Surface the error instead of silently continuing with a partial result.
+			return nil, fmt.Errorf("failed to scan organizer event row: %w", err)
+		}
+		events = append(events, e)
+	}
+ 
+	return events, nil
+}
