@@ -78,7 +78,7 @@ func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		event, err := repository.CreateEvent(pool, &dto, userID.(string))
 
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to create event")
 		}
 		 c.JSON(http.StatusCreated, gin.H{
 			"message": "Event created as draft",
@@ -100,7 +100,7 @@ func DeleteEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 				return
 			}
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to delete event")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "Event deleted successfully"})
@@ -141,7 +141,7 @@ func TrendingEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 
 		events, nextCursor, err := repository.TrendingEvents(pool, limit, cursor)
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to fetch trending events")
 			return
 		}
 
@@ -220,7 +220,7 @@ func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		event, err := repository.UpdateEvents(pool, eventID, &dto, userID.(string))
 
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to update event")
 			return
 		}
 
@@ -295,7 +295,7 @@ func GetAllEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 
 		events, nextCursor, err := repository.GetAllEvents(pool, limit, cursor)
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to get events")
 			return
 		}
 
@@ -346,7 +346,7 @@ func FeaturedEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handle
 
 		events, nextCursor, err := repository.FeaturedEvents(pool, limit, cursor)
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to fetch featured events")
 			return
 		}
 
@@ -397,7 +397,7 @@ func ActiveEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 
 		events, nextCursor, err := repository.ActiveEvents(pool, limit, cursor)
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to get active events")
 			return
 		}
 
@@ -457,7 +457,7 @@ func GetEventCategory(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc 
 		
 		events, nextCursor, err := repository.GetEventBycategory(pool, CategoryID, limit, cursor)
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to get category")
 			return
 		}
 

@@ -50,7 +50,7 @@ func ApproveOrganizerHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		err := repository.ApproveOrganizer(pool, organizerID, adminID.(string))
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to approve organizer")
 			return
 		}
 
@@ -77,7 +77,7 @@ func RejectOrganizerHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		err := repository.RejectOrganizer(pool, organizerID, adminID.(string), input.Reason)
 		if err != nil {
-			utils.InternalError(c, err, "descriptive-log-message")
+			utils.InternalError(c, err, "failed to reject organizer")
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "Organizer application rejected"})

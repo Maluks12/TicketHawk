@@ -21,6 +21,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -177,7 +178,7 @@ func RequestPasswordResetHandler(pool *pgxpool.Pool, emailService *services.Emai
 		if err := emailService.SendPasswordReset(user.Email, resetLink); err != nil {
 			// Log the error but don't tell the client — prevents email enumeration
 			// and avoids breaking the UX on transient email failures
-			fmt.Printf("WARNING: failed to send password reset email to %s: %v\n", user.Email, err)
+			log.Warn().Err(err).Str("email", user.Email).Msg("failed to send password reset email")
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "If the email exists, a reset link was sent"})

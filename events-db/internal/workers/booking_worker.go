@@ -52,7 +52,7 @@ func processBookingJob(
 	qrSvc *services.QRService,
 	bookingID string,
 ) {
-	log.Printf("booking worker: processing job for booking %s", bookingID)
+	log.Printf("booking worker: processing job (booking_id=%s)", bookingID)
  
 	booking, err := repository.GetBookingByID(pool, bookingID)
 	if err != nil {
