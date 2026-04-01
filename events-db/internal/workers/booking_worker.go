@@ -7,10 +7,10 @@ import (
 	"events-db/internal/repository"
 	"events-db/internal/services"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log" 
 )
 
 // StartBookingWorker drains the jobs channel and, for each confirmed booking:
@@ -28,18 +28,18 @@ func StartBookingWorker(
 	qrSvc := services.NewQRService(pool, cfg)
 
 	go func() {
-		log.Println("booking worker: started")
+		log.Info().Msg("booking worker: started")
 		for {
 			select {
 			case bookingID, ok := <-jobs:
 				if !ok {
-					log.Println("booking worker: channel closed, stopping")
+					log.Info().Msg("booking worker: channel closed, stopping")
 					return
 				}
-				processBookingJob(pool, emailSvc, qrSvc, bookingID)
+				processBookingJob(ctx, pool, emailSvc, qrSvc, bookingID)
 
 			case <-ctx.Done():
-				log.Println("booking worker: context cancelled, stopping")
+				log.Info().Msg("booking worker: context cancelled, stopping")
 				return
 			}
 		}
@@ -47,44 +47,46 @@ func StartBookingWorker(
 }
 
 func processBookingJob(
+	ctx context.Context, // FIX 5: accept ctx so notifications respect graceful shutdown
 	pool *pgxpool.Pool,
 	emailSvc *services.EmailService,
 	qrSvc *services.QRService,
 	bookingID string,
 ) {
-	log.Printf("booking worker: processing job (booking_id=%s)", bookingID)
+	log.Info().Str("booking_id", bookingID).Msg("booking worker: processing job")
  
 	booking, err := repository.GetBookingByID(pool, bookingID)
 	if err != nil {
-		log.Printf("booking worker: failed to fetch booking %s: %v", bookingID, err)
+		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to fetch booking")
 		return
 	}
 	if booking.BookingStatus != models.BookingConfirmed {
-		log.Printf("booking worker: booking %s is not confirmed (status=%s), skipping",
-			bookingID, booking.BookingStatus)
+		log.Warn().
+			Str("booking_id", bookingID).
+			Str("status", string(booking.BookingStatus)).
+			Msg("booking worker: booking not confirmed, skipping")
 		return
 	}
 	if booking.TicketsSent {
-		log.Printf("booking worker: tickets already sent for booking %s, skipping", bookingID)
+		log.Info().Str("booking_id", bookingID).Msg("booking worker: tickets already sent, skipping")
 		return
 	}
  
 	event, err := repository.GetEventByID(pool, booking.EventID, nil)
 	if err != nil {
-		log.Printf("booking worker: failed to fetch event %s for booking %s: %v",
-			booking.EventID, bookingID, err)
+		log.Error().Err(err).
+			Str("event_id", booking.EventID).
+			Str("booking_id", bookingID).
+			Msg("booking worker: failed to fetch event")
 		return
 	}
  
 	user, err := resolveEmailRecipient(pool, booking)
 	if err != nil {
-		log.Printf("booking worker: failed to resolve recipient for booking %s: %v",
-			bookingID, err)
+		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to resolve recipient")
 		return
 	}
  
-	// ── Step 1: Create assignment rows ────────────────────────────────────────
-	// Slot 1 is auto-claimed by the buyer; remaining slots start as unassigned.
 	if err := repository.CreateTicketAssignments(
 		pool,
 		bookingID,
@@ -92,45 +94,40 @@ func processBookingJob(
 		user.GetFullName(),
 		user.Email,
 	); err != nil {
-		log.Printf("booking worker: failed to create assignments for booking %s: %v",
-			bookingID, err)
+		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to create assignments")
 		// Non-fatal — carry on and attempt QR + email for the buyer's slot.
 	}
  
-	// ── Step 2: Generate a QR code for every assignment slot ─────────────────
 	assignments, err := fetchAssignmentIDsForBooking(pool, bookingID)
 	if err != nil {
-		log.Printf("booking worker: failed to fetch assignment IDs for %s: %v", bookingID, err)
+		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to fetch assignment IDs")
 	}
  
 	var buyerQRURL string
 	for i, assignmentID := range assignments {
 		if err := qrSvc.GenerateQRCodeForAssignment(assignmentID); err != nil {
-			log.Printf("booking worker: QR generation failed for assignment %s: %v",
-				assignmentID, err)
+			log.Error().Err(err).Str("assignment_id", assignmentID).Msg("booking worker: QR generation failed")
 			continue
 		}
 		if i == 0 {
-			// Slot 1 QR URL — used in the buyer's confirmation email.
 			buyerQRURL = fetchQRURLForAssignment(pool, assignmentID)
 		}
 	}
  
-	// ── Step 3: Send buyer confirmation email (slot 1 QR) ────────────────────
 	if err := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); err != nil {
-		log.Printf("booking worker: email failed for booking %s: %v", bookingID, err)
+		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: email failed, retrying in 3s")
 		time.Sleep(3 * time.Second)
 		if retryErr := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); retryErr != nil {
-			log.Printf("booking worker: email retry also failed for booking %s: %v",
-				bookingID, retryErr)
+			log.Error().Err(retryErr).Str("booking_id", bookingID).Msg("booking worker: email retry also failed")
 		}
 		return
 	}
  
-	// ── Step 4: In-app notification ───────────────────────────────────────────
+	// FIX 5: use the passed ctx instead of context.Background() so this
+	// respects graceful shutdown and doesn't outlive the server.
 	if booking.UserID != nil {
 		notifErr := repository.CreateNotification(
-			pool, context.Background(),
+			pool, ctx,
 			*booking.UserID,
 			models.NotifBookingConfirmed,
 			"Booking Confirmed!",
@@ -143,12 +140,14 @@ func processBookingJob(
 			},
 		)
 		if notifErr != nil {
-			log.Printf("booking worker: notification failed for %s: %v", booking.ID, notifErr)
+			log.Error().Err(notifErr).Str("booking_id", booking.ID).Msg("booking worker: notification failed")
 		}
 	}
  
-	log.Printf("booking worker: successfully processed booking %s (%d ticket slots)",
-		bookingID, booking.TicketQuantity)
+	log.Info().
+		Str("booking_id", bookingID).
+		Int("ticket_slots", booking.TicketQuantity).
+		Msg("booking worker: successfully processed booking")
 }
 
 // resolveEmailRecipient returns a *models.User suitable for use in email templates.

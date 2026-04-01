@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 
@@ -198,7 +199,11 @@ func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 						event.StartTime.Format("Monday, 2 January 2006"),
 						booking.BookingNumber,
 					); err != nil {
-						_ = err
+						log.Error().
+							Err(err).
+							Str("booking_number", booking.BookingNumber).
+							Str("assignee_email", assignee.Email).
+							Msg("refund: failed to send ticket invalidation notice")
 					}
 				}
 			}()

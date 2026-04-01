@@ -4,6 +4,7 @@ import (
 	"context"
 	"events-db/internal/cache"
 	"events-db/internal/repository"
+	"fmt"
 	"log"
 	"time"
 
@@ -176,10 +177,16 @@ func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
   }
  
   for _, r := range expired {
-    tx.Exec(ctx,
+    // FIX 2: check each exec — a silent failure here leaves orphaned reservations
+    // that will never be cleaned up, leaking reserved capacity permanently.
+    if _, err := tx.Exec(ctx,
       `UPDATE events SET reserved_count = GREATEST(0, reserved_count - $1), updated_at = NOW()
-       WHERE id = $2`, r.qty, r.eventID)
-    tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id)
+       WHERE id = $2`, r.qty, r.eventID); err != nil {
+      return fmt.Errorf("expireReservations: decrement reserved_count for event %s: %w", r.eventID, err)
+    }
+    if _, err := tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id); err != nil {
+      return fmt.Errorf("expireReservations: delete reservation %s: %w", r.id, err)
+    }
   }
  
   if err := tx.Commit(ctx); err != nil {

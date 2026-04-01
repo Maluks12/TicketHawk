@@ -16,7 +16,6 @@ import (
 
 var ErrEventNotFound = errors.New("event not found")
 var ErrEventSoldOut = errors.New("event is sold out")
-var ErrInsufficientCapcity = errors.New("insufficient tickets available")
 
 type OrganizerEventSummary struct {
 	ID          string    `json:"id"`
@@ -146,7 +145,7 @@ func IncrementTicketsSold(pool *pgxpool.Pool, eventID string, quantity int) erro
 
 	if maxCapacity != nil {
 		if ticketsSold+quantity > *maxCapacity {
-			return ErrInsufficientCapcity
+			return ErrInsufficientCapacity
 		}
 	}
 

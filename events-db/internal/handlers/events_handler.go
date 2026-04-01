@@ -79,6 +79,7 @@ func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 
 		if err != nil {
 			utils.InternalError(c, err, "failed to create event")
+			return
 		}
 		 c.JSON(http.StatusCreated, gin.H{
 			"message": "Event created as draft",
