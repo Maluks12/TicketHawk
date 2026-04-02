@@ -310,7 +310,7 @@ func TestWorkerSkipsNonConfirmedBooking(t *testing.T) {
 	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingPending, false, 1)
 
 	// nil services — any email/QR call would panic, proving the guard fires first.
-	processBookingJob(pool, nil, nil, bookingID)
+	processBookingJob(context.Background(), pool, nil, nil, bookingID)
 
 	var ticketsSent bool
 	err := pool.QueryRow(context.Background(),
@@ -329,7 +329,7 @@ func TestWorkerSkipsAlreadySentTickets(t *testing.T) {
 	userID := workerSeedUser(t, pool)
 	bookingID := workerSeedBooking(t, pool, eventID, userID, models.BookingConfirmed, true, 2)
 
-	processBookingJob(pool, nil, nil, bookingID)
+	processBookingJob(context.Background(), pool, nil, nil, bookingID)
 
 	var ticketsSent bool
 	err := pool.QueryRow(context.Background(),
@@ -343,7 +343,7 @@ func TestWorkerHandlesMissingBookingGracefully(t *testing.T) {
 	pool := workerDB(t)
 	defer pool.Close()
 	// A random UUID that doesn't exist in the DB.
-	processBookingJob(pool, nil, nil, "00000000-0000-0000-0000-000000000000")
+	processBookingJob(context.Background(), pool, nil, nil, "00000000-0000-0000-0000-000000000000")
 	// No panic = pass.
 }
 
