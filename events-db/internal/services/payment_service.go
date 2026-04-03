@@ -9,7 +9,6 @@ import (
 	"events-db/internal/models"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,26 +16,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
-var (
+const (
 	stitchTokenURL      = "https://secure.stitch.money/connect/token"
 	stitchGraphQLURL    = "https://api.stitch.money/graphql"
 	stitchTokenAudience = "https://secure.stitch.money/connect/token"
 	stitchGateway       = "stitch"
-) // change back to const when done testing
-
-func SetStitchBaseURLs(tokenURL, graphQLURL, audience string) (restore func()) {
-	origToken, origGQL, origAud := stitchTokenURL, stitchGraphQLURL, stitchTokenAudience
-	stitchTokenURL = tokenURL
-	stitchGraphQLURL = graphQLURL
-	stitchTokenAudience = audience
-	return func() {
-		stitchTokenURL = origToken
-		stitchGraphQLURL = origGQL
-		stitchTokenAudience = origAud
-	}
-} // remove in production
+) //change to var when testing
 
 type stitchToken struct {
 	AccessToken string    `json:"access_token"`
@@ -237,7 +225,7 @@ func (s *PaymentService) CreatePaymentIntent(booking *models.Booking) (clientTok
 
 	// FIX 1: pass nil instead of "" so stitch_payment_url is stored as NULL, not empty string
 	if err := s.createPaymentRecord(ctx, booking, pi.ID, nil, nil); err != nil {
-		log.Printf("WARNING: failed to persist payment record for booking %s: %v", booking.ID, err)
+		log.Warn().Err(err).Str("booking_id", booking.ID).Msg("payment: failed to persist payment record")
 	}
 
 	return pi.ClientToken, pi.ID, nil
@@ -327,7 +315,7 @@ func (s *PaymentService) CreateCartPaymentIntent(primaryBooking *models.Booking,
 	// webhook can confirm every booking from the cart in one pass.
 	// FIX 1: pass nil instead of "" for paymentURL
 	if err := s.createPaymentRecord(ctx, primaryBooking, pi.ID, nil, &cartID); err != nil {
-		log.Printf("WARNING: failed to persist cart payment record for cart %s: %v", cartID, err)
+		log.Warn().Err(err).Str("cart_id", cartID).Msg("payment: failed to persist cart payment record")
 	}
 
 	return pi.ClientToken, pi.ID, nil
@@ -383,7 +371,7 @@ func (s *PaymentService) ProcessRefund(bookingID string) error {
 	`
 
 	if _, err := s.pool.Exec(ctx, query, refundedID, string(models.PaymentRefunded), bookingID); err != nil {
-		log.Printf("WARNING: stitch refund OK but DB update failed for booking %s: %v", bookingID, err)
+		log.Warn().Err(err).Str("booking_id", bookingID).Msg("payment: stitch refund OK but DB update failed")
 	}
 	return nil
 }
@@ -419,7 +407,7 @@ func (s *PaymentService) HandleWebhook(event *StitchWebhookEvent) error {
 	case "card_payment.updated": // Secure Fields card payments
 		return s.handlePaymentUpdate(ctx, event.Data)
 	default:
-		log.Printf("stitch webhook: unhandled event type %q", event.Type)
+		log.Warn().Str("type", event.Type).Msg("stitch webhook: unhandled event type")
 		return nil
 	}
 }
@@ -456,13 +444,13 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 	`
 	err := s.pool.QueryRow(ctx, queryStatus, pr.ID).Scan(&currentStatus, &bookingID, &cartID)
 	if err != nil {
-		log.Printf("webhook: no payment record for stitch ID %s, ignoring", pr.ID)
+		log.Warn().Str("stitch_id", pr.ID).Msg("webhook: no payment record found, ignoring")
 		return nil
 	}
 
 	// Idempotency guard — Stitch may deliver the same webhook more than once
 	if currentStatus == string(models.PaymentCompleted) || currentStatus == string(models.PaymentRefunded) {
-		log.Printf("webhook: payment %s already %s, ignoring duplicate", pr.ID, currentStatus)
+		log.Info().Str("stitch_id", pr.ID).Str("status", currentStatus).Msg("webhook: duplicate delivery, ignoring")
 		return nil
 	}
 
@@ -492,10 +480,10 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 	// Sync the primary booking status (covers single-event carts and the legacy
 	// per-booking checkout flow).
 	if err := s.syncBookingStatus(ctx, bookingID, internalStatus); err != nil {
-		log.Printf("WARNING: payment updated but booking sync failed for %s: %v", bookingID, err)
+		log.Warn().Err(err).Str("booking_id", bookingID).Msg("webhook: payment updated but booking sync failed")
 	}
 
-	log.Printf("stitch webhook: %s → status=%s method=%s booking=%s", pr.ID, internalStatus, paymentMethod, bookingID)
+	log.Info().Str("stitch_id", pr.ID).Str("status", string(internalStatus)).Str("method", string(paymentMethod)).Str("booking_id", bookingID).Msg("stitch webhook: payment updated")
 
 	// FIX 2: For cart-based checkouts, sync ALL other bookings that share the same
 	// cart_id on both completion AND failure — not just the primary booking, and not
@@ -506,7 +494,7 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 	if cartID != nil {
 		additionalIDs, syncErr := s.syncAllCartBookings(ctx, *cartID, bookingID, internalStatus)
 		if syncErr != nil {
-			log.Printf("WARNING: failed to sync cart bookings for cart %s: %v", *cartID, syncErr)
+			log.Warn().Err(syncErr).Str("cart_id", *cartID).Msg("webhook: failed to sync cart bookings")
 		}
 
 		// Only enqueue QR + email jobs on successful payment
@@ -515,9 +503,9 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 			for _, id := range allBookingIDs {
 				select {
 				case s.jobChan <- id:
-					log.Printf("stitch webhook: enqueued booking job for %s", id)
+					log.Info().Str("booking_id", id).Msg("stitch webhook: enqueued booking job")
 				default:
-					log.Printf("WARNING: booking job channel full, dropping job for %s", id)
+					log.Warn().Str("booking_id", id).Msg("webhook: booking job channel full, job dropped")
 				}
 			}
 		}
@@ -525,9 +513,9 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 		// Legacy single-booking flow — only enqueue on success
 		select {
 		case s.jobChan <- bookingID:
-			log.Printf("stitch webhook: enqueued booking job for %s", bookingID)
+			log.Info().Str("booking_id", bookingID).Msg("stitch webhook: enqueued booking job")
 		default:
-			log.Printf("WARNING: booking job channel full, dropping job for %s — consider increasing buffer size", bookingID)
+			log.Warn().Str("booking_id", bookingID).Msg("webhook: booking job channel full, job dropped")
 		}
 	}
 
@@ -571,7 +559,7 @@ func (s *PaymentService) syncAllCartBookings(ctx context.Context, cartID, primar
 			continue
 		}
 		additionalIDs = append(additionalIDs, id)
-		log.Printf("stitch webhook: confirmed additional booking %s from cart %s", id, cartID)
+		log.Info().Str("booking_id", id).Str("cart_id", cartID).Msg("stitch webhook: confirmed additional cart booking")
 	}
 	return additionalIDs, nil
 }

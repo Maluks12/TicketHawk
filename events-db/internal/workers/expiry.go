@@ -5,10 +5,10 @@ import (
 	"events-db/internal/cache"
 	"events-db/internal/repository"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context, ttl time.Duration, interval time.Duration) {
@@ -23,17 +23,17 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 			select {
 			case <-ticker.C:
 				if err := expireBookings(pool, ctx, ttl); err != nil {
-					log.Printf("expiry worker: bookings: %v", err)
+					log.Error().Err(err).Msg("expiry worker: bookings")
 				}
 				if err := expireReservations(pool, ctx); err != nil {
-					log.Printf("expiry worker: reservations: %v", err)
+					log.Error().Err(err).Msg("expiry worker: reservations")
 				}
 				if err := cleanupStaleCarts(pool, ctx); err != nil {
-					log.Printf("expiry worker: carts: %v", err)
+					log.Error().Err(err).Msg("expiry worker: carts")
 				}
-				if err := expirePendingAssignments(pool, ctx); err != nil {   // ← add
-		          log.Printf("expiry worker: assignments: %v", err)
-     			}
+				if err := expirePendingAssignments(pool, ctx); err != nil {
+					log.Error().Err(err).Msg("expiry worker: assignments")
+				}
 			case <-viewTicker.C:
 				flushViewCounts(pool, ec, ctx)
 			case <-ctx.Done():
@@ -57,12 +57,11 @@ func flushViewCounts(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Conte
 			`UPDATE events SET views = COALESCE(views, 0) + $1, updated_at = NOW()
 			 WHERE id = $2`, count, eventID)
 		if err != nil {
-			log.Printf("view flush: failed to update event %s: %v", eventID, err)
+			log.Error().Err(err).Str("event_id", eventID).Msg("view flush: failed to update event")
 		}
 	}
-	log.Printf("view flush: updated %d events", len(counts))
+	log.Info().Int("events_updated", len(counts)).Msg("view flush: complete")
 }
-
 
 func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) error {
 	tx, err := pool.Begin(ctx)
@@ -80,15 +79,15 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 		FOR UPDATE SKIP LOCKED
 	`
 
-	rows, err := tx.Query(ctx,query, ttl.String())
+	rows, err := tx.Query(ctx, query, ttl.String())
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
 	type expiredBooking struct {
-		id 		string
-		eventID string
+		id       string
+		eventID  string
 		quantity int
 	}
 
@@ -109,104 +108,99 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	queryCancel := `
 		UPDATE bookings
 		SET booking_status = 'cancelled',
-		updated_at     = NOW()
+		    updated_at     = NOW()
 		WHERE id = $1
 	`
-	
 
 	queryRestore := `
 		UPDATE events
 		SET tickets_sold = GREATEST(0, tickets_sold - $1),
-		updated_at = NOW()
+		    updated_at = NOW()
 		WHERE id = $2
 	`
 
 	for _, b := range expired {
-		// Cancel booking
-		_, err = tx.Exec(ctx, queryCancel,b.id)
-		if err != nil {
+		if _, err = tx.Exec(ctx, queryCancel, b.id); err != nil {
 			return err
 		}
-		// Restore ticket count
-		_, err = tx.Exec(ctx, queryRestore, b.quantity, b.eventID)
-		if err != nil {
+		if _, err = tx.Exec(ctx, queryRestore, b.quantity, b.eventID); err != nil {
 			return err
 		}
 	}
-
 
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
 
-	log.Printf("expiry worker: cancelled %d expired bookings", len(expired))
+	log.Info().Int("count", len(expired)).Msg("expiry worker: cancelled expired bookings")
 	return nil
 }
 
 // expireReservations releases ticket_reservations past their expires_at,
 // decrementing reserved_count on the corresponding event atomically.
 func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
-  tx, err := pool.Begin(ctx)
-  if err != nil {
-    return err
-  }
-  defer tx.Rollback(ctx)
- 
-  rows, err := tx.Query(ctx, `
-    SELECT id, event_id, quantity FROM ticket_reservations
-    WHERE expires_at < NOW()
-    FOR UPDATE SKIP LOCKED
-  `)
-  if err != nil {
-    return err
-  }
-  defer rows.Close()
- 
-  type expiredRes struct{ id, eventID string; qty int }
-  var expired []expiredRes
-  for rows.Next() {
-    var r expiredRes
-    if err := rows.Scan(&r.id, &r.eventID, &r.qty); err != nil {
-      return err
-    }
-    expired = append(expired, r)
-  }
-  rows.Close()
-  if len(expired) == 0 {
-    return nil
-  }
- 
-  for _, r := range expired {
-    // FIX 2: check each exec — a silent failure here leaves orphaned reservations
-    // that will never be cleaned up, leaking reserved capacity permanently.
-    if _, err := tx.Exec(ctx,
-      `UPDATE events SET reserved_count = GREATEST(0, reserved_count - $1), updated_at = NOW()
-       WHERE id = $2`, r.qty, r.eventID); err != nil {
-      return fmt.Errorf("expireReservations: decrement reserved_count for event %s: %w", r.eventID, err)
-    }
-    if _, err := tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id); err != nil {
-      return fmt.Errorf("expireReservations: delete reservation %s: %w", r.id, err)
-    }
-  }
- 
-  if err := tx.Commit(ctx); err != nil {
-    return err
-  }
-  log.Printf("expiry worker: released %d expired reservations", len(expired))
-  return nil
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT id, event_id, quantity FROM ticket_reservations
+		WHERE expires_at < NOW()
+		FOR UPDATE SKIP LOCKED
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type expiredRes struct {
+		id, eventID string
+		qty         int
+	}
+	var expired []expiredRes
+	for rows.Next() {
+		var r expiredRes
+		if err := rows.Scan(&r.id, &r.eventID, &r.qty); err != nil {
+			return err
+		}
+		expired = append(expired, r)
+	}
+	rows.Close()
+	if len(expired) == 0 {
+		return nil
+	}
+
+	for _, r := range expired {
+		if _, err := tx.Exec(ctx,
+			`UPDATE events SET reserved_count = GREATEST(0, reserved_count - $1), updated_at = NOW()
+			 WHERE id = $2`, r.qty, r.eventID); err != nil {
+			return fmt.Errorf("expireReservations: decrement reserved_count for event %s: %w", r.eventID, err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id); err != nil {
+			return fmt.Errorf("expireReservations: delete reservation %s: %w", r.id, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	log.Info().Int("count", len(expired)).Msg("expiry worker: released expired reservations")
+	return nil
 }
- 
+
 // cleanupStaleCarts deletes carts inactive for more than 24 hours.
 func cleanupStaleCarts(pool *pgxpool.Pool, ctx context.Context) error {
-  cmd, err := pool.Exec(ctx,
-    `DELETE FROM carts WHERE last_activity_at < NOW() - INTERVAL '24 hours'`)
-  if err != nil {
-    return err
-  }
-  if cmd.RowsAffected() > 0 {
-    log.Printf("expiry worker: cleaned up %d stale carts", cmd.RowsAffected())
-  }
-  return nil
+	cmd, err := pool.Exec(ctx,
+		`DELETE FROM carts WHERE last_activity_at < NOW() - INTERVAL '24 hours'`)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() > 0 {
+		log.Info().Int64("count", cmd.RowsAffected()).Msg("expiry worker: cleaned up stale carts")
+	}
+	return nil
 }
 
 func expirePendingAssignments(pool *pgxpool.Pool, ctx context.Context) error {

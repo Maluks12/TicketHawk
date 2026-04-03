@@ -233,9 +233,23 @@ func main() {
 		auth.POST("/reset_password", handlers.ResetPasswordHandler(pool))
 	}
 
-	// FIX 3 — refresh and logout moved outside the if/else so they are
-	// always registered regardless of whether rate limiting is enabled.
-	auth.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
+	// FIX 3 — refresh gets its own rate-limit group (10 attempts/hour per IP).
+	// logout is auth-gated so the JWT itself acts as the primary abuse control.
+	if rateLimitManager != nil {
+		refreshGroup := auth.Group("")
+		refreshGroup.Use(middleware.RateLimitByIP(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   10,
+				RefillRate: 1.0 / 3600.0,
+				TTL:        1 * time.Hour,
+			},
+			"refresh",
+		))
+		refreshGroup.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
+	} else {
+		auth.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
+	}
 	auth.POST("/logout", middleware.AuthMiddleware(cfg), handlers.LogoutHandler(pool))
 
 	// ==========================================
@@ -462,114 +476,11 @@ func main() {
 		adminAPI := router.Group("/admin/ratelimit")
 		adminAPI.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
 		{
-			adminAPI.GET("/ip/:ip", func(c *gin.Context) {
-				ip := c.Param("ip")
-				category := c.DefaultQuery("category", "global")
-				key := ratelimit.IPKey(category, ip)
-
-				var bcfg ratelimit.BucketConfig
-				switch category {
-				case "login":
-					bcfg = ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour}
-				case "register":
-					bcfg = ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour}
-				case "password-reset":
-					bcfg = ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 300.0, TTL: 1 * time.Hour}
-				default:
-					bcfg = ratelimit.GlobalIPBucket
-				}
-
-				limiter := rateLimitManager.GetLimiter(category, bcfg)
-				tokens, err := limiter.Peek(c.Request.Context(), key)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check rate limit"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"ip": ip, "category": category,
-					"tokens": tokens, "capacity": bcfg.Capacity, "status": tokens > 0,
-				})
-			})
-
-			adminAPI.POST("/ip/:ip/reset", func(c *gin.Context) {
-				ip := c.Param("ip")
-				category := c.DefaultQuery("category", "global")
-				key := ratelimit.IPKey(category, ip)
-
-				var bcfg ratelimit.BucketConfig
-				switch category {
-				case "login":
-					bcfg = ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour}
-				case "register":
-					bcfg = ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour}
-				default:
-					bcfg = ratelimit.GlobalIPBucket
-				}
-
-				limiter := rateLimitManager.GetLimiter(category, bcfg)
-				if err := limiter.Reset(c.Request.Context(), key); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset rate limit"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"message": "Rate limit reset successfully", "ip": ip, "category": category,
-				})
-			})
-
-			adminAPI.GET("/user/:userId", func(c *gin.Context) {
-				userID := c.Param("userId")
-				category := c.DefaultQuery("category", "events-read")
-				key := ratelimit.UserKey(category, userID)
-
-				var bcfg ratelimit.BucketConfig
-				switch category {
-				case "events-read":
-					bcfg = ratelimit.BucketConfig{Capacity: 100, RefillRate: 2.0, TTL: 15 * time.Minute}
-				case "admin":
-					bcfg = ratelimit.BucketConfig{Capacity: 200, RefillRate: 10.0, TTL: 30 * time.Minute}
-				default:
-					bcfg = ratelimit.APIReadBucket
-				}
-
-				limiter := rateLimitManager.GetLimiter(category, bcfg)
-				tokens, err := limiter.Peek(c.Request.Context(), key)
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check rate limit"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"user_id": userID, "category": category,
-					"tokens": tokens, "capacity": bcfg.Capacity, "status": tokens > 0,
-				})
-			})
-
-			adminAPI.POST("/user/:userId/reset", func(c *gin.Context) {
-				userID := c.Param("userId")
-				category := c.DefaultQuery("category", "events-read")
-				key := ratelimit.UserKey(category, userID)
-
-				bcfg := ratelimit.BucketConfig{Capacity: 100, RefillRate: 2.0, TTL: 15 * time.Minute}
-				limiter := rateLimitManager.GetLimiter(category, bcfg)
-				if err := limiter.Reset(c.Request.Context(), key); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset rate limit"})
-					return
-				}
-				c.JSON(http.StatusOK, gin.H{
-					"message": "Rate limit reset successfully", "user_id": userID, "category": category,
-				})
-			})
-
-			adminAPI.GET("/metrics", func(c *gin.Context) {
-				metrics := ratelimit.GetMetrics()
-				c.JSON(http.StatusOK, gin.H{
-					"total_requests":   metrics.TotalRequests,
-					"allowed_requests": metrics.AllowedRequests,
-					"denied_requests":  metrics.DeniedRequests,
-					"errors":           metrics.Errors,
-					"allow_rate":       metrics.AllowRate(),
-					"categories":       metrics.CategoryMetrics,
-				})
-			})
+			adminAPI.GET("/ip/:ip",              handlers.RateLimitIPStatusHandler(rateLimitManager))
+			adminAPI.POST("/ip/:ip/reset",       handlers.RateLimitIPResetHandler(rateLimitManager))
+			adminAPI.GET("/user/:userId",        handlers.RateLimitUserStatusHandler(rateLimitManager))
+			adminAPI.POST("/user/:userId/reset", handlers.RateLimitUserResetHandler(rateLimitManager))
+			adminAPI.GET("/metrics",             handlers.RateLimitMetricsHandler())
 		}
 	}
 
