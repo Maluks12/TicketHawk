@@ -121,6 +121,7 @@ func main() {
 	emailService := services.NewEmailService(cfg)
 	qrService := services.NewQRService(pool, cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
+	imgService     := services.NewImageService(cfg) 
 
 	// ==========================================
 	// Setup Router
@@ -484,6 +485,43 @@ func main() {
 	}
 
 	// ==========================================
+	// Media Upload Routes (organiser only)
+	// ==========================================
+	media := router.Group("/organiser/events/:id/media")
+	media.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	if rateLimitManager != nil {
+		media.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{
+				Capacity:   20,
+				RefillRate: 1.0 / 60.0,
+				TTL:        15 * time.Minute,
+			},
+			"media-upload",
+		))
+	}
+	{
+		// Cover image — replaces the existing one if present
+		media.POST("/cover",  handlers.UploadCoverImageHandler(pool, imgService))
+ 
+		// Banner image — replaces the existing one if present
+		media.POST("/banner", handlers.UploadBannerImageHandler(pool, imgService))
+ 
+		// Banner video — optional, coexists with the banner image.
+		// The frontend should use the video as primary media and fall back to
+		// the banner image as the poster/thumbnail frame.
+		// Accepts: MP4, MOV, WebM — up to 500 MB.
+		// Form field name: "video"
+		media.POST("/banner/video",   handlers.UploadBannerVideoHandler(pool, imgService))
+		media.DELETE("/banner/video", handlers.DeleteBannerVideoHandler(pool, imgService))
+ 
+		// Gallery — max 10 images, enforced atomically in the repository.
+		// Returns HTTP 409 Conflict when the cap is reached.
+		media.POST("/gallery", handlers.UploadGalleryImageHandler(pool, imgService))
+	}
+
+
+	// ==========================================
 	// Booking Routes (Auth required)
 	// ==========================================
 	bookings := router.Group("/bookings")
@@ -547,7 +585,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 

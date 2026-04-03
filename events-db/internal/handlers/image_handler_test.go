@@ -757,7 +757,7 @@ func TestImageRepo_GetEventImageURLs_NilWhenEmpty(t *testing.T) {
 		userID,
 	).Scan(&eventID))
 
-	cover, banner, _, err := repository.GetEventImageURLs(pool, eventID, userID)
+	cover, banner, _, _, err := repository.GetEventImageURLs(pool, eventID, userID)
 	require.NoError(t, err)
 	assert.Nil(t, cover, "cover should be nil when column is NULL")
 	assert.Nil(t, banner, "banner should be nil when column is NULL")

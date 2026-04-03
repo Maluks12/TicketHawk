@@ -26,26 +26,50 @@ func NewImageService(cfg *config.Config) *ImageService {
 	return &ImageService{cfg: cfg}
 }
 
+// ── Media type constants ──────────────────────────────────────────────────────
+
 type ImageType string
 
 const (
 	ImageTypeCover   ImageType = "covers"
 	ImageTypeBanner  ImageType = "banners"
-	ImageTypeGallery ImageType = "galllery"
+	ImageTypeGallery ImageType = "gallery" // fixed typo: was "galllery"
 )
+
+type VideoType string
 
 const (
-	maxCoverSize    = 5 * 1024 * 1024 // 5mb
-	maxBannerSize   = 8 * 1024 * 1024 //8mb
-	maxGallerySize  = 5 * 1024 * 1024 //5mb
-	maxgalleryCount = 10              // could change after discussion
+	VideoTypeBanner VideoType = "banner_videos"
 )
 
-var allowedMIMETypes = map[string]string{
+// ── Size and count limits ─────────────────────────────────────────────────────
+
+const (
+	maxCoverSize   int64 = 5 * 1024 * 1024  // 5 MB
+	maxBannerSize  int64 = 8 * 1024 * 1024  // 8 MB
+	maxGallerySize int64 = 5 * 1024 * 1024  // 5 MB
+	maxVideoSize   int64 = 500 * 1024 * 1024 // 500 MB
+
+	// MaxGalleryCount is the hard cap on gallery images per event. It is
+	// exported so the repository can reference it for the gallery-full check.
+	MaxGalleryCount = 10
+)
+
+// ── Allowed MIME types ────────────────────────────────────────────────────────
+
+var allowedImageMIMETypes = map[string]string{
 	"image/jpeg": ".jpg",
 	"image/png":  ".png",
 	"image/webp": ".webp",
 }
+
+var allowedVideoMIMETypes = map[string]string{
+	"video/mp4":       ".mp4",
+	"video/quicktime": ".mov",
+	"video/webm":      ".webm",
+}
+
+// ── Image upload ─────────────────────────────────────────────────────────────
 
 func (s *ImageService) UploadEventImage(
 	file multipart.File,
@@ -54,20 +78,19 @@ func (s *ImageService) UploadEventImage(
 	imgType ImageType,
 ) (string, error) {
 	contentType := header.Header.Get("Content-Type")
-	ext, ok := allowedMIMETypes[contentType]
+	ext, ok := allowedImageMIMETypes[contentType]
 	if !ok {
 		ext = strings.ToLower(filepath.Ext(header.Filename))
-		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
-			return "", fmt.Errorf("unsupported file type: only JPEG, PNG, and WebP are allowed")
-		}
-
 		switch ext {
 		case ".jpg", ".jpeg":
 			contentType = "image/jpeg"
+			ext = ".jpg"
 		case ".png":
 			contentType = "image/png"
 		case ".webp":
 			contentType = "image/webp"
+		default:
+			return "", fmt.Errorf("unsupported file type: only JPEG, PNG, and WebP are allowed")
 		}
 	}
 
@@ -91,30 +114,78 @@ func (s *ImageService) UploadEventImage(
 	}
 
 	filename := fmt.Sprintf("events/%s/%s/%s%s", eventID, string(imgType), uuid.New().String(), ext)
-
-	return s.uploadToR2(filename, contentType, data)
+	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
 }
 
-func (s *ImageService) uploadToR2(filename string, contentType string, data []byte) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5 *time.Second)
+// ── Video upload ─────────────────────────────────────────────────────────────
+
+// UploadEventVideo validates and streams a video file to R2 without loading it
+// fully into memory. This is important because banner videos can be up to 500 MB —
+// the load-all approach used for images would exhaust memory under concurrent uploads.
+func (s *ImageService) UploadEventVideo(
+	file multipart.File,
+	header *multipart.FileHeader,
+	eventID string,
+	vidType VideoType,
+) (string, error) {
+	contentType := header.Header.Get("Content-Type")
+	ext, ok := allowedVideoMIMETypes[contentType]
+	if !ok {
+		ext = strings.ToLower(filepath.Ext(header.Filename))
+		switch ext {
+		case ".mp4":
+			contentType = "video/mp4"
+		case ".mov":
+			contentType = "video/quicktime"
+		case ".webm":
+			contentType = "video/webm"
+		default:
+			return "", fmt.Errorf("unsupported video format: only MP4, MOV, and WebM are allowed")
+		}
+	}
+
+	if header.Size > maxVideoSize {
+		return "", fmt.Errorf("video too large: maximum size is %d MB", maxVideoSize/1024/1024)
+	}
+
+	filename := fmt.Sprintf("events/%s/%s/%s%s", eventID, string(vidType), uuid.New().String(), ext)
+
+	// Stream directly from the multipart file — do not ReadAll. The S3 PutObject
+	// call accepts any io.Reader; passing header.Size as ContentLength lets R2
+	// validate the transfer without requiring a seekable body.
+	return s.uploadToR2(filename, contentType, file, header.Size)
+}
+
+// ── R2 primitives ─────────────────────────────────────────────────────────────
+
+// uploadToR2 is the single upload primitive used by both images and videos.
+// Accepting an io.Reader + explicit content length means callers choose whether
+// to buffer (images) or stream (videos) without duplicating the S3 wiring.
+func (s *ImageService) uploadToR2(filename, contentType string, body io.Reader, contentLength int64) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s.cfg.R2AccessKey, s.cfg.R2SecretKey, "")), awsconfig.WithRegion("auto"))
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			s.cfg.R2AccessKey, s.cfg.R2SecretKey, "",
+		)),
+		awsconfig.WithRegion("auto"),
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to load R2 config: %w", err)
 	}
 
-	client := s3.NewFromConfig(cfg, func(o *s3.Options){
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(s.cfg.R2URL)
-	}) 
-		
-	_, err = client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(s.cfg.R2Bucket),
-		Key: aws.String(filename),
-		Body: bytes.NewReader(data),
-		ContentType: aws.String(contentType),
 	})
 
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(s.cfg.R2Bucket),
+		Key:           aws.String(filename),
+		Body:          body,
+		ContentType:   aws.String(contentType),
+		ContentLength: aws.Int64(contentLength),
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to upload to R2: %w", err)
 	}
@@ -122,6 +193,8 @@ func (s *ImageService) uploadToR2(filename string, contentType string, data []by
 	return fmt.Sprintf("%s/%s/%s", s.cfg.R2URL, s.cfg.R2Bucket, filename), nil
 }
 
+// DeleteEventImage removes any event media file (image or video) from R2 by
+// its public URL. The function name is kept for backwards compatibility.
 func (s *ImageService) DeleteEventImage(publicURL string) error {
 	prefix := fmt.Sprintf("%s/%s/", s.cfg.R2URL, s.cfg.R2Bucket)
 	if !strings.HasPrefix(publicURL, prefix) {
@@ -133,19 +206,23 @@ func (s *ImageService) DeleteEventImage(publicURL string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(s.cfg.R2AccessKey, s.cfg.R2SecretKey, "")),awsconfig.WithRegion("auto"))
+	cfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			s.cfg.R2AccessKey, s.cfg.R2SecretKey, "",
+		)),
+		awsconfig.WithRegion("auto"),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to load R2 config: %w", err)
 	}
 
-	client := s3.NewFromConfig(cfg, func(o *s3.Options){
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(s.cfg.R2URL)
 	})
 
 	_, err = client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.cfg.R2Bucket),
-		Key: aws.String(key),
+		Key:    aws.String(key),
 	})
-
 	return err
 }

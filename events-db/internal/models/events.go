@@ -23,6 +23,7 @@ type Event struct {
 	OrganizerID string `json:"organizer_id" db:"organizer_id"`
 	CoverImageURL *string `json:"cover_image_url,omitempty" db:"cover_image_url"`
 	BannerImageURL *string `json:"banner_image_url,omitempty" db:"banner_image_url"`
+	BannerVideoURL *string    `json:"banner_video_url,omitempty" db:"banner_video_url"`
 	GalleryImages ImageArray `json:"gallery_images,omitempty" db:"gallery_images"`
 	StartTime     time.Time `json:"start_time" db:"start_time"`
 	EndTime		  time.Time `json:"end_time" db:"end_time"`
@@ -119,6 +120,7 @@ type CreateEventDTO struct {
 	Description string `json:"description" binding:"required,min=50"`
 	CoverImageURL *string `json:"cover_image_url" binding:"omitempty,url"`
 	BannerImageURL *string `json:"banner_image_url" binding:"omitempty,url"`
+	BannerVideoURL *string    `json:"banner_video_url" binding:"omitempty_url"`
 	GalleryImages	[]string `json:"gallery_images"`
 	StartTime time.Time `json:"start_time" binding:"required"`
 	EndTime time.Time `json:"end_time" binding:"required"`
@@ -144,6 +146,7 @@ type UpdateEventDTO struct {
 	Description *string `json:"description" binding:"omitempty,min=50"`
 	CoverImageUrl *string `json:"cover_image_url" binding:"omitempty,url"`
 	BannerImageURL *string `json:"banner_image_url" binding:"omitempty,url"`
+	BannerVideoURL *string    `json:"banner_video_url" binding:"omitempty_url"`
 	GalleryImages	*[]string `json:"gallery_images"`
 	StartTime *time.Time `json:"start_time"`
 	EndTime *time.Time `json:"end_time"`
