@@ -103,7 +103,7 @@ func main() {
 	rows, err := pool.Query(context.Background(), `
 		SELECT id FROM bookings
 		WHERE booking_status = 'confirmed'
-		AND qr_url IS NULL
+		AND tickets_sent = FALSE
 		AND created_at > NOW() - INTERVAL '24 hours'
 	`)
 	if err == nil {

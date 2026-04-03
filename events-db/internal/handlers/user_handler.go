@@ -76,7 +76,7 @@ func CreateUserhandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		user := &models.User{
 			Email:    registerRequest.Email,
 			Password: string(hashedPassword),
-			Role: "user",
+			Role:     models.RoleAttendee,
 		}
 
 		createdUser, err := repository.CreateUser(pool, user)

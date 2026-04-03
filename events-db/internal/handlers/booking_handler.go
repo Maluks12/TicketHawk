@@ -6,7 +6,6 @@ import (
 	"events-db/internal/repository"
 	"events-db/internal/services"
 	"events-db/internal/utils"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -279,12 +278,23 @@ func VerifyQRCodeHandler(pool *pgxpool.Pool, qrService *services.QRService) gin.
         }
 
         // QR code is valid and organizer has permission
+        attendeeName := ""
+        if booking.AttendeeFirstName != nil {
+            attendeeName = *booking.AttendeeFirstName
+        }
+        if booking.AttendeeLastName != nil {
+            if attendeeName != "" {
+                attendeeName += " "
+            }
+            attendeeName += *booking.AttendeeLastName
+        }
+
         c.JSON(http.StatusOK, gin.H{
             "valid":           true,
             "booking_number":  booking.BookingNumber,
-            "attendee_name":   fmt.Sprintf("%s %s", *booking.AttendeeFirstName, *booking.AttendeeLastName),
+            "attendee_name":   attendeeName,
             "ticket_quantity": booking.TicketQuantity,
-            "event_title":     event.Title,  // ← Use event, not booking.Event
+            "event_title":     event.Title,
         })
     }
 }

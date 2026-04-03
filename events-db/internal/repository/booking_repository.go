@@ -194,7 +194,7 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 			b.id, b.booking_number, b.event_id, b.user_id, b.is_guest,
 			b.ticket_quantity, b.unit_price, b.subtotal,
 			b.platform_fee, b.organizer_fee, b.total_amount, b.currency,
-			b.booking_status, b.payment_status, b.qr_code_url,
+			b.booking_status, b.payment_status, b.qr_code_url, b.tickets_sent,
 			b.attendee_first_name, b.attendee_last_name, b.attendee_email,
 			b.created_at, b.confirmed_at,
 			e.title, e.start_time
@@ -207,14 +207,14 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 	var event models.Event
 
 	err := pool.QueryRow(ctx, query, bookingID).Scan(
-        &booking.ID, &booking.BookingNumber, &booking.EventID, &booking.UserID, &booking.IsGuest,
+		&booking.ID, &booking.BookingNumber, &booking.EventID, &booking.UserID, &booking.IsGuest,
 		&booking.TicketQuantity, &booking.UnitPrice, &booking.Subtotal,
 		&booking.PlatformFee, &booking.OrganizerFee, &booking.TotalAmount, &booking.Currency,
-		&booking.BookingStatus, &booking.PaymentStatus, &booking.QRCodeURL,
+		&booking.BookingStatus, &booking.PaymentStatus, &booking.QRCodeURL, &booking.TicketsSent,
 		&booking.AttendeeFirstName, &booking.AttendeeLastName, &booking.AttendeeEmail,
 		&booking.CreatedAt, &booking.ConfirmedAt,
 		&event.Title, &event.StartTime,
-    )
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get booking: %w", err)
