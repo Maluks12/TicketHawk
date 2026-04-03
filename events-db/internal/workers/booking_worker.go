@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog/log" 
+	"github.com/rs/zerolog/log"
 )
 
 // StartBookingWorker drains the jobs channel and, for each confirmed booking:
@@ -47,14 +47,14 @@ func StartBookingWorker(
 }
 
 func processBookingJob(
-	ctx context.Context, // FIX 5: accept ctx so notifications respect graceful shutdown
+	ctx context.Context,
 	pool *pgxpool.Pool,
 	emailSvc *services.EmailService,
 	qrSvc *services.QRService,
 	bookingID string,
 ) {
 	log.Info().Str("booking_id", bookingID).Msg("booking worker: processing job")
- 
+
 	booking, err := repository.GetBookingByID(pool, bookingID)
 	if err != nil {
 		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to fetch booking")
@@ -71,7 +71,7 @@ func processBookingJob(
 		log.Info().Str("booking_id", bookingID).Msg("booking worker: tickets already sent, skipping")
 		return
 	}
- 
+
 	event, err := repository.GetEventByID(pool, booking.EventID, nil)
 	if err != nil {
 		log.Error().Err(err).
@@ -80,13 +80,13 @@ func processBookingJob(
 			Msg("booking worker: failed to fetch event")
 		return
 	}
- 
+
 	user, err := resolveEmailRecipient(pool, booking)
 	if err != nil {
 		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to resolve recipient")
 		return
 	}
- 
+
 	if err := repository.CreateTicketAssignments(
 		pool,
 		bookingID,
@@ -97,12 +97,12 @@ func processBookingJob(
 		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to create assignments")
 		// Non-fatal — carry on and attempt QR + email for the buyer's slot.
 	}
- 
+
 	assignments, err := fetchAssignmentIDsForBooking(pool, bookingID)
 	if err != nil {
 		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to fetch assignment IDs")
 	}
- 
+
 	var buyerQRURL string
 	for i, assignmentID := range assignments {
 		if err := qrSvc.GenerateQRCodeForAssignment(assignmentID); err != nil {
@@ -113,18 +113,37 @@ func processBookingJob(
 			buyerQRURL = fetchQRURLForAssignment(pool, assignmentID)
 		}
 	}
- 
+
 	if err := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); err != nil {
-		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: email failed, retrying in 3s")
-		time.Sleep(3 * time.Second)
-		if retryErr := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); retryErr != nil {
-			log.Error().Err(retryErr).Str("booking_id", bookingID).Msg("booking worker: email retry also failed")
-		}
+		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: email failed, scheduling async retry")
+
+		// FIX: previously this called time.Sleep(3s) here, blocking the worker
+		// loop from processing any other bookings during the wait. Instead we
+		// launch a separate goroutine for the retry so the main loop stays
+		// unblocked. The retry also honours ctx.Done so it won't fire after
+		// the server has started shutting down.
+		go func() {
+			select {
+			case <-time.After(3 * time.Second):
+				if retryErr := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); retryErr != nil {
+					log.Error().Err(retryErr).Str("booking_id", bookingID).Msg("booking worker: email retry also failed")
+				} else {
+					log.Info().Str("booking_id", bookingID).Msg("booking worker: email retry succeeded")
+					markTicketsSentAfterRetry(pool, bookingID)
+				}
+			case <-ctx.Done():
+				log.Warn().Str("booking_id", bookingID).Msg("booking worker: shutdown before email retry could fire")
+			}
+		}()
+
+		// Return early — the in-process notification below should only run
+		// once the email has actually been sent (the retry goroutine handles
+		// its own notification path if needed).
 		return
 	}
- 
-	// FIX 5: use the passed ctx instead of context.Background() so this
-	// respects graceful shutdown and doesn't outlive the server.
+
+	// Use the passed ctx instead of context.Background() so the notification
+	// write respects graceful shutdown and doesn't outlive the server.
 	if booking.UserID != nil {
 		notifErr := repository.CreateNotification(
 			pool, ctx,
@@ -143,11 +162,27 @@ func processBookingJob(
 			log.Error().Err(notifErr).Str("booking_id", booking.ID).Msg("booking worker: notification failed")
 		}
 	}
- 
+
 	log.Info().
 		Str("booking_id", bookingID).
 		Int("ticket_slots", booking.TicketQuantity).
 		Msg("booking worker: successfully processed booking")
+}
+
+// markTicketsSentAfterRetry is a best-effort update called when the async
+// retry goroutine succeeds. Errors are logged but not propagated — the booking
+// will simply be re-processed harmlessly on the next server restart.
+func markTicketsSentAfterRetry(pool *pgxpool.Pool, bookingID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE bookings SET tickets_sent = TRUE WHERE id = $1`,
+		bookingID,
+	); err != nil {
+		log.Error().Err(err).Str("booking_id", bookingID).
+			Msg("booking worker: failed to mark tickets_sent after retry")
+	}
 }
 
 // resolveEmailRecipient returns a *models.User suitable for use in email templates.
@@ -189,7 +224,7 @@ func resolveEmailRecipient(pool *pgxpool.Pool, booking *models.Booking) (*models
 func fetchAssignmentIDsForBooking(pool *pgxpool.Pool, bookingID string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
- 
+
 	rows, err := pool.Query(ctx,
 		`SELECT id FROM ticket_assignments WHERE booking_id = $1 ORDER BY slot_number`,
 		bookingID,
@@ -198,7 +233,7 @@ func fetchAssignmentIDsForBooking(pool *pgxpool.Pool, bookingID string) ([]strin
 		return nil, err
 	}
 	defer rows.Close()
- 
+
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -209,17 +244,17 @@ func fetchAssignmentIDsForBooking(pool *pgxpool.Pool, bookingID string) ([]strin
 	}
 	return ids, rows.Err()
 }
- 
+
 func fetchQRURLForAssignment(pool *pgxpool.Pool, assignmentID string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
- 
+
 	var url *string
 	pool.QueryRow(ctx,
 		`SELECT qr_code_url FROM ticket_assignments WHERE id = $1`,
 		assignmentID,
 	).Scan(&url)
- 
+
 	if url == nil {
 		return ""
 	}

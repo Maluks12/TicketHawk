@@ -21,6 +21,7 @@ import (
 	"events-db/internal/handlers"
 	"events-db/internal/middleware"
 	"events-db/internal/ratelimit"
+	"events-db/internal/repository"
 	"events-db/internal/services"
 	"events-db/internal/workers"
 
@@ -100,22 +101,20 @@ func main() {
 
 	bookingJobs := make(chan string, 256)
 
-	rows, err := pool.Query(context.Background(), `
-		SELECT id FROM bookings
-		WHERE booking_status = 'confirmed'
-		AND tickets_sent = FALSE
-		AND created_at > NOW() - INTERVAL '24 hours'
-	`)
-	if err == nil {
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil {
-				bookingJobs <- id
-			}
+	unsentIDs, err := repository.GetUnsentConfirmedBookingIDs(pool)
+	if err != nil {
+		log.Warn().Err(err).Msg("startup: failed to query unsent bookings — skipping re-enqueue")
+	} else {
+		for _, id := range unsentIDs {
+			bookingJobs <- id
 		}
-		rows.Close()
+		log.Info().Int("count", len(unsentIDs)).Msg("startup: re-enqueued unsent booking jobs")
 	}
 	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
+
+	bookingRepo := repository.NewPgxBookingQuerier(pool)
+	eventRepo   := repository.NewPgxEventQuerier(pool)
+
 	// ==========================================
 	// Services
 	// ==========================================
@@ -497,12 +496,11 @@ func main() {
 		))
 	}
 	{
-		bookings.POST("", handlers.CreateBookingHandler(pool, paymentService))
-		bookings.GET("", handlers.GetUserBookingsHandler(pool))
-		bookings.GET("/:id", handlers.GetBookingDetailsHandler(pool))
-		bookings.POST("/:id/refund", handlers.RequestRefundHandler(pool, paymentService, emailService))
-		bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(pool, qrService))
-	}
+		bookings.POST("",          handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService))
+	bookings.GET("",           handlers.GetUserBookingsHandler(bookingRepo))
+	bookings.GET("/:id",       handlers.GetBookingDetailsHandler(bookingRepo))
+	bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
+	bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
 
 	// ==========================================
 	// Payment Routes (Auth required, stricter limits)
@@ -577,5 +575,6 @@ func main() {
 		log.Error().Err(err).Msg("server forced to shutdown")
 	} else {
 		log.Info().Msg("server exited cleanly")
+	}
 	}
 }

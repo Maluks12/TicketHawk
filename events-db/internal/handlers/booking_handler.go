@@ -12,16 +12,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
-
-
-func CreateBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentService) gin.HandlerFunc {
-	return func (c *gin.Context) {
+// CreateBookingHandler creates a new booking and initialises a Stitch payment
+// intent for it. Accepts repository interfaces so the handler is unit-testable
+// without a live database.
+func CreateBookingHandler(
+	bookings repository.BookingQuerier,
+	events repository.EventQuerier,
+	paymentService *services.PaymentService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		userID, exists := c.Get("user_id")
-
 		if !exists {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 			return
@@ -30,19 +33,18 @@ func CreateBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 		var dto models.CreateBookingDTO
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Validation",
+				"error":   "Validation",
 				"details": utils.FormatValidationErrors(err),
 			})
 			return
 		}
 
-		event, err := repository.GetEventByID(pool, dto.EventID, nil)
+		event, err := events.GetEventByID(dto.EventID, nil)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
 		}
 
-		// Add this — sold-out check
 		if event.MaxCapacity != nil && event.TicketsSold >= *event.MaxCapacity {
 			c.JSON(http.StatusConflict, gin.H{"error": "This event is sold out"})
 			return
@@ -53,7 +55,7 @@ func CreateBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 			return
 		}
 
-		booking, err := repository.CreateBooking(pool, &dto, userID.(string), event)
+		booking, err := bookings.CreateBooking(&dto, userID.(string), event)
 		if err != nil {
 			if errors.Is(err, repository.ErrInsufficientCapacity) {
 				c.JSON(http.StatusConflict, gin.H{
@@ -72,35 +74,31 @@ func CreateBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 			return
 		}
 
-		response := models.BookingResponse {
-			BookingID: booking.ID,
-			BookingNumber: booking.BookingNumber,
-			TotalAmount: booking.TotalAmount,
-			Currency: booking.Currency,
-			ClientToken: clientToken,
+		c.JSON(http.StatusCreated, models.BookingResponse{
+			BookingID:        booking.ID,
+			BookingNumber:    booking.BookingNumber,
+			TotalAmount:      booking.TotalAmount,
+			Currency:         booking.Currency,
+			ClientToken:      clientToken,
 			PaymentRequestID: paymentRequestID,
-			ExpiresAt: booking.CreatedAt.Add(15*time.Minute),
-		}
-
-		c.JSON(http.StatusCreated, response)
+			ExpiresAt:        booking.CreatedAt.Add(15 * time.Minute),
+		})
 	}
 }
 
-func GetUserBookingsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func GetUserBookingsHandler(bookings repository.BookingQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, _:= c.Get("user_id")
+		userID, _ := c.Get("user_id")
 
 		limit := 20
-        if l := c.Query("limit"); l != "" {
-            if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
-                limit = parsed
-            }
-        }
-
-		cursorStr := c.Query("cursor")
+		if l := c.Query("limit"); l != "" {
+			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
+				limit = parsed
+			}
+		}
 
 		var cursor *utils.Cursor
-		if cursorStr != "" {
+		if cursorStr := c.Query("cursor"); cursorStr != "" {
 			var err error
 			cursor, err = utils.DecodeCursor(cursorStr)
 			if err != nil {
@@ -109,20 +107,21 @@ func GetUserBookingsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
-		bookings, nextCursor, err := repository.GetUserBookings(pool, userID.(string), limit, cursor,)
+		result, nextCursor, err := bookings.GetUserBookings(userID.(string), limit, cursor)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get bookings"})
 			return
 		}
 
-		c.JSON(200, gin.H{
-			"data":        bookings,
+		// FIX: was c.JSON(200, ...) — use the named constant for consistency.
+		c.JSON(http.StatusOK, gin.H{
+			"data":        result,
 			"next_cursor": utils.EncodeCursor(nextCursor),
 		})
 	}
 }
 
-func GetBookingDetailsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func GetBookingDetailsHandler(bookings repository.BookingQuerier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		bookingID := c.Param("id")
@@ -132,8 +131,7 @@ func GetBookingDetailsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		booking, err := repository.GetBookingByID(pool, bookingID)
-
+		booking, err := bookings.GetBookingByID(bookingID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
@@ -148,7 +146,12 @@ func GetBookingDetailsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentService, emailService *services.EmailService) gin.HandlerFunc {
+func RequestRefundHandler(
+	bookings repository.BookingQuerier,
+	events repository.EventQuerier,
+	paymentService *services.PaymentService,
+	emailService *services.EmailService,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		bookingID := c.Param("id")
@@ -161,7 +164,7 @@ func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 			return
 		}
 
-		booking, err := repository.GetBookingByID(pool, bookingID)
+		booking, err := bookings.GetBookingByID(bookingID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
@@ -171,13 +174,13 @@ func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 			return
 		}
 
-		event, err := repository.GetEventByID(pool, booking.EventID, nil)
+		event, err := events.GetEventByID(booking.EventID, nil)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
 		}
 
-		cancelledAssignees, err := repository.RequestRefundWithCascade(pool, bookingID, userID.(string), input.Reason)
+		cancelledAssignees, err := bookings.RequestRefundWithCascade(bookingID, userID.(string), input.Reason)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -216,85 +219,84 @@ func RequestRefundHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 	}
 }
 
-func VerifyQRCodeHandler(pool *pgxpool.Pool, qrService *services.QRService) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        userID, _ := c.Get("user_id")
-        role, _ := c.Get("role")
+// VerifyQRCodeHandler verifies a scanned QR code. Only organisers and admins
+// may call this endpoint, and organisers may only verify tickets for their own
+// events. The role check is done inline here (not just by middleware) so the
+// error response carries the valid/invalid field expected by scanner clients.
+func VerifyQRCodeHandler(
+	bookings repository.BookingQuerier,
+	events repository.EventQuerier,
+	qrService *services.QRService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+		role, _ := c.Get("role")
 
-        if role != models.RoleOrganizer && role != models.RoleAdmin {
-            c.JSON(http.StatusForbidden, gin.H{"error": "Organizer access required"})
-            return
-        }
+		if role != string(models.RoleOrganizer) && role != string(models.RoleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Organizer access required"})
+			return
+		}
 
-        var input struct {
-            QRData string `json:"qr_data" binding:"required"`
-        }
+		var input struct {
+			QRData string `json:"qr_data" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+			return
+		}
 
-        if err := c.ShouldBindJSON(&input); err != nil {
-            c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-            return
-        }
+		payload, err := qrService.VerifyQRCode(input.QRData)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"valid": false,
+				"error": err.Error(),
+			})
+			return
+		}
 
-        // Verify QR code
-        payload, err := qrService.VerifyQRCode(input.QRData)
-        if err != nil {
-            c.JSON(http.StatusBadRequest, gin.H{
-                "valid": false,
-                "error": err.Error(),
-            })
-            return
-        }
+		booking, err := bookings.GetBookingByID(payload.BookingID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"valid": false,
+				"error": "Booking not found",
+			})
+			return
+		}
 
-        // Get booking
-        booking, err := repository.GetBookingByID(pool, payload.BookingID)
-        if err != nil {
-            c.JSON(http.StatusNotFound, gin.H{
-                "valid": false,
-                "error": "Booking not found",
-            })
-            return
-        }
+		event, err := events.GetEventByID(booking.EventID, nil)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"valid": false,
+				"error": "Event not found",
+			})
+			return
+		}
 
-        // Get event (needed for both ownership check and response)
-        event, err := repository.GetEventByID(pool, booking.EventID, nil)
-        if err != nil {
-            c.JSON(http.StatusNotFound, gin.H{
-                "valid": false,
-                "error": "Event not found",
-            })
-            return
-        }
+		if role == string(models.RoleOrganizer) && event.OrganizerID != userID.(string) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"valid": false,
+				"error": "You can only verify tickets for your own events",
+			})
+			return
+		}
 
-        // Organizers can only verify tickets for their own events
-        // Admins can verify any event
-        if role == models.RoleOrganizer {
-            if event.OrganizerID != userID.(string) {
-                c.JSON(http.StatusForbidden, gin.H{
-                    "valid": false,
-                    "error": "You can only verify tickets for your own events",
-                })
-                return
-            }
-        }
+		attendeeName := ""
+		if booking.AttendeeFirstName != nil {
+			attendeeName = *booking.AttendeeFirstName
+		}
+		if booking.AttendeeLastName != nil {
+			if attendeeName != "" {
+				attendeeName += " "
+			}
+			attendeeName += *booking.AttendeeLastName
+		}
 
-        // QR code is valid and organizer has permission
-        attendeeName := ""
-        if booking.AttendeeFirstName != nil {
-            attendeeName = *booking.AttendeeFirstName
-        }
-        if booking.AttendeeLastName != nil {
-            if attendeeName != "" {
-                attendeeName += " "
-            }
-            attendeeName += *booking.AttendeeLastName
-        }
-
-        c.JSON(http.StatusOK, gin.H{
-            "valid":           true,
-            "booking_number":  booking.BookingNumber,
-            "attendee_name":   attendeeName,
-            "ticket_quantity": booking.TicketQuantity,
-            "event_title":     event.Title,
-        })
-    }
+		c.JSON(http.StatusOK, gin.H{
+			"valid":           true,
+			"booking_number":  booking.BookingNumber,
+			"attendee_name":   attendeeName,
+			"ticket_quantity": booking.TicketQuantity,
+			"event_title":     event.Title,
+		})
+	}
 }
