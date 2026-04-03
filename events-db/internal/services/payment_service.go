@@ -7,6 +7,7 @@ import (
 	"errors"
 	"events-db/internal/config"
 	"events-db/internal/models"
+	"events-db/internal/repository"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,7 +25,7 @@ const (
 	stitchGraphQLURL    = "https://api.stitch.money/graphql"
 	stitchTokenAudience = "https://secure.stitch.money/connect/token"
 	stitchGateway       = "stitch"
-) //change to var when testing
+)
 
 type stitchToken struct {
 	AccessToken string    `json:"access_token"`
@@ -495,6 +496,20 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 		additionalIDs, syncErr := s.syncAllCartBookings(ctx, *cartID, bookingID, internalStatus)
 		if syncErr != nil {
 			log.Warn().Err(syncErr).Str("cart_id", *cartID).Msg("webhook: failed to sync cart bookings")
+		}
+
+		// Fulfill merch orders — decrement stock and create sale records.
+		// This is best-effort: a failure here does NOT abort the webhook response
+		// because the booking is already confirmed. Oversold items are recorded
+		// in the merch_orders table with fulfillment_status='oversold' for admin review.
+		if internalStatus == models.PaymentCompleted {
+			if err := repository.FulfillMerchOrders(ctx, s.pool, *cartID, pr.ID); err != nil {
+				log.Error().Err(err).
+					Str("cart_id", *cartID).
+					Str("stitch_id", pr.ID).
+					Msg("webhook: merch fulfillment failed — manual reconciliation required")
+				// Non-fatal: fall through to enqueue ticket jobs
+			}
 		}
 
 		// Only enqueue QR + email jobs on successful payment
