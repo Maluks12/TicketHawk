@@ -96,7 +96,7 @@ func OrganizerOnlyMiddleware() gin.HandlerFunc {
 		if !ok || (role != string(models.RoleOrganizer) && role != string(models.RoleAdmin)) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error": "Organizer access required",
-				"note": "Apply to become an organizer at /api/v1/user/apply-organizer",
+				"note":  "Apply to become an organizer at /api/v1/user/apply-organizer",
 			})
 			c.Abort()
 			return
@@ -105,14 +105,20 @@ func OrganizerOnlyMiddleware() gin.HandlerFunc {
 	}
 }
 
-func AdminOnlyMiddleware() gin.HandlerFunc{
-	return func(c *gin.Context){
-		roleValue, exists := c.Get("role")
+func AdminOnlyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleVal, exists := c.Get("role")
+		if !exists {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+			c.Abort()
+			return
+		}
 
-		if !exists || roleValue != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "admin access required",
-			})
+		// Cast to string before comparing — consistent with OrganizerOnlyMiddleware
+		// and avoids relying on interface{} equality semantics.
+		role, ok := roleVal.(string)
+		if !ok || role != string(models.RoleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
 			c.Abort()
 			return
 		}
@@ -134,45 +140,45 @@ func OptionalAuth(cfg *config.Config) gin.HandlerFunc {
 			c.Next()
 			return
 		}
- 
+
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		if tokenString == "" || tokenString == authHeader {
 			c.Next()
 			return
 		}
- 
+
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
 			return []byte(cfg.JWTSecret), nil
 		})
- 
+
 		if err != nil || !token.Valid {
 			c.Next()
 			return
 		}
- 
+
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
 			c.Next()
 			return
 		}
- 
+
 		if exp, ok := claims["exp"].(float64); ok {
 			if time.Now().After(time.Unix(int64(exp), 0)) {
 				c.Next()
 				return
 			}
 		}
- 
+
 		if userID, ok := claims["user_id"].(string); ok {
 			c.Set("user_id", userID)
 		}
 		if role, ok := claims["role"].(string); ok {
 			c.Set("role", role)
 		}
- 
+
 		c.Next()
 	}
 }

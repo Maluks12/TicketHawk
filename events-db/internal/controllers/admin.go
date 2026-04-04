@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"events-db/internal/models"
 	"net/http"
 	"strconv"
@@ -12,93 +11,82 @@ import (
 )
 
 func PromoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-	return func(c *gin.Context){
-		var ctx context.Context
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
 
 		targetUserID := c.Param("id")
-//might need to at updated at
+
 		query := `
 			UPDATE users
-			SET role = 'admin'
+			SET role = 'admin', updated_at = $2
 			WHERE id = $1
 			RETURNING id, email, role, created_at
 		`
 
 		var user models.User
-		err := pool.QueryRow(ctx,query,targetUserID).Scan(
+		err := pool.QueryRow(ctx, query, targetUserID, time.Now()).Scan(
 			&user.ID,
-            &user.Email,
-            &user.Role,
-            &user.CreatedAt,
+			&user.Email,
+			&user.Role,
+			&user.CreatedAt,
 		)
 
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{
-                "error": "User not found or database error",
-                "details": err.Error(),
-            })
+				"error":   "User not found or database error",
+				"details": err.Error(),
+			})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-            "message": "User successfully promoted to admin",
-            "user": user,
-        })
+			"message": "User successfully promoted to admin",
+			"user":    user,
+		})
 	}
 }
-
 
 func DemoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-	return func(c *gin.Context){
-		var ctx context.Context
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
 
 		targetUserID := c.Param("id")
-        
-        query := `
-            UPDATE users 
-            SET role = 'user'
-            WHERE id = $1 
-            RETURNING id, email, role, created_at
-        `
-        
-        var user models.User
-        err := pool.QueryRow(ctx, query, targetUserID).Scan(
-            &user.ID,
-            &user.Email,
-            &user.Role,
-            &user.CreatedAt,
-        )
-        
-        if err != nil {
-            c.JSON(http.StatusNotFound, gin.H{
-                "error": "User not found or database error",
-                "details": err.Error(),
-            })
-            return
-        }
-        
-        c.JSON(http.StatusOK, gin.H{
-            "message": "User demoted to regular user",
-            "user": user,
-        })
+
+		query := `
+			UPDATE users
+			SET role = 'user', updated_at = $2
+			WHERE id = $1
+			RETURNING id, email, role, created_at
+		`
+
+		var user models.User
+		err := pool.QueryRow(ctx, query, targetUserID, time.Now()).Scan(
+			&user.ID,
+			&user.Email,
+			&user.Role,
+			&user.CreatedAt,
+		)
+
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "User not found or database error",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "User demoted to regular user",
+			"user":    user,
+		})
 	}
 }
-
 
 // add search functionality to user search
 // add role filtering
-func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc{
-	return func(c *gin.Context){
-		var ctx context.Context
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
 
 		limitStr := c.DefaultQuery("limit", "5")
 		pageStr := c.DefaultQuery("page", "1")
@@ -109,7 +97,6 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc{
 		}
 
 		page, err := strconv.Atoi(pageStr)
-
 		if err != nil || page <= 0 {
 			page = 1
 		}
@@ -123,7 +110,7 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc{
 
 		offset := (page - 1) * limit
 
-		query:=`
+		query := `
 			SELECT id, email, role, created_at
 			FROM users
 			ORDER BY created_at DESC
@@ -133,7 +120,7 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc{
 		rows, err := pool.Query(ctx, query, limit, offset)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
-            return
+			return
 		}
 		defer rows.Close()
 
@@ -142,9 +129,9 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc{
 			var user models.User
 			err := rows.Scan(
 				&user.ID,
-                &user.Email,
-                &user.Role,
-                &user.CreatedAt,
+				&user.Email,
+				&user.Role,
+				&user.CreatedAt,
 			)
 			if err != nil {
 				continue
