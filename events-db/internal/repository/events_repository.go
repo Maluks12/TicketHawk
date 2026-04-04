@@ -240,7 +240,7 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 	updateBookings := `
 		UPDATE bookings
 		SET booking_status = $1, refund_requested_at = CURRENT_TIMESTAMP, refund_reason = $2
-		WHERE event_id = $3 AND booking_status = &4
+		WHERE event_id = $3 AND booking_status = $4
 	`
 
 	_, err = tx.Exec(ctx, updateBookings, models.BookingRefunded, "Event cancelled by organizer", eventID, models.BookingConfirmed)
@@ -249,10 +249,19 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 		return fmt.Errorf("failed to update bookings: %w", err)
 	}
 
-	// Notify all confirmed attendees
-	notifRows, notifErr := tx.Query(ctx, `
+	// Commit the cancellation before sending notifications.
+	// The notification query must NOT run inside this transaction — if it
+	// fails (e.g. user_id column missing in test, or notifications table
+	// absent), it would abort the tx and roll back the event cancellation.
+	// Notifications are a side-effect: their failure must never undo a cancel.
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit cancellation: %w", err)
+	}
+
+	// Notify attendees who had confirmed bookings — runs on pool, not tx.
+	notifRows, notifErr := pool.Query(ctx, `
 		SELECT DISTINCT user_id FROM bookings
-		WHERE event_id = $1 AND booking_status = 'confirmed'`, eventID)
+		WHERE event_id = $1 AND user_id IS NOT NULL`, eventID)
 	if notifErr == nil {
 		defer notifRows.Close()
 		for notifRows.Next() {
@@ -270,8 +279,8 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 		}
 	}
 
-	return tx.Commit(ctx)
-} // new
+	return nil
+} // fixed
 
 func TrendingEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -373,26 +382,125 @@ func UpdateEvents(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO
 		argIndex++
 	}
 
+	if dto.CoverImageURL != nil {
+		updates = append(updates, fmt.Sprintf("cover_image_url = $%d", argIndex))
+		args = append(args, *dto.CoverImageURL)
+		argIndex++
+	}
+
+	if dto.BannerImageURL != nil {
+		updates = append(updates, fmt.Sprintf("banner_image_url = $%d", argIndex))
+		args = append(args, *dto.BannerImageURL)
+		argIndex++
+	}
+
+	if dto.BannerVideoURL != nil {
+		updates = append(updates, fmt.Sprintf("banner_video_url = $%d", argIndex))
+		args = append(args, *dto.BannerVideoURL)
+		argIndex++
+	}
+
 	if dto.Price != nil {
-        updates = append(updates, fmt.Sprintf("price = $%d", argIndex))
-        args = append(args, *dto.Price)
-        argIndex++
-    }
-    if dto.StartTime != nil {
-        updates = append(updates, fmt.Sprintf("start_time = $%d", argIndex))
-        args = append(args, *dto.StartTime)
-        argIndex++
-    }
-    if dto.EndTime != nil {
-        updates = append(updates, fmt.Sprintf("end_time = $%d", argIndex))
-        args = append(args, *dto.EndTime)
-        argIndex++
-    }
-    if dto.MaxCapacity != nil {
-        updates = append(updates, fmt.Sprintf("max_capacity = $%d", argIndex))
-        args = append(args, *dto.MaxCapacity)
-        argIndex++
-    }
+		updates = append(updates, fmt.Sprintf("price = $%d", argIndex))
+		args = append(args, *dto.Price)
+		argIndex++
+	}
+
+	if dto.StartTime != nil {
+		updates = append(updates, fmt.Sprintf("start_time = $%d", argIndex))
+		args = append(args, *dto.StartTime)
+		argIndex++
+	}
+
+	if dto.EndTime != nil {
+		updates = append(updates, fmt.Sprintf("end_time = $%d", argIndex))
+		args = append(args, *dto.EndTime)
+		argIndex++
+	}
+
+	if dto.ExpiresAt != nil {
+		updates = append(updates, fmt.Sprintf("expires_at = $%d", argIndex))
+		args = append(args, *dto.ExpiresAt)
+		argIndex++
+	}
+
+	if dto.Timezone != nil {
+		updates = append(updates, fmt.Sprintf("timezone = $%d", argIndex))
+		args = append(args, *dto.Timezone)
+		argIndex++
+	}
+
+	if dto.VenueName != nil {
+		updates = append(updates, fmt.Sprintf("venue_name = $%d", argIndex))
+		args = append(args, *dto.VenueName)
+		argIndex++
+	}
+
+	if dto.Address != nil {
+		updates = append(updates, fmt.Sprintf("address = $%d", argIndex))
+		args = append(args, *dto.Address)
+		argIndex++
+	}
+
+	if dto.City != nil {
+		updates = append(updates, fmt.Sprintf("city = $%d", argIndex))
+		args = append(args, *dto.City)
+		argIndex++
+	}
+
+	if dto.Latitude != nil {
+		updates = append(updates, fmt.Sprintf("latitude = $%d", argIndex))
+		args = append(args, *dto.Latitude)
+		argIndex++
+	}
+
+	if dto.Longitude != nil {
+		updates = append(updates, fmt.Sprintf("longitude = $%d", argIndex))
+		args = append(args, *dto.Longitude)
+		argIndex++
+	}
+
+	if dto.MaxCapacity != nil {
+		updates = append(updates, fmt.Sprintf("max_capacity = $%d", argIndex))
+		args = append(args, *dto.MaxCapacity)
+		argIndex++
+	}
+
+	if dto.AllowWaitlist != nil {
+		updates = append(updates, fmt.Sprintf("allow_waitlist = $%d", argIndex))
+		args = append(args, *dto.AllowWaitlist)
+		argIndex++
+	}
+
+	if dto.IsFeatured != nil {
+		updates = append(updates, fmt.Sprintf("is_featured = $%d", argIndex))
+		args = append(args, *dto.IsFeatured)
+		argIndex++
+	}
+
+	if dto.FeaturedUntil != nil {
+		updates = append(updates, fmt.Sprintf("featured_until = $%d", argIndex))
+		args = append(args, *dto.FeaturedUntil)
+		argIndex++
+	}
+
+	if dto.RefundPolicy != nil {
+		updates = append(updates, fmt.Sprintf("refund_policy = $%d", argIndex))
+		args = append(args, *dto.RefundPolicy)
+		argIndex++
+	}
+
+	if dto.TermsAndConditions != nil {
+		updates = append(updates, fmt.Sprintf("terms_and_conditions = $%d", argIndex))
+		args = append(args, *dto.TermsAndConditions)
+		argIndex++
+	}
+
+	if dto.Tags != nil {
+		updates = append(updates, fmt.Sprintf("tags = $%d", argIndex))
+		args = append(args, *dto.Tags)
+		argIndex++
+	}
 
 	if len(updates) == 0 {
 		return nil, fmt.Errorf("no fields to update")
@@ -489,7 +597,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 		where += `
 			AND (
 				e.start_time < $2
-				OR (e.start_time = $1 AND e.id < $3)
+				OR (e.start_time = $2 AND e.id < $3)
 			)
 		`
 		args = append(args, cursor.StartTime, cursor.ID)
