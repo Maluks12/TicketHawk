@@ -140,6 +140,61 @@ func GuestPaymentStatusHandler(pool *pgxpool.Pool, paymentService *services.Paym
 	}
 }
 
+// GET /guest/bookings/:bookingNumber/assignments?email=...
+//
+// Returns all ticket assignment slots for a guest booking.
+// Identity is verified by bookingNumber + email, matching the pattern used by
+// GetGuestBookingHandler. The same Redis lockout (5 failed attempts → 1 hour
+// block) is applied to prevent enumeration.
+func GetGuestTicketAssignmentsHandler(pool *pgxpool.Pool, rdb *redis.Client) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bookingNumber := c.Param("bookingNumber")
+		email := c.Query("email")
+
+		if email == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required"})
+			return
+		}
+
+		// Redis lockout — same key as GetGuestBookingHandler so failed attempts
+		// on either endpoint count toward the same limit.
+		lockKey := "guest:lockout:" + bookingNumber
+		if rdb != nil {
+			count, _ := rdb.Get(c.Request.Context(), lockKey).Int()
+			if count >= 5 {
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many failed attempts. Try again later"})
+				return
+			}
+		}
+
+		// Verify identity: bookingNumber + email must match a guest booking.
+		booking, err := repository.GetGuestBooking(pool, bookingNumber, email)
+		if err != nil {
+			if rdb != nil {
+				pipe := rdb.Pipeline()
+				pipe.Incr(c.Request.Context(), lockKey)
+				pipe.Expire(c.Request.Context(), lockKey, time.Hour)
+				pipe.Exec(c.Request.Context())
+			}
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+
+		// Clear lockout on success.
+		if rdb != nil {
+			rdb.Del(c.Request.Context(), lockKey)
+		}
+
+		assignments, err := repository.GetAssignmentsByBookingID(pool, booking.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load assignments"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": assignments})
+	}
+}
+
 func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bookingNumber := c.Param("bookingNumber")

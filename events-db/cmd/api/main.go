@@ -388,6 +388,7 @@ func main() {
 	{
 		guest.POST("/bookings", handlers.CreateGuestBookingHandler(pool, paymentService))
 		guest.GET("/bookings/:bookingNumber", handlers.GetGuestBookingHandler(pool, rdb)) // uses nil-safe rdb
+		guest.GET("/bookings/:bookingNumber/assignments", handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
 		guest.GET("/bookings/:bookingNumber/payment", handlers.GuestPaymentStatusHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
 	}
@@ -425,14 +426,17 @@ func main() {
 		))
 	}
 	{
-		admin.POST("/events",       handlers.CreateEventHandlers(pool, eventCache))
-		admin.PUT("/events/:id",    handlers.UpdateEventHandlers(pool, eventCache))
-		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool, eventCache))
-		admin.DELETE("/events/:id", handlers.DeleteEventHandlers(pool))
-		admin.GET("/users", controllers.GetAllUsersHandler(pool))
-		admin.PUT("/users/promote/:id", controllers.PromoteUserHandler(pool))
-		admin.PUT("/users/demote/:id", controllers.DemoteUserHandler(pool))
-		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool)) //might have to add eventcache
+		admin.POST("/events",             handlers.CreateEventHandlers(pool, eventCache))
+		admin.PUT("/events/:id",          handlers.UpdateEventHandlers(pool, eventCache))
+		admin.GET("/events/:id",          handlers.GetEventByIDHandlers(pool, eventCache))
+		admin.DELETE("/events/:id",       handlers.DeleteEventHandlers(pool))
+		admin.GET("/events",              handlers.GetAdminEventsHandler(pool))
+		admin.GET("/stats",               handlers.GetAdminStatsHandler(pool))
+		admin.GET("/merch/oversold",      handlers.GetOversoldMerchOrdersHandler(pool))
+		admin.GET("/users",               controllers.GetAllUsersHandler(pool))
+		admin.PUT("/users/promote/:id",   controllers.PromoteUserHandler(pool))
+		admin.PUT("/users/demote/:id",    controllers.DemoteUserHandler(pool))
+		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
 	}
 
 	// ==========================================
@@ -535,10 +539,29 @@ func main() {
 	}
 	{
 		bookings.POST("",          handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService))
-	bookings.GET("",           handlers.GetUserBookingsHandler(bookingRepo))
-	bookings.GET("/:id",       handlers.GetBookingDetailsHandler(bookingRepo))
-	bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
-	bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
+		bookings.GET("",           handlers.GetUserBookingsHandler(bookingRepo))
+		bookings.GET("/:id",       handlers.GetBookingDetailsHandler(bookingRepo))
+		bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
+		bookings.GET("/:id/assignments", handlers.GetTicketAssignmentsHandler(pool))
+		bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
+	}
+
+	// ==========================================
+	// User Profile Routes (Auth required)
+	// ==========================================
+	user := router.Group("/user")
+	user.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		user.Use(middleware.RateLimitByUser(
+			rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"user-profile",
+		))
+	}
+	{
+		user.GET("/me",           handlers.GetMyProfileHandler(pool))
+		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
+	}
 
 	// ==========================================
 	// Payment Routes (Auth required, stricter limits)
@@ -613,6 +636,5 @@ func main() {
 		log.Error().Err(err).Msg("server forced to shutdown")
 	} else {
 		log.Info().Msg("server exited cleanly")
-	}
 	}
 }
