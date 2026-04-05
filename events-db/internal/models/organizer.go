@@ -27,7 +27,7 @@ type Organizer struct {
 	CommissionRate float64	`json:"commission_rate" db:"commission"`
 	StripeAccountID *string `json:"-" db:"stripe_account_id"`
 	PayoutEnabled  bool   `json:"payout_enabled" db:"payout_enabled"`
-	BankAccountLast4 *string `json:"bank_account_last_4,omitempty" db:"bank_account_last_4 "`
+	BankAccountLast4 *string `json:"bank_account_last_4,omitempty" db:"bank_account_last_4"`
 	Status OrganizerStatus `json:"status" db:"status"`
 	RejectionReason *string `json:"rejection_reason,omitempty" db:"rejection_reason"`
 	CreatedAt 	time.Time `json:"created_at" db:"created_at"`

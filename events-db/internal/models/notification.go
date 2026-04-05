@@ -15,12 +15,12 @@ const (
 )
 
 type Notification struct {
-	ID        string           `json:"id"`
-	UserID    string           `json:"user_id"`
-	Type      NotificationType `json:"type"`
-	Title     string           `json:"title"`
-	Body      string           `json:"body"`
-	Data      json.RawMessage  `json:"data,omitempty"`
-	IsRead    bool             `json:"is_read"`
-	CreatedAt time.Time        `json:"created_at"`
+	ID        string           `json:"id" db:"id"`
+	UserID    string           `json:"user_id" db:"user_id"`
+	Type      NotificationType `json:"type" db:"type"`
+	Title     string           `json:"title" db:"title"`
+	Body      string           `json:"body" db:"body"`
+	Data      json.RawMessage  `json:"data,omitempty" db:"data"`
+	IsRead    bool             `json:"is_read" db:"is_read"`
+	CreatedAt time.Time        `json:"created_at" db:"created_at"`
 }

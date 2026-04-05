@@ -19,23 +19,23 @@ const (
 // atomically with the stock decrement inside the payment webhook handler,
 // only after Stitch confirms a successful payment.
 type MerchOrder struct {
-	ID                   string            `json:"id"`
-	CartID               *string           `json:"cart_id,omitempty"`
-	MerchandiseID        string            `json:"merchandise_id"`
-	VariantID            string            `json:"variant_id"`
-	EventID              string            `json:"event_id"`
-	UserID               *string           `json:"user_id,omitempty"`
-	SessionID            *string           `json:"session_id,omitempty"`
-	Quantity             int               `json:"quantity"`
-	UnitPrice            float64           `json:"unit_price"`
-	TotalAmount          float64           `json:"total_amount"`
-	StitchPaymentReqID   string            `json:"stitch_payment_req_id"`
-	FulfillmentStatus    FulfillmentStatus `json:"fulfillment_status"`
-	CreatedAt            time.Time         `json:"created_at"`
-	UpdatedAt            time.Time         `json:"updated_at"`
+	ID                 string            `json:"id" db:"id"`
+	CartID             *string           `json:"cart_id,omitempty" db:"cart_id"`
+	MerchandiseID      string            `json:"merchandise_id" db:"merchandise_id"`
+	VariantID          string            `json:"variant_id" db:"variant_id"`
+	EventID            string            `json:"event_id" db:"event_id"`
+	UserID             *string           `json:"user_id,omitempty" db:"user_id"`
+	SessionID          *string           `json:"session_id,omitempty" db:"session_id"`
+	Quantity           int               `json:"quantity" db:"quantity"`
+	UnitPrice          float64           `json:"unit_price" db:"unit_price"`
+	TotalAmount        float64           `json:"total_amount" db:"total_amount"`
+	StitchPaymentReqID string            `json:"stitch_payment_req_id" db:"stitch_payment_req_id"`
+	FulfillmentStatus  FulfillmentStatus `json:"fulfillment_status" db:"fulfillment_status"`
+	CreatedAt          time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at" db:"updated_at"`
 
-	// Joined display fields — populated by dashboard queries, not stored columns.
-	MerchName    *string `json:"merch_name,omitempty"`
-	VariantSKU   *string `json:"variant_sku,omitempty"`
-	EventTitle   *string `json:"event_title,omitempty"`
+	// Joined display fields — populated by dashboard queries, never stored columns.
+	MerchName  *string `json:"merch_name,omitempty" db:"-"`
+	VariantSKU *string `json:"variant_sku,omitempty" db:"-"`
+	EventTitle *string `json:"event_title,omitempty" db:"-"`
 }
