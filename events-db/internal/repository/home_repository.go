@@ -12,65 +12,108 @@ import (
 )
 
 type HomeSection struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Events []models.Event `json:"events"`
-	NextCursor string `json:"next_cursor"` // potentially might need to add * for empty strings
+	ID         string         `json:"id"`
+	Title      string         `json:"title"`
+	Events     []models.Event `json:"events"`
+	NextCursor string         `json:"next_cursor"`
 }
 
 type HomeSectionsResult struct {
-	Sections  []HomeSection `json:"sections"`
+	Sections []HomeSection `json:"sections"`
 }
 
-func GetHomeSections(pool *pgxpool.Pool) (*HomeSectionsResult, error) {
+// GetHomeSections assembles the full homepage feed in parallel and injects
+// sponsored events into every section before returning.
+//
+// Sections always present:
+//   - Trending Now    (time-decayed view score)
+//   - Happening Soon  (soonest upcoming)
+//   - This Weekend    (this Sat/Sun)
+//   - Recently Added  (newest published)
+//   - Featured Events (is_featured = true)
+//
+// Conditional sections:
+//   - For You   → injected first when userID is provided (auth users)
+//   - Near You  → injected last when lat/lng are provided
+//
+// Each section receives up to 2 sponsored cards at positions 3 and 7
+// (1-indexed). Sponsored ranking weights daily_budget × category affinity,
+// so ads relevant to the user rank higher regardless of raw budget alone.
+func GetHomeSections(pool *pgxpool.Pool, userID *string, lat, lng *float64) (*HomeSectionsResult, error) {
 	type sectionFetcher struct {
 		id    string
 		title string
 		fetch func() ([]models.Event, *utils.Cursor, error)
 	}
 
-	fetchers := []sectionFetcher{
-		{
+	fetchers := make([]sectionFetcher, 0, 7)
+
+	if userID != nil {
+		uid := *userID
+		fetchers = append(fetchers, sectionFetcher{
+			id:    "for_you",
+			title: "For You",
+			fetch: func() ([]models.Event, *utils.Cursor, error) {
+				events, err := ForYou(pool, uid, 10)
+				return events, nil, err
+			},
+		})
+	}
+
+	fetchers = append(fetchers,
+		sectionFetcher{
 			id:    "trending",
 			title: "Trending Now",
 			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return TrendingEvents(pool, 10, nil)
+				return TrendingNow(pool, 10)
 			},
 		},
-		{
-			id:    "featured",
-			title: "Featured Events",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return FeaturedEvents(pool, 10, nil)
-			},
-		},
-		{
+		sectionFetcher{
 			id:    "happening_soon",
 			title: "Happening Soon",
 			fetch: func() ([]models.Event, *utils.Cursor, error) {
 				return HappeningSoon(pool, 10, nil)
 			},
 		},
-		{
-			id:    "recently_added",
-			title: "Recently Added",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return RecentlyAdded(pool, 10, nil)
-			},
-		},
-		{
+		sectionFetcher{
 			id:    "this_weekend",
 			title: "This Weekend",
 			fetch: func() ([]models.Event, *utils.Cursor, error) {
 				return ThisWeekend(pool, 10, nil)
 			},
 		},
+		sectionFetcher{
+			id:    "recently_added",
+			title: "Recently Added",
+			fetch: func() ([]models.Event, *utils.Cursor, error) {
+				return RecentlyAdded(pool, 10, nil)
+			},
+		},
+		sectionFetcher{
+			id:    "featured",
+			title: "Featured Events",
+			fetch: func() ([]models.Event, *utils.Cursor, error) {
+				return FeaturedEvents(pool, 10, nil)
+			},
+		},
+	)
+
+	if lat != nil && lng != nil {
+		la, lo := *lat, *lng
+		fetchers = append(fetchers, sectionFetcher{
+			id:    "near_you",
+			title: "Near You",
+			fetch: func() ([]models.Event, *utils.Cursor, error) {
+				events, err := NearYou(pool, la, lo, 10, 150)
+				return events, nil, err
+			},
+		})
 	}
 
 	type result struct {
-	section HomeSection
-	err  error
-}
+		section HomeSection
+		err     error
+	}
 
 	results := make([]result, len(fetchers))
 	var wg sync.WaitGroup
@@ -80,8 +123,15 @@ func GetHomeSections(pool *pgxpool.Pool) (*HomeSectionsResult, error) {
 		go func(idx int, sf sectionFetcher) {
 			defer wg.Done()
 			events, nextCursor, err := sf.fetch()
+			if err != nil {
+				results[idx] = result{err: err}
+				return
+			}
+			// Inject up to 2 sponsored cards per section.
+			// RecordImpressions is called asynchronously inside InjectSponsored.
+			events = InjectSponsored(pool, events, userID, 2)
+
 			results[idx] = result{
-				err: err,
 				section: HomeSection{
 					ID:         sf.id,
 					Title:      sf.title,
@@ -104,20 +154,205 @@ func GetHomeSections(pool *pgxpool.Pool) (*HomeSectionsResult, error) {
 	return &HomeSectionsResult{Sections: out}, nil
 }
 
+// ── For You ───────────────────────────────────────────────────────────────────
+//
+// Personalised ranking formula per event:
+//
+//	score = (bookings_in_this_category × 50)
+//	      + (min(views, 10000) × 0.05)
+//	      + soon_bonus (30 if within 7 days, 10 if within 30 days)
+//
+// Events already purchased (non-cancelled/refunded) are excluded.
+// For users with no booking history the formula degrades to popularity+recency.
+func ForYou(pool *pgxpool.Pool, userID string, limit int) ([]models.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		WITH user_cats AS (
+			SELECT e.category_id, COUNT(*) AS cnt
+			FROM   bookings b
+			JOIN   events   e ON b.event_id = e.id
+			WHERE  b.user_id        = $1
+			  AND  b.booking_status IN ('confirmed','pending')
+			GROUP BY e.category_id
+		)
+		SELECT
+			ev.id, ev.title, ev.description, ev.cover_image_url,
+			ev.start_time, ev.end_time, ev.price, ev.currency,
+			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
+			ev.is_featured, ev.status, ev.views, ev.created_at,
+			c.name AS category
+		FROM   events     ev
+		JOIN   categories c   ON c.id  = ev.category_id
+		LEFT JOIN user_cats uc ON uc.category_id = ev.category_id
+		WHERE  ev.status     = 'published'
+		  AND  ev.start_time > NOW()
+		  AND NOT EXISTS (
+			  SELECT 1 FROM bookings b2
+			  WHERE  b2.event_id       = ev.id
+			    AND  b2.user_id        = $1
+			    AND  b2.booking_status NOT IN ('cancelled','refunded')
+		  )
+		ORDER BY (
+			COALESCE(uc.cnt, 0) * 50
+			+ LEAST(ev.views, 10000) * 0.05
+			+ CASE
+				WHEN ev.start_time < NOW() + INTERVAL '7 days'  THEN 30
+				WHEN ev.start_time < NOW() + INTERVAL '30 days' THEN 10
+				ELSE 0
+			  END
+		) DESC,
+		ev.start_time ASC
+		LIMIT $2
+	`, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ForYou: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]models.Event, 0, limit)
+	for rows.Next() {
+		var e models.Event
+		if err := rows.Scan(
+			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
+			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
+			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
+			&e.Category,
+		); err != nil {
+			return nil, fmt.Errorf("ForYou scan: %w", err)
+		}
+		e.ComputeAvailableTickets()
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// ── Near You ──────────────────────────────────────────────────────────────────
+//
+// Haversine formula in SQL — no PostGIS required.
+// LEAST(1.0, ...) guards acos() from receiving > 1.0 due to float rounding.
+// maxKm=150 covers the entire JHB metro + Pretoria + Vereeniging.
+func NearYou(pool *pgxpool.Pool, lat, lng float64, limit int, maxKm float64) ([]models.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		WITH distances AS (
+			SELECT ev.id,
+			       (6371 * acos(LEAST(1.0,
+			           cos(radians($1)) * cos(radians(ev.latitude))
+			           * cos(radians(ev.longitude) - radians($2))
+			           + sin(radians($1)) * sin(radians(ev.latitude))
+			       ))) AS distance_km
+			FROM events ev
+			WHERE ev.status     = 'published'
+			  AND ev.start_time > NOW()
+			  AND ev.latitude   IS NOT NULL
+			  AND ev.longitude  IS NOT NULL
+		)
+		SELECT
+			ev.id, ev.title, ev.description, ev.cover_image_url,
+			ev.start_time, ev.end_time, ev.price, ev.currency,
+			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
+			ev.is_featured, ev.status, ev.views, ev.created_at,
+			c.name AS category
+		FROM   distances d
+		JOIN   events     ev ON ev.id = d.id
+		JOIN   categories c  ON c.id  = ev.category_id
+		WHERE  d.distance_km < $3
+		ORDER BY d.distance_km ASC, ev.start_time ASC
+		LIMIT $4
+	`, lat, lng, maxKm, limit)
+	if err != nil {
+		return nil, fmt.Errorf("NearYou: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]models.Event, 0, limit)
+	for rows.Next() {
+		var e models.Event
+		if err := rows.Scan(
+			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
+			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
+			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
+			&e.Category,
+		); err != nil {
+			return nil, fmt.Errorf("NearYou scan: %w", err)
+		}
+		e.ComputeAvailableTickets()
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// ── Trending Now ──────────────────────────────────────────────────────────────
+//
+// Hacker News-style time-decay: score = views / (age_hours + 2)^1.5
+// Prevents stale events from permanently holding top slots due to high
+// accumulated views. Used only in the home feed; the standalone
+// /events/trending endpoint keeps its existing raw-views sort.
+func TrendingNow(pool *pgxpool.Pool, limit int) ([]models.Event, *utils.Cursor, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT
+			e.id, e.title, e.description, e.cover_image_url,
+			e.start_time, e.end_time, e.price, e.currency,
+			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
+			e.is_featured, e.status, e.views, e.created_at,
+			c.name AS category
+		FROM   events     e
+		JOIN   categories c ON c.id = e.category_id
+		WHERE  e.status     = 'published'
+		  AND  e.start_time > NOW()
+		ORDER BY (
+			e.views::float
+			/ POWER(
+				GREATEST(EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 3600.0, 1.0) + 2.0,
+				1.5
+			)
+		) DESC,
+		e.start_time ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("TrendingNow: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]models.Event, 0, limit)
+	for rows.Next() {
+		var e models.Event
+		if err := rows.Scan(
+			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
+			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
+			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
+			&e.Category,
+		); err != nil {
+			return nil, nil, fmt.Errorf("TrendingNow scan: %w", err)
+		}
+		e.ComputeAvailableTickets()
+		events = append(events, e)
+	}
+	return events, nil, rows.Err()
+}
+
+// ── Recently Added ────────────────────────────────────────────────────────────
+
 func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	args := []interface{}{models.EventPublished}
 	where := "WHERE e.status = $1"
 
 	if cursor != nil {
-		where += `
-			AND (
-				e.created_at < $2
-				OR (e.created_at = $2 AND e.id < $3)
-			)
-		`
+		where += ` AND (e.created_at < $2 OR (e.created_at = $2 AND e.id < $3))`
 		args = append(args, cursor.CreatedAt, cursor.ID)
 	}
 
@@ -131,8 +366,8 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
 			c.name AS category
-		FROM events e
-		JOIN categories c ON e.category_id = c.id
+		FROM   events     e
+		JOIN   categories c ON c.id = e.category_id
 		%s
 		ORDER BY e.created_at DESC, e.id DESC
 		LIMIT $%d
@@ -144,7 +379,7 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	}
 	defer rows.Close()
 
-	events := make([]models.Event, 0 , limit+1)
+	events := make([]models.Event, 0, limit+1)
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
@@ -166,35 +401,23 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	var nextCursor *utils.Cursor
 	if len(events) > limit {
 		last := events[limit-1]
-		nextCursor = &utils.Cursor{
-			CreatedAt: last.CreatedAt,
-			ID:        last.ID,
-		}
+		nextCursor = &utils.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
 		events = events[:limit]
 	}
-
 	return events, nextCursor, nil
 }
+
+// ── Happening Soon ────────────────────────────────────────────────────────────
 
 func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	args := []interface{}{models.EventPublished, time.Now()}
-	where := `
-		WHERE e.status = $1
-		AND e.start_time > $2
-	`
+	where := `WHERE e.status = $1 AND e.start_time > $2`
 
 	if cursor != nil {
-		// ASC order: next page means start_time is greater than the last seen,
-		// or equal start_time with a greater id
-		where += `
-			AND (
-				e.start_time > $3
-				OR (e.start_time = $3 AND e.id > $4)
-			)
-		`
+		where += ` AND (e.start_time > $3 OR (e.start_time = $3 AND e.id > $4))`
 		args = append(args, cursor.StartTime, cursor.ID)
 	}
 
@@ -208,8 +431,8 @@ func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
 			c.name AS category
-		FROM events e
-		JOIN categories c ON e.category_id = c.id
+		FROM   events     e
+		JOIN   categories c ON c.id = e.category_id
 		%s
 		ORDER BY e.start_time ASC, e.id ASC
 		LIMIT $%d
@@ -243,42 +466,48 @@ func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	var nextCursor *utils.Cursor
 	if len(events) > limit {
 		last := events[limit-1]
-		nextCursor = &utils.Cursor{
-			StartTime: last.StartTime,
-			ID:        last.ID,
-		}
+		nextCursor = &utils.Cursor{StartTime: last.StartTime, ID: last.ID}
 		events = events[:limit]
 	}
-
 	return events, nextCursor, nil
 }
 
+// ── This Weekend ──────────────────────────────────────────────────────────────
+// Fixed: Saturday no longer skips to the next weekend.
+//
+//	Sat → window = today..Monday midnight
+//	Sun → window = today..Monday midnight
+//	Mon-Fri → window = coming Saturday..Monday midnight
 func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	now := time.Now()
-	daysUntilSat := (6 - int(now.Weekday()) + 7) % 7
-	if daysUntilSat == 0 {
-		daysUntilSat = 7 // already Saturday — skip to next weekend
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	var weekendStart, weekendEnd time.Time
+	switch now.Weekday() {
+	case time.Saturday:
+		weekendStart = today
+		weekendEnd = today.AddDate(0, 0, 2)
+	case time.Sunday:
+		weekendStart = today
+		weekendEnd = today.AddDate(0, 0, 1)
+	default:
+		daysUntilSat := int(time.Saturday) - int(now.Weekday())
+		weekendStart = today.AddDate(0, 0, daysUntilSat)
+		weekendEnd = weekendStart.AddDate(0, 0, 2)
 	}
-	weekendStart := time.Date(now.Year(), now.Month(), now.Day()+daysUntilSat, 0, 0, 0, 0, now.Location())
-	weekendEnd := weekendStart.AddDate(0, 0, 2) // midnight Monday
 
 	args := []interface{}{models.EventPublished, weekendStart, weekendEnd}
 	where := `
-		WHERE e.status = $1
-		AND e.start_time >= $2
-		AND e.start_time <  $3
+		WHERE e.status     = $1
+		  AND e.start_time >= $2
+		  AND e.start_time <  $3
 	`
 
 	if cursor != nil {
-		where += `
-			AND (
-				e.start_time > $4
-				OR (e.start_time = $4 AND e.id > $5)
-			)
-		`
+		where += ` AND (e.start_time > $4 OR (e.start_time = $4 AND e.id > $5))`
 		args = append(args, cursor.StartTime, cursor.ID)
 	}
 
@@ -292,8 +521,8 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
 			c.name AS category
-		FROM events e
-		JOIN categories c ON e.category_id = c.id
+		FROM   events     e
+		JOIN   categories c ON c.id = e.category_id
 		%s
 		ORDER BY e.start_time ASC, e.id ASC
 		LIMIT $%d
@@ -327,13 +556,8 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 	var nextCursor *utils.Cursor
 	if len(events) > limit {
 		last := events[limit-1]
-		nextCursor = &utils.Cursor{
-			StartTime: last.StartTime,
-			ID:        last.ID,
-		}
+		nextCursor = &utils.Cursor{StartTime: last.StartTime, ID: last.ID}
 		events = events[:limit]
 	}
-
 	return events, nextCursor, nil
-} // look at this more, there might be an issue that it skips the weekend if it is a saturday
-
+}

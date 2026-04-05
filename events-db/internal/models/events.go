@@ -55,6 +55,7 @@ type Event struct {
 	TermsAndConditions *string `json:"terms_and_conditions,omitempty" db:"terms_and_conditions"`
 	Tags           TagArray   `json:"tags,omitempty"  db:"tags"`
 	Views          int        `json:"views"           db:"views"`
+	IsSponsored    bool       `json:"is_sponsored,omitempty" db:"is_sponsored"`
 	Organizer      *Organizer `json:"organizer,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"      db:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"      db:"updated_at"`
