@@ -1,37 +1,58 @@
 package cache
- 
+
 import (
 	"context"
 	"fmt"
 	"strings"
- 
-	//"github.com/redis/go-redis/v9"
+
 	"github.com/rs/zerolog/log"
 )
- 
+
 func viewKey(eventID string) string {
 	return fmt.Sprintf("views:%s", eventID)
 }
- 
+
 // IncrementView atomically increments the Redis view counter for an event.
 // Non-blocking — if Redis is unavailable, the call is silently skipped.
 func (c *EventCache) IncrementView(ctx context.Context, eventID string) {
-	if c.rdb == nil { return }
+	if c.rdb == nil {
+		return
+	}
 	if err := c.rdb.Incr(ctx, viewKey(eventID)).Err(); err != nil {
 		log.Warn().Err(err).Str("event_id", eventID).Msg("view counter incr failed")
 	}
 }
- 
-// FlushViews reads all pending view counts from Redis and returns them.
-// The caller is responsible for writing to Postgres and then the keys are deleted.
-// Returns map[eventID]count.
+
+// FlushViews reads all pending view counts from Redis and returns them as a
+// map[eventID]count. The caller is responsible for writing the totals to
+// Postgres; each key is atomically consumed via GETDEL so counts are not
+// double-counted if the server restarts mid-flush.
+//
+// FIX 1: Previously used KEYS "views:*" which blocks Redis for the entire scan
+// duration. Now uses SCAN to iterate the keyspace in non-blocking batches.
 func (c *EventCache) FlushViews(ctx context.Context) map[string]int64 {
-	keys, err := c.rdb.Keys(ctx, "views:*").Result()
-	if err != nil || len(keys) == 0 {
+	var cursor uint64
+	var allKeys []string
+
+	for {
+		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, "views:*", scanCount).Result()
+		if err != nil {
+			log.Warn().Err(err).Msg("view flush: scan error")
+			return nil
+		}
+		allKeys = append(allKeys, keys...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(allKeys) == 0 {
 		return nil
 	}
-	result := make(map[string]int64, len(keys))
-	for _, key := range keys {
+
+	result := make(map[string]int64, len(allKeys))
+	for _, key := range allKeys {
 		count, err := c.rdb.GetDel(ctx, key).Int64()
 		if err != nil {
 			log.Warn().Err(err).Str("key", key).Msg("view flush get error")

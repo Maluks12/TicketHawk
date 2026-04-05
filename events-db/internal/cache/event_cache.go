@@ -25,7 +25,12 @@ const (
 	TTLCategory      = 60 * time.Second
 	TTLMerchPreview  = 300 * time.Second
 	TTLMerchFull     = 300 * time.Second
-	TTLMerchItem     = 300 * time.Second // ← added
+	TTLMerchItem     = 300 * time.Second
+
+	// scanCount is the COUNT hint passed to Redis SCAN per iteration.
+	// Redis treats this as a hint, not a guarantee, but 100 is a reasonable
+	// batch size that avoids both tiny round-trips and large blocking scans.
+	scanCount = 100
 )
 
 type EventCache struct {
@@ -49,7 +54,7 @@ func keyCategory(categoryID, limit int) string {
 }
 func keyMerchPreview(eventID string) string { return fmt.Sprintf("merch:%s:preview", eventID) }
 func keyMerchFull(eventID string) string    { return fmt.Sprintf("merch:%s:full", eventID) }
-func keyMerchItem(merchID string) string    { return fmt.Sprintf("merch:item:%s", merchID) } // ← added
+func keyMerchItem(merchID string) string    { return fmt.Sprintf("merch:item:%s", merchID) }
 
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
@@ -88,12 +93,40 @@ func (c *EventCache) del(ctx context.Context, keys ...string) {
 	}
 }
 
+// FIX 1: delPattern uses SCAN instead of KEYS so it never blocks Redis.
+//
+// KEYS runs in O(N) against the entire keyspace in a single synchronous call —
+// on a large dataset this stalls every other Redis client for the duration.
+// SCAN iterates in O(1) batches and interleaves safely with other commands.
 func (c *EventCache) delPattern(ctx context.Context, pattern string) {
-	keys, err := c.rdb.Keys(ctx, pattern).Result()
-	if err != nil || len(keys) == 0 {
+	var cursor uint64
+	var toDelete []string
+
+	for {
+		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
+		if err != nil {
+			log.Warn().Err(err).Str("pattern", pattern).Msg("cache scan error")
+			return
+		}
+		toDelete = append(toDelete, keys...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	if len(toDelete) == 0 {
 		return
 	}
-	c.del(ctx, keys...)
+
+	// Pipeline the DEL calls in one round-trip to avoid N separate commands.
+	pipe := c.rdb.Pipeline()
+	for _, k := range toDelete {
+		pipe.Del(ctx, k)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Warn().Err(err).Str("pattern", pattern).Msg("cache pipeline del error")
+	}
 }
 
 // ── EventPage — shared type for paginated event lists ─────────────────────────
@@ -182,7 +215,7 @@ func (c *EventCache) SetMerchFull(ctx context.Context, eventID string, items []m
 	c.set(ctx, keyMerchFull(eventID), items, TTLMerchFull)
 }
 
-// ── Merch single item ─────────────────────────────────────────────────────────  ← added block
+// ── Merch single item ─────────────────────────────────────────────────────────
 
 func (c *EventCache) GetMerchItem(ctx context.Context, merchID string) (*models.MerchandiseDetail, bool) {
 	var item models.MerchandiseDetail
@@ -194,41 +227,40 @@ func (c *EventCache) SetMerchItem(ctx context.Context, merchID string, item *mod
 
 // ── Bust helpers ──────────────────────────────────────────────────────────────
 
-// BustOnPublish — call when a new event is published
+// FIX 2: Bust helpers now use delPattern with wildcards instead of hardcoding
+// specific limit values (previously only l10 and l20 were deleted, so a client
+// that requested limit=30 would keep receiving a stale cached page). delPattern
+// is now safe to call frequently because it uses SCAN, not KEYS.
+
+// BustOnPublish — call when a new event is published.
 func (c *EventCache) BustOnPublish(ctx context.Context) {
-	c.del(ctx,
-		keyHome(),
-		keyTrending(10), keyTrending(20),
-		keyHappeningSoon(10), keyHappeningSoon(20),
-		keyRecentlyAdded(10), keyRecentlyAdded(20),
-		keyThisWeekend(10), keyThisWeekend(20),
-	)
+	c.del(ctx, keyHome())
+	c.delPattern(ctx, "events:trending:*")
+	c.delPattern(ctx, "events:happening_soon:*")
+	c.delPattern(ctx, "events:recently_added:*")
+	c.delPattern(ctx, "events:this_weekend:*")
 }
 
-// BustOnFeaturedChange — call when is_featured changes
+// BustOnFeaturedChange — call when is_featured changes.
 func (c *EventCache) BustOnFeaturedChange(ctx context.Context) {
-	c.del(ctx,
-		keyHome(),
-		keyFeatured(10), keyFeatured(20),
-	)
+	c.del(ctx, keyHome())
+	c.delPattern(ctx, "events:featured:*")
 }
 
-// BustOnTicketSale — call when tickets_sold changes (booking confirmed)
+// BustOnTicketSale — call when tickets_sold changes (booking confirmed).
 func (c *EventCache) BustOnTicketSale(ctx context.Context) {
-	c.del(ctx,
-		keyHome(),
-		keyTrending(10), keyTrending(20),
-	)
+	c.del(ctx, keyHome())
+	c.delPattern(ctx, "events:trending:*")
 }
 
-// BustOnEventUpdate — call when an event is updated (catches all cases)
+// BustOnEventUpdate — call when an event is updated (catches all cases).
 func (c *EventCache) BustOnEventUpdate(ctx context.Context) {
 	c.del(ctx, keyHome())
 	c.delPattern(ctx, "events:*")
 }
 
 // BustMerch — call when merch or a variant is created/updated for an event.
-// Pass optional merchIDs to also bust individual item caches.         ← updated
+// Pass optional merchIDs to also bust individual item caches.
 func (c *EventCache) BustMerch(ctx context.Context, eventID string, merchIDs ...string) {
 	keys := []string{
 		keyMerchPreview(eventID),
