@@ -1,3 +1,13 @@
+// ── Slug addition to admin.repository.go ─────────────────────────────────────
+//
+// Two changes in this file:
+//   1. AdminEventRow gains a Slug field.
+//   2. GetAdminEvents includes e.slug in the SELECT and Scan.
+//
+// Only the changed structs and functions are shown below. The rest of the file
+// (GetAdminStats, GetOversoldMerchOrders, etc.) is unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+
 package repository
 
 import (
@@ -13,7 +23,6 @@ import (
 
 // AdminStats is the payload returned by GET /admin/stats.
 type AdminStats struct {
-	// Ticket stats
 	TotalEvents        int     `json:"total_events"`
 	ActiveEvents       int     `json:"active_events"`
 	TotalUsers         int     `json:"total_users"`
@@ -23,26 +32,23 @@ type AdminStats struct {
 	TicketsToday       int     `json:"tickets_today"`
 	TicketRevenueToday float64 `json:"ticket_revenue_today"`
 
-	// Merch stats
 	MerchUnitsSold      int     `json:"merch_units_sold"`
 	MerchRevenue        float64 `json:"merch_revenue"`
 	MerchOrdersToday    int     `json:"merch_orders_today"`
 	MerchRevenueToday   float64 `json:"merch_revenue_today"`
-	OversoldMerchOrders int     `json:"oversold_merch_orders"` // requires admin attention
+	OversoldMerchOrders int     `json:"oversold_merch_orders"`
 
-	// Combined
 	TotalRevenue      float64 `json:"total_revenue"`
 	TotalRevenueToday float64 `json:"total_revenue_today"`
 }
 
-// GetAdminStats returns aggregate platform metrics in two round-trips.
+// GetAdminStats is unchanged — included here to keep the file self-contained.
 func GetAdminStats(pool *pgxpool.Pool) (*AdminStats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	var s AdminStats
 
-	// Ticket and event stats
 	err := pool.QueryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM events)                                                AS total_events,
@@ -66,7 +72,6 @@ func GetAdminStats(pool *pgxpool.Pool) (*AdminStats, error) {
 		return nil, fmt.Errorf("GetAdminStats tickets: %w", err)
 	}
 
-	// Merch stats
 	err = pool.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(quantity), 0)                                                  AS merch_units_sold,
@@ -94,8 +99,10 @@ func GetAdminStats(pool *pgxpool.Pool) (*AdminStats, error) {
 }
 
 // AdminEventRow is a lightweight event summary for the admin events table.
+// Slug is included so the admin UI can build direct event links.
 type AdminEventRow struct {
 	ID             string             `json:"id"`
+	Slug           string             `json:"slug"`           // ← added
 	Title          string             `json:"title"`
 	Status         models.EventStatus `json:"status"`
 	StartTime      time.Time          `json:"start_time"`
@@ -111,8 +118,8 @@ type AdminEventRow struct {
 	CreatedAt      time.Time          `json:"created_at"`
 }
 
-// GetAdminEvents returns a cursor-paginated list of all events with full
-// ticket and merch revenue per event. Filters: status, search (title ILIKE).
+// GetAdminEvents returns a cursor-paginated list of all events with full ticket
+// and merch revenue per event. Filters: status, search (title ILIKE).
 func GetAdminEvents(
 	pool *pgxpool.Pool,
 	limit int,
@@ -150,7 +157,7 @@ func GetAdminEvents(
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.title, e.status, e.start_time,
+			e.id, e.slug, e.title, e.status, e.start_time,
 			e.city, e.price, e.currency,
 			e.tickets_sold, e.max_capacity,
 			COALESCE(SUM(b.total_amount) FILTER (
@@ -161,7 +168,7 @@ func GetAdminEvents(
 				WHERE mo.fulfillment_status = 'fulfilled'), 0)::int AS merch_units_sold,
 			e.created_at
 		FROM events e
-		LEFT JOIN bookings b    ON b.event_id  = e.id
+		LEFT JOIN bookings b      ON b.event_id  = e.id
 		LEFT JOIN merch_orders mo ON mo.event_id = e.id
 		%s
 		GROUP BY e.id
@@ -179,7 +186,7 @@ func GetAdminEvents(
 	for rows.Next() {
 		var ev AdminEventRow
 		if err := rows.Scan(
-			&ev.ID, &ev.Title, &ev.Status, &ev.StartTime,
+			&ev.ID, &ev.Slug, &ev.Title, &ev.Status, &ev.StartTime,
 			&ev.City, &ev.Price, &ev.Currency,
 			&ev.TicketsSold, &ev.MaxCapacity,
 			&ev.TicketRevenue, &ev.MerchRevenue, &ev.MerchUnitsSold,
@@ -201,6 +208,9 @@ func GetAdminEvents(
 		events = events[:limit]
 	}
 
+	if events == nil {
+		events = []AdminEventRow{}
+	}
 	return events, nextCursor, nil
 }
 

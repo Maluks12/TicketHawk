@@ -21,9 +21,6 @@ func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		userID, _ := c.Get("user_id")
 		roleVal, _ := c.Get("role")
 
-		// c.Set stores role as string (set by AuthMiddleware via JWT claims).
-		// Must cast to string before comparing against typed UserRole constants —
-		// interface{} != models.UserRole even when the underlying values are equal.
 		role, _ := roleVal.(string)
 		if role != string(models.RoleOrganizer) && role != string(models.RoleAdmin) {
 			c.JSON(http.StatusForbidden, gin.H{
@@ -34,7 +31,6 @@ func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		}
 
 		var dto models.CreateEventDTO
-
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":   "Validation failed",
@@ -141,7 +137,6 @@ func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		eventID := c.Param("id")
 
 		var dto models.UpdateEventDTO
-
 		if err := c.ShouldBindJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":   "Validation failed",
@@ -192,6 +187,40 @@ func GetEventByIDHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
+		}
+
+		c.JSON(http.StatusOK, event)
+	}
+}
+
+// GetEventBySlugHandler fetches a single published event by its URL slug.
+//
+//	GET /events/:slug
+//
+// This is the primary lookup path for the public-facing event detail page.
+// The slug is more stable than a UUID for sharing links because it is readable
+// and survives copy-paste. The response is identical to GetEventByIDHandlers so
+// frontend clients can use either interchangeably.
+func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slug := c.Param("slug")
+
+		if slug == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
+			return
+		}
+
+		event, err := repository.GetEventBySlug(pool, slug)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+
+		// Increment view count — same behaviour as the UUID lookup.
+		if ec != nil {
+			ec.IncrementView(c.Request.Context(), event.ID)
+		} else {
+			_ = repository.IncrementViews(pool, event.ID)
 		}
 
 		c.JSON(http.StatusOK, event)
@@ -444,9 +473,7 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		if query == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "search query is required",
-			})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "search query is required"})
 			return
 		}
 
@@ -455,9 +482,7 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			var err error
 			cursor, err = utils.DecodeCursor(cursorStr)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "invalid cursor",
-				})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cursor"})
 				return
 			}
 		}
@@ -483,7 +508,6 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 		var input struct {
 			Reason string `json:"reason" binding:"required,min=10"`
 		}
-
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Cancellation reason required"})
 			return

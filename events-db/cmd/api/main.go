@@ -240,6 +240,7 @@ func main() {
 		public.GET("/active", handlers.ActiveEventsHandlers(pool, eventCache))
 		public.GET("/search", handlers.SearchEventsHandler(pool))
 		public.GET("/category/:id", handlers.GetEventCategory(pool, eventCache))
+		public.GET("/:slug", handlers.GetEventBySlugHandler(pool, eventCache))
 	}
 
 	// ==========================================
