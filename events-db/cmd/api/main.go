@@ -389,6 +389,16 @@ func main() {
 		orgMerch.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
 		orgMerch.PATCH("/campaigns/:id", handlers.UpdateCampaignHandler(pool))
 		orgMerch.DELETE("/campaigns/:id", handlers.EndCampaignHandler(pool))
+	
+		// ── Organiser dashboard ────────────────────────────────────────────
+		// Overview + per-event revenue, bookings, and merch sales.
+		// All queries are scoped to events owned by the requesting organiser.
+		orgMerch.GET("/dashboard/stats",               handlers.GetOrganizerDashboardStatsHandler(pool))
+		orgMerch.GET("/dashboard/events",              handlers.GetOrganizerDashboardEventsHandler(pool))
+		orgMerch.GET("/dashboard/events/:id/stats",    handlers.GetOrganizerEventStatsHandler(pool))
+		orgMerch.GET("/dashboard/events/:id/bookings", handlers.GetOrganizerEventBookingsHandler(pool))
+		orgMerch.GET("/dashboard/events/:id/merch",    handlers.GetOrganizerEventMerchHandler(pool))
+		orgMerch.GET("/dashboard/payouts",             handlers.GetOrganizerPayoutSummaryHandler(pool))
 	}
 
 	// ==========================================

@@ -114,9 +114,16 @@ func GetFollowedEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		var encodedCursor interface{}
+		if nextCursor != nil {
+			encodedCursor = utils.EncodeCursor(nextCursor)
+		} else {
+			encodedCursor = nil
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"data":        events,
-			"next_cursor": utils.EncodeCursor(nextCursor),
+			"next_cursor": encodedCursor,
 		})
 	}
 }
