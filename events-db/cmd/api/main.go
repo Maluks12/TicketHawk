@@ -241,12 +241,26 @@ func main() {
 		public.GET("/active", handlers.ActiveEventsHandlers(pool, eventCache))
 		public.GET("/search", handlers.SearchEventsHandler(pool))
 		public.GET("/category/:id", handlers.GetEventCategory(pool, eventCache))
+		public.GET("/filter",            handlers.FilterEventsHandler(pool))
 		// Merch routes — same middleware, now in the same group
 		public.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 		// This must be last — :slug is a catch-all
 		public.GET("/:slug", handlers.GetEventBySlugHandler(pool, eventCache))
 	}
+
+	// ==========================================
+    // City Lookup (for location picker)
+    // ==========================================
+    cities := router.Group("/cities")
+    if rateLimitManager != nil {
+        cities.Use(middleware.RateLimitByIP(rateLimitManager,
+            ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+            "cities"))
+    }
+    {
+        cities.GET("", handlers.CitiesHandler(pool))
+    }
 
 	// ==========================================
 	// Single Merch Item Route
