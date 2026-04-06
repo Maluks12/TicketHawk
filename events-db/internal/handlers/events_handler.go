@@ -19,16 +19,6 @@ import (
 func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
-		roleVal, _ := c.Get("role")
-
-		role, _ := roleVal.(string)
-		if role != string(models.RoleOrganizer) && role != string(models.RoleAdmin) {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Only organizers can create events",
-				"note":  "Apply to become an organizer at /api/v1/user/apply-organizer",
-			})
-			return
-		}
 
 		var dto models.CreateEventDTO
 		if err := c.ShouldBindJSON(&dto); err != nil {
@@ -163,34 +153,39 @@ func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 }
 
 func GetEventByIDHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		eventID := c.Param("id")
+    return func(c *gin.Context) {
+        eventID := c.Param("id")
 
-		if _, err := uuid.Parse(eventID); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
-			return
-		}
+        if _, err := uuid.Parse(eventID); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
+            return
+        }
 
-		var userID *string
-		if uid, exists := c.Get("user_id"); exists {
-			uidStr := uid.(string)
-			userID = &uidStr
-		}
+        var userID *string
+        if uid, exists := c.Get("user_id"); exists {
+            uidStr := uid.(string)
+            userID = &uidStr
+        }
 
-		if ec != nil {
-			ec.IncrementView(c.Request.Context(), eventID)
-		} else {
-			_ = repository.IncrementViews(pool, eventID)
-		}
+        if ec != nil {
+            ec.IncrementView(c.Request.Context(), eventID)
+        } else {
+            _ = repository.IncrementViews(pool, eventID)
+        }
 
-		event, err := repository.GetEventByID(pool, eventID, userID)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
-			return
-		}
+        event, err := repository.GetEventByID(pool, eventID, userID)
+        if err != nil {
+            // Fix 6: use errors.Is so a real DB error returns 500, not 404
+            if errors.Is(err, repository.ErrEventNotFound) {
+                c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+                return
+            }
+            utils.InternalError(c, err, "failed to fetch event")
+            return
+        }
 
-		c.JSON(http.StatusOK, event)
-	}
+        c.JSON(http.StatusOK, event)
+    }
 }
 
 // GetEventBySlugHandler fetches a single published event by its URL slug.

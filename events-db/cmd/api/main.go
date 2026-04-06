@@ -226,6 +226,7 @@ func main() {
 	// ==========================================
 	// Public Event Routes
 	// ==========================================
+	
 	public := router.Group("/events")
 	public.Use(middleware.OptionalAuth(cfg))
 	if rateLimitManager != nil {
@@ -240,22 +241,11 @@ func main() {
 		public.GET("/active", handlers.ActiveEventsHandlers(pool, eventCache))
 		public.GET("/search", handlers.SearchEventsHandler(pool))
 		public.GET("/category/:id", handlers.GetEventCategory(pool, eventCache))
+		// Merch routes — same middleware, now in the same group
+		public.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
+		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
+		// This must be last — :slug is a catch-all
 		public.GET("/:slug", handlers.GetEventBySlugHandler(pool, eventCache))
-	}
-
-	// ==========================================
-	// Public Merch Routes
-	// ==========================================
-	merch := router.Group("/events")
-	merch.Use(middleware.OptionalAuth(cfg))
-	if rateLimitManager != nil {
-		merch.Use(middleware.RateLimitByUser(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 200, RefillRate: 5.0, TTL: 15 * time.Minute},
-			"merch-public"))
-	}
-	{
-		merch.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
-		merch.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 	}
 
 	// ==========================================
@@ -421,6 +411,7 @@ func main() {
 	// ==========================================
 	media := router.Group("/organiser/events/:id/media")
 	media.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	media.Use(middleware.ExtendWriteTimeout(5 * time.Minute))
 	if rateLimitManager != nil {
 		media.Use(middleware.RateLimitByUser(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
@@ -445,7 +436,7 @@ func main() {
 			"bookings"))
 	}
 	{
-		bookings.POST("", handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService))
+		bookings.POST("", handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
 		bookings.GET("", handlers.GetUserBookingsHandler(bookingRepo))
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
 		bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
@@ -512,7 +503,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 5 * time.Minute,
+		WriteTimeout: 30 * time.Second, // was 5 * time.Minute — too long for non-upload routes
 		IdleTimeout:  60 * time.Second,
 	}
 

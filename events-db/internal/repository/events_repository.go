@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -461,10 +462,10 @@ func UpdateEvents(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO
 // published events are returned; when set, drafts owned by that user are also
 // visible (supporting the organiser preview flow).
 func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*models.Event, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
 
-	query := `
+    query := `
         SELECT
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.expires_at, e.timezone,
@@ -479,32 +480,37 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
         WHERE e.id = $1
     `
 
-	args := []interface{}{id}
-	if requestingUserID == nil {
-		query += ` AND e.status = $2`
-		args = append(args, models.EventPublished)
-	} else {
-		query += ` AND (e.status = $2 OR e.organizer_id = $3)`
-		args = append(args, models.EventPublished, *requestingUserID)
-	}
+    args := []interface{}{id}
+    if requestingUserID == nil {
+        query += ` AND e.status = $2`
+        args = append(args, models.EventPublished)
+    } else {
+        query += ` AND (e.status = $2 OR e.organizer_id = $3)`
+        args = append(args, models.EventPublished, *requestingUserID)
+    }
 
-	var event models.Event
-	err := pool.QueryRow(ctx, query, args...).Scan(
-		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
-		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
-		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
-		&event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
-		&event.AllowWaitlist, &event.IsFeatured, &event.FeaturedUntil, &event.Status,
-		&event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
-		&event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
-		&event.Category,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get event: %w", err)
-	}
+    var event models.Event
+    err := pool.QueryRow(ctx, query, args...).Scan(
+        &event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
+        &event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
+        &event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
+        &event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
+        &event.AllowWaitlist, &event.IsFeatured, &event.FeaturedUntil, &event.Status,
+        &event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
+        &event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
+        &event.Category,
+    )
+    if err != nil {
+        // Fix 6: distinguish a missing row from a genuine DB failure so callers
+        // can return 404 vs 500 correctly.
+        if errors.Is(err, pgx.ErrNoRows) {
+            return nil, ErrEventNotFound
+        }
+        return nil, fmt.Errorf("failed to get event: %w", err)
+    }
 
-	event.ComputeAvailableTickets()
-	return &event, nil
+    event.ComputeAvailableTickets()
+    return &event, nil
 }
 
 // GetEventBySlug fetches a published event by its URL slug. This is the primary

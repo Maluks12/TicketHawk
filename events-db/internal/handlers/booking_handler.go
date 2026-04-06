@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"events-db/internal/config"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
@@ -19,10 +20,12 @@ import (
 // intent for it. Accepts repository interfaces so the handler is unit-testable
 // without a live database.
 func CreateBookingHandler(
-	bookings repository.BookingQuerier,
-	events repository.EventQuerier,
-	paymentService *services.PaymentService,
+    bookings repository.BookingQuerier,
+    events repository.EventQuerier,
+    paymentService *services.PaymentService,
+    cfg *config.Config,
 ) gin.HandlerFunc {
+    expiryDuration := time.Duration(cfg.BookingExpiryMinutes) * time.Minute
 	return func(c *gin.Context) {
 		userID, exists := c.Get("user_id")
 		if !exists {
@@ -75,14 +78,14 @@ func CreateBookingHandler(
 		}
 
 		c.JSON(http.StatusCreated, models.BookingResponse{
-			BookingID:        booking.ID,
-			BookingNumber:    booking.BookingNumber,
-			TotalAmount:      booking.TotalAmount,
-			Currency:         booking.Currency,
-			ClientToken:      clientToken,
-			PaymentRequestID: paymentRequestID,
-			ExpiresAt:        booking.CreatedAt.Add(15 * time.Minute),
-		})
+            BookingID:        booking.ID,
+            BookingNumber:    booking.BookingNumber,
+            TotalAmount:      booking.TotalAmount,
+            Currency:         booking.Currency,
+            ClientToken:      clientToken,
+            PaymentRequestID: paymentRequestID,
+            ExpiresAt:        booking.CreatedAt.Add(expiryDuration), // Fix 3
+        })
 	}
 }
 

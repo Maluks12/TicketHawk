@@ -243,3 +243,17 @@ func CleanupStaleCarts(pool *pgxpool.Pool, ttl time.Duration) error {
   _, err := pool.Exec(ctx, query, ttl.String())
   return err
 }
+
+func SumCartTotal(pool *pgxpool.Pool, cartID string) (float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var total float64
+	err := pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(unit_price_snapshot * quantity), 0)
+		 FROM cart_items
+		 WHERE cart_id = $1`,
+		cartID,
+	).Scan(&total)
+	return total, err
+}

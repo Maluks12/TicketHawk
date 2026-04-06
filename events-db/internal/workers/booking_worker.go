@@ -54,7 +54,7 @@ func StartBookingWorker(
 	qrSvc := services.NewQRService(pool, cfg)
 
 	// Drain any retries that survived a previous crash before accepting new jobs.
-	drainEmailRetries(ctx, pool, emailSvc, qrSvc)
+	drainEmailRetries(ctx, pool, emailSvc)
 
 	// Periodic retry drain — runs every 5 minutes while the server is up.
 	go func() {
@@ -63,7 +63,7 @@ func StartBookingWorker(
 		for {
 			select {
 			case <-ticker.C:
-				drainEmailRetries(ctx, pool, emailSvc, qrSvc)
+				drainEmailRetries(ctx, pool, emailSvc)
 			case <-ctx.Done():
 				return
 			}
@@ -218,7 +218,7 @@ func drainEmailRetries(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	emailSvc *services.EmailService,
-	qrSvc *services.QRService,
+
 ) {
 	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -260,7 +260,7 @@ func drainEmailRetries(
 	log.Info().Int("count", len(pending)).Msg("booking worker: draining email retry queue")
 
 	for _, r := range pending {
-		if err := retryEmailSend(ctx, pool, emailSvc, qrSvc, r.id, r.bookingID, r.attempts); err != nil {
+		if err := retryEmailSend(ctx, pool, emailSvc, r.id, r.bookingID, r.attempts); err != nil {
 			log.Error().Err(err).
 				Str("retry_id", r.id).
 				Str("booking_id", r.bookingID).
@@ -274,7 +274,6 @@ func retryEmailSend(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	emailSvc *services.EmailService,
-	qrSvc *services.QRService,
 	retryID, bookingID string,
 	attempts int,
 ) error {

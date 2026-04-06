@@ -1,17 +1,16 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
 	"events-db/internal/utils"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // CheckoutBeginHandler creates ticket reservations for every ticket item in
@@ -48,8 +47,6 @@ func CheckoutBeginHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		// Collect all unique event IDs and fetch their titles in one query
-		// instead of calling GetEventByID once per reservation (N+1).
 		eventIDs := make([]string, 0, len(reservations))
 		seen := make(map[string]bool)
 		for _, r := range reservations {
@@ -64,7 +61,6 @@ func CheckoutBeginHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		// Build response using the pre-fetched title map.
 		shortest := 600
 		summaries := make([]models.ReservationSummary, 0, len(reservations))
 		for _, r := range reservations {
@@ -75,15 +71,14 @@ func CheckoutBeginHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			summaries = append(summaries, models.ReservationSummary{
 				ReservationID: r.ID,
 				EventID:       r.EventID,
-				EventTitle:    eventTitles[r.EventID], // "" if not found — safe default
+				EventTitle:    eventTitles[r.EventID],
 				Quantity:      r.Quantity,
 				SecondsLeft:   secs,
 			})
 		}
 
-		// Compute cart total from a single query rather than re-fetching the
-		// entire cart object (which was an unnecessary second round-trip).
-		cartTotal, err := sumCartTotal(pool, cart.ID)
+		// Fix 1: use repository.SumCartTotal instead of inline SQL
+		cartTotal, err := repository.SumCartTotal(pool, cart.ID)
 		if err != nil {
 			utils.InternalError(c, err, "failed to compute cart total")
 			return
@@ -131,23 +126,16 @@ func CheckoutAbandonHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"released": false})
 			return
 		}
-		repository.AbandonReservations(pool, cart.ID)
+		// Fix 4: log instead of silently dropping the error
+		if err := repository.AbandonReservations(pool, cart.ID); err != nil {
+			log.Warn().Err(err).Str("cart_id", cart.ID).Msg("checkout: failed to abandon reservations")
+		}
 		c.JSON(http.StatusOK, gin.H{"released": true})
 	}
 }
 
 // CheckoutConfirmHandler converts all active ticket reservations into real pending
 // booking rows, then creates a single Stitch payment intent for the full cart total.
-//
-// Flow:
-//  1. Verify active reservations exist.
-//  2. Call ConvertReservationsToBookings — each reservation becomes a real booking
-//     row (status=pending), capacity moves from reserved_count → tickets_sold.
-//  3. Create one Stitch payment intent for the combined total, linked to the
-//     primary (first) booking AND to the cart_id so the webhook can confirm
-//     every booking when payment completes.
-//
-// This replaces the old per-booking CreateStitchPayment flow for cart checkouts.
 func CheckoutConfirmHandler(pool *pgxpool.Pool, paymentSvc *services.PaymentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cart, err := cartOwner(c, pool)
@@ -156,7 +144,6 @@ func CheckoutConfirmHandler(pool *pgxpool.Pool, paymentSvc *services.PaymentServ
 			return
 		}
 
-		// Resolve user/session for booking creation
 		var userID *string
 		var sessionID *string
 		if uid, ok := c.Get("user_id"); ok {
@@ -169,34 +156,27 @@ func CheckoutConfirmHandler(pool *pgxpool.Pool, paymentSvc *services.PaymentServ
 			}
 		}
 
-		// Verify at least one active reservation exists before touching bookings
 		reservations, err := repository.GetReservationsByCart(pool, cart.ID)
 		if err != nil || len(reservations) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no active reservations — please restart checkout"})
 			return
 		}
 
-		// Convert every reservation into a real pending booking row.
-		// This atomically: creates booking rows, moves reserved_count → tickets_sold,
-		// and deletes the reservation rows.
 		bookingIDs, err := repository.ConvertReservationsToBookings(pool, cart.ID, userID, sessionID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert reservations to bookings"})
 			return
 		}
 
-		// Fetch the primary booking to pass to the payment service
 		primaryBooking, err := repository.GetBookingByID(pool, bookingIDs[0])
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch primary booking"})
 			return
 		}
 
-		// Compute the full cart total with a single SUM query rather than
-		// fetching each booking individually in a loop (N+1).
-		cartTotal, err := sumCartTotal(pool, cart.ID)
+		// Fix 1: use repository.SumCartTotal instead of inline SQL
+		cartTotal, err := repository.SumCartTotal(pool, cart.ID)
 		if err != nil || cartTotal == 0 {
-			// Fallback: sum directly from the newly created bookings in one query.
 			cartTotal, err = repository.SumBookingTotalsByIDs(pool, bookingIDs)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute cart total"})
@@ -205,15 +185,9 @@ func CheckoutConfirmHandler(pool *pgxpool.Pool, paymentSvc *services.PaymentServ
 		}
 
 		currency := primaryBooking.Currency
-
-		// Override the primary booking's TotalAmount with the full cart total so
-		// Stitch receives the correct combined amount.
 		primaryBooking.TotalAmount = cartTotal
 		primaryBooking.Currency = currency
 
-		// Create one Stitch payment intent covering the entire cart.
-		// The payment record is linked to the primary booking AND to cart_id so
-		// the webhook can confirm ALL bookings when payment completes.
 		clientToken, paymentRequestID, err := paymentSvc.CreateCartPaymentIntent(
 			primaryBooking, cart.ID, cartTotal,
 		)
@@ -227,24 +201,8 @@ func CheckoutConfirmHandler(pool *pgxpool.Pool, paymentSvc *services.PaymentServ
 			"payment_request_id": paymentRequestID,
 			"total_amount":       cartTotal,
 			"currency":           currency,
-			"booking_ids":        bookingIDs, // all bookings covered by this payment
+			"booking_ids":        bookingIDs,
 			"primary_booking_id": bookingIDs[0],
 		})
 	}
-}
-
-// sumCartTotal returns the sum of (unit_price_snapshot * quantity) for all
-// items in the given cart. Uses a single aggregation query — no loop needed.
-func sumCartTotal(pool *pgxpool.Pool, cartID string) (float64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var total float64
-	err := pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(unit_price_snapshot * quantity), 0)
-		 FROM cart_items
-		 WHERE cart_id = $1`,
-		cartID,
-	).Scan(&total)
-	return total, err
 }

@@ -4,37 +4,41 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	DatabaseURL string
-	Port        string
-	JWTSecret   string
-	RedisAddr   string
+    DatabaseURL string
+    Port        string
+    JWTSecret   string
+    RedisAddr   string
 
-	SendGridAPIKey   string
-	EmailFromAddress string
-	EmailFromName    string
+    SendGridAPIKey   string
+    EmailFromAddress string
+    EmailFromName    string
 
-	QREncryptionKey string
+    QREncryptionKey string
 
-	R2AccountID string
-	R2AccessKey string
-	R2SecretKey string
-	R2Bucket    string
-	R2URL       string
+    R2AccountID string
+    R2AccessKey string
+    R2SecretKey string
+    R2Bucket    string
+    R2URL       string
 
-	FrontendURL string
+    FrontendURL string
 
-	EnableEmailVerification bool
-	EnableWaitlist          bool
+    EnableEmailVerification bool
+    EnableWaitlist          bool
 
-	StitchClientID      string
-	StitchClientSecret  string
-	StitchWebhookSecret string
-	StitchEnvironment   string
+    StitchClientID      string
+    StitchClientSecret  string
+    StitchWebhookSecret string
+    StitchEnvironment   string
+
+    // Fix 3: booking expiry window — defaults to 15 minutes
+    BookingExpiryMinutes int
 }
 
 func Load() (*Config, error) {
@@ -83,6 +87,13 @@ func Load() (*Config, error) {
 	}
 	if cfg.StitchEnvironment == "" {
 		cfg.StitchEnvironment = "sandbox"
+	}
+
+	cfg.BookingExpiryMinutes = 15
+	if raw := os.Getenv("BOOKING_EXPIRY_MINUTES"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			cfg.BookingExpiryMinutes = parsed
+		}
 	}
 
 	return cfg, nil
