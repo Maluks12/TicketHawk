@@ -20,7 +20,7 @@ var ErrEventSoldOut = errors.New("event is sold out")
 
 type OrganizerEventSummary struct {
 	ID          string    `json:"id"`
-	Slug        string    `json:"slug"`
+	Slug        string    `json:"slug,omitempty"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	StartTime   time.Time `json:"start_time"`
@@ -890,7 +890,7 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
 
 	querySQL := fmt.Sprintf(`
         SELECT
-            e.id, e.slug, e.title, e.description, e.cover_image_url,
+            e.id, COALESCE(e.slug, '') AS slug, e.title, e.description, e.cover_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, c.name as category
         FROM events e
@@ -962,8 +962,8 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 	defer cancel()
 
 	const baseQuery = `
-		SELECT id, slug, title, description, start_time, status, tickets_sold,
-		       max_capacity, price, currency, created_at
+		SELECT id, COALESCE(slug, '') AS slug, title, description, start_time, status, tickets_sold,
+       		max_capacity, price, currency, created_at
 		FROM events
 		WHERE organizer_id = $1
 	`

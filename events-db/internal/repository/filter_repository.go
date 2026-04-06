@@ -124,8 +124,6 @@ func FilterEvents(
 
 	case "custom":
 		if f.DateFrom != nil && f.DateTo != nil {
-			// Extend DateTo to end of day so events starting at any time on
-			// the to-date are included.
 			dateToEndOfDay := time.Date(
 				f.DateTo.Year(), f.DateTo.Month(), f.DateTo.Day(),
 				23, 59, 59, 0, f.DateTo.Location(),
@@ -137,17 +135,18 @@ func FilterEvents(
 				fmt.Sprintf("e.start_time >= $%d AND e.start_time <= $%d", fromIdx, toIdx),
 			)
 		}
-		// If custom but dates are missing, fall through to "any" (no constraint).
 	}
 
 	// ── Cursor ────────────────────────────────────────────────────────────────
+	// ORDER BY is ASC so the next page needs rows strictly greater than the
+	// last item on the current page — use > not <.
 
 	if cursor != nil {
 		args = append(args, cursor.StartTime, cursor.ID)
 		startIdx := len(args) - 1
 		idIdx := len(args)
 		clauses = append(clauses, fmt.Sprintf(
-			"(e.start_time < $%d OR (e.start_time = $%d AND e.id < $%d))",
+			"(e.start_time > $%d OR (e.start_time = $%d AND e.id > $%d))",
 			startIdx, startIdx, idIdx,
 		))
 	}
@@ -159,7 +158,7 @@ func FilterEvents(
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.slug, e.title, e.description, e.cover_image_url,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description, e.cover_image_url,
 			e.start_time, e.end_time, e.price, e.currency,
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
@@ -217,14 +216,13 @@ func GetCitiesWithEvents(pool *pgxpool.Pool, search string) ([]CityResult, error
 	defer cancel()
 
 	args := []interface{}{models.EventPublished, time.Now()}
-	havingSearch := ""
+	whereSearch := ""
 
 	if search != "" {
 		args = append(args, "%"+search+"%")
-		havingSearch = fmt.Sprintf("AND city ILIKE $%d", len(args))
+		whereSearch = fmt.Sprintf("AND city ILIKE $%d", len(args))
 	}
 
-	// Pull cities with live event counts from the DB first.
 	query := fmt.Sprintf(`
 		SELECT city, COUNT(*) AS event_count
 		FROM events
@@ -232,11 +230,11 @@ func GetCitiesWithEvents(pool *pgxpool.Pool, search string) ([]CityResult, error
 		  AND start_time > $2
 		  AND city IS NOT NULL
 		  AND city <> ''
+		  %s
 		GROUP BY city
-		%s
 		ORDER BY event_count DESC, city ASC
 		LIMIT 50
-	`, havingSearch)
+	`, whereSearch)
 
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
@@ -259,8 +257,6 @@ func GetCitiesWithEvents(pool *pgxpool.Pool, search string) ([]CityResult, error
 		return nil, err
 	}
 
-	// Append well-known SA cities that have no current events so users can
-	// still pick them in the location picker. These sort after DB results.
 	for _, city := range southAfricanCities {
 		if search != "" && !strings.Contains(strings.ToLower(city), strings.ToLower(search)) {
 			continue

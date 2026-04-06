@@ -102,7 +102,7 @@ func GetAdminStats(pool *pgxpool.Pool) (*AdminStats, error) {
 // Slug is included so the admin UI can build direct event links.
 type AdminEventRow struct {
 	ID             string             `json:"id"`
-	Slug           string             `json:"slug"`           // ← added
+	Slug           string             `json:"slug,omitempty"`           // ← added
 	Title          string             `json:"title"`
 	Status         models.EventStatus `json:"status"`
 	StartTime      time.Time          `json:"start_time"`
@@ -157,7 +157,7 @@ func GetAdminEvents(
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.slug, e.title, e.status, e.start_time,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.status, e.start_time,
 			e.city, e.price, e.currency,
 			e.tickets_sold, e.max_capacity,
 			COALESCE(SUM(b.total_amount) FILTER (
@@ -186,14 +186,14 @@ func GetAdminEvents(
 	for rows.Next() {
 		var ev AdminEventRow
 		if err := rows.Scan(
-			&ev.ID, &ev.Slug, &ev.Title, &ev.Status, &ev.StartTime,
-			&ev.City, &ev.Price, &ev.Currency,
-			&ev.TicketsSold, &ev.MaxCapacity,
-			&ev.TicketRevenue, &ev.MerchRevenue, &ev.MerchUnitsSold,
-			&ev.CreatedAt,
-		); err != nil {
-			return nil, nil, fmt.Errorf("GetAdminEvents scan: %w", err)
-		}
+    &ev.ID, &ev.Slug, &ev.Title, &ev.Status, &ev.StartTime,
+    &ev.City, &ev.Price, &ev.Currency,
+    &ev.TicketsSold, &ev.MaxCapacity,
+    &ev.TicketRevenue, &ev.MerchRevenue, &ev.MerchUnitsSold,
+    &ev.CreatedAt,
+	); err != nil {
+		return nil, nil, fmt.Errorf("GetAdminEvents scan: %w", err)
+	}
 		ev.TotalRevenue = ev.TicketRevenue + ev.MerchRevenue
 		events = append(events, ev)
 	}
