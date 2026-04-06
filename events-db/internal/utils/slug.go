@@ -20,9 +20,9 @@ var nonWordRe = regexp.MustCompile(`[^a-z0-9]+`)
 //	GenerateSlug("Cape Town Jazz Festival 2026", "a1b2c3d4-...") → "cape-town-jazz-festival-2026-a1b2c3d4"
 //	GenerateSlug("  Hello, World!!! ", "00000000-...")             → "hello-world-00000000"
 func GenerateSlug(title, id string) string {
-	s := strings.ToLower(title)
-	s = nonWordRe.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
+	 s := nonWordRe.ReplaceAllString(title, "-")  // strip before lowercasing
+    s = strings.ToLower(s)
+    s = strings.Trim(s, "-")
 
 	// Append the first 8 characters of the UUID for guaranteed uniqueness.
 	// UUIDs are always at least 8 characters, but guard defensively.

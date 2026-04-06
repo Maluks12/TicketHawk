@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"events-db/internal/cache"
+	"events-db/internal/models"
 	"events-db/internal/repository"
 	"fmt"
 	"time"
@@ -11,13 +12,29 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// StartExpiryWorker runs four periodic maintenance tasks:
+//
+//  1. Expire pending bookings older than ttl.
+//  2. Release expired ticket reservations.
+//  3. Clean up stale carts (inactive > 24 h).
+//  4. Expire pending ticket assignments.
+//
+// It also:
+//   - Flushes Redis view counts to Postgres every 60 s.
+//   - Sends event-reminder notifications to followers every hour.
 func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context, ttl time.Duration, interval time.Duration) {
-	viewTicker := time.NewTicker(60 * time.Second) // flush views every 60s
+	viewTicker := time.NewTicker(60 * time.Second)
+
+	// Reminder notifications run once per hour — fine-grained enough to catch
+	// the ±6-hour window used in GetFollowsNeedingReminder without hammering
+	// the DB more than necessary.
+	reminderTicker := time.NewTicker(1 * time.Hour)
 
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		defer viewTicker.Stop()
+		defer reminderTicker.Stop()
 
 		for {
 			select {
@@ -34,13 +51,85 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 				if err := expirePendingAssignments(pool, ctx); err != nil {
 					log.Error().Err(err).Msg("expiry worker: assignments")
 				}
+
 			case <-viewTicker.C:
 				flushViewCounts(pool, ec, ctx)
+
+			case <-reminderTicker.C:
+				sendFollowReminders(pool, ctx)
+
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
+}
+
+// sendFollowReminders queries all event follows where the event starts in ~7
+// days or ~1 day and the relevant reminder has not been sent yet, then creates
+// a notification for each user and marks the flag as sent.
+func sendFollowReminders(pool *pgxpool.Pool, ctx context.Context) {
+	candidates, err := repository.GetFollowsNeedingReminder(pool)
+	if err != nil {
+		log.Error().Err(err).Msg("reminder worker: query failed")
+		return
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	log.Info().Int("count", len(candidates)).Msg("reminder worker: sending follow reminders")
+
+	for _, c := range candidates {
+		var title, body string
+		if c.DaysUntil == 7 {
+			title = "Event in 7 days 🗓"
+			body = fmt.Sprintf(
+				"%s is starting in 7 days. Make sure you're ready!",
+				c.EventTitle,
+			)
+		} else {
+			title = "Event tomorrow ⏰"
+			body = fmt.Sprintf(
+				"%s is starting tomorrow. Don't forget!",
+				c.EventTitle,
+			)
+		}
+
+		notifErr := repository.CreateNotification(
+			pool, ctx,
+			c.UserID,
+			models.NotifEventReminder,
+			title,
+			body,
+			map[string]interface{}{
+				"event_id":   c.EventID,
+				"event_slug": c.EventSlug,
+				"days_until": c.DaysUntil,
+			},
+		)
+		if notifErr != nil {
+			log.Error().
+				Err(notifErr).
+				Str("follow_id", c.FollowID).
+				Str("user_id", c.UserID).
+				Msg("reminder worker: failed to create notification")
+			// Don't mark the reminder as sent — it will retry next hour.
+			continue
+		}
+
+		// Only flip the flag after the notification is confirmed written.
+		if markErr := repository.MarkReminderSent(pool, c.FollowID, c.ReminderField); markErr != nil {
+			log.Error().
+				Err(markErr).
+				Str("follow_id", c.FollowID).
+				Str("field", c.ReminderField).
+				Msg("reminder worker: failed to mark reminder sent")
+			// Non-fatal — the notification was already written, so a duplicate
+			// on the next run is preferable to a crash. The user gets at most
+			// one extra reminder.
+		}
+	}
 }
 
 func flushViewCounts(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context) {
@@ -70,16 +159,14 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	}
 	defer tx.Rollback(ctx)
 
-	query := `
+	rows, err := tx.Query(ctx, `
 		SELECT id, event_id, ticket_quantity
 		FROM bookings
 		WHERE booking_status = 'pending'
 		AND payment_status = 'pending'
 		AND created_at < NOW() - $1::interval
 		FOR UPDATE SKIP LOCKED
-	`
-
-	rows, err := tx.Query(ctx, query, ttl.String())
+	`, ttl.String())
 	if err != nil {
 		return err
 	}
@@ -105,25 +192,19 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 		return nil
 	}
 
-	queryCancel := `
-		UPDATE bookings
-		SET booking_status = 'cancelled',
-		    updated_at     = NOW()
-		WHERE id = $1
-	`
-
-	queryRestore := `
-		UPDATE events
-		SET tickets_sold = GREATEST(0, tickets_sold - $1),
-		    updated_at = NOW()
-		WHERE id = $2
-	`
-
 	for _, b := range expired {
-		if _, err = tx.Exec(ctx, queryCancel, b.id); err != nil {
+		if _, err = tx.Exec(ctx, `
+			UPDATE bookings
+			SET booking_status = 'cancelled', updated_at = NOW()
+			WHERE id = $1
+		`, b.id); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, queryRestore, b.quantity, b.eventID); err != nil {
+		if _, err = tx.Exec(ctx, `
+			UPDATE events
+			SET tickets_sold = GREATEST(0, tickets_sold - $1), updated_at = NOW()
+			WHERE id = $2
+		`, b.quantity, b.eventID); err != nil {
 			return err
 		}
 	}
@@ -136,8 +217,6 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	return nil
 }
 
-// expireReservations releases ticket_reservations past their expires_at,
-// decrementing reserved_count on the corresponding event atomically.
 func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -190,7 +269,6 @@ func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
 	return nil
 }
 
-// cleanupStaleCarts deletes carts inactive for more than 24 hours.
 func cleanupStaleCarts(pool *pgxpool.Pool, ctx context.Context) error {
 	cmd, err := pool.Exec(ctx,
 		`DELETE FROM carts WHERE last_activity_at < NOW() - INTERVAL '24 hours'`)
