@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+	"github.com/sony/gobreaker"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -64,6 +64,8 @@ type refundPaymentResponse struct {
 	} `json:"clientRefundInitiate"`
 }
 
+var ErrPaymentServiceUnavailable = errors.New("payment service temporarily unavailable")
+
 type PaymentService struct {
 	pool        *pgxpool.Pool
 	cfg         *config.Config
@@ -71,9 +73,30 @@ type PaymentService struct {
 	tokenMu     sync.Mutex
 	cachedToken *stitchToken
 	jobChan     chan<- string
+	breaker     *gobreaker.CircuitBreaker
 }
 
 func NewPaymentService(pool *pgxpool.Pool, cfg *config.Config, jobChan chan<- string) *PaymentService {
+	// Trip after 5 consecutive failures.
+	// Wait 30 seconds before trying a single probe request (half-open).
+	// Close again once 2 consecutive probes succeed.
+	breakerSettings := gobreaker.Settings{
+		Name:        "stitch",
+		MaxRequests: 2,
+		Interval:    60 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 5
+		},
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			log.Warn().
+				Str("breaker", name).
+				Str("from", from.String()).
+				Str("to", to.String()).
+				Msg("payment circuit breaker state changed")
+		},
+	}
+ 
 	return &PaymentService{
 		pool: pool,
 		cfg:  cfg,
@@ -81,6 +104,7 @@ func NewPaymentService(pool *pgxpool.Pool, cfg *config.Config, jobChan chan<- st
 			Timeout: 30 * time.Second,
 		},
 		jobChan: jobChan,
+		breaker: gobreaker.NewCircuitBreaker(breakerSettings),
 	}
 }
 
@@ -131,51 +155,72 @@ func (s *PaymentService) graphQL(ctx context.Context, query string, variables ma
 	if err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
-
+ 
 	payload := graphQLRequest{Query: query, Variables: variables}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshalling graphql request: %w", err)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stitchGraphQLURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating graphql request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("graphql request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("stitch graphql returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var gqlResp graphQLResponse
-	if err := json.Unmarshal(respBody, &gqlResp); err != nil {
-		return fmt.Errorf("decoding graphql response: %w", err)
-	}
-
-	if len(gqlResp.Errors) > 0 {
-		msgs := make([]string, len(gqlResp.Errors))
-		for i, e := range gqlResp.Errors {
-			msgs[i] = e.Message
+ 
+	result, err := s.breaker.Execute(func() (interface{}, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, stitchGraphQLURL, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("creating graphql request: %w", err)
 		}
-		return fmt.Errorf("graphql errors: %s", strings.Join(msgs, "; "))
+ 
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+ 
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			// Network error — counts as a failure toward tripping the breaker.
+			return nil, fmt.Errorf("graphql request: %w", err)
+		}
+		defer resp.Body.Close()
+ 
+		respBody, _ := io.ReadAll(resp.Body)
+ 
+		// 5xx responses are transient Stitch failures — count toward tripping.
+		// 4xx responses are client errors (bad input) — don't count as failures.
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("stitch graphql returned %d: %s", resp.StatusCode, string(respBody))
+		}
+		if resp.StatusCode != http.StatusOK {
+			// 4xx: return the error but wrap it so the breaker ignores it.
+			return nil, gobreaker.ErrOpenState // reuse sentinel to skip count
+		}
+ 
+		var gqlResp graphQLResponse
+		if err := json.Unmarshal(respBody, &gqlResp); err != nil {
+			return nil, fmt.Errorf("decoding graphql response: %w", err)
+		}
+ 
+		if len(gqlResp.Errors) > 0 {
+			msgs := make([]string, len(gqlResp.Errors))
+			for i, e := range gqlResp.Errors {
+				msgs[i] = e.Message
+			}
+			// GraphQL application errors are not infrastructure failures.
+			return &gqlResp, fmt.Errorf("graphql errors: %s", strings.Join(msgs, "; "))
+		}
+ 
+		return &gqlResp, nil
+	})
+ 
+	if err != nil {
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+			return ErrPaymentServiceUnavailable
+		}
+		return err
 	}
-
+ 
 	if out != nil {
+		gqlResp := result.(*graphQLResponse)
 		if err := json.Unmarshal(gqlResp.Data, out); err != nil {
 			return fmt.Errorf("decoding graphql data: %w", err)
 		}
 	}
-
+ 
 	return nil
 }
 
