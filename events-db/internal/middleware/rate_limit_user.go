@@ -7,6 +7,7 @@ import (
 	"events-db/internal/ratelimit"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
 
 func RateLimitByUser(manager *ratelimit.Manager, config ratelimit.BucketConfig, category string) gin.HandlerFunc {
@@ -24,7 +25,7 @@ func RateLimitByUser(manager *ratelimit.Manager, config ratelimit.BucketConfig, 
 
 		result, err := limiter.Allow(c.Request.Context(), key)
 		if err != nil {
-			fmt.Printf("User rate limit error: %v\n", err)
+			log.Warn().Err(err).Str("category", category).Str("user_id", userID).Msg("user rate limit check failed — allowing request")
 			ratelimit.RecordError()
 			c.Next()
 			return
@@ -36,9 +37,9 @@ func RateLimitByUser(manager *ratelimit.Manager, config ratelimit.BucketConfig, 
 
 		if !result.Allowed {
 			ratelimit.RecordDeny(category)
-			
+
 			c.Header("Retry-After", fmt.Sprintf("%d", result.RetryAfter))
-			
+
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": "Rate limit exceeded",
 				"message": fmt.Sprintf(
@@ -71,16 +72,15 @@ func CompositeRateLimit(
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 
-		// 1. Check IP rate limit first
 		ipKey := ratelimit.IPKey(category, ip)
 		ipResult, err := ipLimiter.Allow(c.Request.Context(), ipKey)
-		
+
 		if err != nil {
-			fmt.Printf("IP rate limit error: %v\n", err)
+			log.Warn().Err(err).Str("category", category).Str("ip", ip).Msg("composite IP rate limit check failed — skipping")
 			ratelimit.RecordError()
 		} else if !ipResult.Allowed {
 			ratelimit.RecordDeny(category + "-ip")
-			
+
 			c.Header("Retry-After", fmt.Sprintf("%d", ipResult.RetryAfter))
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error":       "IP rate limit exceeded",
@@ -93,7 +93,6 @@ func CompositeRateLimit(
 			ratelimit.RecordAllow(category + "-ip")
 		}
 
-		// 2. Check user rate limit if authenticated
 		userIDInterface, exists := c.Get("user_id")
 		if exists {
 			userID := userIDInterface.(string)
@@ -101,7 +100,7 @@ func CompositeRateLimit(
 			userResult, err := userLimiter.Allow(c.Request.Context(), userKey)
 
 			if err != nil {
-				fmt.Printf("User rate limit error: %v\n", err)
+				log.Warn().Err(err).Str("category", category).Str("user_id", userID).Msg("composite user rate limit check failed — skipping")
 				ratelimit.RecordError()
 			} else {
 				c.Header("X-RateLimit-Limit", fmt.Sprintf("%.0f", userConfig.Capacity))
@@ -109,7 +108,7 @@ func CompositeRateLimit(
 
 				if !userResult.Allowed {
 					ratelimit.RecordDeny(category + "-user")
-					
+
 					c.Header("Retry-After", fmt.Sprintf("%d", userResult.RetryAfter))
 					c.JSON(http.StatusTooManyRequests, gin.H{
 						"error":       "User rate limit exceeded",
@@ -120,7 +119,7 @@ func CompositeRateLimit(
 					c.Abort()
 					return
 				}
-				
+
 				ratelimit.RecordAllow(category + "-user")
 			}
 		}

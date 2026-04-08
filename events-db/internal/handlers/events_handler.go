@@ -199,25 +199,28 @@ func GetEventByIDHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("slug")
-
+ 
 		if slug == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
 			return
 		}
-
+ 
 		event, err := repository.GetEventBySlug(pool, slug)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			if errors.Is(err, repository.ErrEventNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to fetch event by slug")
 			return
 		}
-
-		// Increment view count — same behaviour as the UUID lookup.
+ 
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), event.ID)
 		} else {
 			_ = repository.IncrementViews(pool, event.ID)
 		}
-
+ 
 		c.JSON(http.StatusOK, event)
 	}
 }
@@ -437,17 +440,21 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
-
+ 
 		err := repository.PublishEvent(pool, eventID, userID.(string))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if errors.Is(err, repository.ErrEventNotPublishable) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Event not found or already published"})
+				return
+			}
+			utils.InternalError(c, err, "failed to publish event")
 			return
 		}
-
+ 
 		if ec != nil {
 			ec.BustOnPublish(c.Request.Context())
 		}
-
+ 
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Event published successfully",
 			"note":    "Event is now visible to all users",
@@ -499,25 +506,29 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
-
+ 
 		var input struct {
 			Reason string `json:"reason" binding:"required,min=10"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Cancellation reason required"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cancellation reason required (min 10 characters)"})
 			return
 		}
-
+ 
 		err := repository.CancelEvent(pool, eventID, input.Reason, userID.(string))
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if errors.Is(err, repository.ErrEventNotCancellable) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Event not found or cannot be cancelled"})
+				return
+			}
+			utils.InternalError(c, err, "failed to cancel event")
 			return
 		}
-
+ 
 		if ec != nil {
 			ec.BustOnEventUpdate(c.Request.Context())
 		}
-
+ 
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Event cancelled successfully",
 			"note":    "All attendees will be automatically refunded",

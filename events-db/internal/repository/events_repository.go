@@ -17,6 +17,8 @@ import (
 
 var ErrEventNotFound = errors.New("event not found")
 var ErrEventSoldOut = errors.New("event is sold out")
+var ErrEventNotPublishable = errors.New("event not found or already published")
+var ErrEventNotCancellable = errors.New("event not found or cannot be cancelled")
 
 type OrganizerEventSummary struct {
 	ID          string    `json:"id"`
@@ -83,7 +85,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
+ 
 	cmd, err := pool.Exec(ctx, `
 		UPDATE events
 		SET status = $1, published_at = CURRENT_TIMESTAMP
@@ -93,7 +95,7 @@ func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string) error 
 		return fmt.Errorf("failed to publish event: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
-		return fmt.Errorf("event not found or already published")
+		return ErrEventNotPublishable
 	}
 	return nil
 }
@@ -191,13 +193,13 @@ func DeleteEvents(pool *pgxpool.Pool, eventID string, organizerID string) error 
 func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
+ 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
-
+ 
 	cmd, err := tx.Exec(ctx, `
 		UPDATE events
 		SET status = $1, cancelled_at = CURRENT_TIMESTAMP, cancellation_reason = $2
@@ -207,9 +209,9 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 		return fmt.Errorf("failed to cancel event: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
-		return fmt.Errorf("event not found or cannot be cancelled")
+		return ErrEventNotCancellable
 	}
-
+ 
 	if _, err = tx.Exec(ctx, `
 		UPDATE bookings
 		SET booking_status = $1, refund_requested_at = CURRENT_TIMESTAMP, refund_reason = $2
@@ -217,11 +219,11 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 	`, models.BookingRefunded, "Event cancelled by organizer", eventID, models.BookingConfirmed); err != nil {
 		return fmt.Errorf("failed to update bookings: %w", err)
 	}
-
+ 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit cancellation: %w", err)
 	}
-
+ 
 	// Notify attendees — runs outside the transaction so a notification failure
 	// never rolls back the cancellation.
 	notifRows, notifErr := pool.Query(ctx, `
@@ -238,11 +240,12 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 				pool, ctx, uid,
 				models.NotifEventCancelled,
 				"Event Cancelled",
-				fmt.Sprintf("Unfortunately, %s has been cancelled. You will be refunded automatically.", reason),
-				map[string]string{"event_id": eventID},
+				"An event you booked has been cancelled. Your refund is being processed.",
+				&eventID,
 			)
 		}
 	}
+ 
 	return nil
 }
 
@@ -518,7 +521,7 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
 func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
+ 
 	var event models.Event
 	err := pool.QueryRow(ctx, `
         SELECT
@@ -547,9 +550,12 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 		&event.Category,
 	)
 	if err != nil {
-		return nil, ErrEventNotFound
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrEventNotFound
+		}
+		return nil, fmt.Errorf("GetEventBySlug: %w", err)
 	}
-
+ 
 	event.ComputeAvailableTickets()
 	return &event, nil
 }
@@ -1001,3 +1007,4 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 	}
 	return events, nil
 }
+

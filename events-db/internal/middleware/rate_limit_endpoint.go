@@ -7,17 +7,13 @@ import (
 	"events-db/internal/ratelimit"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 )
-
-// ==========================================
-// Endpoint-Specific Rate Limiting
-// ==========================================
 
 func RateLimitEndpoint(manager *ratelimit.Manager, config ratelimit.BucketConfig, endpoint string) gin.HandlerFunc {
 	limiter := manager.GetLimiter("endpoint-"+endpoint, config)
 
 	return func(c *gin.Context) {
-		// Use user ID if authenticated, otherwise IP
 		identifier := c.ClientIP()
 		if userID, exists := c.Get("user_id"); exists {
 			identifier = userID.(string)
@@ -27,7 +23,7 @@ func RateLimitEndpoint(manager *ratelimit.Manager, config ratelimit.BucketConfig
 
 		result, err := limiter.Allow(c.Request.Context(), key)
 		if err != nil {
-			fmt.Printf("Endpoint rate limit error: %v\n", err)
+			log.Warn().Err(err).Str("endpoint", endpoint).Str("identifier", identifier).Msg("endpoint rate limit check failed — allowing request")
 			c.Next()
 			return
 		}
@@ -38,7 +34,7 @@ func RateLimitEndpoint(manager *ratelimit.Manager, config ratelimit.BucketConfig
 
 		if !result.Allowed {
 			c.Header("Retry-After", fmt.Sprintf("%d", result.RetryAfter))
-			
+
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error":       fmt.Sprintf("Rate limit exceeded for %s", endpoint),
 				"message":     "Too many requests to this endpoint.",

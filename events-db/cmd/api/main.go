@@ -104,7 +104,6 @@ func main() {
 	}
 	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
 
-	// Ad nightly worker — resumes exhausted campaigns at midnight, ends expired ones
 	workers.StartAdWorker(pool, ctx)
 	log.Info().Msg("ad worker started")
 
@@ -153,7 +152,7 @@ func main() {
 	}
 
 	// ==========================================
-	// Health Check
+	// Health Check (intentionally not versioned — infra tools call this)
 	// ==========================================
 	router.GET("/health", func(c *gin.Context) {
 		status := gin.H{"status": "ok"}
@@ -178,14 +177,28 @@ func main() {
 	})
 
 	// ==========================================
-	// Home Feed
+	// Webhook Routes (intentionally not versioned — Stitch calls these)
 	// ==========================================
-	router.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))
+	webhooks := router.Group("/webhooks")
+	if rateLimitManager != nil {
+		webhooks.Use(middleware.RateLimitByIP(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 100, RefillRate: 10.0, TTL: 1 * time.Minute},
+			"webhooks"))
+	}
+	{
+		webhooks.POST("/stitch", handlers.StitchWebhookHandler(paymentService, cfg.StitchWebhookSecret))
+		webhooks.POST("/stitch-ads", handlers.AdTopupWebhookHandler(pool, cfg.StitchWebhookSecret))
+	}
+
+	// ==========================================
+	// API v1
+	// ==========================================
+	v1 := router.Group("/v1")
 
 	// ==========================================
 	// Authentication Routes
 	// ==========================================
-	auth := router.Group("/auth")
+	auth := v1.Group("/auth")
 	if rateLimitManager != nil {
 		loginGroup := auth.Group("")
 		loginGroup.Use(middleware.RateLimitByIP(rateLimitManager,
@@ -226,8 +239,7 @@ func main() {
 	// ==========================================
 	// Public Event Routes
 	// ==========================================
-	
-	public := router.Group("/events")
+	public := v1.Group("/events")
 	public.Use(middleware.OptionalAuth(cfg))
 	if rateLimitManager != nil {
 		public.Use(middleware.RateLimitByUser(rateLimitManager,
@@ -241,31 +253,30 @@ func main() {
 		public.GET("/active", handlers.ActiveEventsHandlers(pool, eventCache))
 		public.GET("/search", handlers.SearchEventsHandler(pool))
 		public.GET("/category/:id", handlers.GetEventCategory(pool, eventCache))
-		public.GET("/filter",            handlers.FilterEventsHandler(pool))
-		// Merch routes — same middleware, now in the same group
+		public.GET("/filter", handlers.FilterEventsHandler(pool))
 		public.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
-		// This must be last — :slug is a catch-all
+		// Must be last — :slug is a catch-all
 		public.GET("/:slug", handlers.GetEventBySlugHandler(pool, eventCache))
 	}
 
 	// ==========================================
-    // City Lookup (for location picker)
-    // ==========================================
-    cities := router.Group("/cities")
-    if rateLimitManager != nil {
-        cities.Use(middleware.RateLimitByIP(rateLimitManager,
-            ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
-            "cities"))
-    }
-    {
-        cities.GET("", handlers.CitiesHandler(pool))
-    }
+	// City Lookup
+	// ==========================================
+	cities := v1.Group("/cities")
+	if rateLimitManager != nil {
+		cities.Use(middleware.RateLimitByIP(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"cities"))
+	}
+	{
+		cities.GET("", handlers.CitiesHandler(pool))
+	}
 
 	// ==========================================
 	// Single Merch Item Route
 	// ==========================================
-	merchItem := router.Group("/merch")
+	merchItem := v1.Group("/merch")
 	merchItem.Use(middleware.OptionalAuth(cfg))
 	if rateLimitManager != nil {
 		merchItem.Use(middleware.RateLimitByUser(rateLimitManager,
@@ -279,7 +290,7 @@ func main() {
 	// ==========================================
 	// Cart Routes
 	// ==========================================
-	cart := router.Group("/cart")
+	cart := v1.Group("/cart")
 	if rateLimitManager != nil {
 		cart.Use(middleware.RateLimitByIP(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
@@ -297,7 +308,7 @@ func main() {
 	// ==========================================
 	// Checkout Routes
 	// ==========================================
-	checkout := router.Group("/checkout")
+	checkout := v1.Group("/checkout")
 	if rateLimitManager != nil {
 		checkout.Use(middleware.RateLimitByUser(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
@@ -313,7 +324,7 @@ func main() {
 	// ==========================================
 	// Guest Booking Routes
 	// ==========================================
-	guest := router.Group("/guest")
+	guest := v1.Group("/guest")
 	if rateLimitManager != nil {
 		guest.Use(middleware.RateLimitByIP(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
@@ -330,7 +341,7 @@ func main() {
 	// ==========================================
 	// Notification Routes
 	// ==========================================
-	notifs := router.Group("/notifications")
+	notifs := v1.Group("/notifications")
 	notifs.Use(middleware.AuthMiddleware(cfg))
 	if rateLimitManager != nil {
 		notifs.Use(middleware.RateLimitByUser(rateLimitManager,
@@ -345,9 +356,70 @@ func main() {
 	}
 
 	// ==========================================
+	// Bookings Routes (merged with payment sub-routes)
+	//
+	// FIX: previously there were two separate router.Group("/bookings") blocks
+	// — one for booking CRUD and one for payment routes — each with a different
+	// rate-limit bucket applied via middleware. Gin silently merges groups that
+	// share a prefix, meaning the payment endpoints ended up behind both buckets
+	// (order-dependent). They are now a single group: the tighter payment bucket
+	// is applied only to the /:id/payment sub-routes via a nested group.
+	// ==========================================
+	bookings := v1.Group("/bookings")
+	bookings.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		bookings.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			"bookings"))
+	}
+	{
+		bookings.POST("", handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
+		bookings.GET("", handlers.GetUserBookingsHandler(bookingRepo))
+		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
+		bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
+		bookings.GET("/:id/assignments", handlers.GetTicketAssignmentsHandler(pool))
+		bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
+
+		// Payment sub-routes — tighter rate limit applied via a nested group.
+		if rateLimitManager != nil {
+			paymentRoutes := bookings.Group("")
+			paymentRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+				"payments"))
+			paymentRoutes.POST("/:id/payment", handlers.CreateStitchPayment(pool, paymentService))
+			paymentRoutes.GET("/:id/payment", handlers.GetPaymentStatusHandler(pool, paymentService))
+			paymentRoutes.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
+		} else {
+			bookings.POST("/:id/payment", handlers.CreateStitchPayment(pool, paymentService))
+			bookings.GET("/:id/payment", handlers.GetPaymentStatusHandler(pool, paymentService))
+			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
+		}
+	}
+
+	// ==========================================
+	// User Profile Routes
+	// ==========================================
+	user := v1.Group("/user")
+	user.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		user.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"user-profile"))
+	}
+	{
+		user.GET("/me", handlers.GetMyProfileHandler(pool))
+		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
+	}
+
+	// ==========================================
+	// Home Feed
+	// ==========================================
+	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))
+
+	// ==========================================
 	// Admin Routes
 	// ==========================================
-	admin := router.Group("/admin")
+	admin := v1.Group("/admin")
 	admin.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
 	if rateLimitManager != nil {
 		admin.Use(middleware.CompositeRateLimit(rateLimitManager,
@@ -367,59 +439,14 @@ func main() {
 		admin.PUT("/users/promote/:id", controllers.PromoteUserHandler(pool))
 		admin.PUT("/users/demote/:id", controllers.DemoteUserHandler(pool))
 		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
-
-		// Ad campaign oversight
 		admin.GET("/campaigns", handlers.AdminGetCampaignsHandler(pool))
-	}
-
-	// ==========================================
-	// Organiser Routes
-	// ==========================================
-	orgMerch := router.Group("/organiser")
-	orgMerch.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
-	if rateLimitManager != nil {
-		orgMerch.Use(middleware.RateLimitByUser(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 50, RefillRate: 2.0, TTL: 15 * time.Minute},
-			"organiser-merch"))
-	}
-	{
-		// Event management
-		orgMerch.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
-		orgMerch.POST("/events/:id/cancel", handlers.CancelEventHandler(pool, eventCache))
-		orgMerch.GET("/events", handlers.GetOrganizerEventsHandler(pool))
-
-		// Merch
-		orgMerch.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool, eventCache))
-		orgMerch.PUT("/merch/:id", handlers.OrgUpdateMerchHandler(pool, eventCache))
-		orgMerch.DELETE("/merch/:id", handlers.OrgDeactivateMerchHandler(pool, eventCache))
-		orgMerch.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool, eventCache))
-		orgMerch.PUT("/merch/variants/:id", handlers.OrgUpdateVariantHandler(pool, eventCache))
-
-		// ── Ad wallet & campaigns ──────────────────────────────────────────
-		orgMerch.GET("/ad-wallet", handlers.GetWalletHandler(pool))
-		orgMerch.POST("/ad-wallet/topup", handlers.TopupWalletHandler(pool, paymentService))
-		orgMerch.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
-		orgMerch.GET("/campaigns", handlers.GetMyCampaignsHandler(pool))
-		orgMerch.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
-		orgMerch.PATCH("/campaigns/:id", handlers.UpdateCampaignHandler(pool))
-		orgMerch.DELETE("/campaigns/:id", handlers.EndCampaignHandler(pool))
-	
-		// ── Organiser dashboard ────────────────────────────────────────────
-		// Overview + per-event revenue, bookings, and merch sales.
-		// All queries are scoped to events owned by the requesting organiser.
-		orgMerch.GET("/dashboard/stats",               handlers.GetOrganizerDashboardStatsHandler(pool))
-		orgMerch.GET("/dashboard/events",              handlers.GetOrganizerDashboardEventsHandler(pool))
-		orgMerch.GET("/dashboard/events/:id/stats",    handlers.GetOrganizerEventStatsHandler(pool))
-		orgMerch.GET("/dashboard/events/:id/bookings", handlers.GetOrganizerEventBookingsHandler(pool))
-		orgMerch.GET("/dashboard/events/:id/merch",    handlers.GetOrganizerEventMerchHandler(pool))
-		orgMerch.GET("/dashboard/payouts",             handlers.GetOrganizerPayoutSummaryHandler(pool))
 	}
 
 	// ==========================================
 	// Rate Limit Management (Admin)
 	// ==========================================
 	if rateLimitManager != nil {
-		adminAPI := router.Group("/admin/ratelimit")
+		adminAPI := v1.Group("/admin/ratelimit")
 		adminAPI.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
 		{
 			adminAPI.GET("/ip/:ip", handlers.RateLimitIPStatusHandler(rateLimitManager))
@@ -431,9 +458,46 @@ func main() {
 	}
 
 	// ==========================================
+	// Organiser Routes
+	// ==========================================
+	orgRoutes := v1.Group("/organiser")
+	orgRoutes.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	if rateLimitManager != nil {
+		orgRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 50, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"organiser-merch"))
+	}
+	{
+		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
+		orgRoutes.POST("/events/:id/cancel", handlers.CancelEventHandler(pool, eventCache))
+		orgRoutes.GET("/events", handlers.GetOrganizerEventsHandler(pool))
+
+		orgRoutes.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool, eventCache))
+		orgRoutes.PUT("/merch/:id", handlers.OrgUpdateMerchHandler(pool, eventCache))
+		orgRoutes.DELETE("/merch/:id", handlers.OrgDeactivateMerchHandler(pool, eventCache))
+		orgRoutes.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool, eventCache))
+		orgRoutes.PUT("/merch/variants/:id", handlers.OrgUpdateVariantHandler(pool, eventCache))
+
+		orgRoutes.GET("/ad-wallet", handlers.GetWalletHandler(pool))
+		orgRoutes.POST("/ad-wallet/topup", handlers.TopupWalletHandler(pool, paymentService))
+		orgRoutes.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
+		orgRoutes.GET("/campaigns", handlers.GetMyCampaignsHandler(pool))
+		orgRoutes.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
+		orgRoutes.PATCH("/campaigns/:id", handlers.UpdateCampaignHandler(pool))
+		orgRoutes.DELETE("/campaigns/:id", handlers.EndCampaignHandler(pool))
+
+		orgRoutes.GET("/dashboard/stats", handlers.GetOrganizerDashboardStatsHandler(pool))
+		orgRoutes.GET("/dashboard/events", handlers.GetOrganizerDashboardEventsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/stats", handlers.GetOrganizerEventStatsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/bookings", handlers.GetOrganizerEventBookingsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/merch", handlers.GetOrganizerEventMerchHandler(pool))
+		orgRoutes.GET("/dashboard/payouts", handlers.GetOrganizerPayoutSummaryHandler(pool))
+	}
+
+	// ==========================================
 	// Media Upload Routes
 	// ==========================================
-	media := router.Group("/organiser/events/:id/media")
+	media := v1.Group("/organiser/events/:id/media")
 	media.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
 	media.Use(middleware.ExtendWriteTimeout(5 * time.Minute))
 	if rateLimitManager != nil {
@@ -450,75 +514,9 @@ func main() {
 	}
 
 	// ==========================================
-	// Booking Routes
-	// ==========================================
-	bookings := router.Group("/bookings")
-	bookings.Use(middleware.AuthMiddleware(cfg))
-	if rateLimitManager != nil {
-		bookings.Use(middleware.RateLimitByUser(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
-			"bookings"))
-	}
-	{
-		bookings.POST("", handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
-		bookings.GET("", handlers.GetUserBookingsHandler(bookingRepo))
-		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
-		bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
-		bookings.GET("/:id/assignments", handlers.GetTicketAssignmentsHandler(pool))
-		bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
-	}
-
-	// ==========================================
-	// User Profile Routes
-	// ==========================================
-	user := router.Group("/user")
-	user.Use(middleware.AuthMiddleware(cfg))
-	if rateLimitManager != nil {
-		user.Use(middleware.RateLimitByUser(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
-			"user-profile"))
-	}
-	{
-		user.GET("/me", handlers.GetMyProfileHandler(pool))
-		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
-	}
-
-	// ==========================================
-	// Payment Routes
-	// ==========================================
-	payments := router.Group("/bookings")
-	payments.Use(middleware.AuthMiddleware(cfg))
-	if rateLimitManager != nil {
-		payments.Use(middleware.RateLimitByUser(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
-			"payments"))
-	}
-	{
-		payments.POST("/:id/payment", handlers.CreateStitchPayment(pool, paymentService))
-		payments.GET("/:id/payment", handlers.GetPaymentStatusHandler(pool, paymentService))
-		payments.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
-	}
-
-	// ==========================================
-	// Webhook Routes
-	// ==========================================
-	webhooks := router.Group("/webhooks")
-	if rateLimitManager != nil {
-		webhooks.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 100, RefillRate: 10.0, TTL: 1 * time.Minute},
-			"webhooks"))
-	}
-	{
-		// Booking payments
-		webhooks.POST("/stitch", handlers.StitchWebhookHandler(paymentService, cfg.StitchWebhookSecret))
-		// Ad wallet top-ups — separate handler, separate endpoint
-		webhooks.POST("/stitch-ads", handlers.AdTopupWebhookHandler(pool, cfg.StitchWebhookSecret))
-	}
-
-	// ==========================================
 	// Protected Test Route
 	// ==========================================
-	router.GET("/protected-test", middleware.AuthMiddleware(cfg), handlers.TestProtectedHandler())
+	v1.GET("/protected-test", middleware.AuthMiddleware(cfg), handlers.TestProtectedHandler())
 
 	// ==========================================
 	// Start Server — Graceful shutdown
@@ -527,7 +525,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second, // was 5 * time.Minute — too long for non-upload routes
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
