@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
 
   // Hero
   hero: { position: "relative", height: 380 },
-  heroImagePlaceholder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#1a1a2e" },
+  heroImagePlaceholder: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#fcfc00" },
   heroContent: { position: "absolute", bottom: 0, left: 0, right: 0, padding: 20, paddingBottom: 32 },
   heroBadge: { fontSize: 11, fontWeight: "700", color: GOLD, letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 },
   heroTitle: { fontSize: 42, fontWeight: "900", color: "#fff", letterSpacing: 2, lineHeight: 42, marginBottom: 12 },
