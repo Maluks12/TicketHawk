@@ -256,8 +256,8 @@ func main() {
 		public.GET("/filter", handlers.FilterEventsHandler(pool))
 		public.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
-		// Must be last — :slug is a catch-all
-		public.GET("/:slug", handlers.GetEventBySlugHandler(pool, eventCache))
+		// Must be last — catches both UUIDs and slugs
+		public.GET("/:id", handlers.GetEventBySlugHandler(pool, eventCache))
 	}
 
 	// ==========================================
@@ -358,7 +358,7 @@ func main() {
 	// ==========================================
 	// Bookings Routes (merged with payment sub-routes)
 	//
-	// FIX: previously there were two separate router.Group("/bookings") blocks
+	// Previously there were two separate router.Group("/bookings") blocks
 	// — one for booking CRUD and one for payment routes — each with a different
 	// rate-limit bucket applied via middleware. Gin silently merges groups that
 	// share a prefix, meaning the payment endpoints ended up behind both buckets
@@ -378,6 +378,8 @@ func main() {
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
 		bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
 		bookings.GET("/:id/assignments", handlers.GetTicketAssignmentsHandler(pool))
+		bookings.POST("/:id/assignments/:assignmentId", handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURL))
+		bookings.DELETE("/:id/assignments/:assignmentId", handlers.RevokeAssignmentHandler(pool))
 		bookings.POST("/:id/verify", handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
 
 		// Payment sub-routes — tighter rate limit applied via a nested group.
@@ -394,6 +396,19 @@ func main() {
 			bookings.GET("/:id/payment", handlers.GetPaymentStatusHandler(pool, paymentService))
 			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
 		}
+	}
+
+	// ==========================================
+	// Ticket Claim Route (public — no auth)
+	// ==========================================
+	tickets := v1.Group("/tickets")
+	if rateLimitManager != nil {
+		tickets.Use(middleware.RateLimitByIP(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			"ticket-claim"))
+	}
+	{
+		tickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService))
 	}
 
 	// ==========================================
