@@ -396,3 +396,5 @@ Run `go install github.com/air-verse/air@latest` and make sure your Go bin direc
 $env:PATH += ";$env:GOPATH\bin"
 ```
 To make this permanent, add it to your PowerShell profile (`$PROFILE`).
+
+## when trying to run the app for tests, always have docker open and running.
