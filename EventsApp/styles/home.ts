@@ -89,7 +89,7 @@ export const s = {
   sportsListContainer: 'mt-4 px-5',
   sportRow:            'flex-row items-center gap-3.5 py-3.5 border-b border-white/10',
   sportRowLast:        'flex-row items-center gap-3.5 py-3.5',
-  sportThumb:          'w-24 h-[64px] rounded-[8px] bg-[#2a2a2a] shrink-0 overflow-hidden',
+  sportThumb:          'w-32 h-[64px] rounded-[8px] bg-[#2a2a2a] shrink-0 overflow-hidden',
   sportInfo:           'flex-1',
   sportCat:            'text-[10px] font-bold text-gold tracking-[1.5px] uppercase mb-0.5',
   sportTitle:          'text-sm font-semibold text-white mb-0.5',
