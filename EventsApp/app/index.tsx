@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getHomeSections, type Event, type HomeSection } from '../lib/api';
 import { s, sheet } from '../styles/home';
-//HENNYDAY
+
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
 
