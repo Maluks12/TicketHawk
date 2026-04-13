@@ -7,13 +7,14 @@ import { StyleSheet } from 'react-native';
 export const s = {
 
   // ── Screen shell ────────────────────────────────────────────────────────────
-  screen:           'flex-1 bg-white',
-  scroll:           'flex-1',
+  screen:           'flex-1 bg-[#f2f2f7]',
+  scroll:           'flex-1 bg-[#f2f2f7]',
 
   // ── Location header ─────────────────────────────────────────────────────────
-  locationHeader:   'flex-row items-center justify-between px-5 pt-14 pb-3 bg-white z-10',
+  locationHeader:         'flex-row items-center justify-between px-5 pt-16 pb-6 bg-[#f2f2f7] z-10',
+  locationHeaderScrolled: 'flex-row items-center justify-between px-5 pt-16 pb-6 bg-white z-10 rounded-b-[24px]',
   locationCity:     'text-[22px] font-extrabold text-black tracking-[0.3px]',
-  locationSub:      'text-[13px] text-black/45 mt-0.5',
+  locationSub:      'text-[17px] font-extrabold text-black/45 mt-0.5',
   menuBtn:          'p-1.5',
   menuIcon:         'text-2xl text-black',
 
@@ -101,6 +102,18 @@ export const s = {
 };
 
 // ─── StyleSheet ────────────────────────────────────────────────────────────────
+// For the handful of things className can't express (absoluteFill on non-NW
+// components like LinearGradient/Image, dynamic inline overrides, and shadows
+// which require native StyleSheet props for cross-platform support).
 export const sheet = StyleSheet.create({
   absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  locationHeaderShadow: {
+    // iOS
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    // Android
+    elevation: 6,
+  },
 });

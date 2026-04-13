@@ -12,12 +12,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// StartExpiryWorker runs four periodic maintenance tasks:
+// StartExpiryWorker runs periodic maintenance tasks:
 //
 //  1. Expire pending bookings older than ttl.
 //  2. Release expired ticket reservations.
 //  3. Clean up stale carts (inactive > 24 h).
 //  4. Expire pending ticket assignments.
+//  5. Deactivate merch listings whose sale_end has passed.
 //
 // It also:
 //   - Flushes Redis view counts to Postgres every 60 s.
@@ -51,6 +52,9 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 				if err := expirePendingAssignments(pool, ctx); err != nil {
 					log.Error().Err(err).Msg("expiry worker: assignments")
 				}
+				// Deactivate merch items whose sale window has closed, then
+				// bust the cache for every affected event so fresh reads kick in.
+				expireMerchListings(pool, ec, ctx)
 
 			case <-viewTicker.C:
 				flushViewCounts(pool, ec, ctx)
@@ -63,6 +67,30 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 			}
 		}
 	}()
+}
+
+// expireMerchListings deactivates any merchandise items whose sale_end has
+// passed, then busts the event-merch cache for all affected events so the
+// next read reflects the removal immediately.
+func expireMerchListings(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context) {
+	eventIDs, err := repository.ExpireMerchListings(pool, ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("expiry worker: merch listings")
+		return
+	}
+	if len(eventIDs) == 0 {
+		return
+	}
+
+	log.Info().
+		Int("count", len(eventIDs)).
+		Msg("expiry worker: deactivated expired merch listings")
+
+	if ec != nil {
+		for _, eid := range eventIDs {
+			ec.BustMerch(ctx, eid)
+		}
+	}
 }
 
 // sendFollowReminders queries all event follows where the event starts in ~7
@@ -126,8 +154,7 @@ func sendFollowReminders(pool *pgxpool.Pool, ctx context.Context) {
 				Str("field", c.ReminderField).
 				Msg("reminder worker: failed to mark reminder sent")
 			// Non-fatal — the notification was already written, so a duplicate
-			// on the next run is preferable to a crash. The user gets at most
-			// one extra reminder.
+			// on the next run is preferable to a crash.
 		}
 	}
 }

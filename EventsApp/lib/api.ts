@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 // ── Find your IP: run `ipconfig` (Windows) and look for Wi-Fi adapter IPv4
 // Your phone and PC must be on the same WiFi network
-export const API_BASE_URL = 'http://192.168.0.24:8080';
+export const API_BASE_URL = 'http://192.168.1.129:8080';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

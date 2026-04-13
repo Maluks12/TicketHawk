@@ -14,7 +14,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getHomeSections, type Event, type HomeSection } from '../lib/api';
 import { s, sheet } from '../styles/home';
 
-
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -112,6 +111,7 @@ export default function Index() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [location] = useState('Johannesburg, ZA');
+  const [scrolled, setScrolled] = useState(false);
 
   const [sections, setSections]   = useState<HomeSection[]>([]);
   const [loading, setLoading]     = useState(true);
@@ -161,7 +161,10 @@ export default function Index() {
     <View className={s.screen}>
 
       {/* Fixed Location Header */}
-      <View className={s.locationHeader}>
+      <View
+        className={scrolled ? s.locationHeaderScrolled : s.locationHeader}
+        style={scrolled ? sheet.locationHeaderShadow : undefined}
+      >
         <View>
           <Text className={s.locationCity}>{location}</Text>
           <Text className={s.locationSub}>All dates</Text>
@@ -174,6 +177,8 @@ export default function Index() {
       <ScrollView
         className={s.scroll}
         showsVerticalScrollIndicator={false}
+        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 10)}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
         }

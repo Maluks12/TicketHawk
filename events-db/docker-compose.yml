@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: events_dev
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - dev-db-data:/var/lib/postgresql/data
       - ./seed.sql:/seed.sql   # makes seed.sql available inside the container
