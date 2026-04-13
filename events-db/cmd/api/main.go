@@ -432,6 +432,11 @@ func main() {
 	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))
 
 	// ==========================================
+	// Drops Feed
+	// ==========================================
+	v1.GET("/drops", handlers.GetDropsFeedHandler(pool))
+
+	// ==========================================
 	// Admin Routes
 	// ==========================================
 	admin := v1.Group("/admin")
