@@ -7,15 +7,16 @@ import {
   Modal,
   ScrollView,
   StatusBar,
-  SafeAreaView,
   Animated,
   PanResponder,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDropsFeed, type MerchandiseItem } from '../lib/api';
 import { s, sheet } from '../styles/merch';
+
 
 // ─── Card colour palette ──────────────────────────────────────────────────────
 // Derived from category since the DB doesn't store brand colours.
@@ -219,6 +220,7 @@ const UpcomingCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =>
 const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => void }) => {
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
+  const { top } = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(0)).current;
   const scrollOffset = useRef(0);
 
@@ -262,8 +264,12 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
       {/* bg is a runtime value from category palette — must stay inline */}
       <Animated.View style={[sheet.modalFlex, { backgroundColor: bg, transform: [{ translateY }] }]}>
 
-        {/* Drag pill */}
-        <View className={s.dragHandleArea} {...pilePan.panHandlers}>
+        {/* Drag pill — padded by safe area top so it clears the notch/status bar */}
+        <View
+          className={s.dragHandleArea}
+          style={{ paddingTop: top + 8 }}
+          {...pilePan.panHandlers}
+        >
           <View className={s.dragHandle} style={{ backgroundColor: tc + '55' }} />
           <View className={s.modalTopBar}>
             <Text className={s.modalStatus} style={{ color: tc + 'aa' }}>
@@ -453,7 +459,7 @@ export default function Merch() {
 
   return (
     <View className={s.screen}>
-      <SafeAreaView>
+      <SafeAreaView edges={['top', 'left', 'right']}>
         <View className={s.header}>
           <Text className={s.headerTitle}>DROPS</Text>
           <View className={s.headerRight}>
