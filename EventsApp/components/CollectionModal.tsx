@@ -72,7 +72,7 @@ function useTickingSeconds(initial: number) {
 // ─── Carousel dimensions ──────────────────────────────────────────────────────
 
 const { width: W } = Dimensions.get('window');
-const CARD_W   = W * 0.64;
+const CARD_W   = W * 0.78;
 const CARD_GAP = 12;
 const SNAP_W   = CARD_W + CARD_GAP;
 const SIDE_PAD = (W - CARD_W) / 2;
@@ -366,7 +366,10 @@ export const CollectionModal = ({
   const { bg, text: tc } = items.length > 0 ? paletteFor(items[0]) : PALETTE.default;
 
   // Drag-to-dismiss — same logic as DetailModal
-  const translateY = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(800)).current;
+ useEffect(() => {
+   Animated.timing(translateY, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+ }, []);
 
   const pilePan = useRef(
     PanResponder.create({
@@ -375,9 +378,7 @@ export const CollectionModal = ({
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 80 || g.vy > 0.5) {
-          Animated.timing(translateY, {
-            toValue: 800, duration: 220, useNativeDriver: true,
-          }).start(onClose);
+          Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
         }
@@ -399,7 +400,7 @@ export const CollectionModal = ({
   const isLive = activeItem?.sale_status === 'live';
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
 
       <Animated.View style={{ flex: 1, backgroundColor: bg, transform: [{ translateY }] }}>

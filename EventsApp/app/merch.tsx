@@ -260,7 +260,10 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
   const { top } = useSafeAreaInsets();
-  const translateY = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(800)).current;
+ useEffect(() => {
+   Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
+ }, []);
   const scrollOffset = useRef(0);
 
   const pilePan = useRef(
@@ -270,7 +273,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 80 || g.vy > 0.5) {
-          Animated.timing(translateY, { toValue: 800, duration: 220, useNativeDriver: true }).start(onClose);
+          Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
         }
@@ -285,7 +288,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 100 || g.vy > 0.6) {
-          Animated.timing(translateY, { toValue: 800, duration: 220, useNativeDriver: true }).start(onClose);
+          Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
         }
@@ -298,7 +301,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const untilSecs  = useTickingSeconds(item.seconds_until ?? 0);
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
       <Animated.View style={[sheet.modalFlex, { backgroundColor: bg, transform: [{ translateY }] }]}>
 
@@ -508,8 +511,6 @@ export default function Merch() {
         <View className={s.header}>
           <Text className={s.headerTitle}>DROPS</Text>
           <View className={s.headerRight}>
-            <View className={s.liveIndicator} />
-            <Text className={s.liveText}>LIVE</Text>
             <TouchableOpacity className={s.cartBtn}>
               <Text className={s.cartIcon}>🛒</Text>
             </TouchableOpacity>
@@ -522,7 +523,7 @@ export default function Merch() {
             onPress={() => setTab('available')}
           >
             <Text className={`${s.toggleText} ${tab === 'available' ? s.toggleTextActive : ''}`}>
-              AVAILABLE NOW {available.length > 0 ? `(${available.length})` : ''}
+              AVAILABLE NOW
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -530,7 +531,7 @@ export default function Merch() {
             onPress={() => setTab('upcoming')}
           >
             <Text className={`${s.toggleText} ${tab === 'upcoming' ? s.toggleTextActive : ''}`}>
-              DROPPING SOON {upcoming.length > 0 ? `(${upcoming.length})` : ''}
+              DROPPING SOON
             </Text>
           </TouchableOpacity>
         </View>
