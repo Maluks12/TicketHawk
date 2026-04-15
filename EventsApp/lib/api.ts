@@ -113,6 +113,7 @@ export interface MerchandiseVariant {
 export interface MerchandiseItem {
   id: string;
   event_id: string;
+  event_name: string;       // parent event title — returned by /v1/drops, used for collection grouping
   name: string;
   description?: string;
   base_price: number;
