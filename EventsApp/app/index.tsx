@@ -34,7 +34,9 @@ const EventCard = ({ item }: { item: Event }) => (
       {(item.category?.toLowerCase().includes('music') ||
         item.category?.toLowerCase().includes('concert')) && (
         <View className={s.hCardBadge}>
-          <Text className={s.hCardBadgeText}>● LIVE</Text>
+          {/* Live dot */}
+          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: '#fff' }} />
+          <Text className={s.hCardBadgeText}>LIVE</Text>
         </View>
       )}
       <View className={s.hCardPriceBadge}>
@@ -84,6 +86,10 @@ const SectionRow = ({
   if (!section.events?.length) return null;
   return (
     <>
+      {/* Thin divider between sections */}
+      {marginTop && (
+        <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+      )}
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
           <Text className={s.sectionTitle}>{section.title.toUpperCase()}</Text>
@@ -113,10 +119,10 @@ export default function Index() {
   const [location] = useState('Johannesburg, ZA');
   const [scrolled, setScrolled] = useState(false);
 
-  const [sections, setSections]   = useState<HomeSection[]>([]);
-  const [loading, setLoading]     = useState(true);
+  const [sections, setSections]     = useState<HomeSection[]>([]);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]         = useState<string | null>(null);
+  const [error, setError]           = useState<string | null>(null);
 
   const featuredEvent: Event | null =
     sections.find((sec) => sec.id === 'featured')?.events?.[0] ?? null;
@@ -194,9 +200,10 @@ export default function Index() {
           ) : (
             <View className={s.heroImagePlaceholder} />
           )}
+          {/* Scrim: dark at bottom — blends into #0a0a0a screen bg */}
           <LinearGradient
-            colors={['rgba(0,0,47,0.75)', '#000000']}
-            locations={[0.6, 1]}
+            colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
+            locations={[0.3, 0.7, 1]}
             style={sheet.absoluteFill}
           />
           <View className={s.heroContent}>
@@ -209,10 +216,10 @@ export default function Index() {
             </Text>
             <View className={s.heroActions}>
               <TouchableOpacity className={s.btnPrimary}>
-                <Text className={s.btnPrimaryText}>🎟 Get Tickets</Text>
+                <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
               </TouchableOpacity>
               <TouchableOpacity className={s.btnOutline}>
-                <Text className={s.btnOutlineText}>View Details</Text>
+                <Text className={s.btnOutlineText}>VIEW DETAILS</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -230,11 +237,14 @@ export default function Index() {
             onPress={() => setDropdownOpen(true)}
           >
             <Text className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}>
-              {activeCategory === 'All' ? 'Categories' : activeCategory}
+              {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
             </Text>
             <Text className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}> ▾</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Thin divider below filter */}
+        <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: 4 }} />
 
         {/* Category Dropdown Modal */}
         <Modal visible={dropdownOpen} transparent animationType="fade" onRequestClose={() => setDropdownOpen(false)}>
@@ -258,13 +268,33 @@ export default function Index() {
           </View>
         </Modal>
 
-        {/* Error banner — visible so you can diagnose API issues */}
+        {/* Error banner */}
         {error && (
-          <View className="mx-5 mt-4 bg-brand-pink/20 border border-brand-pink rounded-xl p-4">
-            <Text className="text-brand-pink font-bold text-sm mb-1">⚠ Could not load sections</Text>
-            <Text className="text-white/70 text-xs">{error}</Text>
-            <TouchableOpacity onPress={onRefresh} className="mt-3 self-start bg-brand-pink px-4 py-2 rounded-full">
-              <Text className="text-white font-bold text-xs">Retry</Text>
+          <View style={{
+            margin: 20,
+            backgroundColor: 'rgba(255,60,110,0.12)',
+            borderWidth: 1,
+            borderColor: '#ff3c6e',
+            borderRadius: 3,
+            padding: 14,
+          }}>
+            <Text style={{ color: '#ff3c6e', fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
+              ⚠ COULD NOT LOAD SECTIONS
+            </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{error}</Text>
+            <TouchableOpacity
+              onPress={onRefresh}
+              style={{
+                marginTop: 10,
+                alignSelf: 'flex-start',
+                borderWidth: 1,
+                borderColor: '#ff3c6e',
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 2,
+              }}
+            >
+              <Text style={{ color: '#ff3c6e', fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -288,6 +318,7 @@ export default function Index() {
         {/* Sports Elite */}
         {!loading && sportsBannerEvent && (
           <>
+            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
             <View className={s.sectionMt}>
               <View className={s.sectionHeader}>
                 <Text className={s.sectionTitle}>SPORTS ELITE</Text>
@@ -303,12 +334,17 @@ export default function Index() {
                 />
               ) : null}
               <View className={s.sportsBannerBg} />
+              {/* Dark scrim over banner image */}
+              <LinearGradient
+                colors={['rgba(10,10,10,0.3)', 'rgba(10,10,10,0.75)']}
+                style={sheet.absoluteFill}
+              />
               <View className={s.sportsBannerContent}>
                 <Text className={s.sportsBadge}>{sportsBannerEvent.category}</Text>
                 <Text className={s.sportsTitle}>{sportsBannerEvent.title.toUpperCase()}</Text>
                 <Text className={s.sportsSub} numberOfLines={2}>{sportsBannerEvent.description}</Text>
                 <TouchableOpacity className={s.btnOutline}>
-                  <Text className={s.btnOutlineText}>View Tickets</Text>
+                  <Text className={s.btnOutlineText}>VIEW TICKETS</Text>
                 </TouchableOpacity>
               </View>
             </View>
