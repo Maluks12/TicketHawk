@@ -75,14 +75,11 @@ function formatCountdown(totalSecs: number): string {
 }
 
 // ─── Collection grouping ──────────────────────────────────────────────────────
-// Items from the same event_id are grouped into one collection.
-// A grouped feed card shows a "N ITEMS" badge and opens CollectionModal.
-// A solo item card opens DetailModal directly (existing behaviour unchanged).
 
 interface CollectionEntry {
-  representativeItem: MerchandiseItem;   // shown as the feed card
-  items: MerchandiseItem[];              // all items in the group
-  isCollection: boolean;                 // true when items.length > 1
+  representativeItem: MerchandiseItem;
+  items: MerchandiseItem[];
+  isCollection: boolean;
 }
 
 function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
@@ -254,16 +251,16 @@ const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () 
   );
 };
 
-// ─── Detail modal (unchanged from original) ───────────────────────────────────
+// ─── Detail modal (for direct feed card taps) ─────────────────────────────────
 
 const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => void }) => {
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
   const { top } = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(800)).current;
- useEffect(() => {
-   Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
- }, []);
+  useEffect(() => {
+    Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
+  }, []);
   const scrollOffset = useRef(0);
 
   const pilePan = useRef(
@@ -568,19 +565,18 @@ export default function Merch() {
         />
       )}
 
-      {/* Single-item detail modal */}
+      {/* Single-item detail modal (direct feed card taps) */}
       {selected && (
         <DetailModal item={selected} onClose={() => setSelected(null)} />
       )}
 
-      {/* Collection carousel — tapping a card inside drills into DetailModal */}
+      {/* Collection carousel — detail is handled internally by CollectionModal */}
       {activeCollection && (
         <CollectionModal
           collectionName={activeCollection.name}
           items={activeCollection.items}
           onSelectItem={(item) => {
-            setActiveCollection(null);
-            setSelected(item);
+            // handled internally by CollectionModal
           }}
           onClose={() => setActiveCollection(null)}
         />
