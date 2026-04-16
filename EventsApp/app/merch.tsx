@@ -7,19 +7,18 @@ import {
   Modal,
   ScrollView,
   StatusBar,
-  SafeAreaView,
   Animated,
   PanResponder,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getDropsFeed, type MerchandiseItem } from '../lib/api';
 import { s, sheet } from '../styles/merch';
+import { CollectionModal } from '../components/CollectionModal';
 
 // ─── Card colour palette ──────────────────────────────────────────────────────
-// Derived from category since the DB doesn't store brand colours.
-// Extend this map as new categories are added.
 
 const PALETTE: Record<string, { bg: string; text: string }> = {
   sneakers:    { bg: '#0d0d0d',   text: '#ffffff' },
@@ -75,6 +74,39 @@ function formatCountdown(totalSecs: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
+// ─── Collection grouping ──────────────────────────────────────────────────────
+// Items from the same event_id are grouped into one collection.
+// A grouped feed card shows a "N ITEMS" badge and opens CollectionModal.
+// A solo item card opens DetailModal directly (existing behaviour unchanged).
+
+interface CollectionEntry {
+  representativeItem: MerchandiseItem;   // shown as the feed card
+  items: MerchandiseItem[];              // all items in the group
+  isCollection: boolean;                 // true when items.length > 1
+}
+
+function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
+  const map = new Map<string, MerchandiseItem[]>();
+  for (const item of items) {
+    const key = item.event_id;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(item);
+  }
+
+  const entries: CollectionEntry[] = [];
+  map.forEach((group) => {
+    const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
+    entries.push({
+      representativeItem: sorted[0],
+      items: sorted,
+      isCollection: sorted.length > 1,
+    });
+  });
+
+  entries.sort((a, b) => a.representativeItem.display_order - b.representativeItem.display_order);
+  return entries;
+}
+
 // ─── Image collage ────────────────────────────────────────────────────────────
 
 const Collage = ({ images }: { images: string[] }) => {
@@ -102,9 +134,26 @@ const Collage = ({ images }: { images: string[] }) => {
   );
 };
 
+// ─── Collection badge ─────────────────────────────────────────────────────────
+
+const CollectionBadge = ({ count, tc }: { count: number; tc: string }) => (
+  <View style={{
+    borderWidth: 1, borderColor: tc + '50', borderRadius: 2,
+    paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center', marginLeft: 8,
+  }}>
+    <Text style={{ fontSize: 13, fontWeight: '900', color: tc, lineHeight: 15 }}>
+      {count}
+    </Text>
+    <Text style={{ fontSize: 7, fontWeight: '700', letterSpacing: 1.2, color: tc + '60' }}>
+      ITEMS
+    </Text>
+  </View>
+);
+
 // ─── Available card ───────────────────────────────────────────────────────────
 
-const AvailableCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () => void }) => {
+const AvailableCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () => void }) => {
+  const { item, isCollection } = { item: entry.representativeItem, isCollection: entry.isCollection };
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
   const remainSecs = useTickingSeconds(item.seconds_remain ?? 0);
@@ -118,22 +167,14 @@ const AvailableCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =
           <Text className={s.brandName} style={{ color: tc }}>
             {(item.category ?? 'DROP').toUpperCase()}
           </Text>
+          {isCollection && <CollectionBadge count={entry.items.length} tc={tc} />}
           <View style={{ flex: 1 }} />
           {hasExpiry && (
-            <View
-              className={s.expiryBadge}
-              style={{ borderColor: urgent ? '#ff3c6e' : tc + '40' }}
-            >
-              <Text
-                className={s.expiryLabel}
-                style={{ color: urgent ? '#ff3c6e' : tc + '80' }}
-              >
+            <View className={s.expiryBadge} style={{ borderColor: urgent ? '#ff3c6e' : tc + '40' }}>
+              <Text className={s.expiryLabel} style={{ color: urgent ? '#ff3c6e' : tc + '80' }}>
                 ENDS IN
               </Text>
-              <Text
-                className={s.expiryTimer}
-                style={{ color: urgent ? '#ff3c6e' : tc }}
-              >
+              <Text className={s.expiryTimer} style={{ color: urgent ? '#ff3c6e' : tc }}>
                 {formatCountdown(remainSecs)}
               </Text>
             </View>
@@ -141,16 +182,16 @@ const AvailableCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =
         </View>
         <Collage images={images} />
         <Text className={s.cardTitle} style={{ color: tc }} numberOfLines={3}>
-          {item.name}
+          {isCollection ? (item.event_name || item.name) : item.name}
         </Text>
         <View className={s.cardBottom} style={{ borderTopColor: tc + '25' }}>
           <Text className={s.category} style={{ color: tc + 'aa' }}>
-            {(item.category ?? 'MERCHANDISE').toUpperCase()}
+            {isCollection ? `${entry.items.length} ITEMS` : (item.category ?? 'MERCHANDISE').toUpperCase()}
           </Text>
           <View style={{ flex: 1 }} />
-          <TouchableOpacity className={s.actionBtn} style={{ borderColor: tc + '60' }}>
+          <TouchableOpacity className={s.actionBtn} style={{ borderColor: tc + '60' }} onPress={onPress}>
             <Text className={s.actionBtnText} style={{ color: tc }}>
-              BUY  {formatPrice(item.effective_price)}
+              {isCollection ? 'VIEW ALL' : `BUY  ${formatPrice(item.effective_price)}`}
             </Text>
           </TouchableOpacity>
         </View>
@@ -161,7 +202,8 @@ const AvailableCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =
 
 // ─── Upcoming card ────────────────────────────────────────────────────────────
 
-const UpcomingCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () => void }) => {
+const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () => void }) => {
+  const { item, isCollection } = { item: entry.representativeItem, isCollection: entry.isCollection };
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
   const untilSecs = useTickingSeconds(item.seconds_until ?? 0);
@@ -173,26 +215,24 @@ const UpcomingCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =>
           <Text className={s.brandName} style={{ color: tc }}>
             {(item.category ?? 'DROP').toUpperCase()}
           </Text>
+          {isCollection && <CollectionBadge count={entry.items.length} tc={tc} />}
           <View style={{ flex: 1 }} />
           <Text className={s.upcomingLabel} style={{ color: tc + '80' }}>
             DROPS IN
           </Text>
         </View>
-        <View
-          className={s.countdownRow}
-          style={{ borderTopColor: tc + '15', borderBottomColor: tc + '15' }}
-        >
+        <View className={s.countdownRow} style={{ borderTopColor: tc + '15', borderBottomColor: tc + '15' }}>
           <Text className={s.countdownText} style={{ color: tc }}>
             {formatCountdown(untilSecs)}
           </Text>
         </View>
         <Collage images={images} />
         <Text className={s.cardTitle} style={{ color: tc }} numberOfLines={3}>
-          {item.name}
+          {isCollection ? (item.event_name || item.name) : item.name}
         </Text>
         <View className={s.cardBottom} style={{ borderTopColor: tc + '25' }}>
           <Text className={s.category} style={{ color: tc + 'aa' }}>
-            {(item.category ?? 'MERCHANDISE').toUpperCase()}
+            {isCollection ? `${entry.items.length} ITEMS` : (item.category ?? 'MERCHANDISE').toUpperCase()}
           </Text>
           <View style={{ flex: 1 }} />
           <Text className={s.releaseDate} style={{ color: tc + '80' }}>
@@ -203,9 +243,9 @@ const UpcomingCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =>
               : 'TBC'}
           </Text>
           <View style={{ width: 12 }} />
-          <TouchableOpacity className={s.actionBtn} style={{ borderColor: tc + '60' }}>
+          <TouchableOpacity className={s.actionBtn} style={{ borderColor: tc + '60' }} onPress={onPress}>
             <Text className={s.actionBtnText} style={{ color: tc }}>
-              SET ALERT
+              {isCollection ? 'VIEW ALL' : 'SET ALERT'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -214,12 +254,16 @@ const UpcomingCard = ({ item, onPress }: { item: MerchandiseItem; onPress: () =>
   );
 };
 
-// ─── Detail modal ─────────────────────────────────────────────────────────────
+// ─── Detail modal (unchanged from original) ───────────────────────────────────
 
 const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => void }) => {
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
-  const translateY = useRef(new Animated.Value(0)).current;
+  const { top } = useSafeAreaInsets();
+  const translateY = useRef(new Animated.Value(800)).current;
+ useEffect(() => {
+   Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
+ }, []);
   const scrollOffset = useRef(0);
 
   const pilePan = useRef(
@@ -229,7 +273,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 80 || g.vy > 0.5) {
-          Animated.timing(translateY, { toValue: 800, duration: 220, useNativeDriver: true }).start(onClose);
+          Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
         }
@@ -244,7 +288,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 100 || g.vy > 0.6) {
-          Animated.timing(translateY, { toValue: 800, duration: 220, useNativeDriver: true }).start(onClose);
+          Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
         }
@@ -257,13 +301,11 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const untilSecs  = useTickingSeconds(item.seconds_until ?? 0);
 
   return (
-    <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
-      {/* bg is a runtime value from category palette — must stay inline */}
       <Animated.View style={[sheet.modalFlex, { backgroundColor: bg, transform: [{ translateY }] }]}>
 
-        {/* Drag pill */}
-        <View className={s.dragHandleArea} {...pilePan.panHandlers}>
+        <View className={s.dragHandleArea} style={{ paddingTop: top + 8 }} {...pilePan.panHandlers}>
           <View className={s.dragHandle} style={{ backgroundColor: tc + '55' }} />
           <View className={s.modalTopBar}>
             <Text className={s.modalStatus} style={{ color: tc + 'aa' }}>
@@ -290,7 +332,6 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           scrollEventThrottle={16}
           {...scrollPan.panHandlers}
         >
-          {/* Price box */}
           <View className={s.heatScoreBox} style={{ borderColor: tc + '40' }}>
             <Text className={s.heatScoreBoxLabel} style={{ color: tc + '90' }}>
               {(item.category ?? 'MERCHANDISE').toUpperCase()}
@@ -309,7 +350,6 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
 
           <Text className={s.detailTitle} style={{ color: tc }}>{item.name}</Text>
 
-          {/* Variants */}
           {item.variants && item.variants.length > 0 && (
             <View
               className={s.variantsRow}
@@ -349,7 +389,6 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
             </View>
           )}
 
-          {/* Details grid */}
           <View className={s.detailGrid}>
             {[
               ['PRICE',    formatPrice(item.effective_price)],
@@ -373,11 +412,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           )}
         </ScrollView>
 
-        {/* Bottom action bar */}
-        <View
-          className={s.modalBottom}
-          style={{ borderTopColor: tc + '20', backgroundColor: bg }}
-        >
+        <View className={s.modalBottom} style={{ borderTopColor: tc + '20', backgroundColor: bg }}>
           <TouchableOpacity>
             <Text className={s.modalBottomAlerts} style={{ color: tc + 'aa' }}>ALERTS</Text>
           </TouchableOpacity>
@@ -419,14 +454,20 @@ const EmptyState = ({ tab }: { tab: 'available' | 'upcoming' }) => (
 
 type Tab = 'available' | 'upcoming';
 
+interface ActiveCollection {
+  name: string;
+  items: MerchandiseItem[];
+}
+
 export default function Merch() {
-  const [selected,   setSelected]   = useState<MerchandiseItem | null>(null);
-  const [tab,        setTab]        = useState<Tab>('available');
-  const [available,  setAvailable]  = useState<MerchandiseItem[]>([]);
-  const [upcoming,   setUpcoming]   = useState<MerchandiseItem[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
+  const [selected,         setSelected]         = useState<MerchandiseItem | null>(null);
+  const [activeCollection, setActiveCollection] = useState<ActiveCollection | null>(null);
+  const [tab,              setTab]              = useState<Tab>('available');
+  const [available,        setAvailable]        = useState<MerchandiseItem[]>([]);
+  const [upcoming,         setUpcoming]         = useState<MerchandiseItem[]>([]);
+  const [loading,          setLoading]          = useState(true);
+  const [refreshing,       setRefreshing]       = useState(false);
+  const [error,            setError]            = useState<string | null>(null);
 
   const fetchDrops = useCallback(async () => {
     try {
@@ -449,30 +490,40 @@ export default function Merch() {
     setRefreshing(false);
   }, [fetchDrops]);
 
-  const visible = tab === 'available' ? available : upcoming;
+  const availableCollections = useMemo(() => buildCollections(available), [available]);
+  const upcomingCollections  = useMemo(() => buildCollections(upcoming),  [upcoming]);
+  const visibleCollections   = tab === 'available' ? availableCollections : upcomingCollections;
+
+  const handleEntryPress = useCallback((entry: CollectionEntry) => {
+    if (entry.isCollection) {
+      setActiveCollection({
+        name:  entry.representativeItem.event_name || entry.representativeItem.name,
+        items: entry.items,
+      });
+    } else {
+      setSelected(entry.representativeItem);
+    }
+  }, []);
 
   return (
     <View className={s.screen}>
-      <SafeAreaView>
+      <SafeAreaView edges={['top', 'left', 'right']}>
         <View className={s.header}>
           <Text className={s.headerTitle}>DROPS</Text>
           <View className={s.headerRight}>
-            <View className={s.liveIndicator} />
-            <Text className={s.liveText}>LIVE</Text>
             <TouchableOpacity className={s.cartBtn}>
               <Text className={s.cartIcon}>🛒</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Toggle */}
         <View className={s.toggle}>
           <TouchableOpacity
             className={`${s.toggleBtn} ${tab === 'available' ? s.toggleBtnActive : ''}`}
             onPress={() => setTab('available')}
           >
             <Text className={`${s.toggleText} ${tab === 'available' ? s.toggleTextActive : ''}`}>
-              AVAILABLE NOW {available.length > 0 ? `(${available.length})` : ''}
+              AVAILABLE NOW
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -480,7 +531,7 @@ export default function Merch() {
             onPress={() => setTab('upcoming')}
           >
             <Text className={`${s.toggleText} ${tab === 'upcoming' ? s.toggleTextActive : ''}`}>
-              DROPPING SOON {upcoming.length > 0 ? `(${upcoming.length})` : ''}
+              DROPPING SOON
             </Text>
           </TouchableOpacity>
         </View>
@@ -501,12 +552,12 @@ export default function Merch() {
         </View>
       ) : (
         <FlatList
-          data={visible}
-          keyExtractor={(d) => d.id}
-          renderItem={({ item }) =>
-            item.sale_status === 'live'
-              ? <AvailableCard item={item} onPress={() => setSelected(item)} />
-              : <UpcomingCard  item={item} onPress={() => setSelected(item)} />
+          data={visibleCollections}
+          keyExtractor={(entry) => `${entry.representativeItem.event_id}-${tab}`}
+          renderItem={({ item: entry }) =>
+            entry.representativeItem.sale_status === 'live'
+              ? <AvailableCard entry={entry} onPress={() => handleEntryPress(entry)} />
+              : <UpcomingCard  entry={entry} onPress={() => handleEntryPress(entry)} />
           }
           ListEmptyComponent={<EmptyState tab={tab} />}
           contentContainerStyle={{ paddingBottom: 110, flexGrow: 1 }}
@@ -517,8 +568,22 @@ export default function Merch() {
         />
       )}
 
+      {/* Single-item detail modal */}
       {selected && (
         <DetailModal item={selected} onClose={() => setSelected(null)} />
+      )}
+
+      {/* Collection carousel — tapping a card inside drills into DetailModal */}
+      {activeCollection && (
+        <CollectionModal
+          collectionName={activeCollection.name}
+          items={activeCollection.items}
+          onSelectItem={(item) => {
+            setActiveCollection(null);
+            setSelected(item);
+          }}
+          onClose={() => setActiveCollection(null)}
+        />
       )}
     </View>
   );

@@ -13,9 +13,12 @@ import (
 )
 
 // dropsMerchCols is the shared SELECT list for drops queries.
-const dropsMerchCols = `id, event_id, name, description, base_price, category,
-       display_order, is_active, images::text,
-       sale_start, sale_end, created_at, updated_at`
+// We JOIN events to pull event_name so the frontend can group items
+// from the same event into a "collection" carousel without a separate API call.
+const dropsMerchCols = `m.id, m.event_id, COALESCE(e.title, '') AS event_name,
+       m.name, m.description, m.base_price, m.category,
+       m.display_order, m.is_active, m.images::text,
+       m.sale_start, m.sale_end, m.created_at, m.updated_at`
 
 // DropsResponse is the payload returned by GET /v1/drops.
 // Two buckets — available now and dropping soon — so the frontend
@@ -29,6 +32,7 @@ type DropsResponse struct {
 // the frontend needs to render the card and detail modal.
 type DropItem struct {
 	models.Merchandise
+	EventName      string  `json:"event_name"`       // parent event title — used for collection grouping
 	SaleStatus     string  `json:"sale_status"`      // "live" | "scheduled"
 	SecondsUntil   *int64  `json:"seconds_until"`    // nil when live, countdown when scheduled
 	SecondsRemain  *int64  `json:"seconds_remain"`   // nil when no sale_end, else seconds until expiry
@@ -80,21 +84,22 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 	var where string
 	if scheduled {
 		// Upcoming: active, sale_start exists and is in the future
-		where = `WHERE is_active = TRUE
-		           AND sale_start IS NOT NULL
-		           AND sale_start > NOW()`
+		where = `WHERE m.is_active = TRUE
+		           AND m.sale_start IS NOT NULL
+		           AND m.sale_start > NOW()`
 	} else {
 		// Available: active, within sale window (or no window boundaries set)
-		where = `WHERE is_active = TRUE
-		           AND (sale_start IS NULL OR sale_start <= NOW())
-		           AND (sale_end   IS NULL OR sale_end   >  NOW())`
+		where = `WHERE m.is_active = TRUE
+		           AND (m.sale_start IS NULL OR m.sale_start <= NOW())
+		           AND (m.sale_end   IS NULL OR m.sale_end   >  NOW())`
 	}
 
 	q := fmt.Sprintf(`
 		SELECT %s
-		FROM merchandise
+		FROM merchandise m
+		LEFT JOIN events e ON e.id = m.event_id
 		%s
-		ORDER BY display_order ASC, created_at DESC
+		ORDER BY m.display_order ASC, m.created_at DESC
 		LIMIT 50
 	`, dropsMerchCols, where)
 
@@ -104,27 +109,33 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 	}
 	defer rows.Close()
 
-	var items []models.Merchandise
+	type rowData struct {
+		merch     models.Merchandise
+		eventName string
+	}
+	var rowsData []rowData
 	var ids []string
 	for rows.Next() {
 		var m models.Merchandise
+		var eventName string
 		if err := rows.Scan(
-			&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+			&m.ID, &m.EventID, &eventName, &m.Name, &m.Description, &m.BasePrice,
 			&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 			&m.SaleStart, &m.SaleEnd,
 			&m.CreatedAt, &m.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
-		items = append(items, m)
+		rowsData = append(rowsData, rowData{merch: m, eventName: eventName})
 		ids = append(ids, m.ID)
 	}
 
-	if len(items) == 0 {
+	if len(rowsData) == 0 {
 		return []DropItem{}, nil
 	}
 
 	// Batch-load all active variants (avoids N+1)
+	variantMap := make(map[string][]models.MerchandiseVariant)
 	varRows, err := pool.Query(ctx, `
 		SELECT id, merchandise_id, sku, attributes::text,
 		       stock_quantity, price_override, is_active, created_at, updated_at
@@ -134,7 +145,6 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 	`, ids)
 	if err == nil {
 		defer varRows.Close()
-		variantMap := make(map[string][]models.MerchandiseVariant)
 		for varRows.Next() {
 			var v models.MerchandiseVariant
 			if err := varRows.Scan(
@@ -145,17 +155,18 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 				variantMap[v.MerchandiseID] = append(variantMap[v.MerchandiseID], v)
 			}
 		}
-		for i := range items {
-			items[i].Variants = variantMap[items[i].ID]
-		}
 	}
 
 	// Build DropItems with computed fields
 	now := time.Now()
-	result := make([]DropItem, 0, len(items))
-	for _, m := range items {
+	result := make([]DropItem, 0, len(rowsData))
+	for _, rd := range rowsData {
+		m := rd.merch
+		m.Variants = variantMap[m.ID]
+
 		di := DropItem{
 			Merchandise:    m,
+			EventName:      rd.eventName,
 			SaleStatus:     m.SaleStatus(),
 			EffectivePrice: m.BasePrice,
 		}
