@@ -14,9 +14,9 @@ import {
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getDropsFeed, type MerchandiseItem } from '../lib/api';
-import { s, sheet } from '../styles/merch';
-import { CollectionModal } from '../components/CollectionModal';
+import { getDropsFeed, type MerchandiseItem } from '../../lib/api';
+import { s, sheet } from '../../styles/merch';
+import { CollectionModal } from '../../components/CollectionModal';
 
 // ─── Card colour palette ──────────────────────────────────────────────────────
 

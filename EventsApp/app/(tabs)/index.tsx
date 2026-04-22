@@ -10,9 +10,11 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getHomeSections, type Event, type HomeSection } from '../lib/api';
-import { s, sheet } from '../styles/home';
+import { getHomeSections, type Event, type HomeSection } from '../../lib/api';
+import { useEventStore } from '../../store/eventStore';
+import { s, sheet } from '../../styles/home';
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
 
@@ -25,8 +27,8 @@ function formatPrice(price: number, currency: string) {
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-const EventCard = ({ item }: { item: Event }) => (
-  <TouchableOpacity className={s.hCard}>
+const EventCard = ({ item, onPress }: { item: Event; onPress: () => void }) => (
+  <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
         <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
@@ -51,8 +53,8 @@ const EventCard = ({ item }: { item: Event }) => (
   </TouchableOpacity>
 );
 
-const Top10Card = ({ item, rank }: { item: Event; rank: number }) => (
-  <TouchableOpacity className={s.hCard}>
+const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress: () => void }) => (
+  <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
         <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
@@ -78,10 +80,12 @@ const SectionRow = ({
   section,
   isTop10 = false,
   marginTop = false,
+  onEventPress,
 }: {
   section: HomeSection;
   isTop10?: boolean;
   marginTop?: boolean;
+  onEventPress: (event: Event) => void;
 }) => {
   if (!section.events?.length) return null;
   return (
@@ -103,8 +107,8 @@ const SectionRow = ({
       >
         {section.events.map((event, index) =>
           isTop10
-            ? <Top10Card key={event.id} item={event} rank={index + 1} />
-            : <EventCard key={event.id} item={event} />
+            ? <Top10Card key={event.id} item={event} rank={index + 1} onPress={() => onEventPress(event)} />
+            : <EventCard key={event.id} item={event} onPress={() => onEventPress(event)} />
         )}
       </ScrollView>
     </>
@@ -114,6 +118,9 @@ const SectionRow = ({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function Index() {
+  const router = useRouter();
+  const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
+
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [location] = useState('Johannesburg, ZA');
@@ -163,6 +170,12 @@ export default function Index() {
     setDropdownOpen(false);
   };
 
+  // Navigate to detail — store event then push
+  const handleEventPress = (event: Event) => {
+    setSelectedEvent(event);
+    router.push(`/event/${event.id}`);
+  };
+
   return (
     <View className={s.screen}>
 
@@ -190,40 +203,51 @@ export default function Index() {
         }
       >
         {/* Hero Banner */}
-        <View className={s.hero}>
-          {(featuredEvent?.banner_image_url ?? featuredEvent?.cover_image_url) ? (
-            <Image
-              source={{ uri: featuredEvent!.banner_image_url ?? featuredEvent!.cover_image_url! }}
+        <TouchableOpacity
+          activeOpacity={0.95}
+          onPress={() => featuredEvent && handleEventPress(featuredEvent)}
+        >
+          <View className={s.hero}>
+            {(featuredEvent?.banner_image_url ?? featuredEvent?.cover_image_url) ? (
+              <Image
+                source={{ uri: featuredEvent!.banner_image_url ?? featuredEvent!.cover_image_url! }}
+                style={sheet.absoluteFill}
+                resizeMode="cover"
+              />
+            ) : (
+              <View className={s.heroImagePlaceholder} />
+            )}
+            {/* Scrim: dark at bottom — blends into #0a0a0a screen bg */}
+            <LinearGradient
+              colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
+              locations={[0.3, 0.7, 1]}
               style={sheet.absoluteFill}
-              resizeMode="cover"
             />
-          ) : (
-            <View className={s.heroImagePlaceholder} />
-          )}
-          {/* Scrim: dark at bottom — blends into #0a0a0a screen bg */}
-          <LinearGradient
-            colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
-            locations={[0.3, 0.7, 1]}
-            style={sheet.absoluteFill}
-          />
-          <View className={s.heroContent}>
-            <Text className={s.heroBadge}>✦ {featuredEvent?.category ?? 'Featured'}</Text>
-            <Text className={s.heroTitle} numberOfLines={2}>
-              {featuredEvent?.title.toUpperCase() ?? 'DISCOVER\nTOP EVENTS'}
-            </Text>
-            <Text className={s.heroSub} numberOfLines={3}>
-              {featuredEvent?.description ?? 'Find and book the best events happening near you.'}
-            </Text>
-            <View className={s.heroActions}>
-              <TouchableOpacity className={s.btnPrimary}>
-                <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
-              </TouchableOpacity>
-              <TouchableOpacity className={s.btnOutline}>
-                <Text className={s.btnOutlineText}>VIEW DETAILS</Text>
-              </TouchableOpacity>
+            <View className={s.heroContent}>
+              <Text className={s.heroBadge}>✦ {featuredEvent?.category ?? 'Featured'}</Text>
+              <Text className={s.heroTitle} numberOfLines={2}>
+                {featuredEvent?.title.toUpperCase() ?? 'DISCOVER\nTOP EVENTS'}
+              </Text>
+              <Text className={s.heroSub} numberOfLines={3}>
+                {featuredEvent?.description ?? 'Find and book the best events happening near you.'}
+              </Text>
+              <View className={s.heroActions}>
+                <TouchableOpacity
+                  className={s.btnPrimary}
+                  onPress={() => featuredEvent && handleEventPress(featuredEvent)}
+                >
+                  <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  className={s.btnOutline}
+                  onPress={() => featuredEvent && handleEventPress(featuredEvent)}
+                >
+                  <Text className={s.btnOutlineText}>VIEW DETAILS</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Category Filter */}
         <View className={s.filterRow}>
@@ -311,6 +335,7 @@ export default function Index() {
               section={section}
               isTop10={section.id === 'trending'}
               marginTop={index > 0}
+              onEventPress={handleEventPress}
             />
           ))
         )}
@@ -325,35 +350,44 @@ export default function Index() {
                 <TouchableOpacity><Text className={s.sectionLink}>EXPLORE</Text></TouchableOpacity>
               </View>
             </View>
-            <View className={s.sportsBanner}>
-              {(sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url) ? (
-                <Image
-                  source={{ uri: sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url! }}
+            <TouchableOpacity
+              activeOpacity={0.92}
+              onPress={() => handleEventPress(sportsBannerEvent)}
+            >
+              <View className={s.sportsBanner}>
+                {(sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url) ? (
+                  <Image
+                    source={{ uri: sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url! }}
+                    style={sheet.absoluteFill}
+                    resizeMode="cover"
+                  />
+                ) : null}
+                <View className={s.sportsBannerBg} />
+                {/* Dark scrim over banner image */}
+                <LinearGradient
+                  colors={['rgba(10,10,10,0.3)', 'rgba(10,10,10,0.75)']}
                   style={sheet.absoluteFill}
-                  resizeMode="cover"
                 />
-              ) : null}
-              <View className={s.sportsBannerBg} />
-              {/* Dark scrim over banner image */}
-              <LinearGradient
-                colors={['rgba(10,10,10,0.3)', 'rgba(10,10,10,0.75)']}
-                style={sheet.absoluteFill}
-              />
-              <View className={s.sportsBannerContent}>
-                <Text className={s.sportsBadge}>{sportsBannerEvent.category}</Text>
-                <Text className={s.sportsTitle}>{sportsBannerEvent.title.toUpperCase()}</Text>
-                <Text className={s.sportsSub} numberOfLines={2}>{sportsBannerEvent.description}</Text>
-                <TouchableOpacity className={s.btnOutline}>
-                  <Text className={s.btnOutlineText}>VIEW TICKETS</Text>
-                </TouchableOpacity>
+                <View className={s.sportsBannerContent}>
+                  <Text className={s.sportsBadge}>{sportsBannerEvent.category}</Text>
+                  <Text className={s.sportsTitle}>{sportsBannerEvent.title.toUpperCase()}</Text>
+                  <Text className={s.sportsSub} numberOfLines={2}>{sportsBannerEvent.description}</Text>
+                  <TouchableOpacity
+                    className={s.btnOutline}
+                    onPress={() => handleEventPress(sportsBannerEvent)}
+                  >
+                    <Text className={s.btnOutlineText}>VIEW TICKETS</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            </TouchableOpacity>
             {sportsListEvents.length > 0 && (
               <View className={s.sportsListContainer}>
                 {sportsListEvents.map((sport, index) => (
                   <TouchableOpacity
                     key={sport.id}
                     className={index === sportsListEvents.length - 1 ? s.sportRowLast : s.sportRow}
+                    onPress={() => handleEventPress(sport)}
                   >
                     <View className={s.sportThumb}>
                       {sport.cover_image_url && (
