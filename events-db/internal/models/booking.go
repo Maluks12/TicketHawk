@@ -24,8 +24,13 @@ type Booking struct {
 	ID                string        `json:"id" db:"id"`
 	BookingNumber     string        `json:"booking_number" db:"booking_number"`
 	EventID           string        `json:"event_id" db:"event_id"`
-	UserID            *string        `json:"user_id,omitempty" db:"user_id"`
-	IsGuest             bool          `json:"is_guest" db:"is_guest"`
+	UserID            *string       `json:"user_id,omitempty" db:"user_id"`
+	IsGuest           bool          `json:"is_guest" db:"is_guest"`
+	// TicketTypeID links to the tier that was booked. Nil for flat-priced events.
+	TicketTypeID      *string       `json:"ticket_type_id,omitempty" db:"ticket_type_id"`
+	// TicketTypeName is a snapshot of the type name at booking time, so receipts
+	// and emails show the correct tier even if the organiser later renames it.
+	TicketTypeName    *string       `json:"ticket_type_name,omitempty" db:"ticket_type_name"`
 	TicketQuantity    int           `json:"ticket_quantity" db:"ticket_quantity"`
 	UnitPrice         float64       `json:"unit_price" db:"unit_price"`
 	Subtotal          float64       `json:"subtotal" db:"subtotal"`
@@ -43,20 +48,20 @@ type Booking struct {
 	QRCodeData        *string       `json:"-" db:"qr_code_data"`
 	QRCodeURL         *string       `json:"qr_code_url" db:"qr_code_url"`
 	RefundedRequestAt *time.Time    `json:"refunded_request_at,omitempty" db:"refunded_request_at"`
-	RefundedReason 	  *string 		`json:"refunded_reason,omitempty" db:"refunded_reason"`
-	RefundedAt  	  *time.Time	`json:"refunded_at,omitempty" db:"refunded_at"`
-	RefundedAmount	  *float64		`json:"refunded_amount,omitempty" db:"refunded_amount"`
-	BookingNotes	  *string		`json:"booking_notes,omitempty" db:"booking_notes"`
+	RefundedReason    *string       `json:"refunded_reason,omitempty" db:"refunded_reason"`
+	RefundedAt        *time.Time    `json:"refunded_at,omitempty" db:"refunded_at"`
+	RefundedAmount    *float64      `json:"refunded_amount,omitempty" db:"refunded_amount"`
+	BookingNotes      *string       `json:"booking_notes,omitempty" db:"booking_notes"`
 	SpecialRequirements *string     `json:"special_requirements,omitempty" db:"special_requirements"`
-	PromoCode		  *string		`json:"promo_code,omitempty" db:"promo_code"`
-	DiscountAmount 	  float64 		`json:"discount_amount" db:"discount_amount"`
-	CreatedAt 		  time.Time		`json:"created_at" db:"created_at"`
-	UpdatedAt 		  time.Time		`json:"updated_at" db:"updated_at"`
-	ConfirmedAt		  *time.Time	`json:"confirmed_at,omitempty" db:"confirmed_at"`
-	CancelledAt		  *time.Time	`json:"cancelled_at,omitempty" db:"cancelled_at"`
+	PromoCode         *string       `json:"promo_code,omitempty" db:"promo_code"`
+	DiscountAmount    float64       `json:"discount_amount" db:"discount_amount"`
+	CreatedAt         time.Time     `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at" db:"updated_at"`
+	ConfirmedAt       *time.Time    `json:"confirmed_at,omitempty" db:"confirmed_at"`
+	CancelledAt       *time.Time    `json:"cancelled_at,omitempty" db:"cancelled_at"`
 
-	Event			  *Event		`json:"event,omitempty"`
-	User			  *UserProfile	`json:"user,omitempty"`
+	Event *Event       `json:"event,omitempty"`
+	User  *UserProfile `json:"user,omitempty"`
 }
 
 func (b *Booking) GuestEmail() string {
@@ -77,14 +82,14 @@ func (b *Booking) GuestName() string {
 }
 
 type CreateBookingDTO struct {
-	EventID  		  string 		`json:"event_id" binding:"required,uuid"`
-	TicketQuantity 	  int 			`json:"ticket_quantity" binding:"required,min=1,max=10"`
-	AttendeeFirstName *string       `json:"attendee_first_name"`
-	AttendeeLastName  *string       `json:"attendee_last_name"`
-	AttendeeEmail     *string       `json:"attendee_email" binding:"omitempty,email"`
-	AttendeePhone     *string       `json:"attendee_phone"`
-	SpecialRequirements *string     `json:"special_requirements"`
-	PromoCode		  *string		`json:"promo_code"`
+	EventID             string  `json:"event_id" binding:"required,uuid"`
+	TicketQuantity      int     `json:"ticket_quantity" binding:"required,min=1,max=10"`
+	AttendeeFirstName   *string `json:"attendee_first_name"`
+	AttendeeLastName    *string `json:"attendee_last_name"`
+	AttendeeEmail       *string `json:"attendee_email" binding:"omitempty,email"`
+	AttendeePhone       *string `json:"attendee_phone"`
+	SpecialRequirements *string `json:"special_requirements"`
+	PromoCode           *string `json:"promo_code"`
 }
 
 type CreateGuestBookingDTO struct {
@@ -99,14 +104,14 @@ type CreateGuestBookingDTO struct {
 }
 
 type BookingResponse struct {
-	BookingID  			string `json:"booking_id"`
-	BookingNumber 		string `json:"booking_number"`
-	TotalAmount 		float64 `json:"total_amount"`
-	Currency 			string `json:"currency"`         
-	PaymentRequestID    string    `json:"payment_request_id"`
-	ClientToken 		string `json:"client_token"`
-	ExpiresAt			time.Time `json:"expires_at"`
-	IsGuest bool 	`json:"is_guest"`
+	BookingID        string    `json:"booking_id"`
+	BookingNumber    string    `json:"booking_number"`
+	TotalAmount      float64   `json:"total_amount"`
+	Currency         string    `json:"currency"`
+	PaymentRequestID string    `json:"payment_request_id"`
+	ClientToken      string    `json:"client_token"`
+	ExpiresAt        time.Time `json:"expires_at"`
+	IsGuest          bool      `json:"is_guest"`
 }
 
 func (b *Booking) QRCodeURLOrEmpty() string {

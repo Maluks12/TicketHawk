@@ -525,6 +525,13 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
     }
 
     event.ComputeAvailableTickets()
+
+    // Load ticket types — nil slice means the event uses flat pricing
+    ticketTypes, err := GetTicketTypesByEventID(pool, event.ID)
+    if err == nil && len(ticketTypes) > 0 {
+        event.TicketTypes = ticketTypes
+    }
+
     return &event, nil
 }
 
@@ -571,6 +578,13 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 	}
  
 	event.ComputeAvailableTickets()
+
+	// Load ticket types — nil slice means the event uses flat pricing
+	ticketTypes, err := GetTicketTypesByEventID(pool, event.ID)
+	if err == nil && len(ticketTypes) > 0 {
+		event.TicketTypes = ticketTypes
+	}
+
 	return &event, nil
 }
 

@@ -3,15 +3,17 @@ package models
 import "time"
 
 type TicketReservation struct {
-	ID            string    `json:"id" db:"id"`
-	CartID        string    `json:"cart_id" db:"cart_id"`
-	EventID       string    `json:"event_id" db:"event_id"`
-	UserID        *string   `json:"user_id,omitempty" db:"user_id"`
-	SessionID     *string   `json:"session_id,omitempty" db:"session_id"`
-	BookingNumber string    `json:"booking_number" db:"booking_number"`
-	Quantity      int       `json:"quantity" db:"quantity"`
-	ExpiresAt     time.Time `json:"expires_at" db:"expires_at"`
-	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	ID           string    `json:"id" db:"id"`
+	CartID       string    `json:"cart_id" db:"cart_id"`
+	EventID      string    `json:"event_id" db:"event_id"`
+	UserID       *string   `json:"user_id,omitempty" db:"user_id"`
+	SessionID    *string   `json:"session_id,omitempty" db:"session_id"`
+	BookingNumber string   `json:"booking_number" db:"booking_number"`
+	Quantity     int       `json:"quantity" db:"quantity"`
+	// TicketTypeID is set when the buyer chose a specific pricing tier.
+	TicketTypeID *string   `json:"ticket_type_id,omitempty" db:"ticket_type_id"`
+	ExpiresAt    time.Time `json:"expires_at" db:"expires_at"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
 // SecondsRemaining returns the number of seconds left on the reservation.
@@ -36,11 +38,13 @@ type CheckoutBeginResponse struct {
 
 // ReservationSummary is one entry inside CheckoutBeginResponse.
 type ReservationSummary struct {
-	ReservationID string `json:"reservation_id"`
-	EventID       string `json:"event_id"`
-	EventTitle    string `json:"event_title"`
-	Quantity      int    `json:"quantity"`
-	SecondsLeft   int    `json:"seconds_left"`
+	ReservationID  string  `json:"reservation_id"`
+	EventID        string  `json:"event_id"`
+	EventTitle     string  `json:"event_title"`
+	TicketTypeID   *string `json:"ticket_type_id,omitempty"`
+	TicketTypeName *string `json:"ticket_type_name,omitempty"`
+	Quantity       int     `json:"quantity"`
+	SecondsLeft    int     `json:"seconds_left"`
 }
 
 // HeartbeatResponse is returned by POST /checkout/heartbeat.

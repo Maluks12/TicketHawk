@@ -24,15 +24,19 @@ type CartItem struct {
 	ItemType             CartItemType `json:"item_type" db:"item_type"`
 	EventID              string       `json:"event_id" db:"event_id"`
 	MerchandiseVariantID *string      `json:"merchandise_variant_id,omitempty" db:"merchandise_variant_id"`
+	// TicketTypeID is set when the buyer chose a specific pricing tier.
+	// Nil for flat-priced events or merch items.
+	TicketTypeID         *string      `json:"ticket_type_id,omitempty" db:"ticket_type_id"`
 	Quantity             int          `json:"quantity" db:"quantity"`
 	UnitPriceSnapshot    float64      `json:"unit_price_snapshot" db:"unit_price_snapshot"`
 	CreatedAt            time.Time    `json:"created_at" db:"created_at"`
 
 	// Joined display fields — populated by GetCartWithItems, not stored columns
-	EventTitle   *string `json:"event_title,omitempty" db:"event_title"`
-	VariantSKU   *string `json:"variant_sku,omitempty" db:"variant_sku"`
-	MerchName    *string `json:"merch_name,omitempty" db:"merch_name"`
-	VariantAttrs *string `json:"variant_attributes,omitempty" db:"variant_attributes"`
+	EventTitle     *string `json:"event_title,omitempty" db:"event_title"`
+	VariantSKU     *string `json:"variant_sku,omitempty" db:"variant_sku"`
+	MerchName      *string `json:"merch_name,omitempty" db:"merch_name"`
+	VariantAttrs   *string `json:"variant_attributes,omitempty" db:"variant_attributes"`
+	TicketTypeName *string `json:"ticket_type_name,omitempty" db:"ticket_type_name"`
 }
 
 // DTOs — json binding only, no db tags needed
@@ -41,6 +45,9 @@ type AddCartItemDTO struct {
 	ItemType             CartItemType `json:"item_type" binding:"required,oneof=ticket merchandise"`
 	EventID              string       `json:"event_id" binding:"required,uuid"`
 	MerchandiseVariantID *string      `json:"merchandise_variant_id" binding:"omitempty,uuid"`
+	// TicketTypeID selects the pricing tier. Required when the event uses ticket
+	// types; omit for flat-priced events or merch items.
+	TicketTypeID         *string      `json:"ticket_type_id" binding:"omitempty,uuid"`
 	Quantity             int          `json:"quantity" binding:"required,min=1,max=10"`
 }
 

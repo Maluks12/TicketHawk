@@ -37,6 +37,9 @@ type Event struct {
 	Longitude      *float64    `json:"longitude,omitempty" db:"longitude"`
 	CategoryID     int         `json:"-" db:"category_id"`
 	Category       string      `json:"category" db:"category"`
+	// Price reflects the cheapest visible ticket type (kept in sync by a DB
+	// trigger). For flat-priced events with no types it is the organiser's
+	// manually set price. Frontend should display this as "from R{price}".
 	Price          float64     `json:"price" db:"price"`
 	Currency       string      `json:"currency" db:"currency"`
 	MaxCapacity    *int        `json:"max_capacity,omitempty" db:"max_capacity"`
@@ -56,11 +59,12 @@ type Event struct {
 	Performers     TagArray    `json:"performers,omitempty" db:"performers"`
 	Teams          TagArray    `json:"teams,omitempty" db:"teams"`
 	Views          int         `json:"views" db:"views"`
-	// IsSponsored is true when this event was injected by the ad system.
-	// Never stored in the DB — set at feed assembly time by InjectSponsored.
-	// The frontend uses this to render the "Sponsored" badge on the card.
+	// IsSponsored is set at feed assembly time — never stored in DB.
 	IsSponsored    bool        `json:"is_sponsored,omitempty" db:"-"`
 	Organizer      *Organizer  `json:"organizer,omitempty" db:"-"`
+	// TicketTypes lists all visible pricing tiers. Populated by GetEventByID /
+	// GetEventBySlug. Nil (omitted) on list/feed endpoints for performance.
+	TicketTypes    []*TicketType `json:"ticket_types,omitempty" db:"-"`
 	CreatedAt      time.Time   `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time   `json:"updated_at" db:"updated_at"`
 }
@@ -148,6 +152,9 @@ type CreateEventDTO struct {
 	Tags               []string   `json:"tags"`
 	Performers         []string   `json:"performers"`
 	Teams              []string   `json:"teams"`
+	// Optional: create ticket types inline with the event. When provided the
+	// cheapest type price overwrites the Price field above via DB trigger.
+	TicketTypes        []CreateTicketTypeDTO `json:"ticket_types"`
 }
 
 type UpdateEventDTO struct {

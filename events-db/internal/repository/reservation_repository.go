@@ -1,199 +1,251 @@
 package repository
- 
+
 import (
-  "context"
-  "errors"
-  "events-db/internal/models"
-  "fmt"
-  "time"
- 
-  "github.com/jackc/pgx/v5/pgxpool"
+	"context"
+	"errors"
+	"events-db/internal/models"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
- 
+
 var ErrReservationNotFound = errors.New("reservation not found")
 var ErrInsufficientReservationCapacity = errors.New("insufficient ticket capacity for reservation")
 var ErrNoTicketItems = errors.New("cart has no ticket items")
- 
-// CreateReservations atomically creates reservations for all ticket items in the cart.
-// It checks capacity (tickets_sold + reserved_count + qty <= max_capacity) inside a
-// single transaction, rolling back everything if any event is sold out.
-func CreateReservations(pool *pgxpool.Pool, cartID string, userID, sessionID *string) ([]models.TicketReservation, error) {
-  ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-  defer cancel()
- 
-  tx, err := pool.Begin(ctx)
-  if err != nil {
-    return nil, err
-  }
-  defer tx.Rollback(ctx)
- 
-  // Fetch all ticket items in the cart grouped by event
-  rows, err := tx.Query(ctx, `
-    SELECT event_id, SUM(quantity)::int AS total_qty
-    FROM cart_items
-  WHERE cart_id = $1 AND item_type = 'ticket'
-    GROUP BY event_id
-  `, cartID)
-  if err != nil {
-    return nil, fmt.Errorf("failed to query ticket items: %w", err)
-  }
-  defer rows.Close()
- 
-  type eventQty struct { eventID string; qty int }
-  var ticketGroups []eventQty
-  for rows.Next() {
-    var eg eventQty
-    if err := rows.Scan(&eg.eventID, &eg.qty); err != nil {
-      return nil, err
-    }
-    ticketGroups = append(ticketGroups, eg)
-  }
-  rows.Close()
- 
-  if len(ticketGroups) == 0 {
-    return nil, ErrNoTicketItems
-  }
- 
-  // Delete any existing reservations for this cart (re-entering checkout)
-  tx.Exec(ctx, `
-    UPDATE events e SET reserved_count = GREATEST(0, reserved_count - tr.quantity)
-    FROM ticket_reservations tr
-    WHERE tr.cart_id = $1 AND e.id = tr.event_id
-  `, cartID)
-  tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID)
- 
-  // For each event, check capacity and create reservation
-  var reservations []models.TicketReservation
-  for _, eg := range ticketGroups {
-    var maxCapacity *int
-    var ticketsSold, reservedCount int
- 
-    err := tx.QueryRow(ctx, `
-      SELECT max_capacity, tickets_sold, reserved_count
-      FROM events WHERE id = $1 AND status = 'published'
-      FOR UPDATE
-    `, eg.eventID).Scan(&maxCapacity, &ticketsSold, &reservedCount)
-    if err != nil {
-      return nil, fmt.Errorf("event %s not found or not published", eg.eventID)
-    }
- 
-    if maxCapacity != nil && ticketsSold+reservedCount+eg.qty > *maxCapacity {
-      return nil, fmt.Errorf("%w: event %s", ErrInsufficientReservationCapacity, eg.eventID)
-    }
- 
-    // Increment reserved_count
-    _, err = tx.Exec(ctx,
-      `UPDATE events SET reserved_count = reserved_count + $1, updated_at = NOW()
-       WHERE id = $2`, eg.qty, eg.eventID)
-    if err != nil {
-      return nil, fmt.Errorf("failed to update reserved_count: %w", err)
-    }
- 
-    // Insert reservation
-    var r models.TicketReservation
-    err = tx.QueryRow(ctx, `
-      INSERT INTO ticket_reservations
-        (cart_id, event_id, user_id, session_id, quantity)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, cart_id, event_id, user_id, session_id,
-                booking_number, quantity, expires_at, created_at
-    `, cartID, eg.eventID, userID, sessionID, eg.qty,
-    ).Scan(
-      &r.ID, &r.CartID, &r.EventID, &r.UserID, &r.SessionID,
-      &r.BookingNumber, &r.Quantity, &r.ExpiresAt, &r.CreatedAt,
-    )
-    if err != nil {
-      return nil, fmt.Errorf("failed to create reservation: %w", err)
-    }
-    reservations = append(reservations, r)
-  }
- 
-  if err := tx.Commit(ctx); err != nil {
-    return nil, fmt.Errorf("reservation transaction failed: %w", err)
-  }
-  return reservations, nil
+
+// CreateReservations atomically creates reservations for all ticket items in
+// the cart. It checks capacity at both the event level AND the ticket type
+// level (when present) inside a single transaction, rolling back everything if
+// any check fails.
+func CreateReservations(
+	pool *pgxpool.Pool,
+	cartID string,
+	userID, sessionID *string,
+) ([]models.TicketReservation, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Fetch all ticket items grouped by event + ticket_type (NULLs included)
+	rows, err := tx.Query(ctx, `
+		SELECT event_id, ticket_type_id, SUM(quantity)::int AS total_qty
+		FROM cart_items
+		WHERE cart_id = $1 AND item_type = 'ticket'
+		GROUP BY event_id, ticket_type_id
+	`, cartID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query ticket items: %w", err)
+	}
+	defer rows.Close()
+
+	type itemGroup struct {
+		eventID      string
+		ticketTypeID *string
+		qty          int
+	}
+	var ticketGroups []itemGroup
+	for rows.Next() {
+		var eg itemGroup
+		if err := rows.Scan(&eg.eventID, &eg.ticketTypeID, &eg.qty); err != nil {
+			return nil, err
+		}
+		ticketGroups = append(ticketGroups, eg)
+	}
+	rows.Close()
+
+	if len(ticketGroups) == 0 {
+		return nil, ErrNoTicketItems
+	}
+
+	// Release any existing reservations for this cart before re-creating them
+	tx.Exec(ctx, `
+		UPDATE events e
+		SET reserved_count = GREATEST(0, reserved_count - tr.quantity)
+		FROM ticket_reservations tr
+		WHERE tr.cart_id = $1 AND e.id = tr.event_id
+	`, cartID)
+	tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID)
+
+	var reservations []models.TicketReservation
+
+	for _, eg := range ticketGroups {
+		// ---------------------------------------------------------------
+		// 1. Event-level capacity check
+		// ---------------------------------------------------------------
+		var maxCapacity *int
+		var ticketsSold, reservedCount int
+
+		err := tx.QueryRow(ctx, `
+			SELECT max_capacity, tickets_sold, reserved_count
+			FROM events WHERE id = $1 AND status = 'published'
+			FOR UPDATE
+		`, eg.eventID).Scan(&maxCapacity, &ticketsSold, &reservedCount)
+		if err != nil {
+			return nil, fmt.Errorf("event %s not found or not published", eg.eventID)
+		}
+
+		if maxCapacity != nil && ticketsSold+reservedCount+eg.qty > *maxCapacity {
+			return nil, fmt.Errorf("%w: event %s", ErrInsufficientReservationCapacity, eg.eventID)
+		}
+
+		// ---------------------------------------------------------------
+		// 2. Ticket-type-level capacity check (when a type was chosen)
+		// ---------------------------------------------------------------
+		if eg.ticketTypeID != nil {
+			var ttCapacity *int
+			var ttSold, ttReserved int
+
+			err := tx.QueryRow(ctx, `
+				SELECT capacity, tickets_sold, reserved_count
+				FROM ticket_types
+				WHERE id = $1
+				FOR UPDATE
+			`, *eg.ticketTypeID).Scan(&ttCapacity, &ttSold, &ttReserved)
+			if err != nil {
+				return nil, fmt.Errorf("ticket type %s not found", *eg.ticketTypeID)
+			}
+
+			if ttCapacity != nil && ttSold+ttReserved+eg.qty > *ttCapacity {
+				return nil, fmt.Errorf("%w: ticket type %s is sold out", ErrInsufficientReservationCapacity, *eg.ticketTypeID)
+			}
+
+			// Increment ticket type's reserved_count
+			_, err = tx.Exec(ctx,
+				`UPDATE ticket_types
+				 SET reserved_count = reserved_count + $1, updated_at = NOW()
+				 WHERE id = $2`, eg.qty, *eg.ticketTypeID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update ticket type reserved_count: %w", err)
+			}
+		}
+
+		// ---------------------------------------------------------------
+		// 3. Increment event reserved_count
+		// ---------------------------------------------------------------
+		_, err = tx.Exec(ctx,
+			`UPDATE events SET reserved_count = reserved_count + $1, updated_at = NOW()
+			 WHERE id = $2`, eg.qty, eg.eventID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to update event reserved_count: %w", err)
+		}
+
+		// ---------------------------------------------------------------
+		// 4. Insert reservation row (now carries ticket_type_id)
+		// ---------------------------------------------------------------
+		var r models.TicketReservation
+		err = tx.QueryRow(ctx, `
+			INSERT INTO ticket_reservations
+				(cart_id, event_id, user_id, session_id, quantity, ticket_type_id)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id, cart_id, event_id, user_id, session_id,
+			          booking_number, quantity, ticket_type_id, expires_at, created_at
+		`, cartID, eg.eventID, userID, sessionID, eg.qty, eg.ticketTypeID,
+		).Scan(
+			&r.ID, &r.CartID, &r.EventID, &r.UserID, &r.SessionID,
+			&r.BookingNumber, &r.Quantity, &r.TicketTypeID, &r.ExpiresAt, &r.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create reservation: %w", err)
+		}
+		reservations = append(reservations, r)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("reservation transaction failed: %w", err)
+	}
+	return reservations, nil
 }
- 
-// RefreshReservations resets expires_at to NOW() + 10 minutes for all reservations
-// belonging to the given cart. Returns the shortest remaining TTL in seconds.
+
+// RefreshReservations resets expires_at to NOW() + 10 minutes for all active
+// reservations belonging to the given cart.
 func RefreshReservations(pool *pgxpool.Pool, cartID string) (int, error) {
-  ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-  defer cancel()
- 
-  rows, err := pool.Query(ctx, `
-    UPDATE ticket_reservations
-    SET expires_at = NOW() + INTERVAL '10 minutes'
-    WHERE cart_id = $1 AND expires_at > NOW()
-    RETURNING expires_at
-  `, cartID)
-  if err != nil {
-    return 0, err
-  }
-  defer rows.Close()
- 
-  shortest := 600 // 10 minutes
-  count := 0
-  for rows.Next() {
-    var expiresAt time.Time
-    if err := rows.Scan(&expiresAt); err != nil {
-      continue
-    }
-    secs := int(time.Until(expiresAt).Seconds())
-    if secs < shortest {
-      shortest = secs
-    }
-    count++
-  }
- 
-  if count == 0 {
-    return 0, errors.New("no active reservations found for this cart")
-  }
-  return shortest, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		UPDATE ticket_reservations
+		SET expires_at = NOW() + INTERVAL '10 minutes'
+		WHERE cart_id = $1 AND expires_at > NOW()
+		RETURNING expires_at
+	`, cartID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	shortest := 600 // 10 minutes
+	count := 0
+	for rows.Next() {
+		var expiresAt time.Time
+		if err := rows.Scan(&expiresAt); err != nil {
+			continue
+		}
+		secs := int(time.Until(expiresAt).Seconds())
+		if secs < shortest {
+			shortest = secs
+		}
+		count++
+	}
+
+	if count == 0 {
+		return 0, errors.New("no active reservations found for this cart")
+	}
+	return shortest, nil
 }
- 
+
 // AbandonReservations releases all reservations for a cart and decrements
-// reserved_count on each event. Called on checkout page leave.
+// reserved_count on both events and ticket types.
 func AbandonReservations(pool *pgxpool.Pool, cartID string) error {
-  ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-  defer cancel()
- 
-  tx, err := pool.Begin(ctx)
-  if err != nil {
-    return err
-  }
-  defer tx.Rollback(ctx)
- 
-  // Decrement reserved_count for each event
-  _, err = tx.Exec(ctx, `
-    UPDATE events e
-    SET reserved_count = GREATEST(0, e.reserved_count - tr.quantity),
-        updated_at = NOW()
-    FROM ticket_reservations tr
-    WHERE tr.cart_id = $1 AND e.id = tr.event_id
-  `, cartID)
-  if err != nil {
-    return err
-  }
- 
-  // Delete reservations
-  tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID)
- 
-  return tx.Commit(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Decrement reserved_count on ticket types
+	_, err = tx.Exec(ctx, `
+		UPDATE ticket_types tt
+		SET reserved_count = GREATEST(0, tt.reserved_count - tr.quantity),
+		    updated_at = NOW()
+		FROM ticket_reservations tr
+		WHERE tr.cart_id = $1
+		  AND tr.ticket_type_id IS NOT NULL
+		  AND tt.id = tr.ticket_type_id
+	`, cartID)
+	if err != nil {
+		return fmt.Errorf("AbandonReservations: failed to decrement ticket type reserved_count: %w", err)
+	}
+
+	// Decrement reserved_count on events
+	_, err = tx.Exec(ctx, `
+		UPDATE events e
+		SET reserved_count = GREATEST(0, e.reserved_count - tr.quantity),
+		    updated_at = NOW()
+		FROM ticket_reservations tr
+		WHERE tr.cart_id = $1 AND e.id = tr.event_id
+	`, cartID)
+	if err != nil {
+		return fmt.Errorf("AbandonReservations: failed to decrement event reserved_count: %w", err)
+	}
+
+	tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID)
+
+	return tx.Commit(ctx)
 }
- 
-// ConvertReservationsToBookings atomically converts every active reservation for
-// a cart into a real pending booking row, then cleans up the reservation rows.
-//
-// What it does in one transaction:
-//   - For each reservation: inserts a booking (status=pending) using the
-//     reservation's booking_number, sets cart_id on the booking row.
-//   - Moves capacity from reserved_count → tickets_sold on the event.
-//   - Deletes the reservation rows.
-//
-// The bookings start as pending/pending. The payment webhook will confirm them
-// once Stitch reports a completed payment.
-//
-// Returns the ordered list of new booking IDs (same order as reservations).
+
+// ConvertReservationsToBookings atomically converts every active reservation
+// for a cart into a real pending booking row, then cleans up reservation rows.
+// Now carries ticket_type_id and snapshots the type name into bookings for
+// receipts and emails.
 func ConvertReservationsToBookings(
 	pool *pgxpool.Pool,
 	cartID string,
@@ -208,9 +260,9 @@ func ConvertReservationsToBookings(
 	}
 	defer tx.Rollback(ctx)
 
-	// Fetch active reservations for this cart
+	// Fetch active reservations including ticket_type_id
 	rows, err := tx.Query(ctx, `
-		SELECT id, event_id, booking_number, quantity
+		SELECT id, event_id, booking_number, quantity, ticket_type_id
 		FROM ticket_reservations
 		WHERE cart_id = $1 AND expires_at > NOW()
 		ORDER BY created_at ASC
@@ -223,11 +275,12 @@ func ConvertReservationsToBookings(
 	type res struct {
 		id, eventID, bookingNumber string
 		qty                        int
+		ticketTypeID               *string
 	}
 	var reservations []res
 	for rows.Next() {
 		var r res
-		if err := rows.Scan(&r.id, &r.eventID, &r.bookingNumber, &r.qty); err != nil {
+		if err := rows.Scan(&r.id, &r.eventID, &r.bookingNumber, &r.qty, &r.ticketTypeID); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -239,41 +292,60 @@ func ConvertReservationsToBookings(
 		return nil, errors.New("no active reservations found for this cart")
 	}
 
-	// Fetch unit prices from cart_items for each event
+	// Fetch unit prices from cart_items, keyed by event_id + ticket_type_id
+	type cartKey struct{ eventID, ticketTypeID string }
 	priceRows, err := tx.Query(ctx, `
-		SELECT event_id, unit_price_snapshot
+		SELECT event_id, COALESCE(ticket_type_id::text, ''), unit_price_snapshot
 		FROM cart_items
 		WHERE cart_id = $1 AND item_type = 'ticket'
 	`, cartID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch cart prices: %w", err)
 	}
-	eventPrices := map[string]float64{}
+	cartPrices := map[cartKey]float64{}
 	for priceRows.Next() {
-		var eID string
+		var eID, ttID string
 		var price float64
-		if err := priceRows.Scan(&eID, &price); err != nil {
+		if err := priceRows.Scan(&eID, &ttID, &price); err != nil {
 			priceRows.Close()
 			return nil, err
 		}
-		eventPrices[eID] = price
+		cartPrices[cartKey{eID, ttID}] = price
 	}
 	priceRows.Close()
 
 	var bookingIDs []string
 
 	for _, r := range reservations {
-		unitPrice := eventPrices[r.eventID]
+		// Resolve price: prefer event+type key, fall back to event-only key
+		ttKeyStr := ""
+		if r.ticketTypeID != nil {
+			ttKeyStr = *r.ticketTypeID
+		}
+		unitPrice, ok := cartPrices[cartKey{r.eventID, ttKeyStr}]
+		if !ok {
+			unitPrice = cartPrices[cartKey{r.eventID, ""}]
+		}
+
 		subtotal := unitPrice * float64(r.qty)
-		// Use same platform fee calculation as the existing booking flow
 		platformFee := CalculatePlatformFee(subtotal)
 		totalAmount := subtotal + platformFee
 
-		// Determine guest flag and attendee email from cart
 		isGuest := userID == nil
+
+		// Snapshot ticket type name for receipts/emails
+		var ticketTypeName *string
+		if r.ticketTypeID != nil {
+			var name string
+			tx.QueryRow(ctx, `SELECT name FROM ticket_types WHERE id = $1`, *r.ticketTypeID).Scan(&name)
+			if name != "" {
+				ticketTypeName = &name
+			}
+		}
+
+		// Attempt to fetch guest email from cart — best-effort, NULL is fine
 		var attendeeEmail *string
 		if sessionID != nil {
-			// Attempt to fetch guest email from cart — best-effort, NULL is fine
 			var email string
 			tx.QueryRow(ctx, `
 				SELECT attendee_email FROM cart_items
@@ -289,6 +361,7 @@ func ConvertReservationsToBookings(
 		err = tx.QueryRow(ctx, `
 			INSERT INTO bookings (
 				booking_number, event_id, user_id, is_guest,
+				ticket_type_id, ticket_type_name,
 				ticket_quantity, unit_price, subtotal,
 				platform_fee, organizer_fee, total_amount, currency,
 				attendee_email,
@@ -296,15 +369,17 @@ func ConvertReservationsToBookings(
 				cart_id
 			) VALUES (
 				$1, $2, $3, $4,
-				$5, $6, $7,
-				$8, 0, $9, 'ZAR',
-				$10,
+				$5, $6,
+				$7, $8, $9,
+				$10, 0, $11, 'ZAR',
+				$12,
 				'pending', 'pending',
-				$11
+				$13
 			)
 			RETURNING id
 		`,
 			r.bookingNumber, r.eventID, userID, isGuest,
+			r.ticketTypeID, ticketTypeName,
 			r.qty, unitPrice, subtotal,
 			platformFee, totalAmount,
 			attendeeEmail,
@@ -315,7 +390,7 @@ func ConvertReservationsToBookings(
 		}
 		bookingIDs = append(bookingIDs, bookingID)
 
-		// Move quantity from reserved_count to tickets_sold atomically
+		// Move capacity from reserved_count → tickets_sold on the event
 		_, err = tx.Exec(ctx, `
 			UPDATE events
 			SET tickets_sold   = tickets_sold   + $1,
@@ -327,7 +402,21 @@ func ConvertReservationsToBookings(
 			return nil, fmt.Errorf("failed to update event capacity for %s: %w", r.eventID, err)
 		}
 
-		// Delete the reservation row
+		// Move capacity on ticket type too (when present)
+		if r.ticketTypeID != nil {
+			_, err = tx.Exec(ctx, `
+				UPDATE ticket_types
+				SET tickets_sold   = tickets_sold   + $1,
+				    reserved_count = GREATEST(0, reserved_count - $1),
+				    updated_at     = NOW()
+				WHERE id = $2
+			`, r.qty, *r.ticketTypeID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to update ticket type capacity for %s: %w", *r.ticketTypeID, err)
+			}
+		}
+
+		// Delete reservation row
 		tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id)
 	}
 
@@ -339,31 +428,31 @@ func ConvertReservationsToBookings(
 
 // GetReservationsByCart returns all active (non-expired) reservations for a cart.
 func GetReservationsByCart(pool *pgxpool.Pool, cartID string) ([]models.TicketReservation, error) {
-  ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-  defer cancel()
- 
-  rows, err := pool.Query(ctx, `
-    SELECT id, cart_id, event_id, user_id, session_id,
-           booking_number, quantity, expires_at, created_at
-    FROM ticket_reservations
-    WHERE cart_id = $1 AND expires_at > NOW()
-    ORDER BY created_at ASC
-  `, cartID)
-  if err != nil {
-    return nil, err
-  }
-  defer rows.Close()
- 
-  var reservations []models.TicketReservation
-  for rows.Next() {
-    var r models.TicketReservation
-    if err := rows.Scan(
-      &r.ID, &r.CartID, &r.EventID, &r.UserID, &r.SessionID,
-      &r.BookingNumber, &r.Quantity, &r.ExpiresAt, &r.CreatedAt,
-    ); err != nil {
-      return nil, err
-    }
-    reservations = append(reservations, r)
-  }
-  return reservations, nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, cart_id, event_id, user_id, session_id,
+		       booking_number, quantity, ticket_type_id, expires_at, created_at
+		FROM ticket_reservations
+		WHERE cart_id = $1 AND expires_at > NOW()
+		ORDER BY created_at ASC
+	`, cartID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reservations []models.TicketReservation
+	for rows.Next() {
+		var r models.TicketReservation
+		if err := rows.Scan(
+			&r.ID, &r.CartID, &r.EventID, &r.UserID, &r.SessionID,
+			&r.BookingNumber, &r.Quantity, &r.TicketTypeID, &r.ExpiresAt, &r.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		reservations = append(reservations, r)
+	}
+	return reservations, nil
 }

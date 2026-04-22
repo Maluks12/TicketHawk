@@ -256,6 +256,8 @@ func main() {
 		public.GET("/filter", handlers.FilterEventsHandler(pool))
 		public.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
+		// Ticket types â visible tiers for the event detail page
+		public.GET("/:id/ticket-types", handlers.GetTicketTypesHandler(pool))
 		// Must be last — catches both UUIDs and slugs
 		public.GET("/:id", handlers.GetEventBySlugHandler(pool, eventCache))
 	}
@@ -497,6 +499,13 @@ func main() {
 		orgRoutes.DELETE("/merch/:id", handlers.OrgDeactivateMerchHandler(pool, eventCache))
 		orgRoutes.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool, eventCache))
 		orgRoutes.PUT("/merch/variants/:id", handlers.OrgUpdateVariantHandler(pool, eventCache))
+
+		// Ticket Types
+		orgRoutes.GET("/events/:id/ticket-types", handlers.OrgGetTicketTypesHandler(pool))
+		orgRoutes.POST("/events/:id/ticket-types", handlers.OrgCreateTicketTypesHandler(pool))
+		orgRoutes.PUT("/events/:id/ticket-types", handlers.OrgReplaceTicketTypesHandler(pool))
+		orgRoutes.PATCH("/ticket-types/:typeId", handlers.OrgUpdateTicketTypeHandler(pool))
+		orgRoutes.DELETE("/ticket-types/:typeId", handlers.OrgDeleteTicketTypeHandler(pool))
 
 		orgRoutes.GET("/ad-wallet", handlers.GetWalletHandler(pool))
 		orgRoutes.POST("/ad-wallet/topup", handlers.TopupWalletHandler(pool, paymentService))
