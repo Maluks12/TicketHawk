@@ -629,6 +629,12 @@ func TestQRGenerateCodeForAssignment(t *testing.T) {
 	if cfg.R2AccessKey == "" {
 		t.Skip("R2_ACCESS_KEY not set — skipping QR upload test")
 	}
+	// Skip when R2_URL points to a local dev endpoint that won't resolve outside
+	// of the Docker Compose network (e.g. http://dev.localhost or http://localhost).
+	r2URL := cfg.R2URL
+	if r2URL == "" || strings.Contains(r2URL, "localhost") || strings.Contains(r2URL, "127.0.0.1") {
+		t.Skipf("R2_URL (%q) is a local dev endpoint — skipping QR upload test", r2URL)
+	}
 	cfg.QREncryptionKey = qrKeyOrSkip(t)
 	svc := NewQRService(pool, cfg)
 

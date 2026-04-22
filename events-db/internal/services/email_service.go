@@ -210,8 +210,14 @@ func (s *EmailService) SendEventCancellation(event *models.Event, user *models.U
 
     message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
 
-    _, err := s.client.Send(message)
-    return err
+    resp, err := s.client.Send(message)
+    if err != nil {
+        return fmt.Errorf("failed to send event cancellation email: %w", err)
+    }
+    if resp.StatusCode >= 400 {
+        return fmt.Errorf("event cancellation email API error: %d", resp.StatusCode)
+    }
+    return nil
 }
 
 func (s *EmailService) SendWaitlistNotification(event *models.Event, user *models.User) error {
@@ -241,8 +247,14 @@ func (s *EmailService) SendWaitlistNotification(event *models.Event, user *model
 
     message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
 
-    _, err := s.client.Send(message)
-    return err
+    resp, err := s.client.Send(message)
+    if err != nil {
+        return fmt.Errorf("failed to send waitlist notification email: %w", err)
+    }
+    if resp.StatusCode >= 400 {
+        return fmt.Errorf("waitlist notification email API error: %d", resp.StatusCode)
+    }
+    return nil
 }
 
 func (s *EmailService) SendPasswordReset(email string, resetToken string) error {
@@ -268,8 +280,14 @@ func (s *EmailService) SendPasswordReset(email string, resetToken string) error 
 
     message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
 
-    _, err := s.client.Send(message)
-    return err
+    resp, err := s.client.Send(message)
+    if err != nil {
+        return fmt.Errorf("failed to send password reset email: %w", err)
+    }
+    if resp.StatusCode >= 400 {
+        return fmt.Errorf("password reset email API error: %d", resp.StatusCode)
+    }
+    return nil
 }
 
 // SendOrganizerApproval - Notify user they're approved as organizer
@@ -303,8 +321,14 @@ func (s *EmailService) SendOrganizerApproval(user *models.User, organizer *model
 
     message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
 
-    _, err := s.client.Send(message)
-    return err
+    resp, err := s.client.Send(message)
+    if err != nil {
+        return fmt.Errorf("failed to send organizer approval email: %w", err)
+    }
+    if resp.StatusCode >= 400 {
+        return fmt.Errorf("organizer approval email API error: %d", resp.StatusCode)
+    }
+    return nil
 }
 
 // SendOrganizerRejection - Notify user their application was rejected
@@ -329,8 +353,14 @@ func (s *EmailService) SendOrganizerRejection(user *models.User, reason string) 
 
     message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
 
-    _, err := s.client.Send(message)
-    return err
+    resp, err := s.client.Send(message)
+    if err != nil {
+        return fmt.Errorf("failed to send organizer rejection email: %w", err)
+    }
+    if resp.StatusCode >= 400 {
+        return fmt.Errorf("organizer rejection email API error: %d", resp.StatusCode)
+    }
+    return nil
 }
 
 func (s *EmailService) SendTicketAssignmentInvite(
@@ -719,4 +749,3 @@ func (s *EmailService) renderBookingConfirmationWithQR(
 	}
 	return buf.String(), nil
 }
- 
