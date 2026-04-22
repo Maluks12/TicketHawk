@@ -53,6 +53,8 @@ type Event struct {
 	RefundPolicy       *string `json:"refund_policy,omitempty" db:"refund_policy"`
 	TermsAndConditions *string `json:"terms_and_conditions,omitempty" db:"terms_and_conditions"`
 	Tags           TagArray    `json:"tags,omitempty" db:"tags"`
+	Performers     TagArray    `json:"performers,omitempty" db:"performers"`
+	Teams          TagArray    `json:"teams,omitempty" db:"teams"`
 	Views          int         `json:"views" db:"views"`
 	// IsSponsored is true when this event was injected by the ad system.
 	// Never stored in the DB — set at feed assembly time by InjectSponsored.
@@ -144,6 +146,8 @@ type CreateEventDTO struct {
 	RefundPolicy       *string    `json:"refund_policy"`
 	TermsAndConditions *string    `json:"terms_and_conditions"`
 	Tags               []string   `json:"tags"`
+	Performers         []string   `json:"performers"`
+	Teams              []string   `json:"teams"`
 }
 
 type UpdateEventDTO struct {
@@ -170,4 +174,6 @@ type UpdateEventDTO struct {
 	RefundPolicy       *string    `json:"refund_policy"`
 	TermsAndConditions *string    `json:"terms_and_conditions"`
 	Tags               *[]string  `json:"tags"`
+	Performers         *[]string  `json:"performers"`
+	Teams              *[]string  `json:"teams"`
 }

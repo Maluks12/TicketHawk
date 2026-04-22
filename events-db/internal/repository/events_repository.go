@@ -51,10 +51,10 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             start_time, end_time, expires_at, timezone,
             venue_name, address, city, latitude, longitude,
             category_id, price, currency, max_capacity, allow_waitlist,
-            refund_policy, terms_and_conditions, tags,
+            refund_policy, terms_and_conditions, tags, performers, teams,
             organizer_id, status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
         RETURNING id, slug, title, description, cover_image_url, start_time, end_time,
                   price, currency, max_capacity, tickets_sold, status, organizer_id, created_at, updated_at
     `
@@ -66,7 +66,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		dto.StartTime, dto.EndTime, dto.ExpiresAt, dto.Timezone,
 		dto.VenueName, dto.Address, dto.City, dto.Latitude, dto.Longitude,
 		dto.CategoryID, dto.Price, dto.Currency, dto.MaxCapacity, dto.AllowWaitlist,
-		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags,
+		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags, dto.Performers, dto.Teams,
 		organizerID, models.EventDraft,
 	).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
@@ -435,6 +435,16 @@ func UpdateEvents(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO
 		args = append(args, *dto.Tags)
 		argIndex++
 	}
+	if dto.Performers != nil {
+		updates = append(updates, fmt.Sprintf("performers = $%d", argIndex))
+		args = append(args, *dto.Performers)
+		argIndex++
+	}
+	if dto.Teams != nil {
+		updates = append(updates, fmt.Sprintf("teams = $%d", argIndex))
+		args = append(args, *dto.Teams)
+		argIndex++
+	}
 	if len(updates) == 0 {
 		return nil, fmt.Errorf("no fields to update")
 	}
@@ -477,7 +487,8 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
             e.allow_waitlist, e.is_featured, e.featured_until, e.status,
             e.refund_policy, e.terms_and_conditions, e.tags, e.views,
             e.organizer_id, e.created_at, e.updated_at,
-            c.name as category
+            c.name as category,
+            e.performers, e.teams
         FROM events e
         JOIN categories c ON e.category_id = c.id
         WHERE e.id = $1
@@ -502,6 +513,7 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
         &event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
         &event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
         &event.Category,
+        &event.Performers, &event.Teams,
     )
     if err != nil {
         // Fix 6: distinguish a missing row from a genuine DB failure so callers
@@ -533,7 +545,8 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
             e.allow_waitlist, e.is_featured, e.featured_until, e.status,
             e.refund_policy, e.terms_and_conditions, e.tags, e.views,
             e.organizer_id, e.created_at, e.updated_at,
-            c.name as category
+            c.name as category,
+            e.performers, e.teams
         FROM events e
         JOIN categories c ON e.category_id = c.id
         WHERE e.slug = $1
@@ -548,6 +561,7 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 		&event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
 		&event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
 		&event.Category,
+		&event.Performers, &event.Teams,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1007,4 +1021,3 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 	}
 	return events, nil
 }
-
