@@ -107,16 +107,20 @@ func main() {
 	workers.StartAdWorker(pool, ctx)
 	log.Info().Msg("ad worker started")
 
-	bookingRepo := repository.NewPgxBookingQuerier(pool)
-	eventRepo := repository.NewPgxEventQuerier(pool)
+	// FIX 3: instantiate all repository queriers up front so both the booking
+	// handlers and the checkout handlers receive interfaces, not a raw pool.
+	bookingRepo   := repository.NewPgxBookingQuerier(pool)
+	eventRepo     := repository.NewPgxEventQuerier(pool)
+	cartQuerier   := repository.NewPgxCartQuerier(pool)
+	reserveQuerier := repository.NewPgxReservationQuerier(pool)
 
 	// ==========================================
 	// Services
 	// ==========================================
-	emailService := services.NewEmailService(cfg)
-	qrService := services.NewQRService(pool, cfg)
+	emailService   := services.NewEmailService(cfg)
+	qrService      := services.NewQRService(pool, cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
-	imgService := services.NewImageService(cfg)
+	imgService     := services.NewImageService(cfg)
 
 	// ==========================================
 	// Setup Router
@@ -247,19 +251,21 @@ func main() {
 			"events-public"))
 	}
 	{
-		public.GET("/trending", handlers.TrendingEventHandlers(pool, eventCache))
-		public.GET("", handlers.GetAllEventsHandlers(pool, eventCache))
-		public.GET("/featured", handlers.FeaturedEventsHandlers(pool, eventCache))
-		public.GET("/active", handlers.ActiveEventsHandlers(pool, eventCache))
-		public.GET("/search", handlers.SearchEventsHandler(pool))
-		public.GET("/category/:id", handlers.GetEventCategory(pool, eventCache))
-		public.GET("/filter", handlers.FilterEventsHandler(pool))
-		public.GET("/:id/merch", handlers.GetEventMerchHandler(pool, eventCache))
+		// FIX 5: renamed *Handlers → *Handler throughout
+		public.GET("/trending",         handlers.TrendingEventHandler(pool, eventCache))
+		public.GET("",                  handlers.GetAllEventsHandler(pool, eventCache))
+		public.GET("/featured",         handlers.FeaturedEventsHandler(pool, eventCache))
+		public.GET("/active",           handlers.ActiveEventsHandler(pool, eventCache))
+		public.GET("/search",           handlers.SearchEventsHandler(pool))
+		public.GET("/category/:id",     handlers.GetEventCategoryHandler(pool, eventCache))
+		public.GET("/filter",           handlers.FilterEventsHandler(pool))
+		public.GET("/:id/merch",        handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
-		// Ticket types â visible tiers for the event detail page
+		// Ticket types — visible tiers for the event detail page
 		public.GET("/:id/ticket-types", handlers.GetTicketTypesHandler(pool))
 		// Must be last — catches both UUIDs and slugs
-		public.GET("/:id", handlers.GetEventBySlugHandler(pool, eventCache))
+		// FIX 1: GetEventBySlugHandler now reads c.Param("id") correctly
+		public.GET("/:id",              handlers.GetEventBySlugHandler(pool, eventCache))
 	}
 
 	// ==========================================
@@ -299,12 +305,12 @@ func main() {
 			"cart"))
 	}
 	{
-		cart.GET("", middleware.OptionalAuth(cfg), handlers.GetCartHandler(pool))
-		cart.POST("/items", middleware.OptionalAuth(cfg), handlers.AddCartItemHandler(pool))
+		cart.GET("",            middleware.OptionalAuth(cfg), handlers.GetCartHandler(pool))
+		cart.POST("/items",     middleware.OptionalAuth(cfg), handlers.AddCartItemHandler(pool))
 		cart.PATCH("/items/:id", middleware.OptionalAuth(cfg), handlers.UpdateCartItemHandler(pool))
 		cart.DELETE("/items/:id", middleware.OptionalAuth(cfg), handlers.DeleteCartItemHandler(pool))
-		cart.DELETE("", middleware.OptionalAuth(cfg), handlers.ClearCartHandler(pool))
-		cart.POST("/merge", middleware.AuthMiddleware(cfg), handlers.MergeCartHandler(pool))
+		cart.DELETE("",         middleware.OptionalAuth(cfg), handlers.ClearCartHandler(pool))
+		cart.POST("/merge",     middleware.AuthMiddleware(cfg), handlers.MergeCartHandler(pool))
 	}
 
 	// ==========================================
@@ -317,10 +323,11 @@ func main() {
 			"checkout"))
 	}
 	{
-		checkout.POST("/begin", middleware.OptionalAuth(cfg), handlers.CheckoutBeginHandler(pool))
-		checkout.POST("/heartbeat", middleware.OptionalAuth(cfg), handlers.CheckoutHeartbeatHandler(pool))
-		checkout.POST("/abandon", middleware.OptionalAuth(cfg), handlers.CheckoutAbandonHandler(pool))
-		checkout.POST("/confirm", middleware.OptionalAuth(cfg), handlers.CheckoutConfirmHandler(pool, paymentService))
+		// FIX 3: handlers now accept repository interfaces instead of a raw pool
+		checkout.POST("/begin",     middleware.OptionalAuth(cfg), handlers.CheckoutBeginHandler(cartQuerier, reserveQuerier, eventRepo))
+		checkout.POST("/heartbeat", middleware.OptionalAuth(cfg), handlers.CheckoutHeartbeatHandler(cartQuerier, reserveQuerier))
+		checkout.POST("/abandon",   middleware.OptionalAuth(cfg), handlers.CheckoutAbandonHandler(cartQuerier, reserveQuerier))
+		checkout.POST("/confirm",   middleware.OptionalAuth(cfg), handlers.CheckoutConfirmHandler(cartQuerier, reserveQuerier, bookingRepo, paymentService))
 	}
 
 	// ==========================================
@@ -333,11 +340,11 @@ func main() {
 			"guest-bookings"))
 	}
 	{
-		guest.POST("/bookings", handlers.CreateGuestBookingHandler(pool, paymentService))
-		guest.GET("/bookings/:bookingNumber", handlers.GetGuestBookingHandler(pool, rdb))
-		guest.GET("/bookings/:bookingNumber/assignments", handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
-		guest.GET("/bookings/:bookingNumber/payment", handlers.GuestPaymentStatusHandler(pool, paymentService))
-		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
+		guest.POST("/bookings",                                  handlers.CreateGuestBookingHandler(pool, paymentService))
+		guest.GET("/bookings/:bookingNumber",                    handlers.GetGuestBookingHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber/assignments",        handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber/payment",            handlers.GuestPaymentStatusHandler(pool, paymentService))
+		guest.POST("/bookings/:bookingNumber/payment/retry",     handlers.GuestRetryPaymentHandler(pool, paymentService))
 	}
 
 	// ==========================================
@@ -351,8 +358,8 @@ func main() {
 			"notifications"))
 	}
 	{
-		notifs.GET("", handlers.GetNotificationsHandler(pool))
-		notifs.GET("/unread", handlers.GetUnreadCountHandler(pool))
+		notifs.GET("",          handlers.GetNotificationsHandler(pool))
+		notifs.GET("/unread",   handlers.GetUnreadCountHandler(pool))
 		notifs.PATCH("/:id/read", handlers.MarkReadHandler(pool))
 		notifs.POST("/read-all", handlers.MarkAllReadHandler(pool))
 	}
@@ -375,9 +382,9 @@ func main() {
 			"bookings"))
 	}
 	{
-		bookings.POST("", handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
-		bookings.GET("", handlers.GetUserBookingsHandler(bookingRepo))
-		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
+		bookings.POST("",      handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
+		bookings.GET("",       handlers.GetUserBookingsHandler(bookingRepo))
+		bookings.GET("/:id",   handlers.GetBookingDetailsHandler(bookingRepo))
 		bookings.POST("/:id/refund", handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
 		bookings.GET("/:id/assignments", handlers.GetTicketAssignmentsHandler(pool))
 		bookings.POST("/:id/assignments/:assignmentId", handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURL))
@@ -390,12 +397,12 @@ func main() {
 			paymentRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
 				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
 				"payments"))
-			paymentRoutes.POST("/:id/payment", handlers.CreateStitchPayment(pool, paymentService))
-			paymentRoutes.GET("/:id/payment", handlers.GetPaymentStatusHandler(pool, paymentService))
+			paymentRoutes.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
+			paymentRoutes.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			paymentRoutes.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
 		} else {
-			bookings.POST("/:id/payment", handlers.CreateStitchPayment(pool, paymentService))
-			bookings.GET("/:id/payment", handlers.GetPaymentStatusHandler(pool, paymentService))
+			bookings.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
+			bookings.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
 		}
 	}
@@ -424,7 +431,7 @@ func main() {
 			"user-profile"))
 	}
 	{
-		user.GET("/me", handlers.GetMyProfileHandler(pool))
+		user.GET("/me",           handlers.GetMyProfileHandler(pool))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 	}
 
@@ -450,18 +457,19 @@ func main() {
 			"admin"))
 	}
 	{
-		admin.POST("/events", handlers.CreateEventHandlers(pool, eventCache))
-		admin.PUT("/events/:id", handlers.UpdateEventHandlers(pool, eventCache))
-		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool, eventCache))
-		admin.DELETE("/events/:id", handlers.DeleteEventHandlers(pool))
-		admin.GET("/events", handlers.GetAdminEventsHandler(pool))
-		admin.GET("/stats", handlers.GetAdminStatsHandler(pool))
+		// FIX 5: renamed *Handlers → *Handler
+		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache))
+		admin.PUT("/events/:id",     handlers.UpdateEventHandler(pool, eventCache))
+		admin.GET("/events/:id",     handlers.GetEventByIDHandler(pool, eventCache))
+		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool))
+		admin.GET("/events",         handlers.GetAdminEventsHandler(pool))
+		admin.GET("/stats",          handlers.GetAdminStatsHandler(pool))
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))
-		admin.GET("/users", controllers.GetAllUsersHandler(pool))
+		admin.GET("/users",          controllers.GetAllUsersHandler(pool))
 		admin.PUT("/users/promote/:id", controllers.PromoteUserHandler(pool))
-		admin.PUT("/users/demote/:id", controllers.DemoteUserHandler(pool))
+		admin.PUT("/users/demote/:id",  controllers.DemoteUserHandler(pool))
 		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
-		admin.GET("/campaigns", handlers.AdminGetCampaignsHandler(pool))
+		admin.GET("/campaigns",      handlers.AdminGetCampaignsHandler(pool))
 	}
 
 	// ==========================================
@@ -471,11 +479,11 @@ func main() {
 		adminAPI := v1.Group("/admin/ratelimit")
 		adminAPI.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
 		{
-			adminAPI.GET("/ip/:ip", handlers.RateLimitIPStatusHandler(rateLimitManager))
-			adminAPI.POST("/ip/:ip/reset", handlers.RateLimitIPResetHandler(rateLimitManager))
-			adminAPI.GET("/user/:userId", handlers.RateLimitUserStatusHandler(rateLimitManager))
+			adminAPI.GET("/ip/:ip",             handlers.RateLimitIPStatusHandler(rateLimitManager))
+			adminAPI.POST("/ip/:ip/reset",      handlers.RateLimitIPResetHandler(rateLimitManager))
+			adminAPI.GET("/user/:userId",        handlers.RateLimitUserStatusHandler(rateLimitManager))
 			adminAPI.POST("/user/:userId/reset", handlers.RateLimitUserResetHandler(rateLimitManager))
-			adminAPI.GET("/metrics", handlers.RateLimitMetricsHandler())
+			adminAPI.GET("/metrics",             handlers.RateLimitMetricsHandler())
 		}
 	}
 
@@ -491,36 +499,36 @@ func main() {
 	}
 	{
 		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
-		orgRoutes.POST("/events/:id/cancel", handlers.CancelEventHandler(pool, eventCache))
-		orgRoutes.GET("/events", handlers.GetOrganizerEventsHandler(pool))
+		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
+		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 
-		orgRoutes.POST("/events/:id/merch", handlers.OrgCreateMerchHandler(pool, eventCache))
-		orgRoutes.PUT("/merch/:id", handlers.OrgUpdateMerchHandler(pool, eventCache))
-		orgRoutes.DELETE("/merch/:id", handlers.OrgDeactivateMerchHandler(pool, eventCache))
+		orgRoutes.POST("/events/:id/merch",   handlers.OrgCreateMerchHandler(pool, eventCache))
+		orgRoutes.PUT("/merch/:id",           handlers.OrgUpdateMerchHandler(pool, eventCache))
+		orgRoutes.DELETE("/merch/:id",        handlers.OrgDeactivateMerchHandler(pool, eventCache))
 		orgRoutes.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool, eventCache))
-		orgRoutes.PUT("/merch/variants/:id", handlers.OrgUpdateVariantHandler(pool, eventCache))
+		orgRoutes.PUT("/merch/variants/:id",  handlers.OrgUpdateVariantHandler(pool, eventCache))
 
 		// Ticket Types
-		orgRoutes.GET("/events/:id/ticket-types", handlers.OrgGetTicketTypesHandler(pool))
+		orgRoutes.GET("/events/:id/ticket-types",  handlers.OrgGetTicketTypesHandler(pool))
 		orgRoutes.POST("/events/:id/ticket-types", handlers.OrgCreateTicketTypesHandler(pool))
-		orgRoutes.PUT("/events/:id/ticket-types", handlers.OrgReplaceTicketTypesHandler(pool))
-		orgRoutes.PATCH("/ticket-types/:typeId", handlers.OrgUpdateTicketTypeHandler(pool))
-		orgRoutes.DELETE("/ticket-types/:typeId", handlers.OrgDeleteTicketTypeHandler(pool))
+		orgRoutes.PUT("/events/:id/ticket-types",  handlers.OrgReplaceTicketTypesHandler(pool))
+		orgRoutes.PATCH("/ticket-types/:typeId",   handlers.OrgUpdateTicketTypeHandler(pool))
+		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool))
 
-		orgRoutes.GET("/ad-wallet", handlers.GetWalletHandler(pool))
-		orgRoutes.POST("/ad-wallet/topup", handlers.TopupWalletHandler(pool, paymentService))
+		orgRoutes.GET("/ad-wallet",             handlers.GetWalletHandler(pool))
+		orgRoutes.POST("/ad-wallet/topup",      handlers.TopupWalletHandler(pool, paymentService))
 		orgRoutes.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
-		orgRoutes.GET("/campaigns", handlers.GetMyCampaignsHandler(pool))
-		orgRoutes.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
-		orgRoutes.PATCH("/campaigns/:id", handlers.UpdateCampaignHandler(pool))
-		orgRoutes.DELETE("/campaigns/:id", handlers.EndCampaignHandler(pool))
+		orgRoutes.GET("/campaigns",             handlers.GetMyCampaignsHandler(pool))
+		orgRoutes.GET("/campaigns/:id",         handlers.GetCampaignHandler(pool))
+		orgRoutes.PATCH("/campaigns/:id",       handlers.UpdateCampaignHandler(pool))
+		orgRoutes.DELETE("/campaigns/:id",      handlers.EndCampaignHandler(pool))
 
-		orgRoutes.GET("/dashboard/stats", handlers.GetOrganizerDashboardStatsHandler(pool))
-		orgRoutes.GET("/dashboard/events", handlers.GetOrganizerDashboardEventsHandler(pool))
-		orgRoutes.GET("/dashboard/events/:id/stats", handlers.GetOrganizerEventStatsHandler(pool))
-		orgRoutes.GET("/dashboard/events/:id/bookings", handlers.GetOrganizerEventBookingsHandler(pool))
-		orgRoutes.GET("/dashboard/events/:id/merch", handlers.GetOrganizerEventMerchHandler(pool))
-		orgRoutes.GET("/dashboard/payouts", handlers.GetOrganizerPayoutSummaryHandler(pool))
+		orgRoutes.GET("/dashboard/stats",                    handlers.GetOrganizerDashboardStatsHandler(pool))
+		orgRoutes.GET("/dashboard/events",                   handlers.GetOrganizerDashboardEventsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/stats",         handlers.GetOrganizerEventStatsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/bookings",      handlers.GetOrganizerEventBookingsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/merch",         handlers.GetOrganizerEventMerchHandler(pool))
+		orgRoutes.GET("/dashboard/payouts",                  handlers.GetOrganizerPayoutSummaryHandler(pool))
 	}
 
 	// ==========================================
@@ -535,11 +543,11 @@ func main() {
 			"media-upload"))
 	}
 	{
-		media.POST("/cover", handlers.UploadCoverImageHandler(pool, imgService))
-		media.POST("/banner", handlers.UploadBannerImageHandler(pool, imgService))
+		media.POST("/cover",        handlers.UploadCoverImageHandler(pool, imgService))
+		media.POST("/banner",       handlers.UploadBannerImageHandler(pool, imgService))
 		media.POST("/banner/video", handlers.UploadBannerVideoHandler(pool, imgService))
 		media.DELETE("/banner/video", handlers.DeleteBannerVideoHandler(pool, imgService))
-		media.POST("/gallery", handlers.UploadGalleryImageHandler(pool, imgService))
+		media.POST("/gallery",      handlers.UploadGalleryImageHandler(pool, imgService))
 	}
 
 	// ==========================================

@@ -16,16 +16,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// CreateBookingHandler creates a new booking and initialises a Stitch payment
-// intent for it. Accepts repository interfaces so the handler is unit-testable
-// without a live database.
 func CreateBookingHandler(
-    bookings repository.BookingQuerier,
-    events repository.EventQuerier,
-    paymentService *services.PaymentService,
-    cfg *config.Config,
+	bookings repository.BookingQuerier,
+	events repository.EventQuerier,
+	paymentService *services.PaymentService,
+	cfg *config.Config,
 ) gin.HandlerFunc {
-    expiryDuration := time.Duration(cfg.BookingExpiryMinutes) * time.Minute
+	expiryDuration := time.Duration(cfg.BookingExpiryMinutes) * time.Minute
 	return func(c *gin.Context) {
 		userID, exists := c.Get("user_id")
 		if !exists {
@@ -78,14 +75,14 @@ func CreateBookingHandler(
 		}
 
 		c.JSON(http.StatusCreated, models.BookingResponse{
-            BookingID:        booking.ID,
-            BookingNumber:    booking.BookingNumber,
-            TotalAmount:      booking.TotalAmount,
-            Currency:         booking.Currency,
-            ClientToken:      clientToken,
-            PaymentRequestID: paymentRequestID,
-            ExpiresAt:        booking.CreatedAt.Add(expiryDuration), // Fix 3
-        })
+			BookingID:        booking.ID,
+			BookingNumber:    booking.BookingNumber,
+			TotalAmount:      booking.TotalAmount,
+			Currency:         booking.Currency,
+			ClientToken:      clientToken,
+			PaymentRequestID: paymentRequestID,
+			ExpiresAt:        booking.CreatedAt.Add(expiryDuration),
+		})
 	}
 }
 
@@ -116,7 +113,6 @@ func GetUserBookingsHandler(bookings repository.BookingQuerier) gin.HandlerFunc 
 			return
 		}
 
-		// FIX: was c.JSON(200, ...) — use the named constant for consistency.
 		c.JSON(http.StatusOK, gin.H{
 			"data":        result,
 			"next_cursor": utils.EncodeCursor(nextCursor),
@@ -149,6 +145,16 @@ func GetBookingDetailsHandler(bookings repository.BookingQuerier) gin.HandlerFun
 	}
 }
 
+// RequestRefundHandler processes a refund request for a confirmed booking.
+//
+// FIX 4: Ticket invalidation notices are now sent synchronously before the
+// response is returned, rather than in a fire-and-forget goroutine.
+//
+// The previous goroutine was silently lost on process restart, meaning
+// assignees whose tickets were invalidated by the refund might never receive
+// an email notification. The assignee count is bounded (one per ticket in the
+// booking) so the latency increase is negligible in practice, and the caller
+// now gets a response that accurately reflects whether emails were attempted.
 func RequestRefundHandler(
 	bookings repository.BookingQuerier,
 	events repository.EventQuerier,
@@ -194,38 +200,38 @@ func RequestRefundHandler(
 			return
 		}
 
-		if len(cancelledAssignees) > 0 {
-			go func() {
-				for _, assignee := range cancelledAssignees {
-					if err := emailService.SendTicketInvalidationNotice(
-						assignee.Email,
-						assignee.Name,
-						event.Title,
-						event.StartTime.Format("Monday, 2 January 2006"),
-						booking.BookingNumber,
-					); err != nil {
-						log.Error().
-							Err(err).
-							Str("booking_number", booking.BookingNumber).
-							Str("assignee_email", assignee.Email).
-							Msg("refund: failed to send ticket invalidation notice")
-					}
-				}
-			}()
+		// FIX 4: send synchronously — no goroutine. The count is bounded by
+		// ticket quantity so latency is negligible. Errors are logged but do
+		// not fail the request since the refund itself has already succeeded.
+		emailsFailed := 0
+		for _, assignee := range cancelledAssignees {
+			if err := emailService.SendTicketInvalidationNotice(
+				assignee.Email,
+				assignee.Name,
+				event.Title,
+				event.StartTime.Format("Monday, 2 January 2006"),
+				booking.BookingNumber,
+			); err != nil {
+				emailsFailed++
+				log.Error().
+					Err(err).
+					Str("booking_number", booking.BookingNumber).
+					Str("assignee_email", assignee.Email).
+					Msg("refund: failed to send ticket invalidation notice")
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":            "Refund processed successfully",
 			"refund_status":      "processing",
-			"assignees_notified": len(cancelledAssignees),
+			"assignees_notified": len(cancelledAssignees) - emailsFailed,
 		})
 	}
 }
 
 // VerifyQRCodeHandler verifies a scanned QR code. Only organisers and admins
 // may call this endpoint, and organisers may only verify tickets for their own
-// events. The role check is done inline here (not just by middleware) so the
-// error response carries the valid/invalid field expected by scanner clients.
+// events.
 func VerifyQRCodeHandler(
 	bookings repository.BookingQuerier,
 	events repository.EventQuerier,

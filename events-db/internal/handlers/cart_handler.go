@@ -223,7 +223,7 @@ func buildCartSummary(cart *models.Cart) models.CartSummary {
 	summary := models.CartSummary{
 		TotalItems:  len(cart.Items),
 		TotalAmount: total,
-		Currency:    "ZAR",
+		Currency:    models.DefaultCurrency,
 	}
 	for _, eg := range groups {
 		summary.ItemsByEvent = append(summary.ItemsByEvent, *eg)

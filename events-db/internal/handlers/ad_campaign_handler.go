@@ -70,7 +70,7 @@ func TopupWalletHandler(pool *pgxpool.Pool, paymentSvc *services.PaymentService)
 			"topup_id":        topup.ID,
 			"reference":       topup.ReferenceNumber,
 			"amount":          dto.Amount,
-			"currency":        "ZAR",
+			"currency":        models.DefaultCurrency,
 			"client_token":    clientToken,
 			"payment_request": requestID,
 			"status":          "pending",
@@ -127,7 +127,7 @@ func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				"cpm_rate":             campaign.CPMRate,
 				"cost_per_impression":  campaign.CostPerImpression(),
 				"daily_impression_cap": campaign.DailyImpressionCap(),
-				"currency":             "ZAR",
+				"currency":             models.DefaultCurrency,
 			},
 		})
 	}

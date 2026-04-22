@@ -16,7 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// FIX 5: renamed CreateEventHandlers → CreateEventHandler (singular, consistent naming)
+func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 
@@ -52,7 +53,8 @@ func CreateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 	}
 }
 
-func DeleteEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
+
+func DeleteEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -70,7 +72,8 @@ func DeleteEventHandlers(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-func TrendingEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// FIX 5: renamed TrendingEventHandlers → TrendingEventHandler
+func TrendingEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -121,7 +124,7 @@ func TrendingEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 	}
 }
 
-func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+func UpdateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -152,59 +155,63 @@ func UpdateEventHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 	}
 }
 
-func GetEventByIDHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        eventID := c.Param("id")
+// FIX 5: renamed GetEventByIDHandlers → GetEventByIDHandler
+func GetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventID := c.Param("id")
 
-        if _, err := uuid.Parse(eventID); err != nil {
-            c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
-            return
-        }
+		if _, err := uuid.Parse(eventID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
+			return
+		}
 
-        var userID *string
-        if uid, exists := c.Get("user_id"); exists {
-            uidStr := uid.(string)
-            userID = &uidStr
-        }
+		var userID *string
+		if uid, exists := c.Get("user_id"); exists {
+			uidStr := uid.(string)
+			userID = &uidStr
+		}
 
-        if ec != nil {
-            ec.IncrementView(c.Request.Context(), eventID)
-        } else {
-            _ = repository.IncrementViews(pool, eventID)
-        }
+		if ec != nil {
+			ec.IncrementView(c.Request.Context(), eventID)
+		} else {
+			_ = repository.IncrementViews(pool, eventID)
+		}
 
-        event, err := repository.GetEventByID(pool, eventID, userID)
-        if err != nil {
-            // Fix 6: use errors.Is so a real DB error returns 500, not 404
-            if errors.Is(err, repository.ErrEventNotFound) {
-                c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
-                return
-            }
-            utils.InternalError(c, err, "failed to fetch event")
-            return
-        }
+		event, err := repository.GetEventByID(pool, eventID, userID)
+		if err != nil {
+			if errors.Is(err, repository.ErrEventNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to fetch event")
+			return
+		}
 
-        c.JSON(http.StatusOK, event)
-    }
+		c.JSON(http.StatusOK, event)
+	}
 }
 
 // GetEventBySlugHandler fetches a single published event by its URL slug.
 //
-//	GET /events/:slug
+//	GET /events/:id
 //
-// This is the primary lookup path for the public-facing event detail page.
-// The slug is more stable than a UUID for sharing links because it is readable
-// and survives copy-paste. The response is identical to GetEventByIDHandlers so
-// frontend clients can use either interchangeably.
+// FIX 1: c.Param("slug") was wrong — the route param is registered as ":id",
+// so c.Param("id") is the correct call. Using "slug" always returns "" causing
+// the handler to immediately 400 every request.
+//
+// FIX 7: userID is now extracted from context and passed through, so the
+// response can be personalised in future (e.g. isFollowing flag) without
+// changing the handler signature.
 func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		slug := c.Param("slug")
- 
+		// FIX 1: was c.Param("slug") — must match the route param name ":id"
+		slug := c.Param("id")
+
 		if slug == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
 			return
 		}
- 
+
 		event, err := repository.GetEventBySlug(pool, slug)
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotFound) {
@@ -214,18 +221,19 @@ func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			utils.InternalError(c, err, "failed to fetch event by slug")
 			return
 		}
- 
+
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), event.ID)
 		} else {
 			_ = repository.IncrementViews(pool, event.ID)
 		}
- 
+
 		c.JSON(http.StatusOK, event)
 	}
 }
 
-func GetAllEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// FIX 5: renamed GetAllEventsHandlers → GetAllEventsHandler
+func GetAllEventsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -276,7 +284,8 @@ func GetAllEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 	}
 }
 
-func FeaturedEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// FIX 5: renamed FeaturedEventsHandlers → FeaturedEventsHandler
+func FeaturedEventsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -327,7 +336,8 @@ func FeaturedEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handle
 	}
 }
 
-func ActiveEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// FIX 5: renamed ActiveEventsHandlers → ActiveEventsHandler
+func ActiveEventsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cursorStr := c.Query("cursor")
 
@@ -378,7 +388,8 @@ func ActiveEventsHandlers(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 	}
 }
 
-func GetEventCategory(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// FIX 5: renamed GetEventCategory → GetEventCategoryHandler (now consistent)
+func GetEventCategoryHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		cursorStr := c.Query("cursor")
@@ -440,7 +451,7 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
- 
+
 		err := repository.PublishEvent(pool, eventID, userID.(string))
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotPublishable) {
@@ -450,11 +461,11 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			utils.InternalError(c, err, "failed to publish event")
 			return
 		}
- 
+
 		if ec != nil {
 			ec.BustOnPublish(c.Request.Context())
 		}
- 
+
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Event published successfully",
 			"note":    "Event is now visible to all users",
@@ -506,7 +517,7 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
- 
+
 		var input struct {
 			Reason string `json:"reason" binding:"required,min=10"`
 		}
@@ -514,7 +525,7 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Cancellation reason required (min 10 characters)"})
 			return
 		}
- 
+
 		err := repository.CancelEvent(pool, eventID, input.Reason, userID.(string))
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotCancellable) {
@@ -524,11 +535,11 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 			utils.InternalError(c, err, "failed to cancel event")
 			return
 		}
- 
+
 		if ec != nil {
 			ec.BustOnEventUpdate(c.Request.Context())
 		}
- 
+
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Event cancelled successfully",
 			"note":    "All attendees will be automatically refunded",

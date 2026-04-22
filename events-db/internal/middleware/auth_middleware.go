@@ -12,75 +12,79 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// jwtClaims holds the fields extracted from a valid token.
+type jwtClaims struct {
+	UserID string
+	Role   string
+}
+
+// FIX 2: parseJWTClaims extracts and validates claims from a raw Bearer token
+// string. Previously this logic was duplicated verbatim in both AuthMiddleware
+// and OptionalAuth (~40 lines each). Now it lives in one place.
+//
+// Returns an error if the token is missing, malformed, uses a wrong signing
+// algorithm, is expired, or is missing required claims.
+func parseJWTClaims(authHeader string, secret string) (*jwtClaims, error) {
+	if authHeader == "" {
+		return nil, fmt.Errorf("authorization header required")
+	}
+
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	if tokenString == "" || tokenString == authHeader {
+		return nil, fmt.Errorf("invalid authorization header format")
+	}
+
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid or expired token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().After(time.Unix(int64(exp), 0)) {
+			return nil, fmt.Errorf("token has expired")
+		}
+	}
+
+	userID, ok := claims["user_id"].(string)
+	if !ok || userID == "" {
+		return nil, fmt.Errorf("missing user_id claim")
+	}
+
+	role, ok := claims["role"].(string)
+	if !ok || role == "" {
+		return nil, fmt.Errorf("missing role claim")
+	}
+
+	return &jwtClaims{UserID: userID, Role: role}, nil
+}
+
+// AuthMiddleware requires a valid JWT. Aborts with 401 if missing or invalid.
 func AuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
+		claims, err := parseJWTClaims(c.GetHeader("Authorization"), cfg.JWTSecret)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			c.Abort()
 			return
 		}
 
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-		if tokenString == "" || tokenString == authHeader {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization header format"})
-			c.Abort()
-			return
-		}
-
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(cfg.JWTSecret), nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
-			c.Abort()
-			return
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
-			c.Abort()
-			return
-		}
-
-		userID, ok := claims["user_id"].(string)
-
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
-			c.Abort()
-			return
-		}
-
-		role, ok := claims["role"].(string)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid role"})
-			c.Abort()
-			return
-		}
-
-		if exp, ok := claims["exp"].(float64); ok {
-			expirationTime := time.Unix(int64(exp), 0)
-			if time.Now().After(expirationTime) {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has expired"})
-				c.Abort()
-				return
-			}
-		}
-
-		c.Set("user_id", userID)
-		c.Set("role", role)
+		c.Set("user_id", claims.UserID)
+		c.Set("role", claims.Role)
 		c.Next()
 	}
 }
 
+// OrganizerOnlyMiddleware requires the caller to hold the organizer or admin role.
 func OrganizerOnlyMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roleVal, exists := c.Get("role")
@@ -90,8 +94,6 @@ func OrganizerOnlyMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// c.Set stores role as string (set by AuthMiddleware via JWT claims assertion).
-		// Must cast to string before comparing — interface{} != UserRole even with equal values.
 		role, ok := roleVal.(string)
 		if !ok || (role != string(models.RoleOrganizer) && role != string(models.RoleAdmin)) {
 			c.JSON(http.StatusForbidden, gin.H{
@@ -105,6 +107,7 @@ func OrganizerOnlyMiddleware() gin.HandlerFunc {
 	}
 }
 
+// AdminOnlyMiddleware requires the caller to hold the admin role.
 func AdminOnlyMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roleVal, exists := c.Get("role")
@@ -114,71 +117,31 @@ func AdminOnlyMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Cast to string before comparing — consistent with OrganizerOnlyMiddleware
-		// and avoids relying on interface{} equality semantics.
 		role, ok := roleVal.(string)
 		if !ok || role != string(models.RoleAdmin) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
 			c.Abort()
 			return
 		}
-
 		c.Next()
 	}
 }
 
 // OptionalAuth runs the JWT check but never aborts.
-// If a valid token is present, user_id and role are set in the context
-// exactly as AuthMiddleware does. If no token is present or it is invalid,
-// the request continues as a guest — handlers check c.Get("user_id") to
-// distinguish authenticated users from guests.
-// Used by cart and checkout routes which must work for both.
+// If a valid token is present, user_id and role are set in the context exactly
+// as AuthMiddleware does. If the token is absent or invalid the request
+// continues as a guest — handlers check c.Get("user_id") to distinguish.
 func OptionalAuth(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		claims, err := parseJWTClaims(c.GetHeader("Authorization"), cfg.JWTSecret)
+		if err != nil {
+			// Not an error for optional auth — just continue as guest.
 			c.Next()
 			return
 		}
 
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == "" || tokenString == authHeader {
-			c.Next()
-			return
-		}
-
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(cfg.JWTSecret), nil
-		})
-
-		if err != nil || !token.Valid {
-			c.Next()
-			return
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.Next()
-			return
-		}
-
-		if exp, ok := claims["exp"].(float64); ok {
-			if time.Now().After(time.Unix(int64(exp), 0)) {
-				c.Next()
-				return
-			}
-		}
-
-		if userID, ok := claims["user_id"].(string); ok {
-			c.Set("user_id", userID)
-		}
-		if role, ok := claims["role"].(string); ok {
-			c.Set("role", role)
-		}
-
+		c.Set("user_id", claims.UserID)
+		c.Set("role", claims.Role)
 		c.Next()
 	}
 }

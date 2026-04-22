@@ -324,22 +324,22 @@ func buildEventsRouter(pool *pgxpool.Pool) *gin.Engine {
 	// Public event listings — nil cache (no Redis in integration tests)
 	public := r.Group("/events")
 	{
-		public.GET("", handlers.GetAllEventsHandlers(pool, nil))
-		public.GET("/trending", handlers.TrendingEventHandlers(pool, nil))
-		public.GET("/featured", handlers.FeaturedEventsHandlers(pool, nil))
-		public.GET("/active", handlers.ActiveEventsHandlers(pool, nil))
+		public.GET("", handlers.GetAllEventsHandler(pool, nil))
+		public.GET("/trending", handlers.TrendingEventHandler(pool, nil))
+		public.GET("/featured", handlers.FeaturedEventsHandler(pool, nil))
+		public.GET("/active", handlers.ActiveEventsHandler(pool, nil))
 		public.GET("/search", handlers.SearchEventsHandler(pool))
-		public.GET("/category/:id", handlers.GetEventCategory(pool, nil))
+		public.GET("/category/:id", handlers.GetEventCategoryHandler(pool, nil))
 	}
 
 	// Admin routes — create, read, update, delete
 	admin := r.Group("/admin")
 	admin.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
 	{
-		admin.POST("/events", handlers.CreateEventHandlers(pool, nil))
-		admin.GET("/events/:id", handlers.GetEventByIDHandlers(pool, nil))
-		admin.PUT("/events/:id", handlers.UpdateEventHandlers(pool, nil))
-		admin.DELETE("/events/:id", handlers.DeleteEventHandlers(pool))
+		admin.POST("/events", handlers.CreateEventHandler(pool, nil))
+		admin.GET("/events/:id", handlers.GetEventByIDHandler(pool, nil))
+		admin.PUT("/events/:id", handlers.UpdateEventHandler(pool, nil))
+		admin.DELETE("/events/:id", handlers.DeleteEventHandler(pool))
 	}
 
 	// Organiser routes — publish and cancel

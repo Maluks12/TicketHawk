@@ -377,7 +377,7 @@ func (s *PaymentService) CreateAdTopupIntent(organizerID string, amount float64)
 		"input": map[string]interface{}{
 			"amount": map[string]interface{}{
 				"quantity": amountCents,
-				"currency": "ZAR",
+				"currency": models.DefaultCurrency,
 			},
 			"payerReference":       "Ad Wallet Top-up",
 			"merchantReference":    externalRef,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv" // FIX 9: replaces fmt for parseFloat
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -21,38 +22,33 @@ type BucketConfig struct {
 
 // Common configurations
 var (
-	// Login endpoints - strict (5 requests, refill 1 per minute)
 	LoginBucket = BucketConfig{
 		Capacity:   5,
-		RefillRate: 1.0 / 60.0, // 1 token per 60 seconds
+		RefillRate: 1.0 / 60.0,
 		TTL:        1 * time.Hour,
 	}
 
-	// API read endpoints - moderate (100 requests, refill 2 per second)
 	APIReadBucket = BucketConfig{
 		Capacity:   100,
-		RefillRate: 2.0, // 2 tokens per second = 120/min
+		RefillRate: 2.0,
 		TTL:        15 * time.Minute,
 	}
 
-	// API write endpoints - moderate (20 requests, refill 0.5 per second)
 	APIWriteBucket = BucketConfig{
 		Capacity:   20,
-		RefillRate: 0.5, // 0.5 tokens per second = 30/min
+		RefillRate: 0.5,
 		TTL:        15 * time.Minute,
 	}
 
-	// Admin endpoints - lenient (50 requests, refill 1 per second)
 	AdminBucket = BucketConfig{
 		Capacity:   50,
-		RefillRate: 1.0, // 1 token per second = 60/min
+		RefillRate: 1.0,
 		TTL:        30 * time.Minute,
 	}
 
-	// Global per-IP limit - prevent abuse (200 requests, refill 5 per second)
 	GlobalIPBucket = BucketConfig{
 		Capacity:   200,
-		RefillRate: 5.0, // 5 tokens per second = 300/min
+		RefillRate: 5.0,
 		TTL:        1 * time.Hour,
 	}
 )
@@ -62,8 +58,8 @@ var (
 // ==========================================
 
 type BucketState struct {
-	Tokens     float64 `json:"tokens"`      // Current number of tokens
-	LastRefill int64   `json:"last_refill"` // Unix timestamp (milliseconds)
+	Tokens     float64 `json:"tokens"`
+	LastRefill int64   `json:"last_refill"`
 }
 
 // ==========================================
@@ -87,26 +83,22 @@ func NewTokenBucketLimiter(client *redis.Client, config BucketConfig) *TokenBuck
 // ==========================================
 
 type AllowResult struct {
-	Allowed         bool    // Whether request is allowed
-	RemainingTokens float64 // Tokens remaining after this request
-	RetryAfter      int     // Seconds until next token available (if denied)
-	ResetTime       int64   // Unix timestamp when bucket will be full
+	Allowed         bool
+	RemainingTokens float64
+	RetryAfter      int
+	ResetTime       int64
 }
 
 func (tbl *TokenBucketLimiter) Allow(ctx context.Context, key string) (*AllowResult, error) {
 	return tbl.AllowN(ctx, key, 1)
 }
 
-// AllowN - Allow request that costs N tokens
 func (tbl *TokenBucketLimiter) AllowN(ctx context.Context, key string, cost float64) (*AllowResult, error) {
 	now := time.Now().UnixMilli()
-
-	// Use Lua script for atomic operation
 	result, err := tbl.executeTokenBucketScript(ctx, key, cost, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute rate limit: %w", err)
 	}
-
 	return result, nil
 }
 
@@ -114,15 +106,7 @@ func (tbl *TokenBucketLimiter) AllowN(ctx context.Context, key string, cost floa
 // Redis Lua Script (Atomic Operation)
 // ==========================================
 
-// This script ensures atomicity - no race conditions
 var tokenBucketScript = redis.NewScript(`
--- KEYS[1] = rate limit key
--- ARGV[1] = capacity (max tokens)
--- ARGV[2] = refill rate (tokens per second)
--- ARGV[3] = cost (tokens to consume)
--- ARGV[4] = current timestamp (milliseconds)
--- ARGV[5] = TTL (seconds)
-
 local key = KEYS[1]
 local capacity = tonumber(ARGV[1])
 local refill_rate = tonumber(ARGV[2])
@@ -130,46 +114,34 @@ local cost = tonumber(ARGV[3])
 local now = tonumber(ARGV[4])
 local ttl = tonumber(ARGV[5])
 
--- Get current bucket state
 local bucket = redis.call('HMGET', key, 'tokens', 'last_refill')
 local tokens = tonumber(bucket[1])
 local last_refill = tonumber(bucket[2])
 
--- Initialize bucket if it doesn't exist
 if not tokens then
     tokens = capacity
     last_refill = now
 end
 
--- Calculate tokens to add based on time passed
-local time_passed = math.max(0, now - last_refill) / 1000.0 -- Convert to seconds
+local time_passed = math.max(0, now - last_refill) / 1000.0
 local tokens_to_add = time_passed * refill_rate
-
--- Update tokens (capped at capacity)
 tokens = math.min(capacity, tokens + tokens_to_add)
 
--- Check if request can be allowed
 local allowed = 0
 local retry_after = 0
 
 if tokens >= cost then
-    -- Allow request
     allowed = 1
     tokens = tokens - cost
 else
-    -- Deny request - calculate retry after
     local tokens_needed = cost - tokens
     retry_after = math.ceil(tokens_needed / refill_rate)
 end
 
--- Save updated state
 redis.call('HMSET', key, 'tokens', tokens, 'last_refill', now)
 redis.call('EXPIRE', key, ttl)
 
--- Calculate time until bucket is full (for reset time)
 local time_to_full = (capacity - tokens) / refill_rate
-
--- Return: allowed, remaining tokens, retry_after, time_to_full
 return {allowed, tokens, retry_after, math.ceil(time_to_full)}
 `)
 
@@ -215,11 +187,11 @@ func (tbl *TokenBucketLimiter) executeTokenBucketScript(ctx context.Context, key
 	}, nil
 }
 
- func parseFloat(s string) (float64, error) {
- 	var f float64
- 	_, err := fmt.Sscanf(s, "%f", &f)
- 	return f, err
- }
+// FIX 9: parseFloat previously used fmt.Sscanf which is unidiomatic and slower.
+// strconv.ParseFloat is the standard Go approach for this conversion.
+func parseFloat(s string) (float64, error) {
+	return strconv.ParseFloat(s, 64)
+}
 
 // ==========================================
 // Peek - Check bucket status without consuming
@@ -231,37 +203,25 @@ func (tbl *TokenBucketLimiter) Peek(ctx context.Context, key string) (float64, e
 		return 0, err
 	}
 
-	// Bucket doesn't exist yet → full capacity
 	if result[0] == nil || result[1] == nil {
 		return tbl.config.Capacity, nil
 	}
 
-	// Parse stored values
-	tokensStr := result[0].(string)
-	lastRefillStr := result[1].(string)
-
-	tokens, err := parseFloat(tokensStr)
+	tokens, err := parseFloat(result[0].(string))
 	if err != nil {
 		return 0, err
 	}
 
-	lastRefillMs, err := parseFloat(lastRefillStr)
+	lastRefillMs, err := parseFloat(result[1].(string))
 	if err != nil {
 		return 0, err
 	}
 
 	nowMs := float64(time.Now().UnixMilli())
-
-	// Calculate refill
 	timePassed := math.Max(0, nowMs-lastRefillMs) / 1000.0
 	tokensToAdd := timePassed * tbl.config.RefillRate
 
-	currentTokens := math.Min(
-		tbl.config.Capacity,
-		tokens+tokensToAdd,
-	)
-
-	return currentTokens, nil
+	return math.Min(tbl.config.Capacity, tokens+tokensToAdd), nil
 }
 
 // ==========================================

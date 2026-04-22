@@ -571,7 +571,7 @@ func GetOrganizerPayoutSummary(pool *pgxpool.Pool, organizerID string) (*Organiz
 	defer cancel()
 
 	var p OrganizerPayoutSummary
-	p.Currency = "ZAR"
+	p.Currency = models.DefaultCurrency
 
 	err := pool.QueryRow(ctx, `
 		SELECT
