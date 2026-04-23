@@ -31,8 +31,19 @@ type MerchOrder struct {
 	TotalAmount        float64           `json:"total_amount" db:"total_amount"`
 	StitchPaymentReqID string            `json:"stitch_payment_req_id" db:"stitch_payment_req_id"`
 	FulfillmentStatus  FulfillmentStatus `json:"fulfillment_status" db:"fulfillment_status"`
-	CreatedAt          time.Time         `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time         `json:"updated_at" db:"updated_at"`
+
+	// Delivery / pickup snapshot — captured from cart_items at payment confirmation
+	// so the organiser always knows how to fulfil even if the cart is later cleaned up.
+	//
+	// FulfillmentMethod: "delivery" or "pickup" (nil for pre-migration orders).
+	// DeliveryAddress:   JSONB text snapshot of the buyer's shipping address.
+	// PickupLocation:    Snapshot of merchandise.pickup_location at time of order.
+	FulfillmentMethod *string `json:"fulfillment_method,omitempty" db:"fulfillment_method"`
+	DeliveryAddress   *string `json:"delivery_address,omitempty" db:"delivery_address"` // JSONB::text
+	PickupLocation    *string `json:"pickup_location,omitempty" db:"pickup_location"`
+
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 
 	// Joined display fields — populated by dashboard queries, never stored columns.
 	MerchName  *string `json:"merch_name,omitempty" db:"-"`

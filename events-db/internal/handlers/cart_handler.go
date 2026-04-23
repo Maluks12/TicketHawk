@@ -57,26 +57,75 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		// ---------------------------------------------------------------
-		// Resolve unit price
+		// Resolve unit price and delivery fee
 		// ---------------------------------------------------------------
 		var price float64
+		var deliveryFee float64
 
 		if dto.ItemType == models.CartItemTypeMerch {
-			// Merch: price comes from the variant
+			// ── Merch ────────────────────────────────────────────────
 			if dto.MerchandiseVariantID == nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "merchandise_variant_id required for merch items"})
 				return
 			}
-			variant, basePrice, vErr := repository.GetVariantByID(pool, *dto.MerchandiseVariantID)
+
+			variant, basePrice, fi, vErr := repository.GetVariantByID(pool, *dto.MerchandiseVariantID)
 			if vErr != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "variant not found"})
 				return
 			}
 			price = variant.EffectivePrice(basePrice)
 
+			// Validate that a fulfillment_method was provided for merch
+			if dto.FulfillmentMethod == nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "fulfillment_method is required for merch items (\"delivery\" or \"pickup\")",
+				})
+				return
+			}
+
+			method := *dto.FulfillmentMethod
+
+			// Validate the chosen method is allowed by the item's fulfillment_mode
+			switch fi.FulfillmentMode {
+			case models.FulfillmentModeDelivery:
+				if method != "delivery" {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "this item is delivery only — fulfillment_method must be \"delivery\"",
+					})
+					return
+				}
+			case models.FulfillmentModePickup:
+				if method != "pickup" {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "this item is pickup only — fulfillment_method must be \"pickup\"",
+					})
+					return
+				}
+			case models.FulfillmentModeBoth:
+				// buyer can choose either — no restriction
+			}
+
+			// Delivery requires a shipping address
+			if method == "delivery" {
+				if dto.DeliveryAddress == nil {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "delivery_address is required when fulfillment_method is \"delivery\"",
+					})
+					return
+				}
+				if dto.DeliveryAddress.Street == "" || dto.DeliveryAddress.City == "" || dto.DeliveryAddress.Province == "" {
+					c.JSON(http.StatusBadRequest, gin.H{
+						"error": "delivery_address must include street, city, and province",
+					})
+					return
+				}
+				// Apply the delivery fee snapshot
+				deliveryFee = fi.DeliveryFee
+			}
+
 		} else if dto.TicketTypeID != nil {
-			// Ticket with a specific tier chosen: validate the type belongs to
-			// the requested event and is currently on sale, then use its price.
+			// ── Ticket — specific tier ────────────────────────────────
 			tt, ttErr := repository.GetTicketTypeByID(pool, *dto.TicketTypeID)
 			if ttErr != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "ticket type not found"})
@@ -98,14 +147,12 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			price = tt.Price
 
 		} else {
-			// Flat-priced ticket: fall back to events.price
+			// ── Ticket — flat priced ──────────────────────────────────
 			event, eErr := repository.GetEventByID(pool, dto.EventID, nil)
 			if eErr != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 				return
 			}
-			// If the event has ticket types but none was specified, reject the
-			// request so the frontend always selects a tier explicitly.
 			if len(event.TicketTypes) > 0 {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error": "this event has multiple ticket types — please include ticket_type_id",
@@ -115,7 +162,7 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			price = event.Price
 		}
 
-		item, err := repository.AddCartItem(pool, cart.ID, &dto, price)
+		item, err := repository.AddCartItem(pool, cart.ID, &dto, price, deliveryFee)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -197,13 +244,14 @@ func MergeCartHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 }
 
 // buildCartSummary groups cart items by event and computes totals.
+// Line totals include delivery fees.
 func buildCartSummary(cart *models.Cart) models.CartSummary {
 	groups := map[string]*models.EventGroup{}
 	var total float64
 
 	for _, item := range cart.Items {
-		itemTotal := item.UnitPriceSnapshot * float64(item.Quantity)
-		total += itemTotal
+		lineTotal := item.LineTotal()
+		total += lineTotal
 
 		eg, ok := groups[item.EventID]
 		if !ok {
@@ -217,7 +265,7 @@ func buildCartSummary(cart *models.Cart) models.CartSummary {
 			eg = groups[item.EventID]
 		}
 		eg.Items = append(eg.Items, item)
-		eg.Subtotal += itemTotal
+		eg.Subtotal += lineTotal
 	}
 
 	summary := models.CartSummary{

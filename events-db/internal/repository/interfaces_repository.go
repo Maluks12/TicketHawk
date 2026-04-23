@@ -35,7 +35,7 @@ type EventQuerier interface {
 type CartQuerier interface {
 	GetOrCreateCart(userID, sessionID *string) (*models.Cart, error)
 	GetCartWithItems(cartID string) (*models.Cart, error)
-	AddCartItem(cartID string, dto *models.AddCartItemDTO, price float64) (*models.CartItem, error)
+	AddCartItem(cartID string, dto *models.AddCartItemDTO, price float64, deliveryFee float64) (*models.CartItem, error)
 	UpdateCartItemQuantity(cartID, itemID string, quantity int) error
 	DeleteCartItem(cartID, itemID string) error
 	ClearCart(cartID string) error
@@ -105,8 +105,8 @@ func (q *PgxCartQuerier) GetOrCreateCart(userID, sessionID *string) (*models.Car
 func (q *PgxCartQuerier) GetCartWithItems(cartID string) (*models.Cart, error) {
 	return GetCartWithItems(q.pool, cartID)
 }
-func (q *PgxCartQuerier) AddCartItem(cartID string, dto *models.AddCartItemDTO, price float64) (*models.CartItem, error) {
-	return AddCartItem(q.pool, cartID, dto, price)
+func (q *PgxCartQuerier) AddCartItem(cartID string, dto *models.AddCartItemDTO, price float64, deliveryFee float64) (*models.CartItem, error) {
+	return AddCartItem(q.pool, cartID, dto, price, deliveryFee)
 }
 func (q *PgxCartQuerier) UpdateCartItemQuantity(cartID, itemID string, quantity int) error {
 	return UpdateCartItemQuantity(q.pool, cartID, itemID, quantity)

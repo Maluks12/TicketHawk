@@ -19,7 +19,15 @@ const saleWindowClause = `
     AND (sale_start IS NULL OR sale_start <= NOW())
     AND (sale_end   IS NULL OR sale_end   >  NOW())`
 
-// scanMerch scans a merchandise row including the two new sale-window columns.
+// merchSelectCols is the canonical column list used in every merch SELECT.
+// Keeping it in one place prevents drift when columns are added.
+const merchSelectCols = `id, event_id, name, description, base_price, category,
+       display_order, is_active, images::text,
+       fulfillment_mode, pickup_location, delivery_fee,
+       sale_start, sale_end,
+       created_at, updated_at`
+
+// scanMerch scans a merchandise row.
 // Column order must match every SELECT that calls this helper.
 func scanMerch(row interface {
 	Scan(...any) error
@@ -27,17 +35,11 @@ func scanMerch(row interface {
 	return row.Scan(
 		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
 }
-
-// merchSelectCols is the canonical column list used in every merch SELECT.
-// Keeping it in one place prevents drift when columns are added.
-const merchSelectCols = `id, event_id, name, description, base_price, category,
-       display_order, is_active, images::text,
-       sale_start, sale_end,
-       created_at, updated_at`
 
 // GetMerchandiseByEvent returns merch with variants in 2 queries (not N+1).
 // Only items that are active AND within their sale window are returned.
@@ -140,19 +142,26 @@ func GetVariantsByMerchandise(pool *pgxpool.Pool, merchID string) ([]models.Merc
 	return variants, nil
 }
 
-// GetVariantByID fetches a single variant with its parent merchandise.
-// Also enforces the parent's sale window — you can't buy a variant whose
-// item's sale period has not started yet or has already ended.
-func GetVariantByID(pool *pgxpool.Pool, variantID string) (*models.MerchandiseVariant, float64, error) {
+// GetVariantByID fetches a single variant with its parent merchandise, including
+// fulfillment configuration. Also enforces the parent's sale window.
+// Returns the variant, base price, fulfillment info, and any error.
+func GetVariantByID(
+	pool *pgxpool.Pool,
+	variantID string,
+) (*models.MerchandiseVariant, float64, *models.MerchFulfillmentInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var v models.MerchandiseVariant
 	var basePrice float64
+	var fi models.MerchFulfillmentInfo
+
 	err := pool.QueryRow(ctx, fmt.Sprintf(`
         SELECT mv.id, mv.merchandise_id, mv.sku, mv.attributes::text,
                mv.stock_quantity, mv.price_override, mv.is_active,
-               mv.created_at, mv.updated_at, m.base_price
+               mv.created_at, mv.updated_at,
+               m.base_price,
+               m.fulfillment_mode, m.pickup_location, m.delivery_fee
         FROM merchandise_variants mv
         JOIN merchandise m ON m.id = mv.merchandise_id
         WHERE mv.id = $1
@@ -162,11 +171,12 @@ func GetVariantByID(pool *pgxpool.Pool, variantID string) (*models.MerchandiseVa
 		&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
 		&v.StockQuantity, &v.PriceOverride, &v.IsActive,
 		&v.CreatedAt, &v.UpdatedAt, &basePrice,
+		&fi.FulfillmentMode, &fi.PickupLocation, &fi.DeliveryFee,
 	)
 	if err != nil {
-		return nil, 0, ErrMerchNotFound
+		return nil, 0, nil, ErrMerchNotFound
 	}
-	return &v, basePrice, nil
+	return &v, basePrice, &fi, nil
 }
 
 // CreateMerchandise inserts a new merch item for an event.
@@ -174,19 +184,29 @@ func CreateMerchandise(pool *pgxpool.Pool, eventID string, dto *models.CreateMer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Default fulfillment_mode to 'delivery' when omitted
+	mode := dto.FulfillmentMode
+	if mode == "" {
+		mode = string(models.FulfillmentModeDelivery)
+	}
+
 	var m models.Merchandise
 	err := pool.QueryRow(ctx, fmt.Sprintf(`
         INSERT INTO merchandise
-          (event_id, name, description, base_price, category, display_order, images, sale_start, sale_end)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+          (event_id, name, description, base_price, category, display_order, images,
+           fulfillment_mode, pickup_location, delivery_fee,
+           sale_start, sale_end)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12)
         RETURNING %s
     `, merchSelectCols),
 		eventID, dto.Name, dto.Description, dto.BasePrice,
 		dto.Category, dto.DisplayOrder, dto.Images,
+		mode, dto.PickupLocation, dto.DeliveryFee,
 		dto.SaleStart, dto.SaleEnd,
 	).Scan(
 		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
@@ -259,6 +279,7 @@ func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.Merchandise
     `, merchSelectCols, saleWindowClause), merchID).Scan(
 		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
@@ -278,9 +299,7 @@ func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.Merchandise
 }
 
 // GetMerchandiseByEventFiltered returns merch for an event with optional
-// category and attribute filters. Attribute filter is a JSON key-value pair
-// e.g. filterKey="size", filterValue="L".
-// Sale window is always enforced.
+// category and attribute filters. Sale window is always enforced.
 func GetMerchandiseByEventFiltered(
 	pool *pgxpool.Pool,
 	eventID string,
@@ -335,12 +354,7 @@ func GetMerchandiseByEventFiltered(
 	var ids []string
 	for rows.Next() {
 		var m models.Merchandise
-		if err := rows.Scan(
-			&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
-			&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
-			&m.SaleStart, &m.SaleEnd,
-			&m.CreatedAt, &m.UpdatedAt,
-		); err != nil {
+		if err := scanMerch(rows, &m); err != nil {
 			return nil, err
 		}
 		items = append(items, m)
@@ -389,8 +403,7 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Verify ownership — organiser must own the event this merch belongs to.
-	// No sale-window check here: organisers can update expired items to extend them.
+	// Verify ownership — no sale-window check so organisers can extend expired items.
 	var eventID string
 	err := pool.QueryRow(ctx, `
         SELECT m.event_id FROM merchandise m
@@ -432,6 +445,18 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 		args = append(args, *dto.Images)
 		sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args)))
 	}
+	if dto.FulfillmentMode != nil {
+		args = append(args, *dto.FulfillmentMode)
+		sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args)))
+	}
+	if dto.PickupLocation != nil {
+		args = append(args, *dto.PickupLocation)
+		sets = append(sets, fmt.Sprintf("pickup_location = $%d", len(args)))
+	}
+	if dto.DeliveryFee != nil {
+		args = append(args, *dto.DeliveryFee)
+		sets = append(sets, fmt.Sprintf("delivery_fee = $%d", len(args)))
+	}
 	if dto.SaleStart != nil {
 		args = append(args, *dto.SaleStart)
 		sets = append(sets, fmt.Sprintf("sale_start = $%d", len(args)))
@@ -456,6 +481,7 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 	err = pool.QueryRow(ctx, query, args...).Scan(
 		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
 		&m.CreatedAt, &m.UpdatedAt,
 	)

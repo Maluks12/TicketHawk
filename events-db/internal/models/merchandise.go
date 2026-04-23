@@ -2,20 +2,60 @@ package models
 
 import "time"
 
+// FulfillmentMode describes what delivery options an organiser makes available
+// for a merchandise item.
+type FulfillmentMode string
+
+const (
+	// FulfillmentModeDelivery — buyer must provide a shipping address.
+	FulfillmentModeDelivery FulfillmentMode = "delivery"
+	// FulfillmentModePickup — buyer collects at the organiser's stated location.
+	FulfillmentModePickup FulfillmentMode = "pickup"
+	// FulfillmentModeBoth — buyer chooses delivery or pickup at checkout.
+	FulfillmentModeBoth FulfillmentMode = "both"
+)
+
+// DeliveryAddress is the buyer's shipping address, stored as JSONB in the DB
+// and decoded here for validation and display.
+type DeliveryAddress struct {
+	Street     string `json:"street"`
+	Suburb     string `json:"suburb"`
+	City       string `json:"city"`
+	Province   string `json:"province"`
+	PostalCode string `json:"postal_code"`
+}
+
+// MerchFulfillmentInfo carries the fulfillment configuration returned alongside
+// a variant lookup. Used by the cart handler to validate buyer choices.
+type MerchFulfillmentInfo struct {
+	FulfillmentMode FulfillmentMode
+	PickupLocation  *string
+	DeliveryFee     float64
+}
+
 type Merchandise struct {
-	ID           string     `json:"id" db:"id"`
-	EventID      string     `json:"event_id" db:"event_id"`
-	Name         string     `json:"name" db:"name"`
-	Description  *string    `json:"description,omitempty" db:"description"`
-	BasePrice    float64    `json:"base_price" db:"base_price"`
-	Category     *string    `json:"category,omitempty" db:"category"`
-	DisplayOrder int        `json:"display_order" db:"display_order"`
-	IsActive     bool       `json:"is_active" db:"is_active"`
-	Images       *string    `json:"images,omitempty" db:"images"` // JSONB stored as string
-	SaleStart    *time.Time `json:"sale_start,omitempty" db:"sale_start"`
-	SaleEnd      *time.Time `json:"sale_end,omitempty" db:"sale_end"`
-	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
+	ID           string          `json:"id" db:"id"`
+	EventID      string          `json:"event_id" db:"event_id"`
+	Name         string          `json:"name" db:"name"`
+	Description  *string         `json:"description,omitempty" db:"description"`
+	BasePrice    float64         `json:"base_price" db:"base_price"`
+	Category     *string         `json:"category,omitempty" db:"category"`
+	DisplayOrder int             `json:"display_order" db:"display_order"`
+	IsActive     bool            `json:"is_active" db:"is_active"`
+	Images       *string         `json:"images,omitempty" db:"images"` // JSONB stored as string
+
+	// Fulfillment configuration — set by the organiser per item.
+	// FulfillmentMode controls what options the buyer can choose at checkout.
+	// PickupLocation is shown to the buyer when they choose or are forced to pick up.
+	// DeliveryFee is a flat fee charged once per cart line item for delivery orders.
+	FulfillmentMode FulfillmentMode `json:"fulfillment_mode" db:"fulfillment_mode"`
+	PickupLocation  *string         `json:"pickup_location,omitempty" db:"pickup_location"`
+	DeliveryFee     float64         `json:"delivery_fee" db:"delivery_fee"`
+
+	SaleStart *time.Time `json:"sale_start,omitempty" db:"sale_start"`
+	SaleEnd   *time.Time `json:"sale_end,omitempty" db:"sale_end"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
 
 	// Joined — populated by GetMerchandiseByEvent, not a stored column
 	Variants []MerchandiseVariant `json:"variants,omitempty" db:"-"`
@@ -51,6 +91,16 @@ func (m *Merchandise) SaleStatus() string {
 	return "live"
 }
 
+// AllowsDelivery returns true when the buyer may choose delivery.
+func (m *Merchandise) AllowsDelivery() bool {
+	return m.FulfillmentMode == FulfillmentModeDelivery || m.FulfillmentMode == FulfillmentModeBoth
+}
+
+// AllowsPickup returns true when the buyer may choose pickup.
+func (m *Merchandise) AllowsPickup() bool {
+	return m.FulfillmentMode == FulfillmentModePickup || m.FulfillmentMode == FulfillmentModeBoth
+}
+
 type MerchandiseVariant struct {
 	ID            string    `json:"id" db:"id"`
 	MerchandiseID string    `json:"merchandise_id" db:"merchandise_id"`
@@ -80,20 +130,33 @@ type CreateMerchandiseDTO struct {
 	Category     *string    `json:"category"`
 	DisplayOrder int        `json:"display_order"`
 	Images       *string    `json:"images"`
+
+	// Fulfillment — defaults to "delivery" if omitted.
+	// Set fulfillment_mode to "pickup" or "both" to enable collection.
+	// pickup_location is required when mode is "pickup" or "both".
+	FulfillmentMode string  `json:"fulfillment_mode" binding:"omitempty,oneof=delivery pickup both"`
+	PickupLocation  *string `json:"pickup_location"`
+	DeliveryFee     float64 `json:"delivery_fee" binding:"min=0"`
+
 	// Optional sale window — omit both for always-available items.
-	// Include sale_end to get Fortnite-shop-style timed listings.
 	SaleStart *time.Time `json:"sale_start"`
 	SaleEnd   *time.Time `json:"sale_end"`
 }
 
 type UpdateMerchandiseDTO struct {
-	Name         *string    `json:"name" binding:"omitempty,min=1,max=255"`
-	Description  *string    `json:"description"`
-	BasePrice    *float64   `json:"base_price" binding:"omitempty,gt=0"`
-	Category     *string    `json:"category"`
-	DisplayOrder *int       `json:"display_order"`
-	IsActive     *bool      `json:"is_active"`
-	Images       *string    `json:"images"`
+	Name         *string  `json:"name" binding:"omitempty,min=1,max=255"`
+	Description  *string  `json:"description"`
+	BasePrice    *float64 `json:"base_price" binding:"omitempty,gt=0"`
+	Category     *string  `json:"category"`
+	DisplayOrder *int     `json:"display_order"`
+	IsActive     *bool    `json:"is_active"`
+	Images       *string  `json:"images"`
+
+	// Fulfillment updates — all optional.
+	FulfillmentMode *string  `json:"fulfillment_mode" binding:"omitempty,oneof=delivery pickup both"`
+	PickupLocation  *string  `json:"pickup_location"`
+	DeliveryFee     *float64 `json:"delivery_fee" binding:"omitempty,min=0"`
+
 	// Set sale_end to a past time to immediately end a sale without deactivating.
 	SaleStart *time.Time `json:"sale_start"`
 	SaleEnd   *time.Time `json:"sale_end"`

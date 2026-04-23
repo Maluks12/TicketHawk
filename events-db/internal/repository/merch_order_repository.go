@@ -13,18 +13,13 @@ import (
 
 // FulfillMerchOrders is called by the payment webhook when a payment is confirmed.
 // It atomically:
-//   1. Fetches all merchandise cart_items for the cart.
-//   2. For each item, attempts to decrement stock and insert a merch_order row.
-//   3. If stock is insufficient for an item, the order is still recorded with
-//      fulfillment_status = 'oversold' so the admin can resolve it. The stock
-//      column is left unchanged for oversold items.
+//  1. Fetches all merchandise cart_items for the cart, including fulfillment data.
+//  2. For each item, attempts to decrement stock and insert a merch_order row.
+//  3. If stock is insufficient for an item, the order is still recorded with
+//     fulfillment_status = 'oversold' so the admin can resolve it.
 //
 // The unique constraint on (stitch_payment_req_id, variant_id) makes this
 // safe to call multiple times — duplicate webhook deliveries are no-ops.
-//
-// Errors are logged as warnings by the caller (payment_service). The function
-// itself returns an error only for infrastructure failures (DB connection, tx).
-// Oversold items are handled gracefully within the function, not as errors.
 func FulfillMerchOrders(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -32,7 +27,7 @@ func FulfillMerchOrders(
 	stitchPaymentReqID string,
 ) error {
 	// Idempotency fast-path: if any order already exists for this payment + cart,
-	// the webhook has already been processed. Skip without touching the DB further.
+	// the webhook has already been processed.
 	var existingCount int
 	err := pool.QueryRow(ctx, `
 		SELECT COUNT(*)
@@ -51,14 +46,17 @@ func FulfillMerchOrders(
 		return nil
 	}
 
-	// Fetch all merch items in this cart with the data we need for the order rows.
-	// We join merchandise and events so we don't need separate lookups.
+	// Fetch all merch items in this cart including fulfillment choice and the
+	// merchandise's pickup_location (snapshotted into the order record).
 	type cartMerchItem struct {
-		variantID     string
-		merchandiseID string
-		eventID       string
-		quantity      int
-		unitPrice     float64
+		variantID         string
+		merchandiseID     string
+		eventID           string
+		quantity          int
+		unitPrice         float64
+		fulfillmentMethod *string
+		deliveryAddress   *string // JSONB text
+		pickupLocation    *string // from merchandise table
 	}
 
 	rows, err := pool.Query(ctx, `
@@ -67,10 +65,14 @@ func FulfillMerchOrders(
 			mv.merchandise_id,
 			ci.event_id,
 			ci.quantity,
-			ci.unit_price_snapshot
+			ci.unit_price_snapshot,
+			ci.fulfillment_method,
+			ci.delivery_address::text,
+			m.pickup_location
 		FROM cart_items ci
 		JOIN merchandise_variants mv ON mv.id = ci.merchandise_variant_id
-		WHERE ci.cart_id = $1
+		JOIN merchandise m            ON m.id  = mv.merchandise_id
+		WHERE ci.cart_id   = $1
 		  AND ci.item_type = 'merchandise'
 	`, cartID)
 	if err != nil {
@@ -86,6 +88,9 @@ func FulfillMerchOrders(
 			&item.eventID,
 			&item.quantity,
 			&item.unitPrice,
+			&item.fulfillmentMethod,
+			&item.deliveryAddress,
+			&item.pickupLocation,
 		); err != nil {
 			rows.Close()
 			return fmt.Errorf("FulfillMerchOrders: scan cart item: %w", err)
@@ -98,26 +103,25 @@ func FulfillMerchOrders(
 	}
 
 	if len(items) == 0 {
-		// Cart had no merch items — nothing to do.
-		return nil
+		return nil // Cart had no merch items — nothing to do.
 	}
 
 	// Fetch cart owner for order attribution.
 	var userID *string
 	var sessionID *string
-	pool.QueryRow(ctx, `
-		SELECT user_id, session_id FROM carts WHERE id = $1
-	`, cartID).Scan(&userID, &sessionID)
-	// Scan errors are non-fatal — order will just have nil user/session.
+	pool.QueryRow(ctx, `SELECT user_id, session_id FROM carts WHERE id = $1`, cartID).
+		Scan(&userID, &sessionID)
 
 	// Process each merch item in its own transaction to maximise partial success.
-	// If one variant fails (e.g. DB error), the others are still fulfilled.
 	for _, item := range items {
-		if err := fulfillSingleMerchItem(ctx, pool, item.variantID, item.merchandiseID,
-			item.eventID, cartID, stitchPaymentReqID,
-			userID, sessionID, item.quantity, item.unitPrice,
+		if err := fulfillSingleMerchItem(
+			ctx, pool,
+			item.variantID, item.merchandiseID, item.eventID,
+			cartID, stitchPaymentReqID,
+			userID, sessionID,
+			item.quantity, item.unitPrice,
+			item.fulfillmentMethod, item.deliveryAddress, item.pickupLocation,
 		); err != nil {
-			// Log but continue — we want to process remaining items.
 			log.Error().Err(err).
 				Str("variant_id", item.variantID).
 				Str("cart_id", cartID).
@@ -129,8 +133,8 @@ func FulfillMerchOrders(
 }
 
 // fulfillSingleMerchItem handles one cart_item in its own transaction.
-// It tries to decrement stock; if stock is insufficient, it inserts an
-// 'oversold' order record instead so the admin can take action.
+// It tries to decrement stock; if stock is insufficient it inserts an
+// 'oversold' order record so the admin can take action.
 func fulfillSingleMerchItem(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -138,6 +142,9 @@ func fulfillSingleMerchItem(
 	userID, sessionID *string,
 	quantity int,
 	unitPrice float64,
+	fulfillmentMethod *string,
+	deliveryAddress *string,
+	pickupLocation *string,
 ) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -148,7 +155,6 @@ func fulfillSingleMerchItem(
 	totalAmount := unitPrice * float64(quantity)
 
 	// Attempt to decrement stock atomically.
-	// Returns 0 rows affected if stock < quantity (CHECK constraint prevents negatives).
 	cmd, err := tx.Exec(ctx, `
 		UPDATE merchandise_variants
 		SET stock_quantity = stock_quantity - $1,
@@ -162,8 +168,6 @@ func fulfillSingleMerchItem(
 
 	fulfillmentStatus := models.FulfillmentFulfilled
 	if cmd.RowsAffected() == 0 {
-		// Insufficient stock — payment was captured but we can't fulfil.
-		// Record as oversold so the admin dashboard surfaces this immediately.
 		fulfillmentStatus = models.FulfillmentOversold
 		log.Warn().
 			Str("variant_id", variantID).
@@ -172,21 +176,28 @@ func fulfillSingleMerchItem(
 			Msg("merch fulfillment: OVERSOLD — payment captured but stock exhausted; manual resolution required")
 	}
 
-	// Insert the order record. ON CONFLICT DO NOTHING provides idempotency
-	// if the webhook fires a second time before the first transaction commits.
+	// Insert the order record, snapshotting fulfillment details.
+	// ON CONFLICT DO NOTHING provides idempotency on duplicate webhook calls.
+	var deliveryAddrJSONB interface{}
+	if deliveryAddress != nil {
+		deliveryAddrJSONB = *deliveryAddress
+	}
+
 	_, err = tx.Exec(ctx, `
 		INSERT INTO merch_orders (
 			cart_id, merchandise_id, variant_id, event_id,
 			user_id, session_id,
 			quantity, unit_price, total_amount,
-			stitch_payment_req_id, fulfillment_status
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			stitch_payment_req_id, fulfillment_status,
+			fulfillment_method, delivery_address, pickup_location
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14)
 		ON CONFLICT (stitch_payment_req_id, variant_id) DO NOTHING
 	`,
 		cartID, merchandiseID, variantID, eventID,
 		userID, sessionID,
 		quantity, unitPrice, totalAmount,
 		stitchPaymentReqID, string(fulfillmentStatus),
+		fulfillmentMethod, deliveryAddrJSONB, pickupLocation,
 	)
 	if err != nil {
 		return fmt.Errorf("insert merch_order for variant %s: %w", variantID, err)
@@ -206,6 +217,9 @@ func GetMerchOrdersForUser(pool *pgxpool.Pool, userID string, limit int) ([]mode
 			mo.user_id, mo.session_id,
 			mo.quantity, mo.unit_price, mo.total_amount,
 			mo.stitch_payment_req_id, mo.fulfillment_status,
+			mo.fulfillment_method,
+			mo.delivery_address::text,
+			mo.pickup_location,
 			mo.created_at, mo.updated_at,
 			m.name  AS merch_name,
 			mv.sku  AS variant_sku,
@@ -231,6 +245,9 @@ func GetMerchOrdersForUser(pool *pgxpool.Pool, userID string, limit int) ([]mode
 			&o.UserID, &o.SessionID,
 			&o.Quantity, &o.UnitPrice, &o.TotalAmount,
 			&o.StitchPaymentReqID, &o.FulfillmentStatus,
+			&o.FulfillmentMethod,
+			&o.DeliveryAddress,
+			&o.PickupLocation,
 			&o.CreatedAt, &o.UpdatedAt,
 			&o.MerchName, &o.VariantSKU, &o.EventTitle,
 		); err != nil {
@@ -252,6 +269,9 @@ func GetOversoldMerchOrders(pool *pgxpool.Pool) ([]models.MerchOrder, error) {
 			mo.user_id, mo.session_id,
 			mo.quantity, mo.unit_price, mo.total_amount,
 			mo.stitch_payment_req_id, mo.fulfillment_status,
+			mo.fulfillment_method,
+			mo.delivery_address::text,
+			mo.pickup_location,
 			mo.created_at, mo.updated_at,
 			m.name  AS merch_name,
 			mv.sku  AS variant_sku,
@@ -276,6 +296,9 @@ func GetOversoldMerchOrders(pool *pgxpool.Pool) ([]models.MerchOrder, error) {
 			&o.UserID, &o.SessionID,
 			&o.Quantity, &o.UnitPrice, &o.TotalAmount,
 			&o.StitchPaymentReqID, &o.FulfillmentStatus,
+			&o.FulfillmentMethod,
+			&o.DeliveryAddress,
+			&o.PickupLocation,
 			&o.CreatedAt, &o.UpdatedAt,
 			&o.MerchName, &o.VariantSKU, &o.EventTitle,
 		); err != nil {

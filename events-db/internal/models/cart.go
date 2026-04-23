@@ -26,10 +26,20 @@ type CartItem struct {
 	MerchandiseVariantID *string      `json:"merchandise_variant_id,omitempty" db:"merchandise_variant_id"`
 	// TicketTypeID is set when the buyer chose a specific pricing tier.
 	// Nil for flat-priced events or merch items.
-	TicketTypeID         *string      `json:"ticket_type_id,omitempty" db:"ticket_type_id"`
-	Quantity             int          `json:"quantity" db:"quantity"`
-	UnitPriceSnapshot    float64      `json:"unit_price_snapshot" db:"unit_price_snapshot"`
-	CreatedAt            time.Time    `json:"created_at" db:"created_at"`
+	TicketTypeID      *string `json:"ticket_type_id,omitempty" db:"ticket_type_id"`
+	Quantity          int     `json:"quantity" db:"quantity"`
+	UnitPriceSnapshot float64 `json:"unit_price_snapshot" db:"unit_price_snapshot"`
+
+	// Fulfillment fields — only set for merch items.
+	// FulfillmentMethod is the buyer's choice: "delivery" or "pickup".
+	// DeliveryAddress is stored as JSON text (JSONB in DB) for delivery orders.
+	// DeliveryFeeSnapshot is a flat fee captured at add-to-cart time; it is
+	// charged once per line item regardless of quantity.
+	FulfillmentMethod   *string `json:"fulfillment_method,omitempty" db:"fulfillment_method"`
+	DeliveryAddress     *string `json:"delivery_address,omitempty" db:"delivery_address"` // JSONB::text
+	DeliveryFeeSnapshot float64 `json:"delivery_fee_snapshot" db:"delivery_fee_snapshot"`
+
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
 
 	// Joined display fields — populated by GetCartWithItems, not stored columns
 	EventTitle     *string `json:"event_title,omitempty" db:"event_title"`
@@ -37,6 +47,13 @@ type CartItem struct {
 	MerchName      *string `json:"merch_name,omitempty" db:"merch_name"`
 	VariantAttrs   *string `json:"variant_attributes,omitempty" db:"variant_attributes"`
 	TicketTypeName *string `json:"ticket_type_name,omitempty" db:"ticket_type_name"`
+	// PickupLocation is joined from merchandise so the cart can display "pick up at X"
+	PickupLocation *string `json:"pickup_location,omitempty" db:"pickup_location"`
+}
+
+// LineTotal returns the full cost of this cart item including any delivery fee.
+func (ci *CartItem) LineTotal() float64 {
+	return ci.UnitPriceSnapshot*float64(ci.Quantity) + ci.DeliveryFeeSnapshot
 }
 
 // DTOs — json binding only, no db tags needed
@@ -47,8 +64,14 @@ type AddCartItemDTO struct {
 	MerchandiseVariantID *string      `json:"merchandise_variant_id" binding:"omitempty,uuid"`
 	// TicketTypeID selects the pricing tier. Required when the event uses ticket
 	// types; omit for flat-priced events or merch items.
-	TicketTypeID         *string      `json:"ticket_type_id" binding:"omitempty,uuid"`
-	Quantity             int          `json:"quantity" binding:"required,min=1,max=10"`
+	TicketTypeID *string `json:"ticket_type_id" binding:"omitempty,uuid"`
+	Quantity     int     `json:"quantity" binding:"required,min=1,max=10"`
+
+	// Fulfillment — required for merch items; ignored for tickets.
+	// Must match the item's fulfillment_mode. For delivery, DeliveryAddress is
+	// also required.
+	FulfillmentMethod *string          `json:"fulfillment_method" binding:"omitempty,oneof=delivery pickup"`
+	DeliveryAddress   *DeliveryAddress `json:"delivery_address"`
 }
 
 type UpdateCartItemDTO struct {

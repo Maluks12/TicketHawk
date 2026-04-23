@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"events-db/internal/models"
 	"fmt"
@@ -51,7 +52,7 @@ func GetOrCreateCart(pool *pgxpool.Pool, userID, sessionID *string) (*models.Car
 }
 
 // GetCartWithItems returns the cart and all its items with joined display
-// fields, including the ticket type name when a tier was chosen.
+// fields, including fulfillment method, delivery address, and pickup location.
 func GetCartWithItems(pool *pgxpool.Pool, cartID string) (*models.Cart, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -69,12 +70,17 @@ func GetCartWithItems(pool *pgxpool.Pool, cartID string) (*models.Cart, error) {
 		SELECT
 			ci.id, ci.cart_id, ci.item_type, ci.event_id,
 			ci.merchandise_variant_id, ci.ticket_type_id,
-			ci.quantity, ci.unit_price_snapshot, ci.created_at,
+			ci.quantity, ci.unit_price_snapshot,
+			ci.fulfillment_method,
+			ci.delivery_address::text,
+			ci.delivery_fee_snapshot,
+			ci.created_at,
 			e.title                   AS event_title,
 			mv.sku                    AS variant_sku,
 			m.name                    AS merch_name,
 			mv.attributes::text       AS variant_attributes,
-			tt.name                   AS ticket_type_name
+			tt.name                   AS ticket_type_name,
+			m.pickup_location         AS pickup_location
 		FROM cart_items ci
 		JOIN events e ON e.id = ci.event_id
 		LEFT JOIN merchandise_variants mv ON mv.id = ci.merchandise_variant_id
@@ -93,9 +99,14 @@ func GetCartWithItems(pool *pgxpool.Pool, cartID string) (*models.Cart, error) {
 		if err := rows.Scan(
 			&item.ID, &item.CartID, &item.ItemType, &item.EventID,
 			&item.MerchandiseVariantID, &item.TicketTypeID,
-			&item.Quantity, &item.UnitPriceSnapshot, &item.CreatedAt,
+			&item.Quantity, &item.UnitPriceSnapshot,
+			&item.FulfillmentMethod,
+			&item.DeliveryAddress,
+			&item.DeliveryFeeSnapshot,
+			&item.CreatedAt,
 			&item.EventTitle, &item.VariantSKU, &item.MerchName, &item.VariantAttrs,
 			&item.TicketTypeName,
+			&item.PickupLocation,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan cart item: %w", err)
 		}
@@ -105,18 +116,19 @@ func GetCartWithItems(pool *pgxpool.Pool, cartID string) (*models.Cart, error) {
 }
 
 // AddCartItem inserts a cart item, enforcing per-event ticket max of 10.
-// For ticket items, pass the resolved price (from event or ticket type) and
-// the optional ticketTypeID.
+// For merch items pass the resolved price, delivery fee, fulfillment method, and
+// JSON-encoded delivery address. For ticket items the fulfillment fields are nil/0.
 func AddCartItem(
 	pool *pgxpool.Pool,
 	cartID string,
 	dto *models.AddCartItemDTO,
 	price float64,
+	deliveryFee float64,
 ) (*models.CartItem, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Enforce per-event 10-ticket cap across all types combined
+	// Enforce per-event 10-item cap across all types combined
 	var existingQty int
 	pool.QueryRow(ctx,
 		`SELECT COALESCE(SUM(quantity), 0) FROM cart_items
@@ -128,21 +140,38 @@ func AddCartItem(
 		return nil, fmt.Errorf("maximum 10 items per event allowed")
 	}
 
+	// Marshal delivery address to JSON string when provided
+	var deliveryAddrJSON *string
+	if dto.DeliveryAddress != nil {
+		b, err := json.Marshal(dto.DeliveryAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode delivery address: %w", err)
+		}
+		s := string(b)
+		deliveryAddrJSON = &s
+	}
+
 	var item models.CartItem
 	err := pool.QueryRow(ctx, `
 		INSERT INTO cart_items
 			(cart_id, item_type, event_id, merchandise_variant_id,
-			 ticket_type_id, quantity, unit_price_snapshot)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ticket_type_id, quantity, unit_price_snapshot,
+			 fulfillment_method, delivery_address, delivery_fee_snapshot)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
 		RETURNING id, cart_id, item_type, event_id,
 		          merchandise_variant_id, ticket_type_id,
-		          quantity, unit_price_snapshot, created_at
+		          quantity, unit_price_snapshot,
+		          fulfillment_method, delivery_address::text, delivery_fee_snapshot,
+		          created_at
 	`, cartID, dto.ItemType, dto.EventID, dto.MerchandiseVariantID,
 		dto.TicketTypeID, dto.Quantity, price,
+		dto.FulfillmentMethod, deliveryAddrJSON, deliveryFee,
 	).Scan(
 		&item.ID, &item.CartID, &item.ItemType, &item.EventID,
 		&item.MerchandiseVariantID, &item.TicketTypeID,
-		&item.Quantity, &item.UnitPriceSnapshot, &item.CreatedAt,
+		&item.Quantity, &item.UnitPriceSnapshot,
+		&item.FulfillmentMethod, &item.DeliveryAddress, &item.DeliveryFeeSnapshot,
+		&item.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add cart item: %w", err)
@@ -197,8 +226,8 @@ func ClearCart(pool *pgxpool.Pool, cartID string) error {
 	return err
 }
 
-// MergeGuestCart merges a guest session cart into the authenticated user's cart.
-// If both carts have ticket items for the same event/type, the higher quantity wins (up to 10).
+// MergeGuestCart merges a guest session cart into the authenticated user's cart,
+// carrying over fulfillment fields.
 func MergeGuestCart(pool *pgxpool.Pool, userID, sessionID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -229,13 +258,17 @@ func MergeGuestCart(pool *pgxpool.Pool, userID, sessionID string) error {
 		).Scan(&userCartID)
 	}
 
-	// Move guest items to user cart, including ticket_type_id
+	// Move guest items to user cart, including all fulfillment fields
 	_, err = tx.Exec(ctx, `
 		INSERT INTO cart_items
 			(cart_id, item_type, event_id, merchandise_variant_id,
-			 ticket_type_id, quantity, unit_price_snapshot, created_at)
+			 ticket_type_id, quantity, unit_price_snapshot,
+			 fulfillment_method, delivery_address, delivery_fee_snapshot,
+			 created_at)
 		SELECT $1, item_type, event_id, merchandise_variant_id,
-		       ticket_type_id, LEAST(quantity, 10), unit_price_snapshot, created_at
+		       ticket_type_id, LEAST(quantity, 10), unit_price_snapshot,
+		       fulfillment_method, delivery_address, delivery_fee_snapshot,
+		       created_at
 		FROM cart_items
 		WHERE cart_id = $2
 		ON CONFLICT DO NOTHING
@@ -259,13 +292,16 @@ func CleanupStaleCarts(pool *pgxpool.Pool, ttl time.Duration) error {
 	return err
 }
 
+// SumCartTotal returns the grand total for a cart: (unit_price × quantity) + delivery_fee
+// summed across all line items. delivery_fee_snapshot is charged once per line item,
+// not multiplied by quantity.
 func SumCartTotal(pool *pgxpool.Pool, cartID string) (float64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var total float64
 	err := pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(unit_price_snapshot * quantity), 0)
+		`SELECT COALESCE(SUM(unit_price_snapshot * quantity + delivery_fee_snapshot), 0)
 		 FROM cart_items
 		 WHERE cart_id = $1`,
 		cartID,
