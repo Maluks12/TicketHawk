@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Events Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;--surface:#111118;--surface-2:#1a1a24;--surface-3:#22222e;
+  --border:#2d2d3d;--border-2:#3d3d52;
+  --accent:#f59e0b;--accent-h:#d97706;--accent-d:rgba(245,158,11,.12);
+  --text:#e8e8f0;--text-2:#9898a8;--text-3:#4a4a5a;
+  --success:#10b981;--danger:#ef4444;--warning:#f59e0b;--info:#3b82f6;
+  --font-mono:'IBM Plex Mono',monospace;--font-sans:'DM Sans',sans-serif;
+  --r:6px;--r-lg:10px;
+}
+html,body{height:100%;font-family:var(--font-sans);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+a{color:var(--accent);text-decoration:none}
+button{font-family:var(--font-sans);cursor:pointer}
+input,select,textarea{font-family:var(--font-sans)}
+.hidden{display:none!important}
+
+/* ── Login ── */
+#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);position:relative;overflow:hidden}
+#login-screen::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 60% 50% at 50% 0%,rgba(245,158,11,.08) 0%,transparent 70%)}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:2.5rem 2rem;width:100%;max-width:420px;position:relative;z-index:1}
+.login-logo{font-family:var(--font-mono);font-size:1.1rem;font-weight:600;color:var(--accent);letter-spacing:.05em;margin-bottom:2rem;display:flex;align-items:center;gap:.5rem}
+.login-logo span{color:var(--text-2);font-weight:400}
+.login-card h1{font-size:1.4rem;font-weight:600;margin-bottom:.25rem}
+.login-card p{color:var(--text-2);margin-bottom:1.75rem;font-size:.9rem}
+.field{margin-bottom:1rem}
+.field label{display:block;font-size:.78rem;font-family:var(--font-mono);color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem}
+.field input,.field select,.field textarea{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:.55rem .75rem;color:var(--text);font-size:.88rem;outline:none;transition:border .15s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.field-error input,.field-error select,.field-error textarea{border-color:var(--danger)!important;background:rgba(239,68,68,.06)!important}
+.field-error label{color:var(--danger)!important}
+.field-error-msg{font-size:.72rem;color:var(--danger);margin-top:.25rem;font-family:var(--font-mono)}
+.field textarea{resize:vertical;min-height:80px}
+.field select option{background:var(--surface-2)}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+.field-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1rem;border-radius:var(--r);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:.85rem;font-weight:500;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn:hover{background:var(--surface-3);border-color:var(--border-2)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#000;font-weight:600}
+.btn-primary:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn-danger{background:transparent;border-color:#ef4444;color:#ef4444}
+.btn-danger:hover{background:rgba(239,68,68,.1)}
+.btn-success{background:transparent;border-color:#10b981;color:#10b981}
+.btn-success:hover{background:rgba(16,185,129,.1)}
+.btn-sm{padding:.3rem .65rem;font-size:.78rem}
+.btn-icon{padding:.3rem .4rem;border:1px solid var(--border);background:transparent;color:var(--text-2);border-radius:var(--r)}
+.btn-icon:hover{color:var(--text);border-color:var(--border-2);background:var(--surface-2)}
+.btn-full{width:100%;justify-content:center}
+.api-field{margin-bottom:1.25rem}
+
+/* ── App layout ── */
+#app{display:grid;grid-template-columns:220px 1fr;height:100vh;overflow:hidden}
+
+/* ── Sidebar ── */
+#sidebar{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-logo{padding:1.25rem 1rem;font-family:var(--font-mono);font-size:.95rem;font-weight:600;color:var(--accent);border-bottom:1px solid var(--border);letter-spacing:.04em;flex-shrink:0}
+.sidebar-logo em{color:var(--text-3);font-style:normal;font-weight:400;font-size:.7rem;display:block;margin-top:.1rem;letter-spacing:.06em;text-transform:uppercase}
+.nav{flex:1;padding:.75rem 0;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:.65rem;padding:.55rem 1rem;color:var(--text-2);cursor:pointer;transition:all .15s;font-size:.88rem;border-left:2px solid transparent;margin-bottom:.1rem}
+.nav-item:hover{color:var(--text);background:var(--surface-2)}
+.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-d)}
+.nav-icon{width:16px;text-align:center;flex-shrink:0;font-size:13px}
+.nav-badge{margin-left:auto;background:var(--danger);color:#fff;font-size:.65rem;font-family:var(--font-mono);border-radius:99px;padding:1px 6px;min-width:18px;text-align:center}
+.nav-section{font-family:var(--font-mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text-3);padding:.5rem 1rem .2rem;margin-top:.5rem}
+.sidebar-bottom{padding:.75rem 1rem;border-top:1px solid var(--border);flex-shrink:0}
+.user-pill{display:flex;align-items:center;gap:.5rem;font-size:.8rem}
+.user-avatar{width:28px;height:28px;border-radius:50%;background:var(--accent-d);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:.65rem;color:var(--accent);flex-shrink:0}
+.user-name{color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.user-role{font-family:var(--font-mono);font-size:.6rem;color:var(--accent);text-transform:uppercase}
+
+/* ── Content area ── */
+#content{overflow-y:auto;display:flex;flex-direction:column}
+.page{display:none;flex-direction:column;flex:1;padding:1.5rem;max-width:1400px}
+.page.active{display:flex}
+.page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-shrink:0}
+.page-title{font-family:var(--font-mono);font-size:1.1rem;font-weight:600;color:var(--text)}
+.page-subtitle{font-size:.8rem;color:var(--text-2);margin-top:.15rem}
+
+/* ── Stats cards ── */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem;flex-shrink:0}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:1.1rem 1.25rem}
+.stat-label{font-family:var(--font-mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:.35rem}
+.stat-value{font-family:var(--font-mono);font-size:1.5rem;font-weight:600;color:var(--text);margin-bottom:.2rem}
+.stat-sub{font-size:.75rem;color:var(--text-2)}
+.stat-card.accent{border-color:var(--accent);background:var(--accent-d)}
+.stat-card.accent .stat-value{color:var(--accent)}
+.stat-card.danger{border-color:var(--danger);background:rgba(239,68,68,.06)}
+.stat-card.danger .stat-value{color:var(--danger)}
+
+/* ── Tables ── */
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;flex:1;display:flex;flex-direction:column}
+.table-toolbar{display:flex;align-items:center;gap:.75rem;padding:.85rem 1rem;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.search-input{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:.4rem .75rem;color:var(--text);font-size:.85rem;outline:none;width:220px;transition:border .15s}
+.search-input:focus{border-color:var(--accent)}
+.filter-select{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:.38rem .6rem;color:var(--text-2);font-size:.82rem;outline:none;cursor:pointer}
+.filter-select option{background:var(--surface-2)}
+table{width:100%;border-collapse:collapse;font-size:.85rem;table-layout:fixed}
+thead th{font-family:var(--font-mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);padding:.65rem 1rem;text-align:left;border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+tbody tr{border-bottom:1px solid rgba(45,45,61,.5);transition:background .1s;cursor:pointer}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:var(--surface-2)}
+tbody td{padding:.65rem 1rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.actions{overflow:visible;white-space:nowrap}
+.td-mono{font-family:var(--font-mono);font-size:.8rem}
+.td-muted{color:var(--text-2)}
+.actions-wrap{display:flex;align-items:center;gap:.3rem}
+
+/* ── Status badges ── */
+.badge{display:inline-flex;align-items:center;padding:.15rem .5rem;border-radius:99px;font-family:var(--font-mono);font-size:.65rem;font-weight:500;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.badge-draft{background:rgba(152,152,168,.12);color:var(--text-2);border:1px solid rgba(152,152,168,.2)}
+.badge-published{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.2)}
+.badge-cancelled{background:rgba(239,68,68,.12);color:#ef4444;border:1px solid rgba(239,68,68,.2)}
+.badge-completed{background:rgba(59,130,246,.12);color:#3b82f6;border:1px solid rgba(59,130,246,.2)}
+.badge-active{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.2)}
+.badge-inactive{background:rgba(152,152,168,.12);color:var(--text-2);border:1px solid rgba(152,152,168,.2)}
+.badge-admin{background:var(--accent-d);color:var(--accent);border:1px solid rgba(245,158,11,.25)}
+.badge-organizer{background:rgba(59,130,246,.12);color:#3b82f6;border:1px solid rgba(59,130,246,.2)}
+.badge-attendee{background:rgba(45,45,61,.5);color:var(--text-2);border:1px solid var(--border)}
+.badge-user{background:rgba(45,45,61,.5);color:var(--text-2);border:1px solid var(--border)}
+.badge-delivery{background:rgba(59,130,246,.12);color:#3b82f6;border:1px solid rgba(59,130,246,.2)}
+.badge-pickup{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.2)}
+.badge-both{background:var(--accent-d);color:var(--accent);border:1px solid rgba(245,158,11,.2)}
+
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-start;justify-content:center;z-index:1000;padding:1.5rem;overflow-y:auto;backdrop-filter:blur(2px)}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);width:100%;max-width:680px;display:flex;flex-direction:column;margin:auto;position:relative}
+.modal-lg{max-width:860px}
+.modal-sm{max-width:460px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 1.25rem;border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-title{font-family:var(--font-mono);font-size:.95rem;font-weight:600;color:var(--text)}
+.modal-close{background:transparent;border:none;color:var(--text-2);font-size:1.1rem;cursor:pointer;padding:.2rem .4rem;border-radius:var(--r);transition:all .15s}
+.modal-close:hover{color:var(--text);background:var(--surface-2)}
+.modal-body{padding:1.25rem;overflow-y:auto;max-height:calc(100vh - 200px)}
+.modal-footer{padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:.5rem;flex-shrink:0}
+
+/* ── Tabs ── */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.25rem}
+.tab{padding:.55rem 1rem;font-size:.85rem;color:var(--text-2);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--font-sans)}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── Ticket types list in modal ── */
+.ticket-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem}
+.ticket-item{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:.75rem}
+.ticket-item-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+.ticket-item-name{font-weight:500;font-size:.88rem}
+.ticket-item-price{font-family:var(--font-mono);color:var(--accent);font-size:.85rem}
+
+/* ── Variant list ── */
+.variant-list{display:flex;flex-direction:column;gap:.4rem;margin-bottom:.75rem}
+.variant-item{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:.6rem .75rem;display:flex;align-items:center;gap:.5rem;font-size:.82rem}
+.variant-sku{font-family:var(--font-mono);color:var(--accent);flex-shrink:0}
+.variant-attrs{color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis}
+.variant-stock{font-family:var(--font-mono);font-size:.78rem;flex-shrink:0}
+
+/* ── Section divider ── */
+.section-sep{font-family:var(--font-mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);padding:.1rem 0;margin:1rem 0 .75rem;border-top:1px solid var(--border);padding-top:.6rem}
+
+/* ── Merch grid ── */
+.merch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-top:1rem}
+.merch-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;display:flex;flex-direction:column}
+.merch-card-body{padding:1rem;flex:1}
+.merch-card-title{font-weight:500;margin-bottom:.2rem;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.merch-card-price{font-family:var(--font-mono);color:var(--accent);font-size:.9rem;margin-bottom:.5rem}
+.merch-card-meta{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem}
+.merch-card-foot{padding:.65rem 1rem;border-top:1px solid var(--border);display:flex;gap:.4rem;align-items:center}
+.merch-variants-count{font-size:.75rem;color:var(--text-2);margin-left:auto}
+
+/* ── Toast ── */
+#toast-container{position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;display:flex;flex-direction:column;gap:.4rem}
+.toast{background:var(--surface-3);border:1px solid var(--border-2);border-radius:var(--r);padding:.6rem 1rem;font-size:.82rem;min-width:200px;max-width:340px;animation:slideUp .2s ease;display:flex;align-items:center;gap:.5rem}
+.toast.success{border-left:3px solid var(--success);border-left-color:var(--success)}
+.toast.error{border-left:3px solid var(--danger)}
+.toast.info{border-left:3px solid var(--info)}
+@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Alert ── */
+.alert{padding:.75rem 1rem;border-radius:var(--r);font-size:.85rem;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+.alert-warning{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);color:var(--warning)}
+.alert-info{background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);color:var(--info)}
+
+/* ── Loading ── */
+.spinner{width:18px;height:18px;border:2px solid var(--border-2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-row td{text-align:center;padding:2rem;color:var(--text-2)}
+.empty-row td{text-align:center;padding:2rem;color:var(--text-3);font-size:.88rem}
+
+/* ── Tag input ── */
+.tag-input-wrap{display:flex;flex-wrap:wrap;gap:.3rem;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:.4rem .5rem;min-height:38px;cursor:text}
+.tag-input-wrap:focus-within{border-color:var(--accent)}
+.tag-pill{background:var(--accent-d);border:1px solid rgba(245,158,11,.25);color:var(--accent);padding:.1rem .4rem;border-radius:4px;font-size:.75rem;display:flex;align-items:center;gap:.3rem;font-family:var(--font-mono)}
+.tag-pill button{background:none;border:none;color:var(--accent);cursor:pointer;padding:0;font-size:.8rem;line-height:1}
+.tag-bare-input{border:none;outline:none;background:transparent;color:var(--text);font-size:.88rem;flex:1;min-width:100px;font-family:var(--font-sans)}
+
+/* ── Checkbox ── */
+.check-row{display:flex;align-items:center;gap:.5rem;cursor:pointer;user-select:none}
+.check-row input[type=checkbox]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.check-label{font-size:.88rem;color:var(--text)}
+
+/* ── Sub-section ── */
+.sub-section{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:1rem;margin-bottom:.75rem}
+.sub-section-title{font-family:var(--font-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:.75rem}
+
+/* ── Page content helpers ── */
+.flex-between{display:flex;align-items:center;justify-content:space-between}
+.flex-gap{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.mt1{margin-top:.75rem}
+.mb1{margin-bottom:.75rem}
+
+/* ── Oversold ── */
+.oversold-card{background:var(--surface);border:1px solid rgba(239,68,68,.25);border-radius:var(--r-lg);padding:1rem 1.25rem;margin-bottom:.75rem}
+.oversold-title{font-weight:500;margin-bottom:.3rem}
+.oversold-meta{font-size:.8rem;color:var(--text-2);display:flex;gap:1rem;flex-wrap:wrap}
+.oversold-amount{font-family:var(--font-mono);color:var(--danger);font-size:1rem;font-weight:600}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:var(--text-3)}
+</style>
+</head>
+<body>
+
+<!-- ===================== LOGIN ===================== -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">⬡ events<span>/admin</span></div>
+    <h1>Admin Dashboard</h1>
+    <p>Sign in with your admin credentials to manage events, merch, and users.</p>
+    <div class="api-field field">
+      <label>API Base URL</label>
+      <input type="text" id="base-url" value="http://localhost:8080" placeholder="http://localhost:8080">
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="admin@example.com">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="••••••••">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doLogin()" id="login-btn">Sign In</button>
+    <p style="margin-top:.75rem;font-size:.75rem;color:var(--text-3);text-align:center">Requires admin role — contact your system administrator if access is denied.</p>
+  </div>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div id="app" class="hidden">
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-logo">⬡ events<em>admin panel</em></div>
+    <nav class="nav">
+      <div class="nav-section">Overview</div>
+      <div class="nav-item active" onclick="showPage('dashboard')">
+        <span class="nav-icon">▦</span> Dashboard
+      </div>
+      <div class="nav-section">Content</div>
+      <div class="nav-item" onclick="showPage('events')">
+        <span class="nav-icon">◈</span> Events
+      </div>
+      <div class="nav-item" onclick="showPage('merch')">
+        <span class="nav-icon">◇</span> Merchandise
+      </div>
+      <div class="nav-section">Users</div>
+      <div class="nav-item" onclick="showPage('users')">
+        <span class="nav-icon">◉</span> All Users
+      </div>
+      <div class="nav-section">Alerts</div>
+      <div class="nav-item" onclick="showPage('oversold')">
+        <span class="nav-icon">⚠</span> Oversold Orders
+        <span class="nav-badge hidden" id="oversold-badge">0</span>
+      </div>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="user-pill">
+        <div class="user-avatar" id="user-avatar">AD</div>
+        <div style="flex:1;min-width:0">
+          <div class="user-name" id="user-name">Admin</div>
+          <div class="user-role">administrator</div>
+        </div>
+        <button class="btn-icon" onclick="doLogout()" title="Logout" style="font-size:1rem">⇥</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Content -->
+  <main id="content">
+
+    <!-- ===== DASHBOARD ===== -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Dashboard</div>
+          <div class="page-subtitle">Platform overview and metrics</div>
+        </div>
+        <button class="btn" onclick="loadDashboard()">↺ Refresh</button>
+      </div>
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total Revenue</div><div class="stat-value" id="s-total">—</div><div class="stat-sub">Tickets + Merch</div></div>
+        <div class="stat-card accent"><div class="stat-label">Ticket Revenue</div><div class="stat-value" id="s-ticket">—</div><div class="stat-sub">All confirmed bookings</div></div>
+        <div class="stat-card"><div class="stat-label">Merch Revenue</div><div class="stat-value" id="s-merch">—</div><div class="stat-sub">Fulfilled orders</div></div>
+        <div class="stat-card" id="s-oversold-card"><div class="stat-label">Oversold Orders</div><div class="stat-value" id="s-oversold">—</div><div class="stat-sub">Requires attention</div></div>
+      </div>
+      <div id="dash-alert-wrap"></div>
+      <div class="table-wrap" style="flex:none">
+        <div class="table-toolbar flex-between">
+          <span style="font-family:var(--font-mono);font-size:.78rem;color:var(--text-2)">RECENT EVENTS</span>
+          <button class="btn btn-sm" onclick="showPage('events')">View All →</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr>
+              <th style="width:35%">Title</th><th style="width:12%">Status</th>
+              <th style="width:15%">Date</th><th style="width:14%">Tickets Sold</th>
+              <th style="width:12%">Revenue</th><th style="width:12%">City</th>
+            </tr></thead>
+            <tbody id="dash-events-tbody"><tr class="loading-row"><td colspan="6"><div class="spinner" style="margin:auto"></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== EVENTS ===== -->
+    <div id="page-events" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Events</div>
+          <div class="page-subtitle">Create and manage all platform events</div>
+        </div>
+        <button class="btn btn-primary" onclick="openEventModal()">+ New Event</button>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <input class="search-input" type="text" id="event-search" placeholder="Search events…" oninput="debounceEventSearch()">
+          <select class="filter-select" id="event-status-filter" onchange="loadEvents()">
+            <option value="">All Statuses</option>
+            <option value="draft">Draft</option>
+            <option value="published">Published</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="completed">Completed</option>
+          </select>
+          <button class="btn btn-sm" onclick="loadEvents()">↺</button>
+          <div style="margin-left:auto;font-family:var(--font-mono);font-size:.72rem;color:var(--text-3)" id="events-count"></div>
+        </div>
+        <div style="overflow-x:auto;flex:1">
+          <table>
+            <thead><tr>
+              <th style="width:30%">Title</th><th style="width:10%">Status</th>
+              <th style="width:14%">Start Date</th><th style="width:10%">Price</th>
+              <th style="width:10%">Sold / Cap</th><th style="width:12%">Revenue</th>
+              <th style="width:14%">Actions</th>
+            </tr></thead>
+            <tbody id="events-tbody"><tr class="loading-row"><td colspan="7"><div class="spinner" style="margin:auto"></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== MERCH ===== -->
+    <div id="page-merch" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Merchandise</div>
+          <div class="page-subtitle">Manage merch items and variants per event</div>
+        </div>
+      </div>
+      <div class="table-toolbar" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);margin-bottom:1rem;flex-wrap:wrap">
+        <label style="font-family:var(--font-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3)">Event</label>
+        <select class="filter-select" id="merch-event-select" onchange="loadMerch()" style="min-width:200px">
+          <option value="">— Select an event —</option>
+        </select>
+        <button class="btn btn-primary btn-sm" id="btn-create-merch" onclick="openMerchModal()" disabled>+ Add Merch Item</button>
+      </div>
+      <div id="merch-content"><div style="text-align:center;padding:3rem;color:var(--text-3);font-size:.9rem">Select an event to manage its merchandise.</div></div>
+    </div>
+
+    <!-- ===== USERS ===== -->
+    <div id="page-users" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Users</div>
+          <div class="page-subtitle">Manage user roles and accounts</div>
+        </div>
+        <button class="btn btn-sm" onclick="loadUsers()">↺ Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar">
+          <input class="search-input" type="text" id="user-search" placeholder="Filter users…" oninput="filterUsersTable()">
+          <div style="margin-left:auto;font-family:var(--font-mono);font-size:.72rem;color:var(--text-3)" id="users-count"></div>
+        </div>
+        <div style="overflow-x:auto;flex:1">
+          <table>
+            <thead><tr>
+              <th style="width:30%">Name / Email</th><th style="width:30%">Email</th>
+              <th style="width:12%">Role</th><th style="width:15%">Phone</th>
+              <th style="width:13%">Actions</th>
+            </tr></thead>
+            <tbody id="users-tbody"><tr class="loading-row"><td colspan="5"><div class="spinner" style="margin:auto"></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== OVERSOLD ===== -->
+    <div id="page-oversold" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Oversold Orders</div>
+          <div class="page-subtitle">Orders where payment captured but stock exhausted — requires manual resolution</div>
+        </div>
+        <button class="btn btn-sm" onclick="loadOversold()">↺ Refresh</button>
+      </div>
+      <div id="oversold-content"><div class="loading-row" style="text-align:center;padding:2rem"><div class="spinner" style="margin:auto"></div></div></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- =================== EVENT MODAL =================== -->
+<div class="modal-overlay hidden" id="event-modal-overlay" onclick="if(event.target===this)closeEventModal()">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <div class="modal-title" id="event-modal-title">Create Event</div>
+      <button class="modal-close" onclick="closeEventModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('event','basic',this)">Basic Info</button>
+        <button class="tab" onclick="switchTab('event','location',this)">Location</button>
+        <button class="tab" onclick="switchTab('event','tickets',this)">Ticket Types</button>
+        <button class="tab" onclick="switchTab('event','media',this)">Media & Policy</button>
+      </div>
+
+      <!-- Tab: Basic Info -->
+      <div class="tab-panel active" id="event-tab-basic">
+        <div class="field"><label>Title *</label><input type="text" id="ev-title" placeholder="e.g. Summer Music Festival 2025" minlength="5" maxlength="255"></div>
+        <div class="field"><label>Description * <small style="color:var(--text-3);font-weight:300">(min 50 chars)</small></label><textarea id="ev-desc" rows="4" placeholder="Describe your event in detail…"></textarea></div>
+        <div class="field-row">
+          <div class="field"><label>Category *</label>
+            <select id="ev-category">
+              <option value="">Select category</option>
+              <option value="1">Music</option><option value="2">Sports</option>
+              <option value="3">Arts & Culture</option><option value="4">Food & Drink</option>
+              <option value="5">Technology</option><option value="6">Business</option>
+              <option value="7">Health & Wellness</option><option value="8">Education</option>
+              <option value="9">Comedy</option><option value="10">Other</option>
+            </select>
+          </div>
+          <div class="field"><label>Timezone *</label>
+            <select id="ev-timezone">
+              <option value="Africa/Johannesburg">Africa/Johannesburg (SAST)</option>
+              <option value="Africa/Cape_Town">Africa/Cape_Town</option>
+              <option value="UTC">UTC</option>
+              <option value="Europe/London">Europe/London</option>
+              <option value="America/New_York">America/New_York</option>
+              <option value="America/Los_Angeles">America/Los_Angeles</option>
+              <option value="Asia/Dubai">Asia/Dubai</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row-3">
+          <div class="field"><label>Start Time *</label><input type="datetime-local" id="ev-start"></div>
+          <div class="field"><label>End Time *</label><input type="datetime-local" id="ev-end"></div>
+          <div class="field"><label>Expires At *</label><input type="datetime-local" id="ev-expires" title="When the event listing expires (usually after end time)"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Base Price *</label><input type="number" id="ev-price" min="0" step="0.01" placeholder="0.00"></div>
+          <div class="field"><label>Currency *</label>
+            <select id="ev-currency">
+              <option value="ZAR">ZAR — South African Rand</option>
+              <option value="USD">USD — US Dollar</option>
+              <option value="EUR">EUR — Euro</option>
+              <option value="GBP">GBP — British Pound</option>
+              <option value="KES">KES — Kenyan Shilling</option>
+              <option value="NGN">NGN — Nigerian Naira</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Max Capacity <small style="color:var(--text-3)">(leave blank for unlimited)</small></label><input type="number" id="ev-capacity" min="1" placeholder="Unlimited"></div>
+          <div class="field" style="display:flex;align-items:flex-end;padding-bottom:.1rem">
+            <label class="check-row">
+              <input type="checkbox" id="ev-waitlist">
+              <span class="check-label">Allow Waitlist when sold out</span>
+            </label>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field" id="ev-featured-field" class="hidden">
+            <label class="check-row"><input type="checkbox" id="ev-featured"><span class="check-label">Featured Event</span></label>
+          </div>
+          <div class="field" id="ev-featured-until-field" class="hidden">
+            <label>Featured Until</label><input type="datetime-local" id="ev-featured-until">
+          </div>
+        </div>
+        <div class="section-sep">Tags & Performers</div>
+        <div class="field"><label>Tags <small style="color:var(--text-3)">(press Enter to add)</small></label><div class="tag-input-wrap" id="ev-tags-wrap"><input class="tag-bare-input" id="ev-tags-input" placeholder="Add tag…" onkeydown="tagInputKeydown(event,'ev-tags')"></div></div>
+        <div class="field"><label>Performers</label><div class="tag-input-wrap" id="ev-performers-wrap"><input class="tag-bare-input" id="ev-performers-input" placeholder="Add performer…" onkeydown="tagInputKeydown(event,'ev-performers')"></div></div>
+        <div class="field"><label>Teams</label><div class="tag-input-wrap" id="ev-teams-wrap"><input class="tag-bare-input" id="ev-teams-input" placeholder="Add team…" onkeydown="tagInputKeydown(event,'ev-teams')"></div></div>
+      </div>
+
+      <!-- Tab: Location -->
+      <div class="tab-panel" id="event-tab-location">
+        <div class="field"><label>Venue Name *</label><input type="text" id="ev-venue" placeholder="e.g. FNB Stadium"></div>
+        <div class="field"><label>Street Address *</label><input type="text" id="ev-address" placeholder="e.g. 1 Soccer City Ave"></div>
+        <div class="field-row">
+          <div class="field"><label>City *</label><input type="text" id="ev-city" placeholder="e.g. Johannesburg"></div>
+          <div class="field"><label></label></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Latitude <small style="color:var(--text-3)">(optional)</small></label><input type="number" id="ev-lat" step="0.000001" placeholder="-26.2041"></div>
+          <div class="field"><label>Longitude <small style="color:var(--text-3)">(optional)</small></label><input type="number" id="ev-lng" step="0.000001" placeholder="28.0473"></div>
+        </div>
+      </div>
+
+      <!-- Tab: Ticket Types -->
+      <div class="tab-panel" id="event-tab-tickets">
+        <div class="alert alert-info" style="margin-bottom:.75rem">
+          ℹ Ticket types define pricing tiers (e.g. General, VIP). The cheapest visible type overrides the base price automatically. Leave empty for flat pricing.
+        </div>
+        <div class="ticket-list" id="ev-ticket-list"></div>
+        <button class="btn btn-sm" onclick="addTicketTypeRow()">+ Add Ticket Type</button>
+      </div>
+
+      <!-- Tab: Media & Policy -->
+      <div class="tab-panel" id="event-tab-media">
+        <div class="field"><label>Cover Image URL</label><input type="url" id="ev-cover" placeholder="https://…/cover.jpg"></div>
+        <div class="field"><label>Banner Image URL</label><input type="url" id="ev-banner" placeholder="https://…/banner.jpg"></div>
+        <div class="field"><label>Banner Video URL</label><input type="url" id="ev-video" placeholder="https://…/banner.mp4"></div>
+        <div class="field"><label>Gallery Images <small style="color:var(--text-3)">(comma-separated URLs)</small></label><textarea id="ev-gallery" rows="2" placeholder="https://…/img1.jpg, https://…/img2.jpg"></textarea></div>
+        <div class="section-sep">Legal</div>
+        <div class="field"><label>Refund Policy</label><textarea id="ev-refund" rows="3" placeholder="Describe the refund policy…"></textarea></div>
+        <div class="field"><label>Terms & Conditions</label><textarea id="ev-terms" rows="3" placeholder="Terms and conditions for attendees…"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEventModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEventForm()" id="event-submit-btn">Create Event</button>
+    </div>
+  </div>
+</div>
+
+<!-- =================== MERCH MODAL =================== -->
+<div class="modal-overlay hidden" id="merch-modal-overlay" onclick="if(event.target===this)closeMerchModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="merch-modal-title">Add Merchandise Item</div>
+      <button class="modal-close" onclick="closeMerchModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label>Name *</label><input type="text" id="m-name" maxlength="255" placeholder="e.g. Festival T-Shirt"></div>
+      <div class="field"><label>Description</label><textarea id="m-desc" rows="2" placeholder="Optional description…"></textarea></div>
+      <div class="field-row">
+        <div class="field"><label>Base Price *</label><input type="number" id="m-price" min="0.01" step="0.01" placeholder="0.00"></div>
+        <div class="field"><label>Category</label><input type="text" id="m-category" placeholder="e.g. Clothing, Accessories"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Display Order</label><input type="number" id="m-order" value="0" min="0"></div>
+        <div class="field"><label>Fulfillment Mode</label>
+          <select id="m-fulfillment" onchange="togglePickupField()">
+            <option value="delivery">Delivery only</option>
+            <option value="pickup">Pickup only</option>
+            <option value="both">Both (buyer chooses)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row" id="m-pickup-row">
+        <div class="field"><label>Pickup Location</label><input type="text" id="m-pickup" placeholder="e.g. Gate B, FNB Stadium"></div>
+        <div class="field"><label>Delivery Fee (ZAR)</label><input type="number" id="m-dfee" min="0" step="0.01" value="0" placeholder="0.00"></div>
+      </div>
+      <div class="section-sep">Sale Window <small style="font-weight:300;text-transform:none;letter-spacing:0;color:var(--text-3)">(optional — leave blank for always-available)</small></div>
+      <div class="field-row">
+        <div class="field"><label>Sale Start</label><input type="datetime-local" id="m-sale-start"></div>
+        <div class="field"><label>Sale End</label><input type="datetime-local" id="m-sale-end"></div>
+      </div>
+      <div class="field"><label>Images (JSON string)</label><input type="text" id="m-images" placeholder='["https://…/img.jpg"]'></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeMerchModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitMerchForm()" id="merch-submit-btn">Add Item</button>
+    </div>
+  </div>
+</div>
+
+<!-- =================== VARIANT MODAL =================== -->
+<div class="modal-overlay hidden" id="variant-modal-overlay" onclick="if(event.target===this)closeVariantModal()">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="variant-modal-title">Add Variant</div>
+      <button class="modal-close" onclick="closeVariantModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-info" style="margin-bottom:.75rem;font-size:.78rem">Attributes are key-value pairs, e.g. <code style="font-family:var(--font-mono)">{"size":"L","colour":"black"}</code></div>
+      <div class="field"><label>SKU *</label><input type="text" id="v-sku" maxlength="100" placeholder="e.g. TSH-L-BLK"></div>
+      <div class="field"><label>Attributes (JSON) *</label><input type="text" id="v-attrs" placeholder='{"size":"L","colour":"Black"}'></div>
+      <div class="field-row">
+        <div class="field"><label>Stock Quantity</label><input type="number" id="v-stock" min="0" value="0"></div>
+        <div class="field"><label>Price Override <small style="color:var(--text-3)">(optional)</small></label><input type="number" id="v-price-override" min="0.01" step="0.01" placeholder="Leave blank to use base"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeVariantModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitVariantForm()" id="variant-submit-btn">Add Variant</button>
+    </div>
+  </div>
+</div>
+
+<!-- =================== CANCEL MODAL =================== -->
+<div class="modal-overlay hidden" id="cancel-modal-overlay" onclick="if(event.target===this)closeCancelModal()">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-title">Cancel Event</div>
+      <button class="modal-close" onclick="closeCancelModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-warning" style="margin-bottom:.75rem">This will cancel the event. All attendees will be automatically refunded.</div>
+      <div class="field"><label>Cancellation Reason * <small style="color:var(--text-3)">(min 10 chars)</small></label><textarea id="cancel-reason" rows="3" placeholder="Please provide a reason for cancellation…"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeCancelModal()">Back</button>
+      <button class="btn btn-danger" onclick="submitCancelEvent()">Confirm Cancellation</button>
+    </div>
+  </div>
+</div>
+
+<!-- =================== CONFIRM MODAL =================== -->
+<div class="modal-overlay hidden" id="confirm-modal-overlay">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <div class="modal-title" id="confirm-title">Confirm</div>
+      <button class="modal-close" onclick="closeConfirm()">✕</button>
+    </div>
+    <div class="modal-body"><p id="confirm-msg" style="color:var(--text-2);font-size:.9rem"></p></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeConfirm()">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn" onclick="confirmAction()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
+const S = {
+  token: localStorage.getItem('evt_token'),
+  base: localStorage.getItem('evt_base') || 'http://localhost:8080',
+  user: null,
+  editingEventId: null,
+  editingMerchId: null,
+  editingVariantId: null,
+  cancelEventId: null,
+  variantMerchId: null,
+  confirmCb: null,
+  allUsers: [],
+  tagData: { 'ev-tags': [], 'ev-performers': [], 'ev-teams': [] },
+  evSearchTimer: null,
+};
+if (S.token) { document.getElementById('login-screen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden'); initApp(); }
+
+// ══════════════════════════════════════════════════════════════
+// API
+// ══════════════════════════════════════════════════════════════
+async function api(method, path, body, raw = false) {
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + S.token } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(S.base + path, opts);
+  if (r.status === 401) { doLogout(); throw new Error('Unauthorized'); }
+  if (raw) return r;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || data.message || 'Request failed (' + r.status + ')');
+  return data;
+}
+
+function fmt(v) { if (v == null || v === '') return '—'; return v; }
+function fmtMoney(v, cur = 'ZAR') { if (v == null) return '—'; return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: cur, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v); }
+function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }); }
+function fmtDateTime(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+function toLocalInput(dt) { if (!dt) return ''; const d = new Date(dt); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); }
+function badge(status) {
+  const m = { draft: 'badge-draft', published: 'badge-published', cancelled: 'badge-cancelled', completed: 'badge-completed', active: 'badge-active', inactive: 'badge-inactive', admin: 'badge-admin', organizer: 'badge-organizer', organiser: 'badge-organizer', attendee: 'badge-attendee', user: 'badge-user', delivery: 'badge-delivery', pickup: 'badge-pickup', both: 'badge-both' };
+  return `<span class="badge ${m[status] || 'badge-draft'}">${status}</span>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════════════════
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-password').value;
+  const base = document.getElementById('base-url').value.trim().replace(/\/$/, '');
+  if (!email || !pass) { toast('Email and password required', 'error'); return; }
+  S.base = base;
+  localStorage.setItem('evt_base', base);
+  const btn = document.getElementById('login-btn');
+  btn.textContent = 'Signing in…'; btn.disabled = true;
+  try {
+    const data = await fetch(base + '/v1/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pass }) }).then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'Login failed') }); return r.json(); });
+    if (!data.token && !data.access_token) throw new Error('No token returned');
+    const token = data.token || data.access_token;
+    S.token = token; localStorage.setItem('evt_token', token);
+    S.user = data.user;
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    initApp();
+  } catch (e) { toast(e.message, 'error'); } finally { btn.textContent = 'Sign In'; btn.disabled = false; }
+}
+function doLogout() {
+  localStorage.removeItem('evt_token'); S.token = null;
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+}
+function initApp() {
+  loadDashboard(); loadEventSelectForMerch();
+  document.getElementById('base-url').value = S.base;
+}
+
+// ══════════════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════════════
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => { if (n.textContent.trim().toLowerCase().startsWith(name.charAt(0).toUpperCase() + name.slice(1).substring(0, 2)) || n.onclick?.toString().includes("'" + name + "'")) n.classList.add('active'); });
+  if (name === 'events') loadEvents();
+  if (name === 'users') loadUsers();
+  if (name === 'oversold') loadOversold();
+}
+function switchTab(form, tab, el) {
+  document.querySelectorAll(`#${form}-modal-overlay .tab`).forEach(t => t.classList.remove('active'));
+  document.querySelectorAll(`#${form}-modal-overlay .tab-panel`).forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(`${form}-tab-${tab}`).classList.add('active');
+}
+
+// ══════════════════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════════════════
+async function loadDashboard() {
+  try {
+    const [stats, evts] = await Promise.all([api('GET', '/v1/admin/stats'), api('GET', '/v1/admin/events?limit=8')]);
+    document.getElementById('s-total').textContent = fmtMoney((stats.ticket_revenue || 0) + (stats.merch_revenue || 0));
+    document.getElementById('s-ticket').textContent = fmtMoney(stats.ticket_revenue || 0);
+    document.getElementById('s-merch').textContent = fmtMoney(stats.merch_revenue || 0);
+    const oc = stats.oversold_merch_orders || 0;
+    document.getElementById('s-oversold').textContent = oc;
+    const oc_card = document.getElementById('s-oversold-card');
+    if (oc > 0) { oc_card.classList.add('danger'); document.getElementById('oversold-badge').textContent = oc; document.getElementById('oversold-badge').classList.remove('hidden'); }
+    const alertWrap = document.getElementById('dash-alert-wrap');
+    alertWrap.innerHTML = oc > 0 ? `<div class="alert alert-warning">⚠ ${oc} oversold merch order${oc !== 1 ? 's' : ''} require attention. <a href="#" onclick="showPage('oversold')">View →</a></div>` : '';
+    const tbody = document.getElementById('dash-events-tbody');
+    const events = evts.data || [];
+    if (!events.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No events found.</td></tr>'; return; }
+    tbody.innerHTML = events.map(e => `<tr onclick="showPage('events')">
+      <td style="font-weight:500">${esc(e.title)}</td>
+      <td>${badge(e.status)}</td>
+      <td class="td-mono" style="font-size:.78rem">${fmtDate(e.start_time)}</td>
+      <td class="td-mono">${e.tickets_sold}</td>
+      <td class="td-mono">${fmtMoney(e.ticket_revenue)}</td>
+      <td class="td-muted">${esc(e.city)}</td>
+    </tr>`).join('');
+  } catch (e) { toast('Dashboard load failed: ' + e.message, 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════
+// EVENTS
+// ══════════════════════════════════════════════════════════════
+async function loadEvents() {
+  const tbody = document.getElementById('events-tbody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="7"><div class="spinner" style="margin:auto"></div></td></tr>';
+  const status = document.getElementById('event-status-filter').value;
+  const search = document.getElementById('event-search').value.trim();
+  try {
+    const data = await api('GET', `/v1/admin/events?limit=50${status ? '&status=' + status : ''}${search ? '&search=' + encodeURIComponent(search) : ''}`);
+    const events = data.data || [];
+    document.getElementById('events-count').textContent = events.length + ' events';
+    if (!events.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No events found.</td></tr>'; return; }
+    tbody.innerHTML = events.map(e => `<tr>
+      <td style="font-weight:500" title="${esc(e.title)}">${esc(e.title)}</td>
+      <td>${badge(e.status)}</td>
+      <td class="td-mono" style="font-size:.77rem">${fmtDate(e.start_time)}</td>
+      <td class="td-mono">${fmtMoney(e.price, e.currency)}</td>
+      <td class="td-mono">${e.tickets_sold}${e.max_capacity ? ' / ' + e.max_capacity : ''}</td>
+      <td class="td-mono">${fmtMoney(e.ticket_revenue)}</td>
+      <td class="actions"><div class="actions-wrap">
+        <button class="btn-icon" onclick="openEditEventModal('${e.id}')" title="Edit">✎</button>
+        ${e.status === 'draft' ? `<button class="btn btn-success btn-sm" onclick="publishEvent('${e.id}')">Publish</button>` : ''}
+        ${e.status === 'published' ? `<button class="btn btn-sm" onclick="openCancelModal('${e.id}')" style="border-color:var(--warning);color:var(--warning)">Cancel</button>` : ''}
+        <button class="btn-icon btn-danger" onclick="deleteEvent('${e.id}', '${esc(e.title)}')" title="Delete" style="color:var(--danger)">✕</button>
+      </div></td>
+    </tr>`).join('');
+  } catch (e) { toast('Failed to load events: ' + e.message, 'error'); tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Failed to load events.</td></tr>'; }
+}
+function debounceEventSearch() { clearTimeout(S.evSearchTimer); S.evSearchTimer = setTimeout(loadEvents, 400); }
+
+function openEventModal() {
+  S.editingEventId = null;
+  resetEventForm();
+  document.getElementById('event-modal-title').textContent = 'Create Event';
+  document.getElementById('event-submit-btn').textContent = 'Create Event';
+  document.getElementById('event-modal-overlay').classList.remove('hidden');
+}
+
+async function openEditEventModal(id) {
+  S.editingEventId = id;
+  document.getElementById('event-modal-title').textContent = 'Edit Event';
+  document.getElementById('event-submit-btn').textContent = 'Save Changes';
+  document.getElementById('event-modal-overlay').classList.remove('hidden');
+  try {
+    const e = await api('GET', `/v1/admin/events/${id}`);
+    document.getElementById('ev-title').value = e.title || '';
+    document.getElementById('ev-desc').value = e.description || '';
+    document.getElementById('ev-category').value = e.category_id || '';
+    document.getElementById('ev-timezone').value = e.timezone || 'Africa/Johannesburg';
+    document.getElementById('ev-start').value = toLocalInput(e.start_time);
+    document.getElementById('ev-end').value = toLocalInput(e.end_time);
+    document.getElementById('ev-expires').value = toLocalInput(e.expires_at);
+    document.getElementById('ev-price').value = e.price || '';
+    document.getElementById('ev-currency').value = e.currency || 'ZAR';
+    document.getElementById('ev-capacity').value = e.max_capacity || '';
+    document.getElementById('ev-waitlist').checked = e.allow_waitlist || false;
+    document.getElementById('ev-venue').value = e.venue_name || '';
+    document.getElementById('ev-address').value = e.address || '';
+    document.getElementById('ev-city').value = e.city || '';
+    document.getElementById('ev-lat').value = e.latitude || '';
+    document.getElementById('ev-lng').value = e.longitude || '';
+    document.getElementById('ev-cover').value = e.cover_image_url || '';
+    document.getElementById('ev-banner').value = e.banner_image_url || '';
+    document.getElementById('ev-video').value = e.banner_video_url || '';
+    document.getElementById('ev-gallery').value = (e.gallery_images || []).join(', ');
+    document.getElementById('ev-refund').value = e.refund_policy || '';
+    document.getElementById('ev-terms').value = e.terms_and_conditions || '';
+    S.tagData['ev-tags'] = e.tags || []; renderTags('ev-tags');
+    S.tagData['ev-performers'] = e.performers || []; renderTags('ev-performers');
+    S.tagData['ev-teams'] = e.teams || []; renderTags('ev-teams');
+  } catch (e) { toast('Failed to load event: ' + e.message, 'error'); }
+}
+
+function closeEventModal() { document.getElementById('event-modal-overlay').classList.add('hidden'); clearEventErrors(); resetEventForm(); }
+
+function resetEventForm() {
+  ['ev-title','ev-desc','ev-venue','ev-address','ev-city','ev-lat','ev-lng','ev-cover','ev-banner','ev-video','ev-gallery','ev-refund','ev-terms','ev-capacity'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('ev-price').value = '';
+  document.getElementById('ev-currency').value = 'ZAR';
+  document.getElementById('ev-timezone').value = 'Africa/Johannesburg';
+  document.getElementById('ev-waitlist').checked = false;
+  document.getElementById('ev-start').value = '';
+  document.getElementById('ev-end').value = '';
+  document.getElementById('ev-expires').value = '';
+  S.tagData = { 'ev-tags': [], 'ev-performers': [], 'ev-teams': [] };
+  ['ev-tags','ev-performers','ev-teams'].forEach(k => renderTags(k));
+  document.getElementById('ev-ticket-list').innerHTML = '';
+  document.querySelectorAll('#event-modal-overlay .tab').forEach((t, i) => { t.classList.toggle('active', i === 0); });
+  document.querySelectorAll('#event-modal-overlay .tab-panel').forEach((p, i) => { p.classList.toggle('active', i === 0); });
+}
+
+function clearEventErrors() {
+  document.querySelectorAll('#event-modal-overlay .field-error').forEach(f => {
+    f.classList.remove('field-error');
+    const msg = f.querySelector('.field-error-msg');
+    if (msg) msg.remove();
+  });
+}
+
+function markError(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const field = el.closest('.field');
+  if (!field) return;
+  field.classList.add('field-error');
+  if (!field.querySelector('.field-error-msg')) {
+    const span = document.createElement('div');
+    span.className = 'field-error-msg';
+    span.textContent = msg;
+    field.appendChild(span);
+  }
+  return field;
+}
+
+function switchToTabWithError() {
+  // Find which tab panel contains a field-error and switch to it
+  const tabPanels = ['event-tab-basic', 'event-tab-location', 'event-tab-tickets', 'event-tab-media'];
+  const tabBtns = document.querySelectorAll('#event-modal-overlay .tab');
+  for (let i = 0; i < tabPanels.length; i++) {
+    const panel = document.getElementById(tabPanels[i]);
+    if (panel && panel.querySelector('.field-error')) {
+      tabBtns.forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#event-modal-overlay .tab-panel').forEach(p => p.classList.remove('active'));
+      tabBtns[i].classList.add('active');
+      panel.classList.add('active');
+      // Scroll first error into view
+      const firstErr = panel.querySelector('.field-error input, .field-error select, .field-error textarea');
+      if (firstErr) firstErr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return true;
+    }
+  }
+  return false;
+}
+
+async function submitEventForm() {
+  clearEventErrors();
+  // ── Client-side validation ──────────────────────────────────────────────
+  let hasErrors = false;
+  const require = (id, msg) => {
+    const el = document.getElementById(id);
+    const val = el ? el.value.trim() : '';
+    if (!val) { markError(id, msg || 'Required'); hasErrors = true; }
+    return val;
+  };
+  const title = require('ev-title', 'Title is required (min 5 chars)');
+  if (title && title.length < 5) { markError('ev-title', 'Must be at least 5 characters'); hasErrors = true; }
+  const desc = require('ev-desc', 'Description is required (min 50 chars)');
+  if (desc && desc.length < 50) { markError('ev-desc', `Too short — ${desc.length}/50 chars`); hasErrors = true; }
+  require('ev-category', 'Please select a category');
+  require('ev-start', 'Start time is required');
+  require('ev-end', 'End time is required');
+  require('ev-expires', 'Expiry time is required');
+  const price = document.getElementById('ev-price').value;
+  if (price === '' || price === null) { markError('ev-price', 'Price is required (use 0 for free)'); hasErrors = true; }
+  require('ev-venue', 'Venue name is required');
+  require('ev-address', 'Street address is required');
+  require('ev-city', 'City is required');
+  if (hasErrors) { switchToTabWithError(); toast('Please fix the highlighted fields', 'error'); return; }
+
+  const btn = document.getElementById('event-submit-btn');
+  btn.disabled = true; btn.textContent = S.editingEventId ? 'Saving…' : 'Creating…';
+  try {
+    const toISO = (v) => v ? new Date(v).toISOString() : null;
+    const numOrNull = (v) => (v === '' || v === null) ? null : Number(v);
+    const base = {
+      title: document.getElementById('ev-title').value.trim(),
+      description: document.getElementById('ev-desc').value.trim(),
+      category_id: parseInt(document.getElementById('ev-category').value) || null,
+      timezone: document.getElementById('ev-timezone').value,
+      start_time: toISO(document.getElementById('ev-start').value),
+      end_time: toISO(document.getElementById('ev-end').value),
+      expires_at: toISO(document.getElementById('ev-expires').value),
+      price: parseFloat(document.getElementById('ev-price').value) || 0,
+      currency: document.getElementById('ev-currency').value,
+      allow_waitlist: document.getElementById('ev-waitlist').checked,
+      venue_name: document.getElementById('ev-venue').value.trim(),
+      address: document.getElementById('ev-address').value.trim(),
+      city: document.getElementById('ev-city').value.trim(),
+      latitude: numOrNull(document.getElementById('ev-lat').value),
+      longitude: numOrNull(document.getElementById('ev-lng').value),
+      refund_policy: document.getElementById('ev-refund').value.trim() || null,
+      terms_and_conditions: document.getElementById('ev-terms').value.trim() || null,
+      tags: S.tagData['ev-tags'],
+      performers: S.tagData['ev-performers'],
+      teams: S.tagData['ev-teams'],
+    };
+    const cap = document.getElementById('ev-capacity').value;
+    if (cap) base.max_capicity = parseInt(cap);
+    const cover = document.getElementById('ev-cover').value.trim();
+    if (cover) base.cover_image_url = cover;
+    const banner = document.getElementById('ev-banner').value.trim();
+    if (banner) base.banner_image_url = banner;
+    const video = document.getElementById('ev-video').value.trim();
+    if (video) base.banner_video_url = video;
+    const gallery = document.getElementById('ev-gallery').value.trim();
+    if (gallery) base.gallery_images = gallery.split(',').map(u => u.trim()).filter(Boolean);
+    const ttRows = document.querySelectorAll('#ev-ticket-list .ticket-form-row');
+    if (ttRows.length) {
+      base.ticket_types = Array.from(ttRows).map(row => {
+        const tt = {
+          name: row.querySelector('.tt-name').value.trim(),
+          price: parseFloat(row.querySelector('.tt-price').value) || 0,
+          sort_order: parseInt(row.querySelector('.tt-order').value) || 0,
+          is_visible: row.querySelector('.tt-visible').checked,
+        };
+        const cap = row.querySelector('.tt-capacity').value;
+        if (cap) tt.capacity = parseInt(cap);
+        const desc = row.querySelector('.tt-desc').value.trim();
+        if (desc) tt.description = desc;
+        return tt;
+      }).filter(t => t.name);
+    }
+    if (S.editingEventId) {
+      await api('PUT', `/v1/admin/events/${S.editingEventId}`, base);
+      toast('Event updated successfully', 'success');
+    } else {
+      await api('POST', '/v1/admin/events', base);
+      toast('Event created as draft', 'success');
+    }
+    closeEventModal();
+    loadEvents();
+    loadEventSelectForMerch();
+  } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; btn.textContent = S.editingEventId ? 'Save Changes' : 'Create Event'; }
+}
+
+async function publishEvent(id) {
+  if (!confirm('Publish this event? It will become visible to all users.')) return;
+  try { await api('POST', `/v1/organiser/events/${id}/publish`); toast('Event published!', 'success'); loadEvents(); loadDashboard(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+function openCancelModal(id) { S.cancelEventId = id; document.getElementById('cancel-reason').value = ''; document.getElementById('cancel-modal-overlay').classList.remove('hidden'); }
+function closeCancelModal() { document.getElementById('cancel-modal-overlay').classList.add('hidden'); }
+async function submitCancelEvent() {
+  const reason = document.getElementById('cancel-reason').value.trim();
+  if (reason.length < 10) { toast('Reason must be at least 10 characters', 'error'); return; }
+  try { await api('POST', `/v1/organiser/events/${S.cancelEventId}/cancel`, { reason }); toast('Event cancelled', 'success'); closeCancelModal(); loadEvents(); loadDashboard(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+function deleteEvent(id, title) {
+  openConfirm('Delete Event', `Permanently delete "${title}"? This cannot be undone.`, async () => {
+    try { await api('DELETE', `/v1/admin/events/${id}`); toast('Event deleted', 'success'); loadEvents(); loadDashboard(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function addTicketTypeRow() {
+  const list = document.getElementById('ev-ticket-list');
+  const idx = list.children.length;
+  const div = document.createElement('div');
+  div.className = 'sub-section ticket-form-row';
+  div.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem">
+      <span style="font-family:var(--font-mono);font-size:.72rem;color:var(--text-3)">TICKET TYPE ${idx + 1}</span>
+      <button class="btn-icon" onclick="this.closest('.ticket-form-row').remove()" style="font-size:.9rem;color:var(--danger)">✕</button>
+    </div>
+    <div class="field-row">
+      <div class="field" style="margin:0"><label>Name *</label><input class="tt-name" type="text" placeholder="e.g. General Admission"></div>
+      <div class="field" style="margin:0"><label>Price (0 = free)</label><input class="tt-price" type="number" min="0" step="0.01" value="0"></div>
+    </div>
+    <div class="field-row" style="margin-top:.5rem">
+      <div class="field" style="margin:0"><label>Capacity (blank = unlimited)</label><input class="tt-capacity" type="number" min="1"></div>
+      <div class="field" style="margin:0"><label>Sort Order</label><input class="tt-order" type="number" value="${idx}"></div>
+    </div>
+    <div class="field" style="margin-top:.5rem;margin-bottom:.25rem"><label>Description</label><input class="tt-desc" type="text" placeholder="Optional"></div>
+    <label class="check-row" style="margin-top:.25rem"><input class="tt-visible" type="checkbox" checked><span class="check-label">Visible to buyers</span></label>`;
+  list.appendChild(div);
+}
+
+// ══════════════════════════════════════════════════════════════
+// MERCH
+// ══════════════════════════════════════════════════════════════
+async function loadEventSelectForMerch() {
+  try {
+    const data = await api('GET', '/v1/admin/events?limit=100');
+    const sel = document.getElementById('merch-event-select');
+    const events = data.data || [];
+    sel.innerHTML = '<option value="">— Select an event —</option>' + events.map(e => `<option value="${e.id}">${esc(e.title)} (${e.status})</option>`).join('');
+  } catch (e) {}
+}
+
+async function loadMerch() {
+  const eventId = document.getElementById('merch-event-select').value;
+  const btn = document.getElementById('btn-create-merch');
+  btn.disabled = !eventId;
+  if (!eventId) { document.getElementById('merch-content').innerHTML = '<div style="text-align:center;padding:3rem;color:var(--text-3);font-size:.9rem">Select an event to manage its merchandise.</div>'; return; }
+  document.getElementById('merch-content').innerHTML = '<div style="text-align:center;padding:2rem"><div class="spinner" style="margin:auto"></div></div>';
+  try {
+    const data = await api('GET', `/v1/events/${eventId}/merch`);
+    const items = data.data || [];
+    if (!items.length) { document.getElementById('merch-content').innerHTML = '<div style="text-align:center;padding:3rem;color:var(--text-3);font-size:.9rem">No merch items yet. Click "+ Add Merch Item" to create one.</div>'; return; }
+    document.getElementById('merch-content').innerHTML = '<div class="merch-grid" id="merch-grid"></div>';
+    document.getElementById('merch-grid').innerHTML = items.map(m => `
+      <div class="merch-card">
+        <div class="merch-card-body">
+          <div class="merch-card-title" title="${esc(m.name)}">${esc(m.name)}</div>
+          <div class="merch-card-price">${fmtMoney(m.base_price)}</div>
+          <div class="merch-card-meta">
+            ${badge(m.is_active ? 'active' : 'inactive')}
+            ${badge(m.fulfillment_mode)}
+            ${m.category ? `<span class="badge badge-draft">${esc(m.category)}</span>` : ''}
+          </div>
+          ${m.description ? `<div style="font-size:.78rem;color:var(--text-2);margin-bottom:.3rem;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(m.description)}</div>` : ''}
+          <div style="font-size:.75rem;color:var(--text-3)">Sale: ${m.sale_start ? fmtDate(m.sale_start) + ' → ' + fmtDate(m.sale_end) : 'Always live'}</div>
+          <div class="variant-list" style="margin-top:.6rem" id="vlist-${m.id}">
+            ${(m.variants || []).map(v => `<div class="variant-item">
+              <span class="variant-sku">${esc(v.sku)}</span>
+              <span class="variant-attrs">${esc(formatAttrs(v.attributes))}</span>
+              <span class="variant-stock">${v.stock_quantity}x${v.is_active ? '' : ' <em style=color:var(--danger)>off</em>'}</span>
+              ${v.price_override != null ? `<span style="font-family:var(--font-mono);font-size:.72rem;color:var(--accent)">${fmtMoney(v.price_override)}</span>` : ''}
+            </div>`).join('')}
+          </div>
+        </div>
+        <div class="merch-card-foot">
+          <button class="btn btn-sm" onclick="openEditMerchModal('${eventId}','${m.id}')">✎ Edit</button>
+          <button class="btn btn-sm" onclick="openAddVariantModal('${m.id}')">+ Variant</button>
+          <button class="btn btn-sm btn-danger" onclick="deactivateMerch('${m.id}')">Deactivate</button>
+          <span class="merch-variants-count">${(m.variants || []).length} variants</span>
+        </div>
+      </div>`).join('');
+  } catch (e) { document.getElementById('merch-content').innerHTML = '<div style="text-align:center;padding:2rem;color:var(--danger)">Failed to load merch: ' + esc(e.message) + '</div>'; }
+}
+
+function formatAttrs(raw) {
+  try { const o = JSON.parse(raw || '{}'); return Object.entries(o).map(([k, v]) => `${k}: ${v}`).join(', '); } catch { return raw || ''; }
+}
+
+function openMerchModal() {
+  S.editingMerchId = null;
+  resetMerchForm();
+  document.getElementById('merch-modal-title').textContent = 'Add Merchandise Item';
+  document.getElementById('merch-submit-btn').textContent = 'Add Item';
+  document.getElementById('merch-modal-overlay').classList.remove('hidden');
+}
+async function openEditMerchModal(eventId, merchId) {
+  S.editingMerchId = merchId;
+  document.getElementById('merch-modal-title').textContent = 'Edit Merchandise Item';
+  document.getElementById('merch-submit-btn').textContent = 'Save Changes';
+  document.getElementById('merch-modal-overlay').classList.remove('hidden');
+  try {
+    const m = await api('GET', `/v1/merch/${merchId}`);
+    document.getElementById('m-name').value = m.name || '';
+    document.getElementById('m-desc').value = m.description || '';
+    document.getElementById('m-price').value = m.base_price || '';
+    document.getElementById('m-category').value = m.category || '';
+    document.getElementById('m-order').value = m.display_order || 0;
+    document.getElementById('m-fulfillment').value = m.fulfillment_mode || 'delivery';
+    document.getElementById('m-pickup').value = m.pickup_location || '';
+    document.getElementById('m-dfee').value = m.delivery_fee || 0;
+    document.getElementById('m-sale-start').value = toLocalInput(m.sale_start);
+    document.getElementById('m-sale-end').value = toLocalInput(m.sale_end);
+    document.getElementById('m-images').value = m.images || '';
+    togglePickupField();
+  } catch (e) { toast('Failed to load merch item: ' + e.message, 'error'); }
+}
+function closeMerchModal() { document.getElementById('merch-modal-overlay').classList.add('hidden'); resetMerchForm(); }
+function resetMerchForm() { ['m-name','m-desc','m-category','m-pickup','m-images'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; }); document.getElementById('m-price').value = ''; document.getElementById('m-dfee').value = '0'; document.getElementById('m-order').value = '0'; document.getElementById('m-fulfillment').value = 'delivery'; document.getElementById('m-sale-start').value = ''; document.getElementById('m-sale-end').value = ''; togglePickupField(); }
+
+function togglePickupField() {
+  const mode = document.getElementById('m-fulfillment').value;
+  const row = document.getElementById('m-pickup-row');
+  row.style.display = (mode === 'delivery') ? 'none' : '';
+}
+
+async function submitMerchForm() {
+  const eventId = document.getElementById('merch-event-select').value;
+  const btn = document.getElementById('merch-submit-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const toISO = v => v ? new Date(v).toISOString() : null;
+    const body = {
+      name: document.getElementById('m-name').value.trim(),
+      base_price: parseFloat(document.getElementById('m-price').value),
+      display_order: parseInt(document.getElementById('m-order').value) || 0,
+      fulfillment_mode: document.getElementById('m-fulfillment').value,
+      delivery_fee: parseFloat(document.getElementById('m-dfee').value) || 0,
+    };
+    const desc = document.getElementById('m-desc').value.trim(); if (desc) body.description = desc;
+    const cat = document.getElementById('m-category').value.trim(); if (cat) body.category = cat;
+    const pickup = document.getElementById('m-pickup').value.trim(); if (pickup) body.pickup_location = pickup;
+    const saleStart = document.getElementById('m-sale-start').value; if (saleStart) body.sale_start = toISO(saleStart);
+    const saleEnd = document.getElementById('m-sale-end').value; if (saleEnd) body.sale_end = toISO(saleEnd);
+    const images = document.getElementById('m-images').value.trim(); if (images) body.images = images;
+    if (S.editingMerchId) {
+      await api('PUT', `/v1/organiser/merch/${S.editingMerchId}`, body);
+      toast('Merchandise updated', 'success');
+    } else {
+      await api('POST', `/v1/organiser/events/${eventId}/merch`, body);
+      toast('Merchandise created', 'success');
+    }
+    closeMerchModal(); loadMerch();
+  } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; btn.textContent = S.editingMerchId ? 'Save Changes' : 'Add Item'; }
+}
+
+async function deactivateMerch(id) {
+  openConfirm('Deactivate Merchandise', 'This will hide the item from the listing. Existing orders are not affected.', async () => {
+    try { await api('DELETE', `/v1/organiser/merch/${id}`); toast('Item deactivated', 'success'); loadMerch(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openAddVariantModal(merchId) {
+  S.variantMerchId = merchId; S.editingVariantId = null;
+  resetVariantForm();
+  document.getElementById('variant-modal-title').textContent = 'Add Variant';
+  document.getElementById('variant-submit-btn').textContent = 'Add Variant';
+  document.getElementById('variant-modal-overlay').classList.remove('hidden');
+}
+function closeVariantModal() { document.getElementById('variant-modal-overlay').classList.add('hidden'); resetVariantForm(); }
+function resetVariantForm() { document.getElementById('v-sku').value = ''; document.getElementById('v-attrs').value = ''; document.getElementById('v-stock').value = '0'; document.getElementById('v-price-override').value = ''; }
+async function submitVariantForm() {
+  const btn = document.getElementById('variant-submit-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    let attrs = document.getElementById('v-attrs').value.trim();
+    try { JSON.parse(attrs); } catch { toast('Attributes must be valid JSON, e.g. {"size":"L"}', 'error'); btn.disabled = false; btn.textContent = 'Add Variant'; return; }
+    const body = { sku: document.getElementById('v-sku').value.trim(), attributes: attrs, stock_quantity: parseInt(document.getElementById('v-stock').value) || 0 };
+    const po = document.getElementById('v-price-override').value;
+    if (po) body.price_override = parseFloat(po);
+    await api('POST', `/v1/organiser/merch/${S.variantMerchId}/variants`, body);
+    toast('Variant added', 'success'); closeVariantModal(); loadMerch();
+  } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; btn.textContent = 'Add Variant'; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// USERS
+// FIX: added ?limit=100 so all users are fetched (default was 5)
+// FIX: name column falls back to email when first_name/last_name
+//      are not returned by the backend query
+// ══════════════════════════════════════════════════════════════
+async function loadUsers() {
+  const tbody = document.getElementById('users-tbody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="5"><div class="spinner" style="margin:auto"></div></td></tr>';
+  try {
+    const data = await api('GET', '/v1/admin/users?limit=100');
+    S.allUsers = data.users || data || [];
+    document.getElementById('users-count').textContent = S.allUsers.length + ' users';
+    renderUsersTable(S.allUsers);
+  } catch (e) { toast('Failed to load users: ' + e.message, 'error'); tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Failed to load users.</td></tr>'; }
+}
+
+function renderUsersTable(users) {
+  const tbody = document.getElementById('users-tbody');
+  if (!users.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="5">No users found.</td></tr>'; return; }
+  tbody.innerHTML = users.map(u => {
+    const displayName = (u.first_name || u.last_name)
+      ? ((u.first_name || '') + ' ' + (u.last_name || '')).trim()
+      : u.email;
+    const phone = u.phone_number || u.phone || '—';
+    return `<tr>
+    <td style="font-weight:500">${esc(displayName)}</td>
+    <td class="td-muted" style="font-size:.82rem">${esc(u.email)}</td>
+    <td>${badge(u.role || 'attendee')}</td>
+    <td class="td-muted td-mono" style="font-size:.78rem">${esc(phone)}</td>
+    <td class="actions"><div class="actions-wrap">
+      ${u.role === 'admin' ? `<button class="btn btn-sm" onclick="demoteUser('${u.id}','${esc(u.email)}')">Demote</button>` : `<button class="btn btn-sm btn-success" onclick="promoteUser('${u.id}','${esc(u.email)}')">Promote</button>`}
+      <button class="btn-icon" onclick="deleteUser('${u.id}','${esc(u.email)}')" style="color:var(--danger)" title="Delete user">✕</button>
+    </div></td>
+  </tr>`;
+  }).join('');
+}
+
+function filterUsersTable() {
+  const q = document.getElementById('user-search').value.trim().toLowerCase();
+  if (!q) { renderUsersTable(S.allUsers); return; }
+  renderUsersTable(S.allUsers.filter(u => (u.email || '').toLowerCase().includes(q) || ((u.first_name || '') + ' ' + (u.last_name || '')).toLowerCase().includes(q)));
+}
+
+async function promoteUser(id, email) {
+  openConfirm('Promote User', `Grant admin privileges to ${email}?`, async () => {
+    try { await api('PUT', `/v1/admin/users/promote/${id}`); toast('User promoted to admin', 'success'); loadUsers(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+}
+async function demoteUser(id, email) {
+  openConfirm('Demote User', `Remove admin privileges from ${email}?`, async () => {
+    try { await api('PUT', `/v1/admin/users/demote/${id}`); toast('User demoted', 'success'); loadUsers(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+}
+async function deleteUser(id, email) {
+  openConfirm('Delete User', `Permanently delete user "${email}"? This cannot be undone.`, async () => {
+    try { await api('DELETE', `/v1/admin/users/delete/${id}`); toast('User deleted', 'success'); loadUsers(); }
+    catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// OVERSOLD
+// ══════════════════════════════════════════════════════════════
+async function loadOversold() {
+  document.getElementById('oversold-content').innerHTML = '<div style="text-align:center;padding:2rem"><div class="spinner" style="margin:auto"></div></div>';
+  try {
+    const data = await api('GET', '/v1/admin/merch/oversold');
+    const orders = data.data || [];
+    if (!orders.length) { document.getElementById('oversold-content').innerHTML = '<div class="alert alert-info">✓ No oversold orders — all clear!</div>'; return; }
+    document.getElementById('oversold-content').innerHTML = orders.map(o => `
+      <div class="oversold-card">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.4rem">
+          <div class="oversold-title">${esc(o.merch_name || 'Merchandise Item')}</div>
+          <div class="oversold-amount">${fmtMoney(o.total_amount || o.amount)}</div>
+        </div>
+        <div class="oversold-meta">
+          <span>Order: <code style="font-family:var(--font-mono);font-size:.75rem">${esc(o.id || '—')}</code></span>
+          <span>Qty: ${o.quantity || 1}</span>
+          <span>SKU: ${esc(o.variant_sku || '—')}</span>
+          <span>Status: ${badge(o.fulfillment_status || 'oversold')}</span>
+          <span>Date: ${fmtDateTime(o.created_at)}</span>
+        </div>
+        <div style="margin-top:.4rem;font-size:.78rem;color:var(--text-3)">Issue a refund via Stitch or source additional stock and mark as fulfilled.</div>
+      </div>`).join('');
+  } catch (e) { document.getElementById('oversold-content').innerHTML = '<div style="text-align:center;padding:2rem;color:var(--danger)">Failed to load oversold orders: ' + esc(e.message) + '</div>'; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CONFIRM MODAL
+// ══════════════════════════════════════════════════════════════
+function openConfirm(title, msg, cb) {
+  S.confirmCb = cb;
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-msg').textContent = msg;
+  document.getElementById('confirm-modal-overlay').classList.remove('hidden');
+}
+function closeConfirm() { document.getElementById('confirm-modal-overlay').classList.add('hidden'); S.confirmCb = null; }
+async function confirmAction() { if (S.confirmCb) await S.confirmCb(); closeConfirm(); }
+
+// ══════════════════════════════════════════════════════════════
+// TAG INPUT
+// ══════════════════════════════════════════════════════════════
+function tagInputKeydown(e, key) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    const val = e.target.value.trim().replace(/,$/, '');
+    if (val && !S.tagData[key].includes(val)) { S.tagData[key].push(val); renderTags(key); }
+    e.target.value = '';
+  } else if (e.key === 'Backspace' && !e.target.value) {
+    S.tagData[key].pop(); renderTags(key);
+  }
+}
+function renderTags(key) {
+  const wrap = document.getElementById(key + '-wrap');
+  const input = document.getElementById(key + '-input');
+  const tags = S.tagData[key];
+  wrap.querySelectorAll('.tag-pill').forEach(p => p.remove());
+  tags.forEach((t, i) => {
+    const pill = document.createElement('span');
+    pill.className = 'tag-pill';
+    pill.innerHTML = `${esc(t)} <button type="button" onclick="removeTag('${key}',${i})">✕</button>`;
+    wrap.insertBefore(pill, input);
+  });
+}
+function removeTag(key, idx) { S.tagData[key].splice(idx, 1); renderTags(key); }
+
+// ══════════════════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════════════════
+function toast(msg, type = 'info') {
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+  const el = document.createElement('div');
+  el.className = `toast ${type === 'error' ? 'error' : type === 'success' ? 'success' : 'info'}`;
+  el.innerHTML = `<span style="flex-shrink:0">${icons[type] || 'ℹ'}</span> ${esc(msg)}`;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+// ══════════════════════════════════════════════════════════════
+// UTIL
+// ══════════════════════════════════════════════════════════════
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => { m.classList.add('hidden'); });
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  togglePickupField();
+});
+</script>
+</body>
+</html>

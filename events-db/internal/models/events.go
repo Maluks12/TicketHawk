@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -88,27 +89,63 @@ func (a ImageArray) Value() (driver.Value, error) {
 }
 
 func (a *TagArray) Scan(value interface{}) error {
-	if value == nil {
-		*a = TagArray{}
-		return nil
-	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("cannot scan %T into TagArray", value)
-	}
-	str := string(bytes)
-	if str == "{}" || str == "" {
-		*a = TagArray{}
-		return nil
-	}
-	return json.Unmarshal(bytes, a)
+    if value == nil {
+        *a = TagArray{}
+        return nil
+    }
+    b, ok := value.([]byte)
+    if !ok {
+        return fmt.Errorf("cannot scan %T into TagArray", value)
+    }
+    // Handle null bytes or empty
+    if len(b) == 0 || b[0] == 0 {
+        *a = TagArray{}
+        return nil
+    }
+    str := string(b)
+    if str == "{}" || str == "" {
+        *a = TagArray{}
+        return nil
+    }
+    // PostgreSQL text[] format: {val1,"val2"}
+    if str[0] == '{' {
+        inner := str[1 : len(str)-1]
+        if inner == "" {
+            *a = TagArray{}
+            return nil
+        }
+        parts := strings.Split(inner, ",")
+        result := make(TagArray, 0, len(parts))
+        for _, p := range parts {
+            p = strings.TrimSpace(p)
+            p = strings.Trim(p, `"`)
+            if p != "" {
+                result = append(result, p)
+            }
+        }
+        *a = result
+        return nil
+    }
+    // JSON array format: ["val1","val2"]
+    return json.Unmarshal(b, a)
 }
 
 func (a TagArray) Value() (driver.Value, error) {
-	if len(a) == 0 {
-		return nil, nil
-	}
-	return json.Marshal(a)
+    if len(a) == 0 {
+        return "{}", nil
+    }
+    var sb strings.Builder
+    sb.WriteString("{")
+    for i, v := range a {
+        if i > 0 {
+            sb.WriteString(",")
+        }
+        sb.WriteString(`"`)
+        sb.WriteString(strings.ReplaceAll(v, `"`, `\"`))
+        sb.WriteString(`"`)
+    }
+    sb.WriteString("}")
+    return sb.String(), nil
 }
 
 const UnlimitedTickets = -1
@@ -131,7 +168,7 @@ type CreateEventDTO struct {
 	Description        string     `json:"description" binding:"required,min=50"`
 	CoverImageURL      *string    `json:"cover_image_url" binding:"omitempty,url"`
 	BannerImageURL     *string    `json:"banner_image_url" binding:"omitempty,url"`
-	BannerVideoURL     *string    `json:"banner_video_url" binding:"omitempty_url"`
+	BannerVideoURL     *string    `json:"banner_video_url" binding:"omitempty,url"`
 	GalleryImages      []string   `json:"gallery_images"`
 	StartTime          time.Time  `json:"start_time" binding:"required"`
 	EndTime            time.Time  `json:"end_time" binding:"required"`
@@ -162,7 +199,7 @@ type UpdateEventDTO struct {
 	Description        *string    `json:"description" binding:"omitempty,min=50"`
 	CoverImageURL      *string    `json:"cover_image_url" binding:"omitempty,url"`
 	BannerImageURL     *string    `json:"banner_image_url" binding:"omitempty,url"`
-	BannerVideoURL     *string    `json:"banner_video_url" binding:"omitempty_url"`
+	BannerVideoURL     *string    `json:"banner_video_url" binding:"omitempty,url"`
 	GalleryImages      *[]string  `json:"gallery_images"`
 	StartTime          *time.Time `json:"start_time"`
 	EndTime            *time.Time `json:"end_time"`

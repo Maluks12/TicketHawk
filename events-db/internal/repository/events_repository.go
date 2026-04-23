@@ -168,19 +168,10 @@ func DeleteEvents(pool *pgxpool.Pool, eventID string, organizerID string) error 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var bookingCount int
-	if err := pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM bookings WHERE event_id = $1`, eventID,
-	).Scan(&bookingCount); err != nil {
-		return fmt.Errorf("failed to check bookings: %w", err)
-	}
-	if bookingCount > 0 {
-		return fmt.Errorf("cannot delete event with existing bookings")
-	}
-
 	cmd, err := pool.Exec(ctx, `
-		DELETE FROM events WHERE id = $1 AND organizer_id = $2 AND status = $3
-	`, eventID, organizerID, models.EventDraft)
+		DELETE FROM events WHERE id = $1
+		AND status IN ('draft', 'cancelled')
+	`, eventID)
 	if err != nil {
 		return fmt.Errorf("failed to delete event: %w", err)
 	}
