@@ -34,8 +34,9 @@ type MerchFulfillmentInfo struct {
 }
 
 type Merchandise struct {
-	ID           string          `json:"id" db:"id"`
-	EventID      string          `json:"event_id" db:"event_id"`
+	ID      string  `json:"id" db:"id"`
+	// EventID is optional — nil means standalone merch not tied to any event.
+	EventID *string `json:"event_id,omitempty" db:"event_id"`
 	Name         string          `json:"name" db:"name"`
 	Description  *string         `json:"description,omitempty" db:"description"`
 	BasePrice    float64         `json:"base_price" db:"base_price"`
@@ -57,8 +58,10 @@ type Merchandise struct {
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
 
-	// Joined — populated by GetMerchandiseByEvent, not a stored column
-	Variants []MerchandiseVariant `json:"variants,omitempty" db:"-"`
+	// Joined — populated by GetMerchandiseByEvent / GetAllMerchandise, not a stored column.
+	Variants   []MerchandiseVariant `json:"variants,omitempty" db:"-"`
+	// EventTitle is joined from the events table for admin list views. Not stored.
+	EventTitle string               `json:"event_title,omitempty" db:"-"`
 }
 
 // IsLive returns whether the item is currently within its sale window.

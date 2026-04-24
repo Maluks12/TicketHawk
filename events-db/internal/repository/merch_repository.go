@@ -110,6 +110,83 @@ func GetMerchandiseByEvent(pool *pgxpool.Pool, eventID string, limit int) ([]mod
 	return items, nil
 }
 
+// GetAllMerchandise returns all merch across all events for the admin dashboard.
+// Uses LEFT JOIN so standalone merch (no event) is included.
+// Includes inactive items and items outside their sale window.
+func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	q := `
+        SELECT m.id, m.event_id, m.name, m.description, m.base_price, m.category,
+               m.display_order, m.is_active, m.images::text,
+               m.fulfillment_mode, m.pickup_location, m.delivery_fee,
+               m.sale_start, m.sale_end, m.created_at, m.updated_at,
+               COALESCE(e.title, '') as event_title
+        FROM merchandise m
+        LEFT JOIN events e ON e.id = m.event_id
+        ORDER BY m.created_at DESC`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.Merchandise
+	var ids []string
+	for rows.Next() {
+		var m models.Merchandise
+		if err := rows.Scan(
+			&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+			&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+			&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
+			&m.SaleStart, &m.SaleEnd, &m.CreatedAt, &m.UpdatedAt,
+			&m.EventTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, m)
+		ids = append(ids, m.ID)
+	}
+
+	if len(items) == 0 {
+		return items, nil
+	}
+
+	varRows, err := pool.Query(ctx, `
+        SELECT id, merchandise_id, sku, attributes::text,
+               stock_quantity, price_override, is_active, created_at, updated_at
+        FROM merchandise_variants
+        WHERE merchandise_id = ANY($1)
+        ORDER BY created_at ASC
+    `, ids)
+	if err != nil {
+		return items, nil
+	}
+	defer varRows.Close()
+
+	variantMap := make(map[string][]models.MerchandiseVariant)
+	for varRows.Next() {
+		var v models.MerchandiseVariant
+		if err := varRows.Scan(
+			&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+			&v.StockQuantity, &v.PriceOverride, &v.IsActive,
+			&v.CreatedAt, &v.UpdatedAt,
+		); err != nil {
+			continue
+		}
+		variantMap[v.MerchandiseID] = append(variantMap[v.MerchandiseID], v)
+	}
+	for i, item := range items {
+		items[i].Variants = variantMap[item.ID]
+	}
+	return items, nil
+}
+
 // GetVariantsByMerchandise returns all active variants for a merchandise item.
 func GetVariantsByMerchandise(pool *pgxpool.Pool, merchID string) ([]models.MerchandiseVariant, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -179,8 +256,9 @@ func GetVariantByID(
 	return &v, basePrice, &fi, nil
 }
 
-// CreateMerchandise inserts a new merch item for an event.
-func CreateMerchandise(pool *pgxpool.Pool, eventID string, dto *models.CreateMerchandiseDTO) (*models.Merchandise, error) {
+// CreateMerchandise inserts a new merch item.
+// eventID is optional — pass nil to create standalone merch not tied to any event.
+func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMerchandiseDTO) (*models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -398,20 +476,33 @@ func GetMerchandiseByEventFiltered(
 }
 
 // UpdateMerchandise updates allowed fields on a merch item.
-// Verifies the item belongs to an event owned by organizerID.
+// For event-linked merch, verifies the item belongs to an event owned by organizerID.
+// For standalone merch (no event_id), any organizer or admin may update it.
 func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMerchandiseDTO, organizerID string) (*models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Verify ownership — no sale-window check so organisers can extend expired items.
-	var eventID string
-	err := pool.QueryRow(ctx, `
-        SELECT m.event_id FROM merchandise m
-        JOIN events e ON e.id = m.event_id
-        WHERE m.id = $1 AND e.organizer_id = $2 AND m.is_active = TRUE
-    `, merchID, organizerID).Scan(&eventID)
+	// Check the item exists and get its event_id
+	var eventID *string
+	err := pool.QueryRow(ctx,
+		`SELECT event_id FROM merchandise WHERE id = $1 AND is_active = TRUE`,
+		merchID,
+	).Scan(&eventID)
 	if err != nil {
 		return nil, ErrMerchNotFound
+	}
+
+	// If linked to an event, verify organizer owns that event
+	if eventID != nil {
+		var verifyID string
+		err = pool.QueryRow(ctx, `
+            SELECT m.id FROM merchandise m
+            JOIN events e ON e.id = m.event_id
+            WHERE m.id = $1 AND e.organizer_id = $2 AND m.is_active = TRUE
+        `, merchID, organizerID).Scan(&verifyID)
+		if err != nil {
+			return nil, ErrMerchNotFound
+		}
 	}
 
 	sets := []string{"updated_at = NOW()"}
@@ -492,44 +583,87 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 }
 
 // DeactivateMerchandise soft-deletes a merch item (sets is_active = false).
-// Verifies organiser ownership before deactivating.
+// For event-linked merch, verifies organiser ownership before deactivating.
+// For standalone merch (no event_id), any organizer may deactivate.
 func DeactivateMerchandise(pool *pgxpool.Pool, merchID string, organizerID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd, err := pool.Exec(ctx, `
-        UPDATE merchandise m
-        SET is_active = FALSE, updated_at = NOW()
-        FROM events e
-        WHERE m.event_id = e.id
-        AND m.id = $1
-        AND e.organizer_id = $2
-        AND m.is_active = TRUE
-    `, merchID, organizerID)
+	// Check event_id to determine ownership verification path
+	var eventID *string
+	err := pool.QueryRow(ctx,
+		`SELECT event_id FROM merchandise WHERE id = $1 AND is_active = TRUE`,
+		merchID,
+	).Scan(&eventID)
 	if err != nil {
-		return fmt.Errorf("failed to deactivate merchandise: %w", err)
-	}
-	if cmd.RowsAffected() == 0 {
 		return ErrMerchNotFound
 	}
+
+	if eventID != nil {
+		// Event-linked: verify organizer owns the event
+		cmd, err := pool.Exec(ctx, `
+            UPDATE merchandise m
+            SET is_active = FALSE, updated_at = NOW()
+            FROM events e
+            WHERE m.event_id = e.id
+            AND m.id = $1
+            AND e.organizer_id = $2
+            AND m.is_active = TRUE
+        `, merchID, organizerID)
+		if err != nil {
+			return fmt.Errorf("failed to deactivate merchandise: %w", err)
+		}
+		if cmd.RowsAffected() == 0 {
+			return ErrMerchNotFound
+		}
+	} else {
+		// Standalone merch: no ownership check needed
+		cmd, err := pool.Exec(ctx, `
+            UPDATE merchandise SET is_active = FALSE, updated_at = NOW()
+            WHERE id = $1 AND is_active = TRUE
+        `, merchID)
+		if err != nil {
+			return fmt.Errorf("failed to deactivate merchandise: %w", err)
+		}
+		if cmd.RowsAffected() == 0 {
+			return ErrMerchNotFound
+		}
+	}
+
 	return nil
 }
 
 // UpdateVariant updates stock quantity, price override, or active status.
-// Verifies organiser ownership through the merchandise → event chain.
-func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO, organizerID string) (*models.MerchandiseVariant, string, error) {
+// For event-linked merch, verifies organiser ownership through the merchandise → event chain.
+// For standalone merch, any organizer may update variants.
+// Returns the updated variant, the event ID (nil for standalone merch), and any error.
+func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO, organizerID string) (*models.MerchandiseVariant, *string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var eventID string
+	// Get the event_id through the variant → merchandise chain
+	var eventID *string
 	err := pool.QueryRow(ctx, `
-        SELECT e.id FROM merchandise_variants mv
+        SELECT m.event_id FROM merchandise_variants mv
         JOIN merchandise m ON m.id = mv.merchandise_id
-        JOIN events e ON e.id = m.event_id
-        WHERE mv.id = $1 AND e.organizer_id = $2
-    `, variantID, organizerID).Scan(&eventID)
+        WHERE mv.id = $1
+    `, variantID).Scan(&eventID)
 	if err != nil {
-		return nil, "", ErrMerchNotFound
+		return nil, nil, ErrMerchNotFound
+	}
+
+	// Only verify organizer ownership if the merch is linked to an event
+	if eventID != nil {
+		var verifyID string
+		err = pool.QueryRow(ctx, `
+            SELECT e.id FROM merchandise_variants mv
+            JOIN merchandise m ON m.id = mv.merchandise_id
+            JOIN events e ON e.id = m.event_id
+            WHERE mv.id = $1 AND e.organizer_id = $2
+        `, variantID, organizerID).Scan(&verifyID)
+		if err != nil {
+			return nil, nil, ErrMerchNotFound
+		}
 	}
 
 	sets := []string{"updated_at = NOW()"}
@@ -549,7 +683,7 @@ func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVaria
 	}
 
 	if len(args) == 0 {
-		return nil, "", fmt.Errorf("no fields to update")
+		return nil, nil, fmt.Errorf("no fields to update")
 	}
 
 	args = append(args, variantID)
@@ -567,13 +701,14 @@ func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVaria
 		&v.CreatedAt, &v.UpdatedAt,
 	)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to update variant: %w", err)
+		return nil, nil, fmt.Errorf("failed to update variant: %w", err)
 	}
 	return &v, eventID, nil
 }
 
 // ExpireMerchListings deactivates merchandise items whose sale window has closed.
 // Returns the IDs of affected events so callers can bust the merch cache.
+// Standalone merch (NULL event_id) is expired but not returned in eventIDs.
 // Called by the expiry worker on every tick.
 func ExpireMerchListings(pool *pgxpool.Pool, ctx context.Context) ([]string, error) {
 	rows, err := pool.Query(ctx, `
@@ -592,13 +727,17 @@ func ExpireMerchListings(pool *pgxpool.Pool, ctx context.Context) ([]string, err
 	seen := make(map[string]struct{})
 	var eventIDs []string
 	for rows.Next() {
-		var eid string
+		var eid *string
 		if err := rows.Scan(&eid); err != nil {
 			continue
 		}
-		if _, ok := seen[eid]; !ok {
-			seen[eid] = struct{}{}
-			eventIDs = append(eventIDs, eid)
+		// Skip standalone merch (no event to bust cache for)
+		if eid == nil {
+			continue
+		}
+		if _, ok := seen[*eid]; !ok {
+			seen[*eid] = struct{}{}
+			eventIDs = append(eventIDs, *eid)
 		}
 	}
 	return eventIDs, nil
