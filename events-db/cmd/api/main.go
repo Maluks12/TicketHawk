@@ -455,6 +455,7 @@ func main() {
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))
 		// All merch (event-linked + standalone) — for admin dashboard
 		admin.GET("/merch",          handlers.GetAllMerchHandler(pool))
+		admin.PUT("/merch/:id", handlers.AdminUpdateMerchHandler(pool, eventCache))
 		// Create standalone merch (not linked to any event) — admin
 		admin.POST("/merch",         handlers.AdminCreateMerchHandler(pool, eventCache))
 		admin.GET("/users",          controllers.GetAllUsersHandler(pool))

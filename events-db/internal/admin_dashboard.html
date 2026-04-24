@@ -623,7 +623,7 @@ td.actions{overflow:visible;white-space:nowrap}
         <div class="field"><label>Sale Start</label><input type="datetime-local" id="m-sale-start"></div>
         <div class="field"><label>Sale End</label><input type="datetime-local" id="m-sale-end"></div>
       </div>
-      <div class="field"><label>Images (JSON string)</label><input type="text" id="m-images" placeholder='["https://…/img.jpg"]'></div>
+      <div class="field"><label>Images <small style="color:var(--text-3)">(URL or comma-separated URLs)</small></label><input type="text" id="m-images" placeholder="https://example.com/img.jpg"></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeMerchModal()">Cancel</button>
@@ -1203,9 +1203,18 @@ async function submitMerchForm() {
     const pickup = document.getElementById('m-pickup').value.trim(); if (pickup) body.pickup_location = pickup;
     const saleStart = document.getElementById('m-sale-start').value; if (saleStart) body.sale_start = toISO(saleStart);
     const saleEnd = document.getElementById('m-sale-end').value; if (saleEnd) body.sale_end = toISO(saleEnd);
-    const images = document.getElementById('m-images').value.trim(); if (images) body.images = images;
+    const imagesRaw = document.getElementById('m-images').value.trim();
+    if (imagesRaw) {
+      if (!imagesRaw.startsWith('[')) {
+        // Auto-wrap plain URL or comma-separated URLs into a JSON array
+        const urls = imagesRaw.split(',').map(u => u.trim()).filter(Boolean);
+        body.images = JSON.stringify(urls);
+      } else {
+        body.images = imagesRaw;
+      }
+    }
     if (S.editingMerchId) {
-      await api('PUT', `/v1/organiser/merch/${S.editingMerchId}`, body);
+      await api('PUT', `/v1/admin/merch/${S.editingMerchId}`, body);
       toast('Merchandise updated', 'success');
     } else if (eventId) {
       await api('POST', `/v1/organiser/events/${eventId}/merch`, body);
@@ -1346,9 +1355,11 @@ function renderAllMerchTable(items) {
       <td class="td-mono" style="text-align:center">${variantCount}</td>
       <td class="td-mono">${variantCount > 0 ? totalStock + ' units' : '—'}</td>
       <td class="actions"><div class="actions-wrap">
-        <button class="btn btn-sm" onclick="openEditMerchModalFromAll('${esc(m.event_id)}','${esc(m.id)}')">✎ Edit</button>
+        <button class="btn btn-sm" onclick="openEditMerchModalFromAll('${esc(m.event_id || '')}','${esc(m.id)}')">✎ Edit</button>
         <button class="btn btn-sm" onclick="openAddVariantModal('${esc(m.id)}')">+ Variant</button>
-        ${m.is_active ? `<button class="btn btn-sm btn-danger" onclick="deactivateMerchAll('${esc(m.id)}')">Deactivate</button>` : ''}
+        ${m.is_active
+          ? `<button class="btn btn-sm btn-danger" onclick="deactivateMerchAll('${esc(m.id)}')">Deactivate</button>`
+          : `<button class="btn btn-sm btn-success" onclick="activateMerchAll('${esc(m.id)}')">Activate</button>`}
       </div></td>
     </tr>`;
   }).join('');
@@ -1372,9 +1383,19 @@ async function openEditMerchModalFromAll(eventId, merchId) {
   openEditMerchModal(eventId, merchId);
 }
 
+async function activateMerchAll(id) {
+  openConfirm('Activate Merchandise', 'This will make the item visible in listings again.', async () => {
+    try {
+      await api('PUT', `/v1/admin/merch/${id}`, { is_active: true });
+      toast('Item activated', 'success');
+      loadAllMerch();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 async function deactivateMerchAll(id) {
   openConfirm('Deactivate Merchandise', 'This will hide the item from listings. Existing orders are not affected.', async () => {
-    try { await api('DELETE', `/v1/organiser/merch/${id}`); toast('Item deactivated', 'success'); loadAllMerch(); }
+    try { await api('PUT', `/v1/admin/merch/${id}`, { is_active: false }); toast('Item deactivated', 'success'); loadAllMerch(); }
     catch (e) { toast(e.message, 'error'); }
   });
 }

@@ -754,3 +754,86 @@ func joinSets(sets []string) string {
 	}
 	return result
 }
+
+// AdminUpdateMerchandise updates a merch item with no ownership check.
+// Used by admin endpoints — works on both active and inactive items.
+func AdminUpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMerchandiseDTO) (*models.Merchandise, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    sets := []string{"updated_at = NOW()"}
+    args := []any{}
+
+    if dto.Name != nil {
+        args = append(args, *dto.Name)
+        sets = append(sets, fmt.Sprintf("name = $%d", len(args)))
+    }
+    if dto.Description != nil {
+        args = append(args, *dto.Description)
+        sets = append(sets, fmt.Sprintf("description = $%d", len(args)))
+    }
+    if dto.BasePrice != nil {
+        args = append(args, *dto.BasePrice)
+        sets = append(sets, fmt.Sprintf("base_price = $%d", len(args)))
+    }
+    if dto.Category != nil {
+        args = append(args, *dto.Category)
+        sets = append(sets, fmt.Sprintf("category = $%d", len(args)))
+    }
+    if dto.DisplayOrder != nil {
+        args = append(args, *dto.DisplayOrder)
+        sets = append(sets, fmt.Sprintf("display_order = $%d", len(args)))
+    }
+    if dto.IsActive != nil {
+        args = append(args, *dto.IsActive)
+        sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
+    }
+    if dto.Images != nil {
+        args = append(args, *dto.Images)
+        sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args)))
+    }
+    if dto.FulfillmentMode != nil {
+        args = append(args, *dto.FulfillmentMode)
+        sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args)))
+    }
+    if dto.PickupLocation != nil {
+        args = append(args, *dto.PickupLocation)
+        sets = append(sets, fmt.Sprintf("pickup_location = $%d", len(args)))
+    }
+    if dto.DeliveryFee != nil {
+        args = append(args, *dto.DeliveryFee)
+        sets = append(sets, fmt.Sprintf("delivery_fee = $%d", len(args)))
+    }
+    if dto.SaleStart != nil {
+        args = append(args, *dto.SaleStart)
+        sets = append(sets, fmt.Sprintf("sale_start = $%d", len(args)))
+    }
+    if dto.SaleEnd != nil {
+        args = append(args, *dto.SaleEnd)
+        sets = append(sets, fmt.Sprintf("sale_end = $%d", len(args)))
+    }
+
+    if len(args) == 0 {
+        return nil, fmt.Errorf("no fields to update")
+    }
+
+    args = append(args, merchID)
+    query := fmt.Sprintf(`
+        UPDATE merchandise SET %s
+        WHERE id = $%d
+        RETURNING %s
+    `, joinSets(sets), len(args), merchSelectCols)
+
+    var m models.Merchandise
+    err := pool.QueryRow(ctx, query, args...).Scan(
+        &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+        &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+        &m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
+        &m.SaleStart, &m.SaleEnd,
+        &m.CreatedAt, &m.UpdatedAt,
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to update merchandise: %w", err)
+    }
+    return &m, nil
+}

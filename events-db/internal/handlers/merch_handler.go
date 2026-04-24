@@ -358,3 +358,30 @@ func GetAllMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"data": items, "count": len(items)})
 	}
 }
+
+// AdminUpdateMerchHandler updates any merch item without ownership checks.
+// Works on both active and inactive items. Admin-only.
+// Route: PUT /admin/merch/:id
+func AdminUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        merchID := c.Param("id")
+        var dto models.UpdateMerchandiseDTO
+        if err := c.ShouldBindJSON(&dto); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+            return
+        }
+        item, err := repository.AdminUpdateMerchandise(pool, merchID, &dto)
+        if err != nil {
+            if err.Error() == "no fields to update" {
+                c.JSON(http.StatusBadRequest, gin.H{"error": "No fields provided to update"})
+                return
+            }
+            utils.InternalError(c, err, "admin update merchandise")
+            return
+        }
+        if ec != nil && item.EventID != nil {
+            ec.BustMerch(c.Request.Context(), *item.EventID, merchID)
+        }
+        c.JSON(http.StatusOK, gin.H{"message": "Merchandise updated", "item": item})
+    }
+}
