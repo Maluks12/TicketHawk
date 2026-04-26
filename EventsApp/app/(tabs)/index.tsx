@@ -8,15 +8,20 @@ import {
   Image,
   ActivityIndicator,
   RefreshControl,
+  Animated,
 } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getHomeSections, type Event, type HomeSection } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
 
+
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
+const lastScrollY = useRef(0);
+const headerAnim = useRef(new Animated.Value(0)).current;
+const HEADER_HEIGHT = 120;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -179,10 +184,10 @@ export default function Index() {
   return (
     <View className={s.screen}>
 
-      {/* Fixed Location Header */}
-      <View
+      {/* Animated Header */}
+      <Animated.View
+        style={{ transform: [{ translateY: headerAnim }] }}
         className={scrolled ? s.locationHeaderScrolled : s.locationHeader}
-        style={scrolled ? sheet.locationHeaderShadow : undefined}
       >
         <View>
           <Text className={s.locationCity}>{location}</Text>
@@ -191,16 +196,34 @@ export default function Index() {
         <TouchableOpacity className={s.menuBtn}>
           <Text className={s.menuIcon}>🛒</Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
 
       <ScrollView
         className={s.scroll}
         showsVerticalScrollIndicator={false}
-        onScroll={(e) => setScrolled(e.nativeEvent.contentOffset.y > 10)}
-        scrollEventThrottle={16}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
-        }
+        onScroll={(e) => {
+          const currentY = e.nativeEvent.contentOffset.y;
+          const diff = currentY - lastScrollY.current;
+
+          if (diff > 5 && currentY > 10) {
+            // scrolling down — hide
+            Animated.timing(headerAnim, {
+              toValue: -HEADER_HEIGHT,
+              duration: 130,
+              useNativeDriver: true,
+            }).start();
+          } else if (diff < -5) {
+            // scrolling up — show
+            Animated.timing(headerAnim, {
+              toValue: 0,
+              duration: 130,
+              useNativeDriver: true,
+            }).start();
+          }
+
+          lastScrollY.current = currentY;
+          setScrolled(currentY > 10);
+        }}
       >
         {/* Hero Banner */}
         <TouchableOpacity

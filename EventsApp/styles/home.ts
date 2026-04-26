@@ -11,13 +11,13 @@ export const s = {
   scroll:           'flex-1 bg-white',
 
   // ── Location header ─────────────────────────────────────────────────────────
-  locationHeader:         'flex-row items-center justify-between px-5 pt-16 pb-6 bg-white z-10',
-  locationHeaderScrolled: 'flex-row items-center justify-between px-5 pt-16 pb-6 bg-white z-10',
-  locationCity:     'text-[22px] font-extrabold text-black tracking-[0.3px]',
-  locationSub:      'text-[17px] font-extrabold text-black/35 mt-0.5',
+  locationHeader: 'absolute top-0 left-0 right-0 flex-row items-center justify-between px-5 pt-16 pb-6 bg-[#0a0a0a] z-10',
+  locationHeaderScrolled: 'absolute top-0 left-0 right-0 flex-row items-center justify-between px-5 pt-16 pb-6 bg-[#0a0a0a] z-10',
+  locationCity: 'text-[22px] font-extrabold text-white tracking-[0.3px]',
+  locationSub:  'text-[17px] font-extrabold text-white/35 mt-0.5',
   menuBtn:          'p-1.5',
-  menuIcon:         'text-2xl text-black',
-
+  menuIcon:     'text-2xl text-white',
+  
   // ── Hero banner ──────────────────────────────────────────────────────────────
   hero:                  'relative h-[380px]',
   heroImagePlaceholder:  'absolute inset-0 bg-[#e5e5e5]',
