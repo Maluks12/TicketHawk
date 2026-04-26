@@ -134,7 +134,7 @@ func (s *EmailService) renderBookingConfirmation(booking *models.Booking, event 
         "TotalAmount":         fmt.Sprintf("%.2f", booking.TotalAmount),
         "Currency":            booking.Currency,
         "QRCodeURL":           booking.QRCodeURLOrEmpty(),
-        "BookingURL":          fmt.Sprintf("%s/bookings/%s", s.cfg.FrontendURL, booking.ID),
+        "BookingURL":          fmt.Sprintf("%s/bookings/%s", s.cfg.FrontendURLs[0], booking.ID),
         "RefundDeadline":      event.StartTime.Add(-24 * time.Hour).Format("January 2, 2006"),
         "SpecialRequirements": booking.SpecialRequirements,
     }
@@ -240,7 +240,7 @@ func (s *EmailService) SendWaitlistNotification(event *models.Event, user *model
         </body>
         </html>
     `, user.GetFullName(), event.Title, event.StartTime.Format("January 2, 2006"),
-       event.Currency, event.Price, s.cfg.FrontendURL, event.ID)
+       event.Currency, event.Price, s.cfg.FrontendURLs[0], event.ID)
 
     from := mail.NewEmail(s.cfg.EmailFromName, s.cfg.EmailFromAddress)
     to := mail.NewEmail(user.GetFullName(), user.Email)
@@ -258,7 +258,7 @@ func (s *EmailService) SendWaitlistNotification(event *models.Event, user *model
 }
 
 func (s *EmailService) SendPasswordReset(email string, resetToken string) error {
-    resetURL := fmt.Sprintf("%s/reset-password?token=%s", s.cfg.FrontendURL, resetToken)
+    resetURL := fmt.Sprintf("%s/reset-password?token=%s", s.cfg.FrontendURLs[0], resetToken)
 
     subject := "Password Reset Request"
     htmlContent := fmt.Sprintf(`
@@ -314,7 +314,7 @@ func (s *EmailService) SendOrganizerApproval(user *models.User, organizer *model
             <p>Welcome to the community!</p>
         </body>
         </html>
-    `, user.GetFullName(), organizer.BusinessName, s.cfg.FrontendURL)
+    `, user.GetFullName(), organizer.BusinessName, s.cfg.FrontendURLs[0])
 
     from := mail.NewEmail(s.cfg.EmailFromName, s.cfg.EmailFromAddress)
     to := mail.NewEmail(user.GetFullName(), user.Email)
@@ -644,7 +644,7 @@ func (s *EmailService) renderBookingConfirmationWithQR(
             </div>`, qrCodeURL)
 	}
  
-	manageURL := fmt.Sprintf("%s/bookings/%s/assignments", s.cfg.FrontendURL, booking.ID)
+	manageURL := fmt.Sprintf("%s/bookings/%s/assignments", s.cfg.FrontendURLs[0], booking.ID)
  
 	multiTicketNote := ""
 	if booking.TicketQuantity > 1 {
@@ -685,7 +685,7 @@ func (s *EmailService) renderBookingConfirmationWithQR(
         TotalAmount: fmt.Sprintf("%.2f", booking.TotalAmount),
 		QRBlock:         qrBlock,
 		MultiTicketNote: multiTicketNote,
-		BookingURL:      fmt.Sprintf("%s/bookings/%s", s.cfg.FrontendURL, booking.ID),
+		BookingURL:      fmt.Sprintf("%s/bookings/%s", s.cfg.FrontendURLs[0], booking.ID),
 	}
  
 	tmpl := `<!DOCTYPE html>

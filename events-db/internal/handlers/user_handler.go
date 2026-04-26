@@ -174,7 +174,7 @@ func RequestPasswordResetHandler(pool *pgxpool.Pool, emailService *services.Emai
 		}
 
 		// TODO: send email
-		resetLink := fmt.Sprintf("%s/reset-password?token=%s", cfg.FrontendURL, rawToken)
+		resetLink := fmt.Sprintf("%s/reset-password?token=%s", cfg.FrontendURLs[0], rawToken)
 		if err := emailService.SendPasswordReset(user.Email, resetLink); err != nil {
 			// Log the error but don't tell the client — prevents email enumeration
 			// and avoids breaking the UX on transient email failures

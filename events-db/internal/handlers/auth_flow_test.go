@@ -60,7 +60,7 @@ const authTestDBURL = "postgresql://testuser:testpass@localhost:5433/test_db"
 func authTestConfig() *config.Config {
 	return &config.Config{
 		JWTSecret:           "test-secret-that-is-at-least-32-chars!!",
-		FrontendURL:         "http://localhost:3000",
+		//FrontendURLs:         "http://localhost:3000",
 		SendGridAPIKey:      "SG.test",
 		StitchClientID:      "test-client",
 		StitchClientSecret:  "test-secret",

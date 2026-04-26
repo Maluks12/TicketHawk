@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -133,7 +134,7 @@ func main() {
 	router.Use(gin.Recovery())
 
 	router.Use(cors.New(cors.Config{
-		AllowOrigins: []string{cfg.FrontendURL},
+		AllowOrigins: cfg.FrontendURLs,
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{
 			"Origin",
@@ -377,7 +378,7 @@ func main() {
 		bookings.GET("/:id",   handlers.GetBookingDetailsHandler(bookingRepo))
 		bookings.POST("/:id/refund",                        handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
 		bookings.GET("/:id/assignments",                    handlers.GetTicketAssignmentsHandler(pool))
-		bookings.POST("/:id/assignments/:assignmentId",     handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURL))
+		bookings.POST("/:id/assignments/:assignmentId",     handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURLs[0]))
 		bookings.DELETE("/:id/assignments/:assignmentId",   handlers.RevokeAssignmentHandler(pool))
 		bookings.POST("/:id/verify",                        handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
 
@@ -566,7 +567,7 @@ func main() {
 		Str("port", cfg.Port).
 		Bool("rate_limiting", rateLimitManager != nil).
 		Str("email_from", cfg.EmailFromName+" <"+cfg.EmailFromAddress+">").
-		Str("frontend_url", cfg.FrontendURL).
+		Str("frontend_urls", strings.Join(cfg.FrontendURLs, ", ")).
 		Msg("server starting")
 
 	go func() {

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -27,7 +28,7 @@ type Config struct {
     R2Bucket    string
     R2URL       string
 
-    FrontendURL string
+    FrontendURLs []string
 
     EnableEmailVerification bool
     EnableWaitlist          bool
@@ -64,7 +65,7 @@ func Load() (*Config, error) {
 		R2Bucket:    os.Getenv("R2_BUCKET"),
 		R2URL:       os.Getenv("R2_URL"),
 
-		FrontendURL: os.Getenv("FRONTEND_URL"),
+		FrontendURLs: strings.Split(os.Getenv("FRONTEND_URLS"), ","),
 
 		EnableEmailVerification: os.Getenv("ENABLE_EMAIL_VERIFICATION") == "true",
 		EnableWaitlist:          os.Getenv("ENABLE_WAITLIST") == "true",
@@ -120,8 +121,8 @@ func (c *Config) validate() error {
 	if c.StitchWebhookSecret == "" {
 		missing = append(missing, "STITCH_WEBHOOK_SECRET")
 	}
-	if c.FrontendURL == "" {
-		missing = append(missing, "FRONTEND_URL")
+	if len(c.FrontendURLs) == 0 || c.FrontendURLs[0] == "" {
+		missing = append(missing, "FRONTEND_URLS")
 	}
 	if c.SendGridAPIKey == "" {
 		missing = append(missing, "SENDGRID_API_KEY")
