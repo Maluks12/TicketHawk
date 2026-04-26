@@ -19,8 +19,6 @@ import { s, sheet } from '../../styles/home';
 
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
-const lastScrollY = useRef(0);
-const headerAnim = useRef(new Animated.Value(0)).current;
 const HEADER_HEIGHT = 120;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -41,7 +39,6 @@ const EventCard = ({ item, onPress }: { item: Event; onPress: () => void }) => (
       {(item.category?.toLowerCase().includes('music') ||
         item.category?.toLowerCase().includes('concert')) && (
         <View className={s.hCardBadge}>
-          {/* Live dot */}
           <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: '#fff' }} />
           <Text className={s.hCardBadgeText}>LIVE</Text>
         </View>
@@ -95,7 +92,6 @@ const SectionRow = ({
   if (!section.events?.length) return null;
   return (
     <>
-      {/* Thin divider between sections */}
       {marginTop && (
         <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
       )}
@@ -125,6 +121,11 @@ const SectionRow = ({
 export default function Index() {
   const router = useRouter();
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
+
+  // ── Refs (must live inside the component) ────────────────────────────────
+  const lastScrollY  = useRef(0);
+  const headerOffset = useRef(0);          // raw clamped number, source of truth
+  const headerAnim   = useRef(new Animated.Value(0)).current;
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -175,10 +176,22 @@ export default function Index() {
     setDropdownOpen(false);
   };
 
-  // Navigate to detail — store event then push
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
     router.push(`/event/${event.id}`);
+  };
+
+  // ── Snap helper ──────────────────────────────────────────────────────────
+  const snapHeader = () => {
+    const target = headerOffset.current < -(HEADER_HEIGHT / 2) ? -HEADER_HEIGHT : 0;
+    Animated.spring(headerAnim, {
+      toValue: target,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 14,
+    }).start(() => {
+      headerOffset.current = target;
+    });
   };
 
   return (
@@ -187,7 +200,7 @@ export default function Index() {
       {/* Animated Header */}
       <Animated.View
         style={{ transform: [{ translateY: headerAnim }] }}
-        className={scrolled ? s.locationHeaderScrolled : s.locationHeader}
+        className={s.locationHeader}
       >
         <View>
           <Text className={s.locationCity}>{location}</Text>
@@ -201,29 +214,25 @@ export default function Index() {
       <ScrollView
         className={s.scroll}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
         onScroll={(e) => {
           const currentY = e.nativeEvent.contentOffset.y;
-          const diff = currentY - lastScrollY.current;
-
-          if (diff > 5 && currentY > 10) {
-            // scrolling down — hide
-            Animated.timing(headerAnim, {
-              toValue: -HEADER_HEIGHT,
-              duration: 130,
-              useNativeDriver: true,
-            }).start();
-          } else if (diff < -5) {
-            // scrolling up — show
-            Animated.timing(headerAnim, {
-              toValue: 0,
-              duration: 130,
-              useNativeDriver: true,
-            }).start();
-          }
-
+          const delta    = currentY - lastScrollY.current;
           lastScrollY.current = currentY;
+
+          // Move the header 1:1 with scroll — feels physically connected
+          headerOffset.current = Math.min(
+            0,
+            Math.max(-HEADER_HEIGHT, headerOffset.current - delta)
+          );
+          headerAnim.setValue(headerOffset.current);
           setScrolled(currentY > 10);
         }}
+        onScrollEndDrag={snapHeader}
+        onMomentumScrollEnd={snapHeader}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
+        }
       >
         {/* Hero Banner */}
         <TouchableOpacity
@@ -240,7 +249,6 @@ export default function Index() {
             ) : (
               <View className={s.heroImagePlaceholder} />
             )}
-            {/* Scrim: dark at bottom — blends into #0a0a0a screen bg */}
             <LinearGradient
               colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
               locations={[0.3, 0.7, 1]}
@@ -386,7 +394,6 @@ export default function Index() {
                   />
                 ) : null}
                 <View className={s.sportsBannerBg} />
-                {/* Dark scrim over banner image */}
                 <LinearGradient
                   colors={['rgba(10,10,10,0.3)', 'rgba(10,10,10,0.75)']}
                   style={sheet.absoluteFill}
