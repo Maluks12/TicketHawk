@@ -5,7 +5,7 @@ import { fmtMoney, Badge } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
 
-interface MerchRow { id: string; name: string; event_id?: string; event_title?: string; base_price: number; is_active: boolean; fulfillment_mode: string; category?: string; variants: { stock_quantity: number; is_active: boolean }[]; }
+interface MerchRow { id: string; name: string; event_id?: string; event_title?: string; base_price: number; is_active: boolean; fulfillment_mode: string; category?: string; variants?: { stock_quantity: number; is_active: boolean }[]; }
 
 const EMPTY_VARIANT = { sku: '', attributes: '', stock_quantity: '0', price_override: '' };
 
@@ -102,7 +102,8 @@ export default function AllMerchPage() {
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={8} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-3)' }}>No merchandise found.</td></tr>
               ) : filtered.map(m => {
-                const totalStock = m.variants.reduce((s, v) => s + (v.stock_quantity || 0), 0);
+                const variants = m.variants ?? [];
+                const totalStock = variants.reduce((s, v) => s + (v.stock_quantity || 0), 0);
                 return (
                   <tr key={m.id} style={{ borderBottom: '1px solid rgba(45,45,61,.5)' }}>
                     <td style={{ padding: '.65rem 1rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.name}>{m.name}</td>
@@ -110,8 +111,8 @@ export default function AllMerchPage() {
                     <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)' }}>{fmtMoney(m.base_price)}</td>
                     <td style={{ padding: '.65rem 1rem' }}><Badge status={m.is_active ? 'active' : 'inactive'} /></td>
                     <td style={{ padding: '.65rem 1rem' }}><Badge status={m.fulfillment_mode || 'delivery'} /></td>
-                    <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)', textAlign: 'center' }}>{m.variants.length}</td>
-                    <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)' }}>{m.variants.length > 0 ? `${totalStock} units` : '—'}</td>
+                    <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)', textAlign: 'center' }}>{variants.length}</td>
+                    <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)' }}>{variants.length > 0 ? `${totalStock} units` : '—'}</td>
                     <td style={{ padding: '.65rem 1rem', overflow: 'visible', whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', gap: '.3rem' }}>
                         <button className="btn btn-sm" onClick={() => openVariant(m.id)}>+ Variant</button>
