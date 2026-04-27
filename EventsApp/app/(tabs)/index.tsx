@@ -16,10 +16,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getHomeSections, type Event, type HomeSection } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
+import FilterModal, { FilterParams, buildFilterQueryString } from '../../components/FilterModal';
 
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
 const HEADER_HEIGHT = 120;
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -122,15 +124,18 @@ export default function Index() {
   const router = useRouter();
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
 
-  // ── Refs (must live inside the component) ────────────────────────────────
+  // ── Refs ─────────────────────────────────────────────────────────────────
   const lastScrollY  = useRef(0);
-  const headerOffset = useRef(0);          // raw clamped number, source of truth
+  const headerOffset = useRef(0);
   const headerAnim   = useRef(new Animated.Value(0)).current;
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [location] = useState('Johannesburg, ZA');
   const [scrolled, setScrolled] = useState(false);
+
+  // ── Filter state ─────────────────────────────────────────────────────────
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterParams, setFilterParams] = useState<FilterParams>({ date: 'any' });
 
   const [sections, setSections]     = useState<HomeSection[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -181,6 +186,44 @@ export default function Index() {
     router.push(`/event/${event.id}`);
   };
 
+  // ── Filter apply ─────────────────────────────────────────────────────────
+  const handleFilterApply = async (params: FilterParams) => {
+    setFilterParams(params);
+    setFilterOpen(false);
+    try {
+      setLoading(true);
+      setError(null);
+      const qs = buildFilterQueryString(params);
+      const res = await fetch(`${BASE_URL}/events/filter?${qs}`);
+      if (!res.ok) throw new Error('Filter request failed');
+      const data = await res.json();
+      // data.data is the filtered events array — wrap it into a section for display
+      if (data.data) {
+        setSections([{
+          id: 'filtered', title: 'Results', events: data.data,
+          next_cursor: ''
+        }]);
+      }
+    } catch (err: any) {
+      // If the filter endpoint isn't ready yet, fall back to the full home feed
+      await fetchSections();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Location / date label for header ────────────────────────────────────
+  const locationLabel =
+    filterParams.city ?? (filterParams.lat ? 'Near me' : 'Johannesburg, ZA');
+
+  const dateLabelText =
+    filterParams.date === 'any'      ? 'All dates'    :
+    filterParams.date === 'tomorrow' ? 'Tomorrow'     :
+    filterParams.date === 'weekend'  ? 'This Weekend' :
+    filterParams.date_from
+      ? `${filterParams.date_from} – ${filterParams.date_to}`
+      : 'All dates';
+
   // ── Snap helper ──────────────────────────────────────────────────────────
   const snapHeader = () => {
     const target = headerOffset.current < -(HEADER_HEIGHT / 2) ? -HEADER_HEIGHT : 0;
@@ -202,10 +245,11 @@ export default function Index() {
         style={{ transform: [{ translateY: headerAnim }] }}
         className={s.locationHeader}
       >
-        <View>
-          <Text className={s.locationCity}>{location}</Text>
-          <Text className={s.locationSub}>All dates</Text>
-        </View>
+        {/* Tapping the location/date row opens the filter sheet */}
+        <TouchableOpacity onPress={() => setFilterOpen(true)}>
+          <Text className={s.locationCity}>{locationLabel}</Text>
+          <Text className={s.locationSub}>{dateLabelText}</Text>
+        </TouchableOpacity>
         <TouchableOpacity className={s.menuBtn}>
           <Text className={s.menuIcon}>🛒</Text>
         </TouchableOpacity>
@@ -220,7 +264,6 @@ export default function Index() {
           const delta    = currentY - lastScrollY.current;
           lastScrollY.current = currentY;
 
-          // Move the header 1:1 with scroll — feels physically connected
           headerOffset.current = Math.min(
             0,
             Math.max(-HEADER_HEIGHT, headerOffset.current - delta)
@@ -439,6 +482,14 @@ export default function Index() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Filter bottom sheet */}
+      <FilterModal
+        visible={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        initialParams={filterParams}
+        onApply={handleFilterApply}
+      />
     </View>
   );
 }
