@@ -42,11 +42,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     await SecureStore.deleteItemAsync('refresh_token');
     set({ user: null });
   },
-
   loadUser: async () => {
     const token = await SecureStore.getItemAsync('access_token');
     if (!token) return;
-    // token exists — decode locally or call a /me endpoint if you add one
-    set({ user: { id: '', email: '', role: 'attendee' } });
+    try {
+      const { data } = await api.get('/user/me');
+      set({ user: data });
+    } catch {
+      // Token is invalid or expired — clear it
+      await SecureStore.deleteItemAsync('access_token');
+      await SecureStore.deleteItemAsync('refresh_token');
+      set({ user: null });
+    }
   },
 }));
