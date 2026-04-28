@@ -13,7 +13,7 @@ import {
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getHomeSections, type Event, type HomeSection } from '../../lib/api';
+import { getHomeSections, loadMoreSectionEvents, type Event, type HomeSection } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString,formatDateRangeLabel } from '../../components/FilterModal';
@@ -78,7 +78,10 @@ const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress
   </TouchableOpacity>
 );
 
-// ─── Section row ──────────────────────────────────────────────────────────────
+// ─── Section row (paginated) ──────────────────────────────────────────────────
+//
+// Converts the horizontal ScrollView into a FlatList so we can call
+// loadMoreSectionEvents when the user scrolls near the end.
 
 const SectionRow = ({
   section,
@@ -91,7 +94,35 @@ const SectionRow = ({
   marginTop?: boolean;
   onEventPress: (event: Event) => void;
 }) => {
-  if (!section.events?.length) return null;
+  const [events,     setEvents]     = useState<Event[]>(section.events ?? []);
+  const [nextCursor, setNextCursor] = useState<string>(section.next_cursor ?? '');
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Re-sync when the parent section refreshes (e.g. pull-to-refresh)
+  useEffect(() => {
+    setEvents(section.events ?? []);
+    setNextCursor(section.next_cursor ?? '');
+  }, [section]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    const result = await loadMoreSectionEvents(section.id, nextCursor);
+    if (result && result.data.length > 0) {
+      setEvents((prev) => {
+        const existingIds = new Set(prev.map((e) => e.id));
+        const fresh = result.data.filter((e) => !existingIds.has(e.id));
+        return [...prev, ...fresh];
+      });
+      setNextCursor(result.next_cursor ?? '');
+    } else {
+      setNextCursor(''); // nothing left to load
+    }
+    setLoadingMore(false);
+  }, [nextCursor, loadingMore, section.id]);
+
+  if (!events.length) return null;
+
   return (
     <>
       {marginTop && (
@@ -100,20 +131,37 @@ const SectionRow = ({
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
           <Text className={s.sectionTitle}>{section.title.toUpperCase()}</Text>
-          <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+          {/* Only show "VIEW ALL" indicator when there are more pages */}
+          {nextCursor ? (
+            <TouchableOpacity onPress={handleLoadMore} disabled={loadingMore}>
+              <Text className={s.sectionLink}>{loadingMore ? '…' : 'MORE'}</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+          )}
         </View>
       </View>
-      <ScrollView
+      <FlatList
         horizontal
+        data={events}
+        keyExtractor={(e) => e.id}
         showsHorizontalScrollIndicator={false}
-        contentContainerClassName={s.hScrollContent}
-      >
-        {section.events.map((event, index) =>
+        contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+        onEndReachedThreshold={0.4}
+        onEndReached={handleLoadMore}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={{ width: 56, alignItems: 'center', justifyContent: 'center' }}>
+              <ActivityIndicator size="small" color="#ff3c6e" />
+            </View>
+          ) : null
+        }
+        renderItem={({ item, index }) =>
           isTop10
-            ? <Top10Card key={event.id} item={event} rank={index + 1} onPress={() => onEventPress(event)} />
-            : <EventCard key={event.id} item={event} onPress={() => onEventPress(event)} />
-        )}
-      </ScrollView>
+            ? <Top10Card item={item} rank={index + 1} onPress={() => onEventPress(item)} />
+            : <EventCard item={item} onPress={() => onEventPress(item)} />
+        }
+      />
     </>
   );
 };
@@ -194,7 +242,7 @@ export default function Index() {
       setLoading(true);
       setError(null);
       const qs = buildFilterQueryString(params);
-      const res = await fetch(`${BASE_URL}/events/filter?${qs}`);
+      const res = await fetch(`${BASE_URL}/v1/events/filter?${qs}`);
       if (!res.ok) throw new Error('Filter request failed');
       const data = await res.json();
       // data.data is the filtered events array — wrap it into a section for display
