@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getHomeSections, type Event, type HomeSection } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
-import FilterModal, { FilterParams, buildFilterQueryString } from '../../components/FilterModal';
+import FilterModal, { FilterParams, buildFilterQueryString,formatDateRangeLabel } from '../../components/FilterModal';
 
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
@@ -220,8 +220,8 @@ export default function Index() {
     filterParams.date === 'any'      ? 'All dates'    :
     filterParams.date === 'tomorrow' ? 'Tomorrow'     :
     filterParams.date === 'weekend'  ? 'This Weekend' :
-    filterParams.date_from
-      ? `${filterParams.date_from} – ${filterParams.date_to}`
+    filterParams.date === 'custom' && filterParams.date_from && filterParams.date_to
+      ? formatDateRangeLabel(filterParams.date_from, filterParams.date_to)
       : 'All dates';
 
   // ── Snap helper ──────────────────────────────────────────────────────────

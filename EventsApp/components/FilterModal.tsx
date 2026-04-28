@@ -1,13 +1,13 @@
 /**
- * FilterModal.tsx
- * Place this file at: EventsApp/components/FilterModal.tsx
+ * FilterModal.tsx  –  EventsApp/components/FilterModal.tsx
  *
- * Fix: collapsed the double-Modal (backdrop + sheet) into a single Modal
- * with an inline Pressable backdrop — React Native stacked Modals are
- * unreliable on Android and cause the sheet to never appear.
+ * Architecture: ONE Modal, three internal screens swapped instantly.
+ *   'filter'   – main bottom sheet
+ *   'location' – full-screen city search
+ *   'calendar' – full-screen date-range calendar
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,14 +16,20 @@ import {
   Pressable,
   TextInput,
   FlatList,
+  ScrollView,
   ActivityIndicator,
-  Animated,
   Keyboard,
   Platform,
   KeyboardAvoidingView,
   StyleSheet,
+  Dimensions,
+  SafeAreaView,
 } from 'react-native';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
+
+const { width: SW } = Dimensions.get('window');
+const CELL = Math.floor((SW - 48) / 7);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,598 +57,542 @@ interface FilterModalProps {
   initialParams?: Partial<FilterParams>;
 }
 
+type Screen = 'filter' | 'location' | 'calendar';
+
+// ─── API URL ──────────────────────────────────────────────────────────────────
+//
+// On a physical device "localhost" = the phone itself, not your dev machine.
+// We fall back to the Expo debugger host (your machine's LAN IP) automatically.
+//
+function getBaseUrl(): string {
+  // Explicit env var always wins
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  // In Expo Go / dev builds, Constants.expoConfig.hostUri is "192.168.x.x:8081"
+  // Strip the port and use 8080 (your Go server)
+  const debuggerHost =
+    Constants.expoConfig?.hostUri ??
+    (Constants as any).manifest?.debuggerHost ??
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
+
+  if (debuggerHost) {
+    const ip = debuggerHost.split(':')[0];
+    return `http://${ip}:8080`;
+  }
+  return 'http://localhost:8080';
+}
+
+const BASE_URL = getBaseUrl();
+console.log('[FilterModal] API base URL:', BASE_URL);
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-
 async function fetchCities(query: string): Promise<CityResult[]> {
-  const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
-  const res = await fetch(`${BASE_URL}/cities${qs}`);
-  if (!res.ok) throw new Error('Failed to load cities');
-  const json = await res.json();
-  return json.cities ?? [];
+  try {
+    const qs  = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
+    const url = `${BASE_URL}/cities${qs}`;
+    const res  = await fetch(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    // Backend returns { "cities": [...] }
+    return Array.isArray(json.cities) ? json.cities : [];
+  } catch {
+    return [];
+  }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Date helpers ─────────────────────────────────────────────────────────────
 
-function formatCustomDate(iso: string): string {
-  if (!iso) return '';
+const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_FULL  = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAY_LABELS  = ['S','M','T','W','T','F','S'];
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function toISO(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** "May 28, 2026" — calendar header */
+function formatDisplay(iso: string): string {
+  if (!iso) return 'Select date';
   const [y, m, d] = iso.split('-');
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${months[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
+  return `${MONTH_SHORT[parseInt(m) - 1]} ${parseInt(d)}, ${y}`;
 }
 
-function todayISO(offsetDays = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+/**
+ * "Apr 29 – May 15" — home header + Set Dates button label.
+ * Exported so index.tsx can use it directly.
+ */
+export function formatDateRangeLabel(from: string, to: string): string {
+  if (!from || !to) return 'All dates';
+  const [, fm, fd] = from.split('-');
+  const [, tm, td] = to.split('-');
+  return `${MONTH_SHORT[parseInt(fm) - 1]} ${parseInt(fd)} – ${MONTH_SHORT[parseInt(tm) - 1]} ${parseInt(td)}`;
 }
 
-// ─── LocationPicker ───────────────────────────────────────────────────────────
-
-interface LocationPickerProps {
-  visible: boolean;
-  current: { city: string | null; isNearMe: boolean };
-  onSelect: (city: string | null, coords?: { lat: number; lng: number }) => void;
-  onClose: () => void;
+function buildMonths(count = 12): { year: number; month: number }[] {
+  const now = new Date();
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
 }
 
-function LocationPicker({ visible, current, onSelect, onClose }: LocationPickerProps) {
-  const [query, setQuery] = useState('');
-  const [cities, setCities] = useState<CityResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [locLoading, setLocLoading] = useState(false);
+function buildDaysGrid(year: number, month: number): number[] {
+  const firstDay    = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const grid: number[] = [];
+  for (let i = 0; i < firstDay; i++) grid.push(0);
+  for (let d = 1; d <= daysInMonth; d++) grid.push(d);
+  return grid;
+}
+
+// ─── CalendarMonth ────────────────────────────────────────────────────────────
+
+interface CalendarMonthProps {
+  year: number; month: number;
+  from: string; to: string;
+  todayStr: string;
+  onDayPress: (iso: string) => void;
+}
+
+function CalendarMonth({ year, month, from, to, todayStr, onDayPress }: CalendarMonthProps) {
+  const grid = buildDaysGrid(year, month);
+  return (
+    <View style={{ marginBottom: 28 }}>
+      <Text style={cal.monthName}>{MONTH_FULL[month]}</Text>
+      <View style={cal.grid}>
+        {grid.map((day, idx) => {
+          if (!day) return <View key={`p${idx}`} style={{ width: CELL, height: CELL }} />;
+          const iso     = toISO(year, month, day);
+          const isPast  = iso < todayStr;
+          const isFrom  = iso === from;
+          const isTo    = iso === to;
+          const inRange = !!(from && to && iso > from && iso < to);
+          return (
+            <TouchableOpacity
+              key={iso}
+              style={[
+                cal.cell, { width: CELL, height: CELL },
+                (isFrom || isTo) && cal.cellSelected,
+                inRange          && cal.cellRange,
+                isFrom && to     && cal.cellRangeStart,
+                isTo   && from   && cal.cellRangeEnd,
+              ]}
+              onPress={() => !isPast && onDayPress(iso)}
+              activeOpacity={isPast ? 1 : 0.7}
+              disabled={isPast}
+            >
+              <Text style={[
+                cal.dayText,
+                isPast           && cal.dayPast,
+                (isFrom || isTo) && cal.daySelected,
+                inRange          && cal.dayRange,
+              ]}>
+                {day}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+const cal = StyleSheet.create({
+  monthName:      { fontSize: 16, fontWeight: '800', color: '#0a0a0a', marginBottom: 10, paddingHorizontal: 24 },
+  grid:           { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 24 },
+  cell:           { alignItems: 'center', justifyContent: 'center' },
+  cellSelected:   { backgroundColor: '#0a0a0a', borderRadius: CELL / 2 },
+  cellRange:      { backgroundColor: 'rgba(10,10,10,0.08)', borderRadius: 0 },
+  cellRangeStart: { borderTopLeftRadius: CELL / 2, borderBottomLeftRadius: CELL / 2, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  cellRangeEnd:   { borderTopRightRadius: CELL / 2, borderBottomRightRadius: CELL / 2, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
+  dayText:        { fontSize: 15, fontWeight: '500', color: '#0a0a0a' },
+  dayPast:        { color: 'rgba(10,10,10,0.2)' },
+  daySelected:    { color: '#fff', fontWeight: '800' },
+  dayRange:       { color: '#0a0a0a' },
+});
+
+// ─── Main FilterModal ─────────────────────────────────────────────────────────
+
+export default function FilterModal({ visible, onClose, onApply, initialParams }: FilterModalProps) {
+
+  const [screen, setScreen] = useState<Screen>('filter');
+
+  const [selectedCity,   setSelectedCity]   = useState<string | null>(initialParams?.city ?? null);
+  const [nearMeCoords,   setNearMeCoords]   = useState<{ lat: number; lng: number } | undefined>(
+    initialParams?.lat != null ? { lat: initialParams.lat!, lng: initialParams.lng! } : undefined,
+  );
+  const [previousCities, setPreviousCities] = useState<string[]>(
+    initialParams?.city ? [initialParams.city] : [],
+  );
+  const [datePreset, setDatePreset] = useState<DatePreset>(initialParams?.date ?? 'any');
+  const [dateFrom,   setDateFrom]   = useState(initialParams?.date_from ?? '');
+  const [dateTo,     setDateTo]     = useState(initialParams?.date_to   ?? '');
+
+  // Location screen
+  const [query,       setQuery]       = useState('');
+  const [cities,      setCities]      = useState<CityResult[]>([]);
+  const [cityLoading, setCityLoading] = useState(false);
+  const [locLoading,  setLocLoading]  = useState(false);
+  const inputRef = useRef<TextInput>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Calendar
+  const todayStr = todayISO();
+  const [calFrom, setCalFrom] = useState('');
+  const [calTo,   setCalTo]   = useState('');
+  const [calStep, setCalStep] = useState<'from' | 'to'>('from');
+  const months = buildMonths(12);
+
   useEffect(() => {
-    if (!visible) { setQuery(''); return; }
-    loadCities('');
+    if (!visible) setTimeout(() => setScreen('filter'), 300);
   }, [visible]);
 
-  async function loadCities(q: string) {
-    setLoading(true);
-    try { setCities(await fetchCities(q)); }
-    catch { /* silently fail */ }
-    finally { setLoading(false); }
-  }
+  // On mount of location screen: clear + load full list immediately
+  useEffect(() => {
+    if (screen !== 'location') return;
+    setQuery('');
+    setCities([]);
+    loadCities('');
+    setTimeout(() => inputRef.current?.focus(), 60);
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen === 'calendar') {
+      setCalFrom(dateFrom);
+      setCalTo(dateTo);
+      setCalStep('from');
+    }
+  }, [screen]);
+
+  // ── City search ───────────────────────────────────────────────────────────
+
+  const loadCities = useCallback(async (q: string) => {
+    setCityLoading(true);
+    const results = await fetchCities(q);
+    setCities(results);
+    setCityLoading(false);
+  }, []);
 
   function handleQueryChange(text: string) {
     setQuery(text);
     if (debounce.current) clearTimeout(debounce.current);
-    debounce.current = setTimeout(() => loadCities(text), 320);
+    // Debounce typed searches; clear immediately restores full list
+    debounce.current = setTimeout(() => loadCities(text), text.trim() ? 280 : 0);
+  }
+
+  function handleCitySelect(city: string) {
+    setSelectedCity(city);
+    setNearMeCoords(undefined);
+    if (!previousCities.includes(city)) {
+      setPreviousCities(prev => [city, ...prev].slice(0, 5));
+    }
+    setScreen('filter');
   }
 
   async function handleNearMe() {
     setLocLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { onSelect(null); return; }
+      if (status !== 'granted') { setLocLoading(false); return; }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      onSelect(null, { lat: loc.coords.latitude, lng: loc.coords.longitude });
-    } catch {
-      onSelect(null);
-    } finally {
-      setLocLoading(false);
+      setSelectedCity(null);
+      setNearMeCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+      setScreen('filter');
+    } catch { }
+    finally { setLocLoading(false); }
+  }
+
+  // ── Calendar ──────────────────────────────────────────────────────────────
+
+  function handleDayPress(iso: string) {
+    if (calStep === 'from') {
+      setCalFrom(iso); setCalTo(''); setCalStep('to');
+    } else {
+      if (iso < calFrom) { setCalFrom(iso); setCalTo(''); }
+      else               { setCalTo(iso); setCalStep('from'); }
     }
   }
 
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1, justifyContent: 'flex-end' }}
-      >
-        <Pressable style={{ flex: 1 }} onPress={onClose} />
-        <View style={lp.sheet}>
-          {/* Handle */}
-          <View style={lp.handle} />
-
-          {/* Header */}
-          <View style={lp.header}>
-            <Text style={lp.title}>Choose Location</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={lp.done}>Done</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Search */}
-          <View style={lp.searchBar}>
-            <Text style={{ fontSize: 15, marginRight: 8 }}>🔍</Text>
-            <TextInput
-              value={query}
-              onChangeText={handleQueryChange}
-              placeholder="Search cities..."
-              placeholderTextColor="rgba(10,10,10,0.3)"
-              style={lp.searchInput}
-              autoFocus
-              returnKeyType="search"
-              onSubmitEditing={Keyboard.dismiss}
-            />
-            {query.length > 0 && (
-              <TouchableOpacity onPress={() => { setQuery(''); loadCities(''); }}>
-                <Text style={{ color: 'rgba(10,10,10,0.4)', fontSize: 16, fontWeight: '600' }}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Near Me */}
-          <TouchableOpacity onPress={handleNearMe} style={lp.nearMeRow}>
-            <View style={lp.nearMeIcon}>
-              {locLoading
-                ? <ActivityIndicator size="small" color="#ff3c6e" />
-                : <Text style={{ fontSize: 16 }}>📍</Text>}
-            </View>
-            <View>
-              <Text style={lp.nearMeLabel}>Near me</Text>
-              <Text style={lp.nearMeSub}>Use your current location</Text>
-            </View>
-            {current.isNearMe && (
-              <Text style={lp.check}>✓</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* City List */}
-          {loading
-            ? <ActivityIndicator size="small" color="#ff3c6e" style={{ marginTop: 20 }} />
-            : (
-              <FlatList
-                data={cities}
-                keyExtractor={(item) => item.city}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingHorizontal: 20 }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    onPress={() => onSelect(item.city)}
-                    style={lp.cityRow}
-                  >
-                    <Text style={[lp.cityName, current.city === item.city && lp.cityNameActive]}>
-                      {item.city}
-                    </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      {item.event_count > 0 && (
-                        <Text style={lp.eventCount}>{item.event_count} events</Text>
-                      )}
-                      {current.city === item.city && (
-                        <Text style={lp.check}>✓</Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                ListEmptyComponent={
-                  <Text style={lp.empty}>No cities found</Text>
-                }
-              />
-            )}
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-const lp = StyleSheet.create({
-  sheet:         { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 12, paddingBottom: 40, maxHeight: '85%' },
-  handle:        { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.12)', alignSelf: 'center', marginBottom: 20 },
-  header:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 16 },
-  title:         { fontSize: 20, fontWeight: '800', color: '#0a0a0a', letterSpacing: 0.3 },
-  done:          { fontSize: 13, fontWeight: '700', color: '#ff3c6e' },
-  searchBar:     { marginHorizontal: 20, marginBottom: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.05)', borderRadius: 10, paddingHorizontal: 16, height: 44 },
-  searchInput:   { flex: 1, fontSize: 15, color: '#0a0a0a' },
-  nearMeRow:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.1)' },
-  nearMeIcon:    { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,60,110,0.1)', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  nearMeLabel:   { fontSize: 15, fontWeight: '700', color: '#0a0a0a' },
-  nearMeSub:     { fontSize: 12, color: 'rgba(10,10,10,0.4)', marginTop: 1 },
-  check:         { marginLeft: 'auto', color: '#ff3c6e', fontSize: 15, fontWeight: '800' },
-  cityRow:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.07)' },
-  cityName:      { fontSize: 15, fontWeight: '500', color: 'rgba(10,10,10,0.65)' },
-  cityNameActive:{ fontWeight: '800', color: '#0a0a0a' },
-  eventCount:    { fontSize: 11, color: 'rgba(10,10,10,0.35)', fontWeight: '600' },
-  empty:         { textAlign: 'center', color: 'rgba(10,10,10,0.3)', fontSize: 13, marginTop: 24 },
-});
-
-// ─── DateRangePicker ──────────────────────────────────────────────────────────
-
-interface DateRangePickerProps {
-  visible: boolean;
-  dateFrom: string;
-  dateTo: string;
-  onApply: (from: string, to: string) => void;
-  onClose: () => void;
-}
-
-function DateRangePicker({ visible, dateFrom, dateTo, onApply, onClose }: DateRangePickerProps) {
-  const [from, setFrom] = useState(dateFrom || todayISO());
-  const [to, setTo]     = useState(dateTo  || todayISO(7));
-
-  useEffect(() => {
-    if (visible) {
-      setFrom(dateFrom || todayISO());
-      setTo(dateTo || todayISO(7));
-    }
-  }, [visible]);
-
-  const isValid = from && to && from <= to;
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable
-        style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' }}
-        onPress={onClose}
-      >
-        <Pressable onPress={() => {}} style={dr.sheet}>
-          <View style={dr.handle} />
-          <Text style={dr.title}>Set Dates</Text>
-
-          <Text style={dr.label}>FROM</Text>
-          <TextInput
-            value={from}
-            onChangeText={setFrom}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor="rgba(10,10,10,0.25)"
-            style={[dr.input, { borderColor: from ? '#0a0a0a' : 'rgba(10,10,10,0.15)' }]}
-            keyboardType="numeric"
-          />
-
-          <Text style={dr.label}>TO</Text>
-          <TextInput
-            value={to}
-            onChangeText={setTo}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor="rgba(10,10,10,0.25)"
-            style={[dr.input, { borderColor: to ? '#0a0a0a' : 'rgba(10,10,10,0.15)', marginBottom: 6 }]}
-            keyboardType="numeric"
-          />
-
-          {!isValid && from && to && (
-            <Text style={{ fontSize: 12, color: '#ff3c6e', marginBottom: 4 }}>
-              End date must be on or after start date
-            </Text>
-          )}
-          {isValid && (
-            <Text style={dr.preview}>
-              {formatCustomDate(from)} → {formatCustomDate(to)}
-            </Text>
-          )}
-
-          <TouchableOpacity
-            onPress={() => isValid && onApply(from, to)}
-            style={[dr.applyBtn, { backgroundColor: isValid ? '#0a0a0a' : 'rgba(10,10,10,0.2)' }]}
-          >
-            <Text style={dr.applyText}>Apply Dates</Text>
-          </TouchableOpacity>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-const dr = StyleSheet.create({
-  sheet:    { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 40 },
-  handle:   { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.12)', alignSelf: 'center', marginBottom: 20 },
-  title:    { fontSize: 20, fontWeight: '800', color: '#0a0a0a', marginBottom: 24 },
-  label:    { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: 'rgba(10,10,10,0.4)', marginBottom: 8 },
-  input:    { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: '#0a0a0a', fontWeight: '600', marginBottom: 20 },
-  preview:  { fontSize: 13, color: 'rgba(10,10,10,0.45)', marginBottom: 24, marginTop: 6 },
-  applyBtn: { borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-  applyText:{ color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.5 },
-});
-
-// ─── Main FilterModal ─────────────────────────────────────────────────────────
-
-export default function FilterModal({ visible, onClose, onApply, initialParams }: FilterModalProps) {
-  const [selectedCity, setSelectedCity] = useState<string | null>(initialParams?.city ?? null);
-  const [nearMeCoords, setNearMeCoords] = useState<{ lat: number; lng: number } | undefined>(
-    initialParams?.lat != null && initialParams?.lng != null
-      ? { lat: initialParams.lat, lng: initialParams.lng }
-      : undefined
-  );
-
-  const [datePreset, setDatePreset] = useState<DatePreset>(initialParams?.date ?? 'any');
-  const [dateFrom, setDateFrom]     = useState(initialParams?.date_from ?? '');
-  const [dateTo, setDateTo]         = useState(initialParams?.date_to   ?? '');
-
-  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [datePickerOpen, setDatePickerOpen]         = useState(false);
-
-  const isNearMe     = !selectedCity && nearMeCoords != null;
-  const locationIsSet = !!selectedCity || !!nearMeCoords;
-  const locationLabel = selectedCity ?? (nearMeCoords ? 'Near me' : 'Near me');
-
-  function handleLocationSelect(city: string | null, coords?: { lat: number; lng: number }) {
-    setSelectedCity(city);
-    setNearMeCoords(coords);
-    setLocationPickerOpen(false);
+  function handleCalendarApply() {
+    if (!calFrom || !calTo) return;
+    setDatePreset('custom');
+    setDateFrom(calFrom);
+    setDateTo(calTo);
+    setScreen('filter');
   }
+
+  // ── Filter ────────────────────────────────────────────────────────────────
 
   function handleDatePreset(preset: DatePreset) {
-    if (preset === 'custom') { setDatePickerOpen(true); return; }
-    setDatePreset(preset);
-    setDateFrom('');
-    setDateTo('');
-  }
-
-  function handleDateRangeApply(from: string, to: string) {
-    setDatePreset('custom');
-    setDateFrom(from);
-    setDateTo(to);
-    setDatePickerOpen(false);
+    if (preset === 'custom') { setScreen('calendar'); return; }
+    setDatePreset(preset); setDateFrom(''); setDateTo('');
   }
 
   function handleDone() {
     const params: FilterParams = { date: datePreset };
-    if (selectedCity) {
-      params.city = selectedCity;
-    } else if (nearMeCoords) {
-      params.lat = nearMeCoords.lat;
-      params.lng = nearMeCoords.lng;
-      params.radius_km = 50;
-    }
-    if (datePreset === 'custom' && dateFrom && dateTo) {
-      params.date_from = dateFrom;
-      params.date_to   = dateTo;
-    }
+    if (selectedCity)      params.city = selectedCity;
+    else if (nearMeCoords) { params.lat = nearMeCoords.lat; params.lng = nearMeCoords.lng; params.radius_km = 50; }
+    if (datePreset === 'custom' && dateFrom && dateTo) { params.date_from = dateFrom; params.date_to = dateTo; }
     onApply(params);
   }
 
-  const PILL_PRESETS: { key: DatePreset; label: string }[] = [
+  const locationIsSet = !!selectedCity || !!nearMeCoords;
+  const locationLabel = selectedCity ?? (nearMeCoords ? 'Near me' : 'Near me');
+  const customBtnLabel =
+    datePreset === 'custom' && dateFrom && dateTo
+      ? formatDateRangeLabel(dateFrom, dateTo)
+      : 'Set dates';
+  const calCanApply = !!calFrom && !!calTo && calFrom <= calTo;
+
+  const PILLS: { key: DatePreset; label: string }[] = [
     { key: 'any',      label: 'Any date'  },
     { key: 'tomorrow', label: 'Tomorrow'  },
     { key: 'weekend',  label: 'Weekend'   },
   ];
 
-  const customLabel =
-    datePreset === 'custom' && dateFrom && dateTo
-      ? `${formatCustomDate(dateFrom)} – ${formatCustomDate(dateTo)}`
-      : 'Set dates';
-
   return (
-    <>
-      {/* ── Single Modal ─────────────────────────────────────────────────── */}
-      <Modal
-        visible={visible}
-        transparent
-        animationType="slide"
-        onRequestClose={onClose}
-        statusBarTranslucent
-      >
-        <View style={fm.root}>
-          {/* Tappable backdrop */}
-          <Pressable style={fm.backdrop} onPress={onClose} />
+    <Modal
+      visible={visible}
+      transparent={screen === 'filter'}
+      animationType={screen === 'filter' ? 'slide' : 'none'}
+      onRequestClose={() => screen === 'filter' ? onClose() : setScreen('filter')}
+      statusBarTranslucent
+    >
 
-          {/* Sheet */}
-          <View style={fm.sheet}>
-            {/* Drag handle */}
-            <View style={fm.handle} />
+      {/* ══════════ FILTER SHEET ══════════ */}
+      {screen === 'filter' && (
+        <View style={s.filterRoot}>
+          <Pressable style={s.backdrop} onPress={onClose} />
+          <View style={s.sheet}>
+            <View style={s.handle} />
 
-            {/* ── Location ── */}
-            <Text style={fm.sectionTitle}>Location</Text>
-
-            <TouchableOpacity
-              onPress={() => setLocationPickerOpen(true)}
-              style={fm.locationRow}
-              activeOpacity={0.7}
-            >
-              <View style={fm.locationIcon}>
-                <Text style={{ fontSize: 20 }}>📍</Text>
-              </View>
-              <Text style={[fm.locationText, locationIsSet && fm.locationTextSet]}>
-                {locationLabel}
-              </Text>
-              <Text style={fm.chevron}>›</Text>
+            <Text style={s.sectionTitle}>Location</Text>
+            <TouchableOpacity onPress={() => setScreen('location')} style={s.locationRow} activeOpacity={0.7}>
+              <View style={s.locationIcon}><Text style={{ fontSize: 20 }}>📍</Text></View>
+              <Text style={[s.locationText, locationIsSet && s.locationTextSet]}>{locationLabel}</Text>
+              <Text style={s.chevron}>›</Text>
             </TouchableOpacity>
 
-            {/* Divider */}
-            <View style={fm.divider} />
+            <View style={s.divider} />
 
-            {/* ── Dates ── */}
-            <Text style={[fm.sectionTitle, { marginTop: 8 }]}>Dates</Text>
-
-            {/* Pills row */}
-            <View style={fm.pillRow}>
-              {PILL_PRESETS.map(({ key, label }) => {
+            <Text style={[s.sectionTitle, { marginTop: 8 }]}>Dates</Text>
+            <View style={s.pillRow}>
+              {PILLS.map(({ key, label }) => {
                 const active = datePreset === key;
                 return (
-                  <TouchableOpacity
-                    key={key}
-                    onPress={() => handleDatePreset(key)}
-                    style={[fm.pill, active && fm.pillActive]}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[fm.pillText, active && fm.pillTextActive]}>{label}</Text>
+                  <TouchableOpacity key={key} onPress={() => handleDatePreset(key)} style={[s.pill, active && s.pillActive]} activeOpacity={0.7}>
+                    <Text style={[s.pillText, active && s.pillTextActive]}>{label}</Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
 
-            {/* Set dates button */}
-            <TouchableOpacity
-              onPress={() => handleDatePreset('custom')}
-              style={[fm.setDatesBtn, datePreset === 'custom' && fm.setDatesBtnActive]}
-              activeOpacity={0.75}
-            >
-              <Text style={[fm.setDatesText, datePreset === 'custom' && fm.setDatesTextActive]}>
-                {customLabel}
-              </Text>
+            <TouchableOpacity onPress={() => handleDatePreset('custom')} style={[s.setDatesBtn, datePreset === 'custom' && s.setDatesBtnActive]} activeOpacity={0.7}>
+              <Text style={[s.setDatesText, datePreset === 'custom' && s.setDatesTextActive]}>{customBtnLabel}</Text>
             </TouchableOpacity>
 
-            {/* Done */}
-            <View style={fm.doneRow}>
-              <TouchableOpacity onPress={handleDone} style={fm.doneBtn} activeOpacity={0.85}>
-                <Text style={fm.doneBtnText}>Done</Text>
+            <View style={s.doneRow}>
+              <TouchableOpacity onPress={handleDone} style={s.doneBtn} activeOpacity={0.85}>
+                <Text style={s.doneBtnText}>Done</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
-      </Modal>
+      )}
 
-      {/* Sub-modals (rendered outside the main Modal to avoid nesting issues) */}
-      <LocationPicker
-        visible={locationPickerOpen}
-        current={{ city: selectedCity, isNearMe }}
-        onSelect={handleLocationSelect}
-        onClose={() => setLocationPickerOpen(false)}
-      />
-      <DateRangePicker
-        visible={datePickerOpen}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        onApply={handleDateRangeApply}
-        onClose={() => setDatePickerOpen(false)}
-      />
-    </>
+      {/* ══════════ LOCATION SCREEN ══════════ */}
+      {screen === 'location' && (
+        <SafeAreaView style={s.fullScreen}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+
+            <View style={s.locTopBar}>
+              <View style={s.locSearchBox}>
+                <Text style={s.locSearchIcon}>🔍</Text>
+                <TextInput
+                  ref={inputRef}
+                  value={query}
+                  onChangeText={handleQueryChange}
+                  placeholder="Search by city"
+                  placeholderTextColor="rgba(10,10,10,0.38)"
+                  style={s.locSearchInput}
+                  returnKeyType="search"
+                  onSubmitEditing={Keyboard.dismiss}
+                  clearButtonMode="while-editing"
+                />
+              </View>
+              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setScreen('filter'); }} style={s.locCancelBtn} activeOpacity={0.7}>
+                <Text style={s.locCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={s.hairline} />
+
+            {cityLoading ? (
+              <ActivityIndicator size="small" color="#0a0a0a" style={{ marginTop: 36 }} />
+            ) : (
+              <FlatList
+                data={cities}
+                keyExtractor={c => c.city}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingHorizontal: 24 }}
+                ListHeaderComponent={
+                  !query.trim() && previousCities.length > 0 ? (
+                    <>
+                      <Text style={s.locSectionLabel}>Previous Locations</Text>
+                      {previousCities.map(city => (
+                        <TouchableOpacity key={`prev-${city}`} onPress={() => handleCitySelect(city)} style={s.locRow} activeOpacity={0.7}>
+                          <Text style={[s.locRowText, selectedCity === city && { fontWeight: '700' }]}>{city}</Text>
+                          <Text style={s.locRowChevron}>›</Text>
+                        </TouchableOpacity>
+                      ))}
+                      {cities.length > 0 && <Text style={s.locSectionLabel}>All Cities</Text>}
+                    </>
+                  ) : null
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity onPress={() => handleCitySelect(item.city)} style={s.locRow} activeOpacity={0.7}>
+                    <Text style={[s.locRowText, selectedCity === item.city && { fontWeight: '700' }]}>{item.city}</Text>
+                    {item.event_count > 0 && <Text style={s.locRowCount}>{item.event_count} events</Text>}
+                    <Text style={s.locRowChevron}>›</Text>
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={
+                  <Text style={s.locEmpty}>
+                    {query.trim() ? `No results for "${query}"` : 'No cities found — check your connection'}
+                  </Text>
+                }
+              />
+            )}
+
+            <View>
+              <View style={s.hairline} />
+              <TouchableOpacity onPress={handleNearMe} style={s.currentLocBtn} activeOpacity={0.7}>
+                {locLoading
+                  ? <ActivityIndicator size="small" color="#0a0a0a" style={{ marginRight: 8 }} />
+                  : <Text style={s.currentLocArrow}>➤</Text>}
+                <Text style={s.currentLocText}>Use Current Location</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      )}
+
+      {/* ══════════ CALENDAR SCREEN ══════════ */}
+      {screen === 'calendar' && (
+        <SafeAreaView style={s.fullScreen}>
+          <View style={s.calHeader}>
+            <TouchableOpacity style={[s.calHeaderCol, calStep === 'from' && s.calHeaderColActive]} onPress={() => setCalStep('from')} activeOpacity={0.7}>
+              <Text style={s.calHeaderLabel}>FROM</Text>
+              <Text style={[s.calHeaderDate, !calFrom && s.calHeaderDateEmpty]}>{calFrom ? formatDisplay(calFrom) : 'Select date'}</Text>
+            </TouchableOpacity>
+            <View style={s.calHeaderDivider} />
+            <TouchableOpacity style={[s.calHeaderCol, calStep === 'to' && s.calHeaderColActive]} onPress={() => calFrom && setCalStep('to')} activeOpacity={calFrom ? 0.7 : 1}>
+              <Text style={s.calHeaderLabel}>TO</Text>
+              <Text style={[s.calHeaderDate, !calTo && s.calHeaderDateEmpty]}>{calTo ? formatDisplay(calTo) : 'Select date'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={s.calDowRow}>
+            {DAY_LABELS.map((d, i) => (
+              <View key={i} style={{ width: CELL, alignItems: 'center' }}>
+                <Text style={s.calDowText}>{d}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={s.hairline} />
+
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 16, paddingBottom: 8 }}>
+            {months.map(({ year, month }) => (
+              <CalendarMonth key={`${year}-${month}`} year={year} month={month} from={calFrom} to={calTo} todayStr={todayStr} onDayPress={handleDayPress} />
+            ))}
+          </ScrollView>
+
+          <View style={s.calFooter}>
+            <TouchableOpacity onPress={() => setScreen('filter')} activeOpacity={0.7}>
+              <Text style={s.calCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleCalendarApply} style={[s.calApplyBtn, !calCanApply && s.calApplyBtnDisabled]} activeOpacity={calCanApply ? 0.85 : 1}>
+              <Text style={s.calApplyText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      )}
+    </Modal>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const fm = StyleSheet.create({
-  root: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 44,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 20,
-    elevation: 24,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(0,0,0,0.12)',
-    alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#0a0a0a',
-    paddingHorizontal: 24,
-    marginBottom: 4,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
-  locationIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(10,10,10,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  locationText: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '400',
-    color: 'rgba(10,10,10,0.45)',
-  },
-  locationTextSet: {
-    fontWeight: '600',
-    color: '#0a0a0a',
-  },
-  chevron: {
-    fontSize: 22,
-    color: 'rgba(10,10,10,0.3)',
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    marginHorizontal: 24,
-    marginVertical: 8,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 24,
-    gap: 10,
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  pill: {
-    flex: 1,
-    paddingVertical: 11,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(10,10,10,0.2)',
-    backgroundColor: '#fff',
-    alignItems: 'center',
-  },
-  pillActive: {
-    borderWidth: 2,
-    borderColor: '#0a0a0a',
-  },
-  pillText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: 'rgba(10,10,10,0.55)',
-  },
-  pillTextActive: {
-    fontWeight: '800',
-    color: '#0a0a0a',
-  },
-  setDatesBtn: {
-    marginHorizontal: 24,
-    paddingVertical: 15,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(10,10,10,0.18)',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  setDatesBtnActive: {
-    borderWidth: 2,
-    borderColor: '#0a0a0a',
-  },
-  setDatesText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: 'rgba(10,10,10,0.6)',
-  },
-  setDatesTextActive: {
-    fontWeight: '800',
-    color: '#0a0a0a',
-  },
-  doneRow: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-    alignItems: 'flex-end',
-  },
-  doneBtn: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 40,
-  },
-  doneBtnText: {
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 15,
-    letterSpacing: 0.3,
-  },
+const s = StyleSheet.create({
+  filterRoot:          { flex: 1, justifyContent: 'flex-end' },
+  backdrop:            { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet:               { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 44, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 24 },
+  handle:              { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.12)', alignSelf: 'center', marginTop: 12, marginBottom: 24 },
+  sectionTitle:        { fontSize: 22, fontWeight: '800', color: '#0a0a0a', paddingHorizontal: 24, marginBottom: 4 },
+  locationRow:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 14 },
+  locationIcon:        { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(10,10,10,0.06)', alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  locationText:        { flex: 1, fontSize: 17, fontWeight: '400', color: 'rgba(10,10,10,0.45)' },
+  locationTextSet:     { fontWeight: '600', color: '#0a0a0a' },
+  chevron:             { fontSize: 22, color: 'rgba(10,10,10,0.3)' },
+  divider:             { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.1)', marginHorizontal: 24, marginVertical: 8 },
+  pillRow:             { flexDirection: 'row', paddingHorizontal: 24, gap: 10, marginTop: 12, marginBottom: 12 },
+  pill:                { flex: 1, paddingVertical: 11, borderRadius: 24, borderWidth: 1, borderColor: 'rgba(10,10,10,0.2)', backgroundColor: '#fff', alignItems: 'center' },
+  pillActive:          { borderWidth: 2, borderColor: '#0a0a0a' },
+  pillText:            { fontSize: 14, fontWeight: '500', color: 'rgba(10,10,10,0.55)' },
+  pillTextActive:      { fontWeight: '800', color: '#0a0a0a' },
+  setDatesBtn:         { marginHorizontal: 24, paddingVertical: 15, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(10,10,10,0.18)', alignItems: 'center', backgroundColor: '#fff' },
+  setDatesBtnActive:   { borderWidth: 2, borderColor: '#0a0a0a' },
+  setDatesText:        { fontSize: 15, fontWeight: '600', color: 'rgba(10,10,10,0.6)' },
+  setDatesTextActive:  { fontWeight: '800', color: '#0a0a0a' },
+  doneRow:             { paddingHorizontal: 24, marginTop: 24, alignItems: 'flex-end' },
+  doneBtn:             { backgroundColor: '#0a0a0a', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40 },
+  doneBtnText:         { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.3 },
+  fullScreen:          { flex: 1, backgroundColor: '#fff' },
+  hairline:            { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.1)' },
+  locTopBar:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, gap: 10 },
+  locSearchBox:        { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,10,10,0.06)', borderRadius: 14, paddingHorizontal: 14, height: 46 },
+  locSearchIcon:       { fontSize: 15, marginRight: 8 },
+  locSearchInput:      { flex: 1, fontSize: 16, color: '#0a0a0a' },
+  locCancelBtn:        { paddingLeft: 4, paddingVertical: 8 },
+  locCancelText:       { fontSize: 17, color: '#0a0a0a' },
+  locSectionLabel:     { fontSize: 17, fontWeight: '800', color: '#0a0a0a', marginTop: 24, marginBottom: 4 },
+  locRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.07)' },
+  locRowText:          { flex: 1, fontSize: 16, fontWeight: '400', color: '#0a0a0a' },
+  locRowCount:         { fontSize: 13, color: 'rgba(10,10,10,0.4)', marginRight: 8 },
+  locRowChevron:       { fontSize: 20, color: 'rgba(10,10,10,0.25)' },
+  locEmpty:            { textAlign: 'center', color: 'rgba(10,10,10,0.35)', fontSize: 14, marginTop: 40, lineHeight: 22 },
+  currentLocBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 8 },
+  currentLocArrow:     { fontSize: 14, color: '#0a0a0a', transform: [{ rotate: '-45deg' }] },
+  currentLocText:      { fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
+  calHeader:           { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.12)' },
+  calHeaderCol:        { flex: 1, paddingVertical: 16, paddingHorizontal: 24 },
+  calHeaderColActive:  { borderBottomWidth: 2, borderBottomColor: '#0a0a0a' },
+  calHeaderLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: 'rgba(10,10,10,0.4)', marginBottom: 5 },
+  calHeaderDate:       { fontSize: 17, fontWeight: '800', color: '#0a0a0a' },
+  calHeaderDateEmpty:  { fontWeight: '400', color: 'rgba(10,10,10,0.35)' },
+  calHeaderDivider:    { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.15)', marginVertical: 14 },
+  calDowRow:           { flexDirection: 'row', paddingHorizontal: 24, paddingTop: 14, paddingBottom: 8 },
+  calDowText:          { fontSize: 13, fontWeight: '600', color: 'rgba(10,10,10,0.35)' },
+  calFooter:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(0,0,0,0.08)' },
+  calCancelText:       { fontSize: 16, fontWeight: '500', color: '#0a0a0a' },
+  calApplyBtn:         { backgroundColor: '#0a0a0a', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 44 },
+  calApplyBtnDisabled: { backgroundColor: 'rgba(10,10,10,0.2)' },
+  calApplyText:        { color: '#fff', fontWeight: '800', fontSize: 15 },
 });
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 
 export function buildFilterQueryString(params: FilterParams): string {
   const qs = new URLSearchParams();
-  if (params.city)       qs.set('city',      params.city);
-  if (params.lat != null) qs.set('lat',      String(params.lat));
-  if (params.lng != null) qs.set('lng',      String(params.lng));
-  if (params.radius_km)  qs.set('radius_km', String(params.radius_km));
+  if (params.city)         qs.set('city',      params.city);
+  if (params.lat  != null) qs.set('lat',       String(params.lat));
+  if (params.lng  != null) qs.set('lng',       String(params.lng));
+  if (params.radius_km)    qs.set('radius_km', String(params.radius_km));
   if (params.date && params.date !== 'any') qs.set('date', params.date);
   if (params.date === 'custom' && params.date_from) qs.set('date_from', params.date_from);
   if (params.date === 'custom' && params.date_to)   qs.set('date_to',   params.date_to);
