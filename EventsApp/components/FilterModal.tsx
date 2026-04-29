@@ -23,8 +23,8 @@ import {
   KeyboardAvoidingView,
   StyleSheet,
   Dimensions,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
 
@@ -91,7 +91,7 @@ console.log('[FilterModal] API base URL:', BASE_URL);
 async function fetchCities(query: string): Promise<CityResult[]> {
   try {
     const qs  = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
-    const url = `${BASE_URL}/cities${qs}`;
+    const url = `${BASE_URL}/v1/cities${qs}`;
     const res  = await fetch(url);
     if (!res.ok) return [];
     const json = await res.json();
@@ -408,7 +408,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
       {/* ══════════ LOCATION SCREEN ══════════ */}
       {screen === 'location' && (
-        <SafeAreaView style={s.fullScreen}>
+        <SafeAreaView style={s.fullScreen} edges={['top']}>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
             <View style={s.locTopBar}>
@@ -484,7 +484,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
       {/* ══════════ CALENDAR SCREEN ══════════ */}
       {screen === 'calendar' && (
-        <SafeAreaView style={s.fullScreen}>
+        <SafeAreaView style={s.fullScreen} edges={['top']}>
           <View style={s.calHeader}>
             <TouchableOpacity style={[s.calHeaderCol, calStep === 'from' && s.calHeaderColActive]} onPress={() => setCalStep('from')} activeOpacity={0.7}>
               <Text style={s.calHeaderLabel}>FROM</Text>

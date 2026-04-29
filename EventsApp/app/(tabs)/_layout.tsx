@@ -1,58 +1,161 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { View, StyleSheet } from 'react-native';
+import { Feather, Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const ACTIVE   = '#0a0a0a';
+const INACTIVE = 'rgba(10,10,10,0.30)';
+const BAR_BG   = '#ffffff';
+const DOT_CLR  = '#ff3c6e';
+const SZ       = 26;
+
+function Dot() {
+  return <View style={styles.dot} />;
+}
+
+function HomeIcon({ focused }: { focused: boolean }) {
+  return (
+    <View style={styles.iconWrap}>
+      <Feather name="home" size={SZ} color={focused ? ACTIVE : INACTIVE} />
+    </View>
+  );
+}
+
+function MerchIcon({ focused }: { focused: boolean }) {
+  return (
+    <View style={styles.iconWrap}>
+      <Feather name="shopping-bag" size={SZ} color={focused ? ACTIVE : INACTIVE} />
+    </View>
+  );
+}
+
+function SearchIcon({ focused }: { focused: boolean }) {
+  return (
+    <View style={styles.iconWrap}>
+      <Feather name="search" size={SZ} color={focused ? ACTIVE : INACTIVE} />
+    </View>
+  );
+}
+
+function TicketsIcon({ focused }: { focused: boolean }) {
+  return (
+    <View style={styles.iconWrap}>
+      <Ionicons
+        name="ticket-outline"
+        size={SZ + 2}
+        color={focused ? ACTIVE : INACTIVE}
+      />
+    </View>
+  );
+}
+
+function ProfileIcon({ focused, hasBadge }: { focused: boolean; hasBadge?: boolean }) {
+  return (
+    <View style={styles.iconWrap}>
+      <View style={[styles.avatarRing, focused && styles.avatarRingActive]}>
+        <Feather name="user" size={SZ - 4} color={focused ? ACTIVE : INACTIVE} />
+      </View>
+      {hasBadge && <Dot />}
+    </View>
+  );
+}
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarActiveTintColor: '#ff3c6e',
-        tabBarInactiveTintColor: 'rgba(255,255,255,0.45)',
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.tabLabel,
-        tabBarItemStyle: styles.tabItem,
-        tabBarIcon: ({ color, focused, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap = 'home';
-          if (route.name === 'index')        iconName = 'home';
-          else if (route.name === 'merch')   iconName = 'bag';
-          else if (route.name === 'profile') iconName = 'person-circle-outline';
-          return (
-            <View style={[styles.iconWrapper, focused && styles.iconWrapperFocused]}>
-              <Ionicons name={iconName} size={size} color={color} />
-            </View>
-          );
+      screenOptions={{
+        headerShown:             false,
+        tabBarShowLabel:         false,
+        tabBarActiveTintColor:   ACTIVE,
+        tabBarInactiveTintColor: INACTIVE,
+        tabBarStyle: {
+          ...styles.tabBar,
+          height:        55 + insets.bottom,
+          paddingBottom: insets.bottom,
+          paddingTop:    10,
         },
-      })}
+        tabBarItemStyle: styles.tabItem,
+      }}
     >
-      <Tabs.Screen name="index"   options={{ title: 'Home' }} />
-      <Tabs.Screen name="merch"   options={{ title: 'Merch' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen
+        name="index"
+        options={{ tabBarIcon: ({ focused }) => <HomeIcon focused={focused} /> }}
+      />
+      <Tabs.Screen
+        name="merch"
+        options={{ tabBarIcon: ({ focused }) => <MerchIcon focused={focused} /> }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{ tabBarIcon: ({ focused }) => <SearchIcon focused={focused} /> }}
+      />
+      <Tabs.Screen
+        name="tickets"
+        options={{ tabBarIcon: ({ focused }) => <TicketsIcon focused={focused} /> }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{ tabBarIcon: ({ focused }) => <ProfileIcon focused={focused} hasBadge /> }}
+      />
     </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: '#002047',
-    borderRadius: 40,
-    marginHorizontal: 16,
-    marginBottom: 20,
-    height: 70,
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderTopWidth: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
+    backgroundColor:  BAR_BG,
+    borderTopWidth:   StyleSheet.hairlineWidth,
+    borderTopColor:   'rgba(10,10,10,0.12)',
+    borderRadius:     0,
+    marginHorizontal: 0,
+    marginBottom:     0,
+    shadowColor:      '#000',
+    shadowOffset:     { width: 0, height: -2 },
+    shadowOpacity:    0.05,
+    shadowRadius:     8,
+    elevation:        4,
   },
-  tabItem:            { paddingTop: 8 },
-  tabLabel:           { fontSize: 11, fontWeight: '500', marginBottom: 6 },
-  iconWrapper:        { padding: 6, borderRadius: 30 },
-  iconWrapperFocused: { backgroundColor: 'rgba(255,60,110,0.20)' },
+
+  tabItem: {
+    flex:           1,
+    alignItems:     'center',
+    justifyContent: 'flex-start',
+  },
+
+  iconWrap: {
+    position:       'relative',
+    alignItems:     'center',
+    justifyContent: 'center',
+    width:          44,
+    height:         44,
+  },
+
+  dot: {
+    position:        'absolute',
+    top:             6,
+    right:           4,
+    width:           8,
+    height:          8,
+    borderRadius:    4,
+    backgroundColor: DOT_CLR,
+    borderWidth:     1.5,
+    borderColor:     BAR_BG,
+  },
+
+  avatarRing: {
+    width:          36,
+    height:         36,
+    borderRadius:   18,
+    alignItems:     'center',
+    justifyContent: 'center',
+    borderWidth:    1.5,
+    borderColor:    'transparent',
+  },
+  avatarRingActive: {
+    borderColor: ACTIVE,
+  },
 });

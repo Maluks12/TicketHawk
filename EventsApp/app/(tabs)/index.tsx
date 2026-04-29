@@ -238,6 +238,16 @@ export default function Index() {
   const handleFilterApply = async (params: FilterParams) => {
     setFilterParams(params);
     setFilterOpen(false);
+
+    // Always snap the header back into view so the updated city / date label is visible
+    headerOffset.current = 0;
+    Animated.spring(headerAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      bounciness: 0,
+      speed: 14,
+    }).start();
+
     try {
       setLoading(true);
       setError(null);
@@ -262,7 +272,7 @@ export default function Index() {
 
   // ── Location / date label for header ────────────────────────────────────
   const locationLabel =
-    filterParams.city ?? (filterParams.lat ? 'Near me' : 'Johannesburg, ZA');
+    filterParams.city ?? (filterParams.lat ? 'Near me' : 'Near me');
 
   const dateLabelText =
     filterParams.date === 'any'      ? 'All dates'    :
