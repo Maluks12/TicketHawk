@@ -24,9 +24,10 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
 
 const { width: SW } = Dimensions.get('window');
 const CELL = Math.floor((SW - 48) / 7);
@@ -37,6 +38,7 @@ export type DatePreset = 'any' | 'tomorrow' | 'weekend' | 'custom';
 
 export interface FilterParams {
   city?: string;
+  province?: string;   // province-level filter — maps to ?province= on the backend
   lat?: number;
   lng?: number;
   radius_km?: number;
@@ -217,13 +219,66 @@ const cal = StyleSheet.create({
   dayRange:       { color: '#0a0a0a' },
 });
 
+// ─── Province → cities mapping (client-side province search) ─────────────────
+
+const PROVINCE_CITIES: Record<string, string[]> = {
+  'Gauteng':           ['Johannesburg', 'Pretoria', 'Sandton', 'Soweto', 'Midrand', 'Centurion', 'Randburg', 'Roodepoort', 'Boksburg', 'Benoni', 'Germiston', 'Krugersdorp'],
+  'Western Cape':      ['Cape Town', 'Stellenbosch', 'Paarl', 'George', 'Knysna', 'Mossel Bay', 'Hermanus', 'Worcester'],
+  'KwaZulu-Natal':     ['Durban', 'Pietermaritzburg', 'Richards Bay', 'Newcastle', 'Umhlanga', 'Ballito'],
+  'Eastern Cape':      ['Port Elizabeth', 'East London', 'Mthatha', 'Grahamstown', 'Uitenhage'],
+  'Limpopo':           ['Polokwane', 'Tzaneen', 'Phalaborwa', 'Louis Trichardt'],
+  'Mpumalanga':        ['Nelspruit', 'Witbank', 'Secunda', 'Barberton'],
+  'North West':        ['Rustenburg', 'Klerksdorp', 'Mafikeng', 'Potchefstroom'],
+  'Free State':        ['Bloemfontein', 'Welkom', 'Sasolburg', 'Kroonstad'],
+  'Northern Cape':     ['Kimberley', 'Upington', 'Springbok'],
+};
+
+// A flat row item for the FlatList
+type LocRow =
+  | { type: 'province'; key: string; label: string }
+  | { type: 'city';     key: string; label: string; eventCount: number };
+
+/**
+ * Build the flat list of province headers + city rows from:
+ *  - the query string (used to match provinces client-side)
+ *  - the backend city results (for city-level matches)
+ */
+function buildLocationResults(query: string, backendCities: CityResult[]): LocRow[] {
+  if (!query) return [];
+
+  const q = query.toLowerCase();
+  const rows: LocRow[] = [];
+
+  // 1. Province match — show province header + all cities in that province
+  for (const [province, cities] of Object.entries(PROVINCE_CITIES)) {
+    if (!province.toLowerCase().includes(q)) continue;
+    rows.push({ type: 'province', key: `prov-${province}`, label: province });
+    for (const city of cities) {
+      rows.push({ type: 'city', key: `prov-city-${city}`, label: city, eventCount: 0 });
+    }
+  }
+
+  // 2. Direct city matches from backend (deduplicate vs province-expanded cities)
+  const alreadyAdded = new Set(rows.filter(r => r.type === 'city').map(r => r.label.toLowerCase()));
+  for (const c of backendCities) {
+    if (!alreadyAdded.has(c.city.toLowerCase())) {
+      rows.push({ type: 'city', key: `city-${c.city}`, label: c.city, eventCount: Number(c.event_count ?? 0) });
+    }
+  }
+
+  return rows;
+}
+
 // ─── Main FilterModal ─────────────────────────────────────────────────────────
 
 export default function FilterModal({ visible, onClose, onApply, initialParams }: FilterModalProps) {
 
+  const insets = useSafeAreaInsets();
+
   const [screen, setScreen] = useState<Screen>('filter');
 
-  const [selectedCity,   setSelectedCity]   = useState<string | null>(initialParams?.city ?? null);
+  const [selectedCity,     setSelectedCity]     = useState<string | null>(initialParams?.city     ?? null);
+  const [selectedProvince, setSelectedProvince] = useState<string | null>(initialParams?.province ?? null);
   const [nearMeCoords,   setNearMeCoords]   = useState<{ lat: number; lng: number } | undefined>(
     initialParams?.lat != null ? { lat: initialParams.lat!, lng: initialParams.lng! } : undefined,
   );
@@ -239,6 +294,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const [cities,      setCities]      = useState<CityResult[]>([]);
   const [cityLoading, setCityLoading] = useState(false);
   const [locLoading,  setLocLoading]  = useState(false);
+  const [locInputFocused, setLocInputFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -253,12 +309,12 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
     if (!visible) setTimeout(() => setScreen('filter'), 300);
   }, [visible]);
 
-  // On mount of location screen: clear + load full list immediately
+  // On mount of location screen: clear state, focus input — don't pre-load city list
   useEffect(() => {
     if (screen !== 'location') return;
     setQuery('');
     setCities([]);
-    loadCities('');
+    setLocInputFocused(false);
     setTimeout(() => inputRef.current?.focus(), 60);
   }, [screen]);
 
@@ -282,16 +338,24 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   function handleQueryChange(text: string) {
     setQuery(text);
     if (debounce.current) clearTimeout(debounce.current);
-    // Debounce typed searches; clear immediately restores full list
-    debounce.current = setTimeout(() => loadCities(text), text.trim() ? 280 : 0);
+    if (!text.trim()) { setCities([]); return; }
+    debounce.current = setTimeout(() => loadCities(text), 280);
   }
 
   function handleCitySelect(city: string) {
     setSelectedCity(city);
+    setSelectedProvince(null);
     setNearMeCoords(undefined);
     if (!previousCities.includes(city)) {
       setPreviousCities(prev => [city, ...prev].slice(0, 5));
     }
+    setScreen('filter');
+  }
+
+  function handleProvinceSelect(province: string) {
+    setSelectedProvince(province);
+    setSelectedCity(null);
+    setNearMeCoords(undefined);
     setScreen('filter');
   }
 
@@ -336,14 +400,15 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
   function handleDone() {
     const params: FilterParams = { date: datePreset };
-    if (selectedCity)      params.city = selectedCity;
-    else if (nearMeCoords) { params.lat = nearMeCoords.lat; params.lng = nearMeCoords.lng; params.radius_km = 50; }
+    if (selectedCity)        params.city     = selectedCity;
+    else if (selectedProvince) params.province = selectedProvince;
+    else if (nearMeCoords)   { params.lat = nearMeCoords.lat; params.lng = nearMeCoords.lng; params.radius_km = 50; }
     if (datePreset === 'custom' && dateFrom && dateTo) { params.date_from = dateFrom; params.date_to = dateTo; }
     onApply(params);
   }
 
-  const locationIsSet = !!selectedCity || !!nearMeCoords;
-  const locationLabel = selectedCity ?? (nearMeCoords ? 'Near me' : 'Near me');
+  const locationIsSet = !!selectedCity || !!selectedProvince || !!nearMeCoords;
+  const locationLabel = selectedCity ?? selectedProvince ?? (nearMeCoords ? 'Near me' : 'Near me');
   const customBtnLabel =
     datePreset === 'custom' && dateFrom && dateTo
       ? formatDateRangeLabel(dateFrom, dateTo)
@@ -408,83 +473,115 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
       {/* ══════════ LOCATION SCREEN ══════════ */}
       {screen === 'location' && (
-        <SafeAreaView style={s.fullScreen} edges={['top']}>
+        <View style={[s.fullScreen, { paddingTop: insets.top }]}>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
+            {/* ── Search bar — matches search tab design ── */}
             <View style={s.locTopBar}>
-              <View style={s.locSearchBox}>
-                <Text style={s.locSearchIcon}>🔍</Text>
+              <View style={[s.locSearchBox, locInputFocused && s.locSearchBoxFocused]}>
+                <Ionicons name="search" size={17} color="rgba(10,10,10,0.45)" style={{ marginRight: 8 }} />
                 <TextInput
                   ref={inputRef}
                   value={query}
                   onChangeText={handleQueryChange}
-                  placeholder="Search by city"
+                  onFocus={() => setLocInputFocused(true)}
+                  onBlur={() => setLocInputFocused(false)}
+                  placeholder="Search by city or province…"
                   placeholderTextColor="rgba(10,10,10,0.38)"
                   style={s.locSearchInput}
                   returnKeyType="search"
                   onSubmitEditing={Keyboard.dismiss}
-                  clearButtonMode="while-editing"
+                  autoCorrect={false}
+                  autoCapitalize="words"
                 />
+                {query.length > 0 && (
+                  <TouchableOpacity onPress={() => { setQuery(''); setCities([]); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={16} color="rgba(10,10,10,0.35)" />
+                  </TouchableOpacity>
+                )}
               </View>
-              <TouchableOpacity onPress={() => { Keyboard.dismiss(); setScreen('filter'); }} style={s.locCancelBtn} activeOpacity={0.7}>
-                <Text style={s.locCancelText}>Cancel</Text>
-              </TouchableOpacity>
+              {/* Cancel only appears while input is focused */}
+              {locInputFocused && (
+                <TouchableOpacity
+                  onPress={() => { Keyboard.dismiss(); setLocInputFocused(false); setScreen('filter'); }}
+                  style={s.locCancelBtn}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.locCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <View style={s.hairline} />
 
+            {/* ── Results ── */}
             {cityLoading ? (
-              <ActivityIndicator size="small" color="#0a0a0a" style={{ marginTop: 36 }} />
+              <ActivityIndicator size="small" color="#ff3c6e" style={{ marginTop: 36 }} />
             ) : (
               <FlatList
-                data={cities}
-                keyExtractor={c => c.city}
+                data={buildLocationResults(query.trim(), cities)}
+                keyExtractor={r => r.key}
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={{ paddingHorizontal: 24 }}
-                ListHeaderComponent={
-                  !query.trim() && previousCities.length > 0 ? (
-                    <>
-                      <Text style={s.locSectionLabel}>Previous Locations</Text>
-                      {previousCities.map(city => (
-                        <TouchableOpacity key={`prev-${city}`} onPress={() => handleCitySelect(city)} style={s.locRow} activeOpacity={0.7}>
-                          <Text style={[s.locRowText, selectedCity === city && { fontWeight: '700' }]}>{city}</Text>
-                          <Text style={s.locRowChevron}>›</Text>
-                        </TouchableOpacity>
-                      ))}
-                      {cities.length > 0 && <Text style={s.locSectionLabel}>All Cities</Text>}
-                    </>
-                  ) : null
-                }
-                renderItem={({ item }) => (
-                  <TouchableOpacity onPress={() => handleCitySelect(item.city)} style={s.locRow} activeOpacity={0.7}>
-                    <Text style={[s.locRowText, selectedCity === item.city && { fontWeight: '700' }]}>{item.city}</Text>
-                    {item.event_count > 0 && <Text style={s.locRowCount}>{item.event_count} events</Text>}
-                    <Text style={s.locRowChevron}>›</Text>
-                  </TouchableOpacity>
-                )}
+                contentContainerStyle={s.locListContent}
+                renderItem={({ item }) => {
+                  if (item.type === 'province') {
+                    return (
+                      <TouchableOpacity
+                        onPress={() => handleProvinceSelect(item.label)}
+                        style={s.locRow}
+                        activeOpacity={0.7}
+                      >
+                        <View style={s.locRowLeft}>
+                          <Ionicons name="map-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
+                          <Text style={[s.locRowText, s.locProvinceRowText, selectedProvince === item.label && s.locRowTextSelected]}>
+                            {item.label}
+                          </Text>
+                        </View>
+                        <Text style={s.locProvinceTag}>Province</Text>
+                      </TouchableOpacity>
+                    );
+                  }
+                  return (
+                    <TouchableOpacity onPress={() => handleCitySelect(item.label)} style={s.locRow} activeOpacity={0.7}>
+                      <View style={s.locRowLeft}>
+                        <Ionicons name="location-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
+                        <Text style={[s.locRowText, selectedCity === item.label && s.locRowTextSelected]}>
+                          {item.label}
+                        </Text>
+                      </View>
+                      {item.eventCount > 0 && (
+                        <Text style={s.locRowCount}>{item.eventCount} events</Text>
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
                 ListEmptyComponent={
-                  <Text style={s.locEmpty}>
-                    {query.trim() ? `No results for "${query}"` : 'No cities found — check your connection'}
-                  </Text>
+                  query.trim() ? (
+                    <Text style={s.locEmpty}>No results for "{query}"</Text>
+                  ) : (
+                    <Text style={s.locEmpty}>Start typing a city or province…</Text>
+                  )
                 }
+                ItemSeparatorComponent={() => <View style={s.locDivider} />}
               />
             )}
 
+            {/* ── Use Current Location ── */}
             <View>
               <View style={s.hairline} />
               <TouchableOpacity onPress={handleNearMe} style={s.currentLocBtn} activeOpacity={0.7}>
                 {locLoading
                   ? <ActivityIndicator size="small" color="#0a0a0a" style={{ marginRight: 8 }} />
-                  : <Text style={s.currentLocArrow}>➤</Text>}
+                  : <Ionicons name="navigate" size={16} color="#0a0a0a" style={{ marginRight: 6 }} />}
                 <Text style={s.currentLocText}>Use Current Location</Text>
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
-        </SafeAreaView>
+        </View>
       )}
 
       {/* ══════════ CALENDAR SCREEN ══════════ */}
       {screen === 'calendar' && (
-        <SafeAreaView style={s.fullScreen} edges={['top']}>
+        <View style={[s.fullScreen, { paddingTop: insets.top }]}>
           <View style={s.calHeader}>
             <TouchableOpacity style={[s.calHeaderCol, calStep === 'from' && s.calHeaderColActive]} onPress={() => setCalStep('from')} activeOpacity={0.7}>
               <Text style={s.calHeaderLabel}>FROM</Text>
@@ -520,7 +617,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
               <Text style={s.calApplyText}>Apply</Text>
             </TouchableOpacity>
           </View>
-        </SafeAreaView>
+        </View>
       )}
     </Modal>
   );
@@ -555,19 +652,22 @@ const s = StyleSheet.create({
   fullScreen:          { flex: 1, backgroundColor: '#fff' },
   hairline:            { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.1)' },
   locTopBar:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, gap: 10 },
-  locSearchBox:        { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,10,10,0.06)', borderRadius: 14, paddingHorizontal: 14, height: 46 },
-  locSearchIcon:       { fontSize: 15, marginRight: 8 },
-  locSearchInput:      { flex: 1, fontSize: 16, color: '#0a0a0a' },
+  locSearchBox:        { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,10,10,0.06)', borderRadius: 14, paddingHorizontal: 14, height: 46, borderWidth: 1.5, borderColor: 'transparent' },
+  locSearchBoxFocused: { borderColor: '#ff3c6e', backgroundColor: '#fff' },
+  locSearchInput:      { flex: 1, fontSize: 15, color: '#0a0a0a', fontWeight: '400' },
   locCancelBtn:        { paddingLeft: 4, paddingVertical: 8 },
-  locCancelText:       { fontSize: 17, color: '#0a0a0a' },
-  locSectionLabel:     { fontSize: 17, fontWeight: '800', color: '#0a0a0a', marginTop: 24, marginBottom: 4 },
-  locRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.07)' },
+  locCancelText:       { fontSize: 16, color: '#ff3c6e', fontWeight: '600' },
+  locListContent:      { paddingHorizontal: 20, paddingBottom: 40 },
+  locRow:              { flexDirection: 'row', alignItems: 'center', paddingVertical: 15 },
+  locRowLeft:          { flex: 1, flexDirection: 'row', alignItems: 'center' },
   locRowText:          { flex: 1, fontSize: 16, fontWeight: '400', color: '#0a0a0a' },
-  locRowCount:         { fontSize: 13, color: 'rgba(10,10,10,0.4)', marginRight: 8 },
-  locRowChevron:       { fontSize: 20, color: 'rgba(10,10,10,0.25)' },
-  locEmpty:            { textAlign: 'center', color: 'rgba(10,10,10,0.35)', fontSize: 14, marginTop: 40, lineHeight: 22 },
+  locRowTextSelected:  { fontWeight: '700', color: '#ff3c6e' },
+  locProvinceRowText:  { fontWeight: '600' },
+  locProvinceTag:      { fontSize: 11, fontWeight: '700', color: 'rgba(10,10,10,0.35)', letterSpacing: 0.8, textTransform: 'uppercase', marginLeft: 8 },
+  locRowCount:         { fontSize: 12, color: 'rgba(10,10,10,0.35)', marginLeft: 8 },
+  locDivider:          { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(10,10,10,0.07)', marginLeft: 46 },
+  locEmpty:            { textAlign: 'center', color: 'rgba(10,10,10,0.35)', fontSize: 14, marginTop: 48, lineHeight: 22 },
   currentLocBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 8 },
-  currentLocArrow:     { fontSize: 14, color: '#0a0a0a', transform: [{ rotate: '-45deg' }] },
   currentLocText:      { fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
   calHeader:           { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.12)' },
   calHeaderCol:        { flex: 1, paddingVertical: 16, paddingHorizontal: 24 },
@@ -589,10 +689,11 @@ const s = StyleSheet.create({
 
 export function buildFilterQueryString(params: FilterParams): string {
   const qs = new URLSearchParams();
-  if (params.city)         qs.set('city',      params.city);
-  if (params.lat  != null) qs.set('lat',       String(params.lat));
-  if (params.lng  != null) qs.set('lng',       String(params.lng));
-  if (params.radius_km)    qs.set('radius_km', String(params.radius_km));
+  if (params.city)         qs.set('city',       params.city);
+  if (params.province)     qs.set('province',   params.province);
+  if (params.lat  != null) qs.set('lat',        String(params.lat));
+  if (params.lng  != null) qs.set('lng',        String(params.lng));
+  if (params.radius_km)    qs.set('radius_km',  String(params.radius_km));
   if (params.date && params.date !== 'any') qs.set('date', params.date);
   if (params.date === 'custom' && params.date_from) qs.set('date_from', params.date_from);
   if (params.date === 'custom' && params.date_to)   qs.set('date_to',   params.date_to);

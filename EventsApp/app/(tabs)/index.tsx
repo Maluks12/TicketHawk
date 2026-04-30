@@ -272,7 +272,9 @@ export default function Index() {
 
   // ── Location / date label for header ────────────────────────────────────
   const locationLabel =
-    filterParams.city ?? (filterParams.lat ? 'Near me' : 'Near me');
+    filterParams.city     ??
+    filterParams.province ??
+    (filterParams.lat ? 'Near me' : 'Near me');
 
   const dateLabelText =
     filterParams.date === 'any'      ? 'All dates'    :
