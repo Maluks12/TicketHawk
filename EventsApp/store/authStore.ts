@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
-import { api } from '../lib/api';
+import { authLogin, authRegister, authLogout, getMe, type AuthUser, type RegisterDTO } from '../lib/api';
+
 interface AuthState {
-  user: { id: string; email: string; role: string; first_name?: string } | null;
+  user: AuthUser | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (dto: RegisterDTO) => Promise<void>;
@@ -10,10 +11,14 @@ interface AuthState {
   loadUser: () => Promise<void>;
 }
 
-interface RegisterDTO {
-  email: string; password: string;
-  first_name: string; last_name: string;
-  date_of_birth: string; phone_number: string;
+async function saveTokens(access: string, refresh: string) {
+  await SecureStore.setItemAsync('access_token', access);
+  await SecureStore.setItemAsync('refresh_token', refresh);
+}
+
+async function clearTokens() {
+  await SecureStore.deleteItemAsync('access_token');
+  await SecureStore.deleteItemAsync('refresh_token');
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -22,36 +27,53 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (email, password) => {
     set({ isLoading: true });
-    const { data } = await api.post('/auth/login', { email, password });
-    await SecureStore.setItemAsync('access_token',  data.access_token);
-    await SecureStore.setItemAsync('refresh_token', data.refresh_token);
-    set({ user: data.user, isLoading: false });
+    try {
+      // 1. Get tokens
+      const { data: tokens } = await authLogin(email, password);
+      await saveTokens(tokens.access_token, tokens.refresh_token);
+
+      // 2. Fetch profile (interceptor will attach the token automatically)
+      const { data: user } = await getMe();
+      set({ user, isLoading: false });
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
   register: async (dto) => {
     set({ isLoading: true });
-    const { data } = await api.post('/auth/register', dto);
-    await SecureStore.setItemAsync('access_token',  data.access_token);
-    await SecureStore.setItemAsync('refresh_token', data.refresh_token);
-    set({ user: data.user, isLoading: false });
+    try {
+      // 1. Create account
+      await authRegister(dto);
+
+      // 2. Log in to get tokens
+      const { data: tokens } = await authLogin(dto.email, dto.password);
+      await saveTokens(tokens.access_token, tokens.refresh_token);
+
+      // 3. Fetch full profile
+      const { data: user } = await getMe();
+      set({ user, isLoading: false });
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
   },
 
   logout: async () => {
-    await api.post('/auth/logout');
-    await SecureStore.deleteItemAsync('access_token');
-    await SecureStore.deleteItemAsync('refresh_token');
+    try { await authLogout(); } catch { /* clear locally regardless */ }
+    await clearTokens();
     set({ user: null });
   },
+
   loadUser: async () => {
     const token = await SecureStore.getItemAsync('access_token');
     if (!token) return;
     try {
-      const { data } = await api.get('/user/me');
-      set({ user: data });
+      const { data: user } = await getMe();
+      set({ user });
     } catch {
-      // Token is invalid or expired — clear it
-      await SecureStore.deleteItemAsync('access_token');
-      await SecureStore.deleteItemAsync('refresh_token');
+      await clearTokens();
       set({ user: null });
     }
   },

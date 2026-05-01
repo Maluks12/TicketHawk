@@ -26,8 +26,12 @@ import (
 )
 
 type RegisterRequest struct {
-	Email    string `json:"email" binding:"required,email,max=255"`
-	Password string `json:"password" binding:"required,min=8,max=128"`
+	Email       string  `json:"email"        binding:"required,email,max=255"`
+	Password    string  `json:"password"     binding:"required,min=8,max=128"`
+	FirstName   string  `json:"first_name"   binding:"required,max=100"`
+	LastName    string  `json:"last_name"    binding:"required,max=100"`
+	PhoneNumber string  `json:"phone_number" binding:"required,max=20"`
+	DateOfBirth *string `json:"date_of_birth"`
 }
 
 type LoginRequest struct {
@@ -54,33 +58,29 @@ type ResetPasswordRequest struct {
 
 func CreateUserhandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var registerRequest RegisterRequest
+		var req RegisterRequest
 
-		if err := c.ShouldBindJSON(&registerRequest); err != nil {
+		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "details": utils.FormatValidationErrors(err)})
 			return
 		}
 
-		// if len(registerRequest.Password) < 8 {
-		// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 8 characters"})
-		// 	return
-		// }
-
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(registerRequest.Password), bcrypt.DefaultCost)
-
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
 			return
 		}
 
 		user := &models.User{
-			Email:    registerRequest.Email,
-			Password: string(hashedPassword),
-			Role:     models.RoleAttendee,
+			Email:       req.Email,
+			Password:    string(hashedPassword),
+			Role:        models.RoleAttendee,
+			FirstName:   &req.FirstName,
+			LastName:    &req.LastName,
+			PhoneNumber: &req.PhoneNumber,
 		}
 
 		createdUser, err := repository.CreateUser(pool, user)
-
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Email already registered"})
@@ -89,7 +89,15 @@ func CreateUserhandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
 			return
 		}
-		c.JSON(http.StatusCreated, createdUser)
+
+		// Return the created user (frontend will call login separately to get tokens)
+		c.JSON(http.StatusCreated, gin.H{
+			"id":         createdUser.ID,
+			"email":      createdUser.Email,
+			"first_name": req.FirstName,
+			"last_name":  req.LastName,
+			"role":       createdUser.Role,
+		})
 	}
 }
 
@@ -292,9 +300,9 @@ func RefreshTokenHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc
 
 
 		c.JSON(http.StatusOK, gin.H{
-			"access_tokens": accessToken,
+			"access_token":  accessToken,
 			"refresh_token": rawRefresh,
-			"expires_in": 900,
+			"expires_in":    900,
 		})
 	}
 }

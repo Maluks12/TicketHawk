@@ -197,7 +197,7 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 			b.booking_status, b.payment_status, b.qr_code_url, b.tickets_sent,
 			b.attendee_first_name, b.attendee_last_name, b.attendee_email,
 			b.created_at, b.confirmed_at,
-			e.title, e.start_time
+			e.title, e.start_time, e.venue_name, e.city, e.address, e.cover_image_url
 		FROM bookings b
 		JOIN events e ON b.event_id = e.id
 		WHERE b.id = $1
@@ -213,7 +213,7 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 		&booking.BookingStatus, &booking.PaymentStatus, &booking.QRCodeURL, &booking.TicketsSent,
 		&booking.AttendeeFirstName, &booking.AttendeeLastName, &booking.AttendeeEmail,
 		&booking.CreatedAt, &booking.ConfirmedAt,
-		&event.Title, &event.StartTime,
+		&event.Title, &event.StartTime, &event.VenueName, &event.City, &event.Address, &event.CoverImageURL,
 	)
 
 	if err != nil {
@@ -291,7 +291,7 @@ func GetUserBookings(pool *pgxpool.Pool, userID string, limit int, cursor *utils
 			b.ticket_quantity, b.total_amount, b.currency,
 			b.booking_status, b.payment_status, b.qr_code_url,
 			b.created_at, b.confirmed_at,
-			e.title, e.start_time, e.venue_name, e.city
+			e.title, e.start_time, e.venue_name, e.city, e.cover_image_url
 		FROM bookings b
 		JOIN events e ON b.event_id = e.id
 		%s
@@ -327,6 +327,7 @@ func GetUserBookings(pool *pgxpool.Pool, userID string, limit int, cursor *utils
 			&event.StartTime,
 			&event.VenueName,
 			&event.City,
+			&event.CoverImageURL,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to scan booking: %w", err)

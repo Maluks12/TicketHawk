@@ -7,11 +7,13 @@ import {
   StatusBar,
   Share,
   Linking,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { useEventStore } from '../../store/eventStore';
+import { useMockBookingStore } from '../../store/mockBookingStore';
 import { s, sheet } from '../../styles/eventDetail';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -42,6 +44,7 @@ export default function EventDetail() {
   const router = useRouter();
   const event  = useEventStore((state) => state.selectedEvent);
   const [expanded, setExpanded] = useState(false);
+  const addBooking = useMockBookingStore((s) => s.addBooking);
 
   if (!event) {
     return (
@@ -71,6 +74,18 @@ export default function EventDetail() {
   // Teams shown for sports events, performers for everything else
   const teams:      string[] = ev.teams      ?? [];
   const performers: string[] = ev.performers ?? [];
+
+  const handleGetTickets = () => {
+    addBooking(event as any);
+    Alert.alert(
+      '🎟 Ticket Added!',
+      `Your ticket for ${event.title} has been added to your wallet.`,
+      [
+        { text: 'View Tickets', onPress: () => router.push('/(tabs)/tickets') },
+        { text: 'Stay Here', style: 'cancel' },
+      ]
+    );
+  };
 
   const handleShare = async () => {
     try {
@@ -199,7 +214,7 @@ export default function EventDetail() {
                 <Text className={s.btnSoldOutText}>🎟 SOLD OUT</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity className={s.btnPrimary}>
+              <TouchableOpacity className={s.btnPrimary} onPress={handleGetTickets}>
                 <Text className={s.btnPrimaryText}>
                   🎟 GET TICKETS · {formatPrice(event.price, event.currency)}
                 </Text>

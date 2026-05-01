@@ -19,12 +19,15 @@ func CreateUser(pool *pgxpool.Pool, user *models.User) (*models.User, error) {
 	defer cancel()
 
 	query := `
-		INSERT INTO users (email, password, role)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (email, password, role, first_name, last_name, phone_number)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, email, created_at
 	`
 
-	err := pool.QueryRow(ctx, query, user.Email, user.Password, user.Role).Scan(
+	err := pool.QueryRow(ctx, query,
+		user.Email, user.Password, user.Role,
+		user.FirstName, user.LastName, user.PhoneNumber,
+	).Scan(
 		&user.ID,
 		&user.Email,
 		&user.CreatedAt,

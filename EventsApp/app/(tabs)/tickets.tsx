@@ -17,7 +17,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../../lib/api';
+import { useMockBookingStore } from '../../store/mockBookingStore';
 import { useAuthStore } from '../../store/authStore';
+import { router, useRouter } from 'expo-router';
 
 const CARD_HEIGHT = 200;
 const CARD_PEEK = 72;
@@ -223,7 +225,7 @@ const GuestLookup = () => {
         {result ? (
           <View style={{ gap: 20 }}>
             <Text style={styles.sectionLabel}>YOUR TICKET</Text>
-            <TicketCard booking={result} index={0} onPress={() => {}} />
+            <TicketCard booking={result} index={0} onPress={() => router.push(`/booking/${result.id}`)} />
             <TouchableOpacity style={styles.lookupAgainBtn} onPress={reset}>
               <Ionicons name="search-outline" size={15} color="rgba(255,255,255,0.6)" />
               <Text style={styles.lookupAgainText}>Look up another ticket</Text>
@@ -302,6 +304,7 @@ const AuthTickets = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mockBookings = useMockBookingStore((s) => s.bookings) as unknown as Booking[];
 
   const fetchBookings = useCallback(async () => {
     try {
@@ -318,7 +321,11 @@ const AuthTickets = () => {
         if (!aUp && bUp) return 1;
         return aUp ? aT - bT : bT - aT;
       });
-      setBookings(sorted);
+      // Merge mock (local) bookings with real API bookings, dedup by booking_number
+      const mockSnap = useMockBookingStore.getState().bookings as unknown as Booking[];
+      const allIds = new Set(sorted.map(b => b.booking_number));
+      const merged = [...mockSnap.filter(m => !allIds.has(m.booking_number)), ...sorted];
+      setBookings(merged);
     } catch (e: any) {
       setError(e?.response?.data?.error ?? 'Failed to load tickets');
     }
@@ -338,8 +345,14 @@ const AuthTickets = () => {
 
   useEffect(() => { load(); }, [load]);
 
-  const upcoming = bookings.filter(isUpcoming);
-  const past = bookings.filter(b => !isUpcoming(b));
+  // Merge any mock bookings not already in real API results
+  const allBookingIds = new Set(bookings.map(b => b.booking_number));
+  const allBookings = [
+    ...(mockBookings as Booking[]).filter(m => !allBookingIds.has(m.booking_number)),
+    ...bookings,
+  ];
+  const upcoming = allBookings.filter(isUpcoming);
+  const past = allBookings.filter(b => !isUpcoming(b));
 
   if (loading) {
     return <View style={styles.centred}><ActivityIndicator color="rgba(255,255,255,0.6)" /></View>;
@@ -382,7 +395,7 @@ const AuthTickets = () => {
           <View>
             {upcoming.map((b, i) => (
               <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-                <TicketCard booking={b} index={i} onPress={() => {}} />
+                <TicketCard booking={b} index={i} onPress={() => router.push(`/booking/${b.id}`)} />
               </View>
             ))}
           </View>
@@ -394,13 +407,70 @@ const AuthTickets = () => {
           <View>
             {past.map((b, i) => (
               <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-                <TicketCard booking={b} index={upcoming.length + i} onPress={() => {}} />
+                <TicketCard booking={b} index={upcoming.length + i} onPress={() => router.push(`/booking/${b.id}`)} />
               </View>
             ))}
           </View>
         </View>
       )}
     </ScrollView>
+  );
+};
+
+// ─── Guest + Mock View ────────────────────────────────────────────────────────
+
+const GuestOrMockView = () => {
+  const insets = useSafeAreaInsets();
+  const mockBookings = useMockBookingStore((s) => s.bookings) as unknown as Booking[];
+  const router = useRouter();
+
+  const upcoming = mockBookings.filter(isUpcoming);
+  const past = mockBookings.filter(b => !isUpcoming(b));
+
+  if (mockBookings.length === 0) {
+    return <GuestLookup />;
+  }
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 40 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {upcoming.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>UPCOMING</Text>
+            <View>
+              {upcoming.map((b, i) => (
+                <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
+                  <TicketCard booking={b} index={i} onPress={() => router.push(`/booking/${b.id}`)} />
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+        {past.length > 0 && (
+          <View style={[styles.section, upcoming.length > 0 && { marginTop: 36 }]}>
+            <Text style={styles.sectionLabel}>PAST</Text>
+            <View>
+              {past.map((b, i) => (
+                <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
+                  <TicketCard booking={b} index={upcoming.length + i} onPress={() => router.push(`/booking/${b.id}`)} />
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+        <TouchableOpacity
+          style={styles.signInPrompt}
+          onPress={() => router.push('/auth/login')}
+        >
+          <Text style={styles.signInPromptText}>
+            Sign in to sync tickets across devices →
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
   );
 };
 
@@ -415,7 +485,7 @@ export default function TicketsScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <Text style={styles.headerTitle}>My Tickets</Text>
       </View>
-      {user ? <AuthTickets /> : <GuestLookup />}
+      {user ? <AuthTickets /> : <GuestOrMockView />}
     </View>
   );
 }
@@ -522,4 +592,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   lookupAgainText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
+  signInPrompt: {
+    marginTop: 32,
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  signInPromptText: { color: 'rgba(255,255,255,0.35)', fontSize: 13, fontWeight: '500' },
 });
