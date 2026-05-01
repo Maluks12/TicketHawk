@@ -9,6 +9,13 @@ export default function RootLayout() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="event/[id]" />
       <Stack.Screen
+        name="event/purchase"
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+        }}
+      />
+      <Stack.Screen
         name="auth/login"
         options={{
           presentation: 'modal',

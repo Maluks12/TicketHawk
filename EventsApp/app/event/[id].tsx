@@ -7,13 +7,11 @@ import {
   StatusBar,
   Share,
   Linking,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import { useEventStore } from '../../store/eventStore';
-import { useMockBookingStore } from '../../store/mockBookingStore';
 import { s, sheet } from '../../styles/eventDetail';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -44,7 +42,6 @@ export default function EventDetail() {
   const router = useRouter();
   const event  = useEventStore((state) => state.selectedEvent);
   const [expanded, setExpanded] = useState(false);
-  const addBooking = useMockBookingStore((s) => s.addBooking);
 
   if (!event) {
     return (
@@ -76,15 +73,7 @@ export default function EventDetail() {
   const performers: string[] = ev.performers ?? [];
 
   const handleGetTickets = () => {
-    addBooking(event as any);
-    Alert.alert(
-      '🎟 Ticket Added!',
-      `Your ticket for ${event.title} has been added to your wallet.`,
-      [
-        { text: 'View Tickets', onPress: () => router.push('/(tabs)/tickets') },
-        { text: 'Stay Here', style: 'cancel' },
-      ]
-    );
+    router.push('/event/purchase');
   };
 
   const handleShare = async () => {
