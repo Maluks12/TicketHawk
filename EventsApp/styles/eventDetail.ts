@@ -52,8 +52,8 @@ export const s = {
   btnSoldOut:        'w-full bg-black/10 py-5 rounded-xl items-center mb-3',
   btnSoldOutText:    'text-black/30 text-[18px] font-extrabold tracking-[0.07em] uppercase',
   actionRow:         'flex-row gap-3',
-  btnOutline:        'flex-1 border border-[#DDDDDD] bg-white py-4 rounded-xl flex-row items-center justify-center gap-1.5',
-  btnOutlineText:    'text-[#111111] text-[12px] font-bold tracking-[0.1em] uppercase',
+  btnOutline:        'flex-1 border border-[#1c2e61] bg-[#1c2e61] py-4 rounded-xl flex-row items-center justify-center gap-1.5',
+  btnOutlineText:    'text-white text-[12px] font-bold tracking-[0.1em] uppercase',
   btnOutlineIcon:    'text-[16px]',
 
   // ── Sections ─────────────────────────────────────────────────────────────────
@@ -85,10 +85,10 @@ export const s = {
   locationName:            'text-[16px] font-bold text-[#111111] mb-0.5',
   locationAddr:            'text-[13px] text-[#888888]',
   locationBtnRow:          'flex-col gap-2',
-  locationBtnFilled:       'bg-[#111111] px-4 py-2.5 rounded-lg items-center',
+  locationBtnFilled:       'bg-[#ff2d55] px-4 py-2.5 rounded-lg items-center',
   locationBtnFilledText:   'text-[11px] font-bold text-white tracking-[0.1em] uppercase',
-  locationBtnOutline:      'bg-white border border-[#CCCCCC] px-4 py-2.5 rounded-lg items-center',
-  locationBtnOutlineText:  'text-[11px] font-bold text-[#111111] tracking-[0.1em] uppercase',
+  locationBtnOutline: 'bg-[#1c2e61] border border-[#1c2e61] px-4 py-2.5 rounded-lg items-center',
+  locationBtnOutlineText: 'text-[11px] font-bold text-white tracking-[0.1em] uppercase',
 
   // ── Participants ──────────────────────────────────────────────────────────────
   participantRow:        'flex-row items-center gap-3.5 py-3.5 border-b border-[#EEEEEE]',

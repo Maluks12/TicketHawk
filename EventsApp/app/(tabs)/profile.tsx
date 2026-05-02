@@ -1,10 +1,11 @@
 import React, { useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Linking, Switch } from 'react-native';import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/profile';
+import { useThemeStore, ThemeMode } from '../../store/themeStore';
+import { useAppTheme } from '../../theme/colors';
 
 const APP_VERSION = '1.0.0';
 
@@ -18,25 +19,24 @@ interface RowProps {
   onPress?: () => void;
   destructive?: boolean;
   hideChevron?: boolean;
+  colors?: { text: string; subText: string };
 }
 
-const Row = ({ icon, label, value, valueColor, onPress, destructive, hideChevron }: RowProps) => (
-  <TouchableOpacity className={s.row} onPress={onPress} activeOpacity={onPress ? 0.65 : 1} disabled={!onPress}>
+const Row = ({ icon, label, value, valueColor, onPress, destructive, hideChevron, colors }: RowProps) => (  <TouchableOpacity className={s.row} onPress={onPress} activeOpacity={onPress ? 0.65 : 1} disabled={!onPress}>
     <View className={s.rowLeft}>
       <View className={s.rowIconWrap}>{icon}</View>
-      <Text className={`${s.rowLabel}${destructive ? ` ${s.rowLabelDestructive}` : ''}`}>{label}</Text>
+      <Text className={s.rowLabel} style={colors && !destructive ? { color: colors.text } : undefined}>{label}</Text>
     </View>
     <View className={s.rowRight}>
-      {value ? <Text className={s.rowValue} style={valueColor ? { color: valueColor } : undefined}>{value}</Text> : null}
-      {!hideChevron && onPress && <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.25)" />}
+      {value ? <Text className={s.rowValue} style={valueColor ? { color: valueColor } : colors ? { color: colors.subText } : undefined}>{value}</Text> : null}
+      {!hideChevron && onPress && <Feather name="chevron-right" size={16} color={colors ? colors.subText : 'rgba(255,255,255,0.25)'} />}
     </View>
   </TouchableOpacity>
 );
 
 // ─── Section ──────────────────────────────────────────────────────────────────
 
-const Section = ({ title, children }: { title?: string; children: React.ReactNode }) => (
-  <View className={s.section}>
+const Section = ({ title, children, colors }: { title?: string; children: React.ReactNode; colors?: { subText: string; sectionCardBg: string; dividerColor: string } }) => (  <View className={s.section}>
     {title && <Text className={s.sectionTitle}>{title}</Text>}
     <View style={sheet.sectionCard}>{children}</View>
   </View>
@@ -65,6 +65,14 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const { mode, setMode } = useThemeStore();
+  const { isDark, colors } = useAppTheme();
+
+  const themeModeLabel: Record<ThemeMode, string> = { auto: 'Auto', light: 'Light', dark: 'Dark' };
+  const cycleTheme = () => {
+    const next: Record<ThemeMode, ThemeMode> = { auto: 'light', light: 'dark', dark: 'auto' };
+    setMode(next[mode]);
+  };
 
   const handleLogout = useCallback(() => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
@@ -86,13 +94,23 @@ export default function ProfileScreen() {
           <Section>
             <TouchableOpacity className={s.signInRow} activeOpacity={0.7} onPress={() => router.push('/auth/login' as any)}>
               <View className={s.signInAvatar}>
-                <Feather name="user" size={26} color="rgba(255,255,255,0.4)" />
+                <Feather name="user" size={26} color={colors.iconColor} />
               </View>
-              <View style={{ flex: 1 }}>
+             <View className={s.root} style={{ backgroundColor: colors.background }}>
+                <Text className={s.headerTitle} style={{ color: colors.text }}>Profile</Text>
                 <Text className={s.signInTitle}>Sign up or log in</Text>
                 <Text className={s.signInSub}>Access your tickets and bookings</Text>
               </View>
-              <Feather name="chevron-right" size={16} color="rgba(255,255,255,0.25)" />
+              <Section title="APPEARANCE" colors={colors}>
+                <Row
+                  icon={<Feather name="sun" size={16} color={colors.iconColor} />}
+                  label="Theme"
+                  value={themeModeLabel[mode]}
+                  onPress={cycleTheme}
+                  colors={colors}
+                />
+              </Section>
+              <Feather name="chevron-right" size={16} color={colors.iconColor} />
             </TouchableOpacity>
           </Section>
         )}
@@ -123,7 +141,7 @@ export default function ProfileScreen() {
           </Section>
         )}
 
-        <Text className={s.version}>v{APP_VERSION}</Text>
+        <Text className={s.version} style={{ color: colors.subText }}>v{APP_VERSION}</Text>
       </ScrollView>
     </View>
   );

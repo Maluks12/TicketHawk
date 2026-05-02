@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useState, useRef } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet, HERO_H } from '../../styles/eventDetail';
+import { useAppTheme } from '../../theme/colors';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,7 @@ export default function EventDetail() {
   const router = useRouter();
   const event  = useEventStore((state) => state.selectedEvent);
   const [expanded, setExpanded] = useState(false);
+  const { colors } = useAppTheme();
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -131,7 +133,7 @@ export default function EventDetail() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar barStyle="light-content" />
 
       {/* ── Nav overlay ─────────────────────────────────────────────── */}
@@ -208,7 +210,7 @@ export default function EventDetail() {
         </View>
 
         {/* ── Floating action card ─────────────────────────────────── */}
-        <View style={sheet.actionCard}>
+       <View style={[sheet.actionCard, { backgroundColor: colors.cardBg }]}>
           <MetaItem icon="📅" label="DATE"     value={formatDateShort(event.start_time)} />
           <MetaItem icon="🕐" label="TIME"     value={formatTime(event.start_time)} />
           <MetaItem icon="📍" label="VENUE"    value={`${event.venue_name}, ${event.city}`} />

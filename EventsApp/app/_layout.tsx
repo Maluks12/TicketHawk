@@ -1,9 +1,11 @@
 import '../global.css';
-
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
+import { useThemeStore } from '../store/themeStore';
 
 export default function RootLayout() {
+  const loadMode = useThemeStore((s) => s.loadMode);
+  useEffect(() => { loadMode(); }, []);
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />

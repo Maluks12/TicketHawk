@@ -17,6 +17,7 @@ import { getHomeSections, loadMoreSectionEvents, type Event, type HomeSection } 
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString,formatDateRangeLabel } from '../../components/FilterModal';
+import { useAppTheme } from '../../theme/colors';
 
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
@@ -170,6 +171,7 @@ const SectionRow = ({
 export default function Index() {
   const router = useRouter();
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
+  const { colors } = useAppTheme();
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const lastScrollY  = useRef(0);
@@ -298,10 +300,8 @@ export default function Index() {
   };
 
   return (
-    <View className={s.screen}>
-
-      <ScrollView
-        className={s.scroll}
+<View className={s.screen} style={{ backgroundColor: colors.background }}>
+<ScrollView className={s.scroll} style={{ backgroundColor: colors.background }}        
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
        onScroll={(e) => {
@@ -536,14 +536,14 @@ if (currentY <= 0) {
 
             {/* Animated Header */}
       <Animated.View
-        style={{ transform: [{ translateY: headerAnim }] }}
+        style={[{ transform: [{ translateY: headerAnim }], backgroundColor: colors.headerBg }]}
         className={s.locationHeader}
         onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
       >
         {/* Tapping the location/date row opens the filter sheet */}
         <TouchableOpacity onPress={() => setFilterOpen(true)}>
-          <Text className={s.locationCity}>{locationLabel}</Text>
-          <Text className={s.locationSub}>{dateLabelText}</Text>
+          <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
+          <Text className={s.locationSub} style={{ color: colors.subText }}>{dateLabelText}</Text>
         </TouchableOpacity>
         <TouchableOpacity className={s.menuBtn}>
           <Text className={s.menuIcon}>🛒</Text>
