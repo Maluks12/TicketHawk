@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   Dimensions,
 } from 'react-native';
 import type { TicketType } from '../lib/api';
@@ -38,342 +37,304 @@ export function detectVenueType(category: string, venueName?: string): VenueType
   return 'none';
 }
 
-// ─── Color tokens ─────────────────────────────────────────────────────────────
+// ─── Color Palette ────────────────────────────────────────────────────────────
 
-// tier 0 = cheapest (upper/gray), 1 = lower (navy), 2 = club (gold)
-const TIER_COLORS = [
-  { bg: '#c8cdd8', border: '#a8b0bf', text: '#4a5568' },   // upper
-  { bg: '#1a2e5e', border: '#0f1e3e', text: '#ffffff' },   // lower
-  { bg: '#b8820f', border: '#8a6200', text: '#ffffff' },   // club
-];
-const SEL = { bg: '#1d6cf5', border: '#1558d0', text: '#ffffff' };
+const C = {
+  upper:    { bg: '#9B8DC8', border: '#7A6AAD', text: '#fff' },
+  lower:    { bg: '#5A9E60', border: '#3D7A43', text: '#fff' },
+  club:     { bg: '#5B9BD5', border: '#3A7DBD', text: '#fff' },
+  access:   { bg: '#F0A030', border: '#C07B10', text: '#fff' },
+  unavail:  { bg: '#C0C4D0', border: '#A0A6BA', text: '#666' },
+  selected: { bg: '#1d6cf5', border: '#1558d0', text: '#fff' },
+};
 
-function tc(i: number) { return TIER_COLORS[Math.min(i, TIER_COLORS.length - 1)]; }
+// ─── Layout constants ─────────────────────────────────────────────────────────
 
-// ─── Geometry helpers ─────────────────────────────────────────────────────────
+const MAP_W = SW - 32;
 
-const MAP_W   = SW - 32;
-const MAP_H   = MAP_W * 0.82;   // slightly taller for a football oval
-const CX      = MAP_W / 2;
-const CY      = MAP_H / 2;
+// Band thicknesses
+const UH = Math.round(MAP_W * 0.108); // upper tier top/bottom row height
+const CH = Math.round(MAP_W * 0.088); // club tier top/bottom row height
+const LH = Math.round(MAP_W * 0.072); // lower tier top/bottom row height
 
-// Ellipse radii for each tier ring centre-line
-const RX_UPPER = MAP_W * 0.455;
-const RY_UPPER = MAP_H * 0.455;
+const MAP_H = Math.round(MAP_W * 0.82); // total map height
 
-const RX_CLUB  = MAP_W * 0.335;
-const RY_CLUB  = MAP_H * 0.335;
+// Side column widths
+const UW = Math.round(MAP_W * 0.112); // upper left/right col
+const CW = Math.round(MAP_W * 0.092); // club left/right col
+const LW = Math.round(MAP_W * 0.074); // lower left/right col
 
-const RX_LOWER = MAP_W * 0.225;
-const RY_LOWER = MAP_H * 0.255;
+// Pitch size (derived)
+const PW = MAP_W - 2 * (UW + CW + LW);
+const PH = MAP_H - 2 * (UH + CH + LH);
 
-// Pitch
-const RX_PITCH = MAP_W * 0.148;
-const RY_PITCH = MAP_H * 0.185;
+const GAP = 1.5;
 
-// Oval ring widths (for background layers)
-const BG_UPPER_W  = MAP_W;
-const BG_UPPER_H  = MAP_H;
-const BG_CLUB_W   = MAP_W * 0.76;
-const BG_CLUB_H   = MAP_H * 0.76;
-const BG_LOWER_W  = MAP_W * 0.558;
-const BG_LOWER_H  = MAP_H * 0.604;
-const BG_PITCH_W  = MAP_W * 0.355;
-const BG_PITCH_H  = MAP_H * 0.445;
+// ─── Section labels ───────────────────────────────────────────────────────────
 
-// Convert polar → absolute left/top for a section tile
-function pos(rx: number, ry: number, angleDeg: number) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return {
-    left: CX + rx * Math.cos(rad),
-    top:  CY + ry * Math.sin(rad),
-  };
-}
+const TOP_UPPER   = ['301','302','303','304','305','306','307'];
+const BOT_UPPER   = ['326','325','324','323','322','320','319'];
+const LEFT_UPPER  = ['331','330','329','328','327','326'];
+const RIGHT_UPPER = ['309','310','311','312','313','318'];
 
-// ─── Section definitions ──────────────────────────────────────────────────────
-// angle 0=right, -90=top, 90=bottom, 180/±180=left
+const TOP_CLUB    = ['201','202','203','204','205','206'];
+const BOT_CLUB    = ['221','223','224','225','226','227'];
+const LEFT_CLUB   = ['231','230','228','227'];
+const RIGHT_CLUB  = ['207','208','209','210'];
 
-// Upper tier — 20 sections spread around the full oval
-const UPPER_SECTIONS = [
-  { label:'301', angle:-155 },
-  { label:'302', angle:-135 },
-  { label:'301', angle:-115 },
-  { label:'302', angle:-90  },
-  { label:'302', angle:-65  },
-  { label:'301', angle:-45  },
-  { label:'301', angle:-25  },
-  { label:'303', angle:  0  },
-  { label:'304', angle: 25  },
-  { label:'304', angle: 45  },
-  { label:'305', angle: 65  },
-  { label:'306', angle: 90  },
-  { label:'307', angle:115  },
-  { label:'307', angle:135  },
-  { label:'302', angle:155  },
-  { label:'303', angle: 180 },
-];
+const TOP_LOWER   = ['101','102','103','104','105','106'];
+const BOT_LOWER   = ['118','117','116','115','114','112'];
+const LEFT_LOWER  = ['138','137','136'];
+const RIGHT_LOWER = ['108','109','111'];
 
-// Club level — 6 wide sections
-const CLUB_SECTIONS = [
-  { label:'CLUB\n201', angle:-90  },
-  { label:'CLUB\n201', angle:-30  },
-  { label:'CLUB\n201', angle: 30  },
-  { label:'CLUB\n202', angle: 90  },
-  { label:'CLUB\n202', angle:150  },
-  { label:'CLUB\n202', angle:-150 },
-];
-
-// Lower tier — 16 sections tightly around the pitch
-const LOWER_SECTIONS = [
-  { label:'101', angle:-155 },
-  { label:'102', angle:-130 },
-  { label:'103', angle:-105 },
-  { label:'104', angle:-80  },
-  { label:'105', angle:-55  },
-  { label:'106', angle:-30  },
-  { label:'107', angle:  0  },
-  { label:'108', angle: 30  },
-  { label:'105', angle: 55  },
-  { label:'104', angle: 80  },
-  { label:'103', angle:105  },
-  { label:'102', angle:130  },
-  { label:'101', angle:155  },
-  { label:'100', angle:180  },
-  { label:'109', angle:-180 },
-];
-
-// ─── Stadium Map ──────────────────────────────────────────────────────────────
+// ─── Stadium Map Component ────────────────────────────────────────────────────
 
 function StadiumMap({ ticketTypes, selectedTypeId, onSelectType }: Omit<SeatingMapProps, 'venueType'>) {
   const sorted = useMemo(() => [...ticketTypes].sort((a, b) => a.price - b.price), [ticketTypes]);
 
-  function ttFor(tierIdx: number): TicketType | null {
+  function ttFor(idx: number): TicketType | null {
     if (!sorted.length) return null;
-    if (tierIdx === 0) return sorted[0];
-    if (tierIdx === 2) return sorted[sorted.length - 1];
+    if (idx === 0) return sorted[0];
+    if (idx === 2) return sorted[sorted.length - 1];
     return sorted[Math.min(1, sorted.length - 1)];
   }
 
-  function isSel(tierIdx: number) { return ttFor(tierIdx)?.id === selectedTypeId; }
-  function press(tierIdx: number) { const tt = ttFor(tierIdx); if (tt) onSelectType(tt.id); }
+  function isSel(idx: number) { return ttFor(idx)?.id === selectedTypeId; }
+  function press(idx: number) { const tt = ttFor(idx); if (tt) onSelectType(tt.id); }
 
-  // Section tile style per tier
-  function tileStyle(tierIdx: number) {
-    const sel = isSel(tierIdx);
-    const c   = sel ? SEL : tc(tierIdx);
-    return {
-      backgroundColor: c.bg,
-      borderColor:     c.border,
-      borderWidth:     sel ? 1.5 : 1,
-    };
-  }
-  function textStyle(tierIdx: number) {
-    return { color: isSel(tierIdx) ? SEL.text : tc(tierIdx).text };
+  function cc(tier: number) {
+    if (isSel(tier)) return C.selected;
+    return [C.upper, C.lower, C.club][tier] ?? C.unavail;
   }
 
-  // Oval background helper
-  const ovalLayer = (w: number, h: number, color: string, borderColor: string) => ({
-    position: 'absolute' as const,
-    width:  w,
-    height: h,
-    left:   (MAP_W - w) / 2,
-    top:    (MAP_H - h) / 2,
-    borderRadius: h / 2,
-    backgroundColor: color,
-    borderWidth: 1,
-    borderColor,
-  });
+  // ── Sub-components ──────────────────────────────────────────────────────────
 
-  // Section tile sizes
-  const UT_W = 28, UT_H = 16;   // upper tile
-  const CT_W = 32, CT_H = 20;   // club tile
-  const LT_W = 24, LT_H = 14;   // lower tile
+  const Tile = ({ label, tier, style }: { label: string; tier: number; style?: object }) => {
+    const col = cc(tier);
+    const sel = isSel(tier);
+    return (
+      <TouchableOpacity
+        onPress={() => press(tier)}
+        activeOpacity={0.72}
+        style={[{
+          backgroundColor: col.bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 2,
+          borderWidth: sel ? 1.5 : 0.5,
+          borderColor: sel ? '#fff' : 'rgba(255,255,255,0.18)',
+        }, style]}
+      >
+        <Text style={{
+          fontSize: 5.8,
+          fontWeight: '800',
+          color: col.text,
+          textAlign: 'center',
+          lineHeight: 7.5,
+          letterSpacing: 0.1,
+        }}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const TileRow = ({ labels, tier, height }: { labels: string[]; tier: number; height: number }) => (
+    <View style={{ flexDirection: 'row', height, gap: GAP }}>
+      {labels.map((lbl, i) => <Tile key={i} label={lbl} tier={tier} style={{ flex: 1 }} />)}
+    </View>
+  );
+
+  const TileCol = ({ labels, tier, width }: { labels: string[]; tier: number; width: number }) => (
+    <View style={{ width, gap: GAP }}>
+      {labels.map((lbl, i) => <Tile key={i} label={lbl} tier={tier} style={{ flex: 1 }} />)}
+    </View>
+  );
+
+  const Corner = ({ w, h, type }: { w: number; h: number; type: 'access' | 'unavail' }) => (
+    <View style={{
+      width: w, height: h,
+      backgroundColor: type === 'access' ? C.access.bg : C.unavail.bg,
+      borderRadius: 2,
+      borderWidth: 0.5,
+      borderColor: type === 'access' ? C.access.border : C.unavail.border,
+    }} />
+  );
+
+  // Football pitch with markings
+  const Pitch = () => {
+    const circR = PH * 0.22;
+    return (
+      <View style={{
+        flex: 1,
+        backgroundColor: '#2E7D32',
+        borderRadius: 3,
+        overflow: 'hidden',
+      }}>
+        {/* Centre line */}
+        <View style={{
+          position: 'absolute',
+          left: '50%', top: 0, bottom: 0,
+          width: 1, backgroundColor: 'rgba(255,255,255,0.42)',
+        }} />
+
+        {/* Centre circle */}
+        <View style={{
+          position: 'absolute',
+          width: circR * 2, height: circR * 2,
+          borderRadius: circR,
+          borderWidth: 1, borderColor: 'rgba(255,255,255,0.42)',
+          left: PW / 2 - circR,
+          top: PH / 2 - circR,
+        }} />
+
+        {/* Centre spot */}
+        <View style={{
+          position: 'absolute',
+          width: 4, height: 4, borderRadius: 2,
+          backgroundColor: 'rgba(255,255,255,0.6)',
+          left: PW / 2 - 2, top: PH / 2 - 2,
+        }} />
+
+        {/* Left penalty box */}
+        <View style={{
+          position: 'absolute',
+          left: 0, top: PH * 0.2,
+          width: PW * 0.155, height: PH * 0.6,
+          borderRightWidth: 1, borderTopWidth: 1, borderBottomWidth: 1,
+          borderColor: 'rgba(255,255,255,0.4)',
+        }} />
+
+        {/* Right penalty box */}
+        <View style={{
+          position: 'absolute',
+          right: 0, top: PH * 0.2,
+          width: PW * 0.155, height: PH * 0.6,
+          borderLeftWidth: 1, borderTopWidth: 1, borderBottomWidth: 1,
+          borderColor: 'rgba(255,255,255,0.4)',
+        }} />
+
+        {/* Left 6-yard box */}
+        <View style={{
+          position: 'absolute',
+          left: 0, top: PH * 0.33,
+          width: PW * 0.07, height: PH * 0.34,
+          borderRightWidth: 1, borderTopWidth: 1, borderBottomWidth: 1,
+          borderColor: 'rgba(255,255,255,0.26)',
+        }} />
+
+        {/* Right 6-yard box */}
+        <View style={{
+          position: 'absolute',
+          right: 0, top: PH * 0.33,
+          width: PW * 0.07, height: PH * 0.34,
+          borderLeftWidth: 1, borderTopWidth: 1, borderBottomWidth: 1,
+          borderColor: 'rgba(255,255,255,0.26)',
+        }} />
+
+        {/* Left penalty spot */}
+        <View style={{
+          position: 'absolute',
+          width: 3, height: 3, borderRadius: 1.5,
+          backgroundColor: 'rgba(255,255,255,0.55)',
+          left: PW * 0.115 - 1.5, top: PH / 2 - 1.5,
+        }} />
+
+        {/* Right penalty spot */}
+        <View style={{
+          position: 'absolute',
+          width: 3, height: 3, borderRadius: 1.5,
+          backgroundColor: 'rgba(255,255,255,0.55)',
+          right: PW * 0.115 - 1.5, top: PH / 2 - 1.5,
+        }} />
+      </View>
+    );
+  };
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <View style={{ width: MAP_W, height: MAP_H, position: 'relative', alignSelf: 'center' }}>
+    <View style={{
+      width: MAP_W,
+      height: MAP_H,
+      alignSelf: 'center',
+      backgroundColor: '#D5D9E4',
+      borderRadius: 8,
+      overflow: 'hidden',
+      gap: GAP,
+      padding: GAP,
+    }}>
 
-      {/* ── Oval background layers (outermost → innermost) ── */}
-
-      {/* Upper tier oval (full stadium shape) */}
-      <View style={ovalLayer(BG_UPPER_W, BG_UPPER_H,
-        isSel(0) ? SEL.bg       : tc(0).bg,
-        isSel(0) ? SEL.border   : tc(0).border)} />
-
-      {/* Club oval */}
-      <View style={ovalLayer(BG_CLUB_W, BG_CLUB_H,
-        isSel(2) ? SEL.bg     : tc(2).bg,
-        isSel(2) ? SEL.border : tc(2).border)} />
-
-      {/* Lower tier oval */}
-      <View style={ovalLayer(BG_LOWER_W, BG_LOWER_H,
-        isSel(1) ? SEL.bg     : tc(1).bg,
-        isSel(1) ? SEL.border : tc(1).border)} />
-
-      {/* Pitch oval (green, not tappable) */}
-      <View style={[ovalLayer(BG_PITCH_W, BG_PITCH_H, '#2e7d32', '#1b5e20'), { overflow: 'hidden' }]}>
-        {/* Field markings */}
-        <View style={{ position:'absolute', left:0, right:0, top:'50%', height:1, backgroundColor:'rgba(255,255,255,0.35)' }} />
-        <View style={{
-          position:'absolute',
-          width: BG_PITCH_W * 0.42,
-          height: BG_PITCH_W * 0.42,
-          borderRadius: BG_PITCH_W * 0.21,
-          borderWidth: 1,
-          borderColor: 'rgba(255,255,255,0.40)',
-          alignSelf: 'center',
-          top: (BG_PITCH_H - BG_PITCH_W * 0.42) / 2,
-        }} />
-        {/* Goal boxes */}
-        <View style={{ position:'absolute', alignSelf:'center', top:4, width:'52%', height:'20%', borderWidth:1, borderColor:'rgba(255,255,255,0.30)', borderRadius:2 }} />
-        <View style={{ position:'absolute', alignSelf:'center', bottom:4, width:'52%', height:'20%', borderWidth:1, borderColor:'rgba(255,255,255,0.30)', borderRadius:2 }} />
-        {/* Small goal areas */}
-        <View style={{ position:'absolute', alignSelf:'center', top:4, width:'28%', height:'9%', borderWidth:1, borderColor:'rgba(255,255,255,0.25)', borderRadius:1 }} />
-        <View style={{ position:'absolute', alignSelf:'center', bottom:4, width:'28%', height:'9%', borderWidth:1, borderColor:'rgba(255,255,255,0.25)', borderRadius:1 }} />
-        {/* Penalty spots */}
-        <View style={{ position:'absolute', alignSelf:'center', top:'24%', width:4, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.5)' }} />
-        <View style={{ position:'absolute', alignSelf:'center', bottom:'24%', width:4, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.5)' }} />
+      {/* ── Row 1: Top upper tier ─────────────────────────────────── */}
+      <View style={{ flexDirection: 'row', height: UH, gap: GAP }}>
+        <Corner w={UW} h={UH} type="unavail" />
+        {TOP_UPPER.map((lbl, i) => <Tile key={i} label={lbl} tier={0} style={{ flex: 1 }} />)}
+        <Corner w={UW} h={UH} type="unavail" />
       </View>
 
-      {/* ── Touchable overlay rings — make entire oval band tappable ── */}
+      {/* ── Row 2: Middle ─────────────────────────────────────────── */}
+      <View style={{ flex: 1, flexDirection: 'row', gap: GAP }}>
 
-      {/* Upper tier ring touch area (tap outermost oval, not covered by club oval) */}
-      <TouchableOpacity
-        onPress={() => press(0)}
-        style={{
-          position: 'absolute',
-          width: BG_UPPER_W, height: BG_UPPER_H,
-          left: 0, top: 0,
-          borderRadius: BG_UPPER_H / 2,
-          backgroundColor: 'transparent',
-        }}
-        activeOpacity={0.6}
-      />
+        {/* Left upper column */}
+        <TileCol labels={LEFT_UPPER} tier={0} width={UW} />
 
-      {/* Club touch area */}
-      <TouchableOpacity
-        onPress={() => press(2)}
-        style={{
-          position: 'absolute',
-          width: BG_CLUB_W, height: BG_CLUB_H,
-          left: (MAP_W - BG_CLUB_W) / 2,
-          top:  (MAP_H - BG_CLUB_H) / 2,
-          borderRadius: BG_CLUB_H / 2,
-          backgroundColor: 'transparent',
-        }}
-        activeOpacity={0.6}
-      />
+        {/* ── Inner zone ─────────────────────────────────────────── */}
+        <View style={{ flex: 1, gap: GAP }}>
 
-      {/* Lower tier touch area */}
-      <TouchableOpacity
-        onPress={() => press(1)}
-        style={{
-          position: 'absolute',
-          width: BG_LOWER_W, height: BG_LOWER_H,
-          left: (MAP_W - BG_LOWER_W) / 2,
-          top:  (MAP_H - BG_LOWER_H) / 2,
-          borderRadius: BG_LOWER_H / 2,
-          backgroundColor: 'transparent',
-        }}
-        activeOpacity={0.6}
-      />
+          {/* Club top + accessible corners */}
+          <View style={{ flexDirection: 'row', height: CH, gap: GAP }}>
+            <Corner w={CW} h={CH} type="access" />
+            {TOP_CLUB.map((lbl, i) => <Tile key={i} label={lbl} tier={2} style={{ flex: 1 }} />)}
+            <Corner w={CW} h={CH} type="access" />
+          </View>
 
-      {/* ── Section label tiles — positioned on each oval ring ── */}
+          {/* Club side columns + lower ring + pitch */}
+          <View style={{ flex: 1, flexDirection: 'row', gap: GAP }}>
 
-      {/* Upper tier labels */}
-      {UPPER_SECTIONS.map((sec, i) => {
-        const { left, top } = pos(RX_UPPER, RY_UPPER, sec.angle);
-        return (
-          <TouchableOpacity
-            key={`u${i}`}
-            onPress={() => press(0)}
-            activeOpacity={0.75}
-            style={[
-              {
-                position: 'absolute',
-                width: UT_W, height: UT_H,
-                left: left - UT_W / 2,
-                top:  top  - UT_H / 2,
-                borderRadius: 3,
-                alignItems: 'center',
-                justifyContent: 'center',
-              },
-              tileStyle(0),
-            ]}
-          >
-            <Text style={[{ fontSize: 5.5, fontWeight: '800', letterSpacing: 0.2, textAlign: 'center' }, textStyle(0)]}>
-              {sec.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
+            {/* Left club column */}
+            <TileCol labels={LEFT_CLUB} tier={2} width={CW} />
 
-      {/* Club labels */}
-      {CLUB_SECTIONS.map((sec, i) => {
-        const { left, top } = pos(RX_CLUB, RY_CLUB, sec.angle);
-        return (
-          <TouchableOpacity
-            key={`c${i}`}
-            onPress={() => press(2)}
-            activeOpacity={0.75}
-            style={[
-              {
-                position: 'absolute',
-                width: CT_W, height: CT_H,
-                left: left - CT_W / 2,
-                top:  top  - CT_H / 2,
-                borderRadius: 3,
-                alignItems: 'center',
-                justifyContent: 'center',
-              },
-              tileStyle(2),
-            ]}
-          >
-            <Text style={[{ fontSize: 5, fontWeight: '900', letterSpacing: 0.3, textAlign: 'center', lineHeight: 7 }, textStyle(2)]}>
-              {sec.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
+            {/* Lower ring + pitch */}
+            <View style={{ flex: 1, gap: GAP }}>
+              <TileRow labels={TOP_LOWER} tier={1} height={LH} />
 
-      {/* Lower tier labels */}
-      {LOWER_SECTIONS.map((sec, i) => {
-        const { left, top } = pos(RX_LOWER, RY_LOWER, sec.angle);
-        return (
-          <TouchableOpacity
-            key={`l${i}`}
-            onPress={() => press(1)}
-            activeOpacity={0.75}
-            style={[
-              {
-                position: 'absolute',
-                width: LT_W, height: LT_H,
-                left: left - LT_W / 2,
-                top:  top  - LT_H / 2,
-                borderRadius: 2,
-                alignItems: 'center',
-                justifyContent: 'center',
-              },
-              tileStyle(1),
-            ]}
-          >
-            <Text style={[{ fontSize: 5, fontWeight: '800', letterSpacing: 0.2, textAlign: 'center' }, textStyle(1)]}>
-              {sec.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
+              {/* Pitch with lower side cols */}
+              <View style={{ flex: 1, flexDirection: 'row', gap: GAP }}>
+                <TileCol labels={LEFT_LOWER} tier={1} width={LW} />
+                <Pitch />
+                <TileCol labels={RIGHT_LOWER} tier={1} width={LW} />
+              </View>
 
-      {/* Compass */}
-      <View style={{ position:'absolute', bottom:8, right:10, alignItems:'center', opacity:0.55 }}>
-        <Text style={{ fontSize:7, fontWeight:'900', color:'#333' }}>N</Text>
-        <View style={{ width:5, height:5, borderRadius:2.5, backgroundColor:'#333', marginVertical:1 }} />
-        <Text style={{ fontSize:7, fontWeight:'900', color:'#333' }}>S</Text>
+              <TileRow labels={BOT_LOWER} tier={1} height={LH} />
+            </View>
+
+            {/* Right club column */}
+            <TileCol labels={RIGHT_CLUB} tier={2} width={CW} />
+          </View>
+
+          {/* Club bottom + accessible corners */}
+          <View style={{ flexDirection: 'row', height: CH, gap: GAP }}>
+            <Corner w={CW} h={CH} type="access" />
+            {BOT_CLUB.map((lbl, i) => <Tile key={i} label={lbl} tier={2} style={{ flex: 1 }} />)}
+            <Corner w={CW} h={CH} type="access" />
+          </View>
+        </View>
+
+        {/* Right upper column */}
+        <TileCol labels={RIGHT_UPPER} tier={0} width={UW} />
+      </View>
+
+      {/* ── Row 3: Bottom upper tier ──────────────────────────────── */}
+      <View style={{ flexDirection: 'row', height: UH, gap: GAP }}>
+        <Corner w={UW} h={UH} type="access" />
+        {BOT_UPPER.map((lbl, i) => <Tile key={i} label={lbl} tier={0} style={{ flex: 1 }} />)}
+        <Corner w={UW} h={UH} type="access" />
       </View>
     </View>
   );
 }
 
-// ─── Legend ───────────────────────────────────────────────────────────────────
+// ─── Map Legend ───────────────────────────────────────────────────────────────
 
 export function MapLegend({
   ticketTypes,
@@ -383,21 +344,31 @@ export function MapLegend({
   selectedTypeId: string | null;
 }) {
   const sorted = [...ticketTypes].sort((a, b) => a.price - b.price);
-  const labels = ['Upper tier', 'Lower tier', 'Club level'];
+  const tiers  = [C.upper, C.lower, C.club];
+  const labels = ['Upper', 'Lower', 'Club'];
+
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
       {sorted.map((tt, i) => {
         const sel = tt.id === selectedTypeId;
-        const c   = sel ? SEL : tc(i);
+        const col = sel ? C.selected : (tiers[i] ?? C.upper);
         return (
           <View key={tt.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <View style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: c.bg, borderWidth: 1, borderColor: c.border }} />
-            <Text style={{ fontSize: 10, fontWeight: sel ? '700' : '500', color: sel ? SEL.bg : '#555' }}>
+            <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: col.bg, borderWidth: 1, borderColor: col.border }} />
+            <Text style={{ fontSize: 10, fontWeight: sel ? '700' : '500', color: sel ? C.selected.bg : '#555' }}>
               {labels[i] ?? tt.name}
             </Text>
           </View>
         );
       })}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: C.access.bg, borderWidth: 1, borderColor: C.access.border }} />
+        <Text style={{ fontSize: 10, fontWeight: '500', color: '#555' }}>Accessible</Text>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: C.unavail.bg, borderWidth: 1, borderColor: C.unavail.border }} />
+        <Text style={{ fontSize: 10, fontWeight: '500', color: '#555' }}>Unavailable</Text>
+      </View>
     </View>
   );
 }
@@ -418,6 +389,8 @@ const AUD_ROWS = [
   [{ id:'PIT',   label:'PIT / GA', tier:3, wide:true }],
 ];
 
+const SEL_AUD = { bg: '#1d6cf5', border: '#1558d0', text: '#fff' };
+
 function AuditoriumMap({ ticketTypes, selectedTypeId, onSelectType }: Omit<SeatingMapProps, 'venueType'>) {
   const sorted = useMemo(() => [...ticketTypes].sort((a, b) => a.price - b.price), [ticketTypes]);
   function ttForTier(t: number): TicketType | null {
@@ -435,13 +408,13 @@ function AuditoriumMap({ ticketTypes, selectedTypeId, onSelectType }: Omit<Seati
           {row.map((sec: any) => {
             const tt  = ttForTier(sec.tier);
             const sel = tt?.id === selectedTypeId;
-            const c   = sel ? SEL : AUD_COLORS[Math.min(sec.tier, AUD_COLORS.length - 1)];
+            const col = sel ? SEL_AUD : AUD_COLORS[Math.min(sec.tier, AUD_COLORS.length - 1)];
             return (
               <TouchableOpacity key={sec.id} onPress={() => tt && onSelectType(tt.id)}
                 style={{ flex: sec.wide ? 3 : 1, paddingVertical: 14, borderRadius: 6,
                   alignItems: 'center', justifyContent: 'center',
-                  borderWidth: sel ? 2 : 1, backgroundColor: c.bg, borderColor: c.border }}>
-                <Text style={{ fontSize: 8, fontWeight: '800', letterSpacing: 0.4, textAlign: 'center', lineHeight: 12, color: c.text }}>
+                  borderWidth: sel ? 2 : 1, backgroundColor: col.bg, borderColor: col.border }}>
+                <Text style={{ fontSize: 8, fontWeight: '800', letterSpacing: 0.4, textAlign: 'center', lineHeight: 12, color: col.text }}>
                   {sec.label}
                 </Text>
               </TouchableOpacity>
@@ -453,11 +426,11 @@ function AuditoriumMap({ ticketTypes, selectedTypeId, onSelectType }: Omit<Seati
   );
 }
 
-// ─── Main Export ──────────────────────────────────────────────────────────────
+// ─── Main export ──────────────────────────────────────────────────────────────
 
 export default function SeatingMap(props: SeatingMapProps) {
   const { venueType, ...rest } = props;
-  if (venueType === 'stadium') return <StadiumMap {...rest} />;
+  if (venueType === 'stadium')    return <StadiumMap   {...rest} />;
   if (venueType === 'auditorium') return <AuditoriumMap {...rest} />;
   return null;
 }
