@@ -1,28 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  ActivityIndicator,
-  Image,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Dimensions,
+  View, Text, ScrollView, TouchableOpacity, RefreshControl,
+  ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet } from 'react-native';
 import { api } from '../../lib/api';
-import { useMockBookingStore } from '../../store/mockBookingStore';
 import { useAuthStore } from '../../store/authStore';
-import { router, useRouter } from 'expo-router';
+import { useMockBookingStore } from '../../store/mockBookingStore';
+import { s, sheet } from '../../styles/tickets';
 
 const CARD_HEIGHT = 200;
-const CARD_PEEK = 72;
+const CARD_PEEK   = 72;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,7 +26,7 @@ interface BookingEvent {
   cover_image_url?: string | null;
 }
 
-interface Booking {
+export interface Booking {
   id: string;
   booking_number: string;
   event_id: string;
@@ -50,9 +42,9 @@ interface Booking {
   event?: BookingEvent;
 }
 
-// ─── Card palettes ────────────────────────────────────────────────────────────
+// ─── Palettes ─────────────────────────────────────────────────────────────────
 
-const CARD_PALETTES: { top: string; bottom: string; accent: string }[] = [
+const PALETTES = [
   { top: '#0d2137', bottom: '#0a3d2e', accent: '#00e5a0' },
   { top: '#1a0a2e', bottom: '#2d0a3d', accent: '#b57bee' },
   { top: '#1a1200', bottom: '#3d2600', accent: '#ffb830' },
@@ -63,99 +55,98 @@ const CARD_PALETTES: { top: string; bottom: string; accent: string }[] = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-ZA', {
-    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-  });
-}
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
-}
-function isUpcoming(b: Booking): boolean {
-  return !!b.event?.start_time && new Date(b.event.start_time) > new Date();
-}
-function daysUntil(iso: string): number {
-  return Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-}
+const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+const isUpcoming = (b: Booking) => !!b.event?.start_time && new Date(b.event.start_time) > new Date();
+const daysUntil  = (iso: string) => Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
+const dedup = (list: Booking[]) => { const seen = new Set<string>(); return list.filter(b => { if (seen.has(b.booking_number)) return false; seen.add(b.booking_number); return true; }); };
 
 // ─── Ticket Card ──────────────────────────────────────────────────────────────
 
 const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: number; onPress: () => void }) => {
-  const pal = CARD_PALETTES[index % CARD_PALETTES.length];
-  const upcoming = isUpcoming(booking);
+  const pal  = PALETTES[index % PALETTES.length];
+  const up   = isUpcoming(booking);
   const days = booking.event?.start_time ? daysUntil(booking.event.start_time) : null;
 
   const statusLabel =
-    booking.booking_status === 'confirmed' && upcoming
+    booking.booking_status === 'confirmed' && up
       ? days === 0 ? 'TODAY' : days === 1 ? 'TOMORROW' : `IN ${days} DAYS`
       : booking.booking_status === 'confirmed' ? 'ATTENDED'
       : booking.booking_status.toUpperCase();
 
   const statusColor =
-    upcoming && booking.booking_status === 'confirmed' ? pal.accent
+    up && booking.booking_status === 'confirmed' ? pal.accent
     : booking.booking_status === 'cancelled' || booking.booking_status === 'refunded' ? '#ff4d4d'
     : '#888';
 
   return (
-    <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={[styles.cardTouchable, { zIndex: 100 - index }]}>
-      <LinearGradient colors={[pal.top, pal.bottom]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.card}>
+    <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={[sheet.cardTouchable, { zIndex: 100 - index }]}>
+      <LinearGradient colors={[pal.top, pal.bottom]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={sheet.card}>
         {booking.event?.cover_image_url && (
           <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} blurRadius={2} />
         )}
         {booking.event?.cover_image_url && (
           <LinearGradient colors={[`${pal.top}e0`, `${pal.bottom}f5`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
         )}
-        <View style={styles.cardTopRow}>
-          <View style={[styles.logoMark, { borderColor: `${pal.accent}50` }]}>
+
+        {/* Top row */}
+        <View className={s.cardTopRow}>
+          <View style={[sheet.logoMark, { borderColor: `${pal.accent}50` }]}>
             <Ionicons name="ticket" size={12} color={pal.accent} />
           </View>
-          <View style={[styles.statusPill, { borderColor: `${statusColor}40`, backgroundColor: `${statusColor}18` }]}>
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-            <Text style={[styles.statusText, { color: statusColor }]}>{statusLabel}</Text>
+          <View className={s.statusPill} style={{ borderColor: `${statusColor}40`, backgroundColor: `${statusColor}18` }}>
+            <View className={s.statusDot} style={{ backgroundColor: statusColor }} />
+            <Text className={s.statusText} style={{ color: statusColor }}>{statusLabel}</Text>
           </View>
         </View>
-        <Text style={styles.eventTitle} numberOfLines={2}>{booking.event?.title ?? 'Event'}</Text>
-        <View style={styles.metaGroup}>
+
+        <Text className={s.eventTitle} numberOfLines={2}>{booking.event?.title ?? 'Event'}</Text>
+
+        <View className={s.metaGroup}>
           {booking.event?.start_time && (
-            <View style={styles.metaRow}>
+            <View className={s.metaRow}>
               <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.45)" />
-              <Text style={styles.metaText}>{formatDate(booking.event.start_time)} · {formatTime(booking.event.start_time)}</Text>
+              <Text className={s.metaText}>{fmt(booking.event.start_time)} · {fmtTime(booking.event.start_time)}</Text>
             </View>
           )}
           {booking.event && (
-            <View style={styles.metaRow}>
+            <View className={s.metaRow}>
               <Ionicons name="location-outline" size={10} color="rgba(255,255,255,0.45)" />
-              <Text style={styles.metaText} numberOfLines={1}>{booking.event.venue_name}, {booking.event.city}</Text>
+              <Text className={s.metaText} numberOfLines={1}>{booking.event.venue_name}, {booking.event.city}</Text>
             </View>
           )}
         </View>
-        <View style={styles.perfRow}>
-          <View style={[styles.perfCircle, { left: -10 }]} />
-          <View style={styles.perfLine}>
+
+        {/* Perforation */}
+        <View style={sheet.perfRow}>
+          <View style={[sheet.perfCircle, { left: -10 }]} />
+          <View style={sheet.perfLine}>
             {Array.from({ length: 20 }).map((_, i) => (
-              <View key={i} style={[styles.perfDash, { backgroundColor: `${pal.accent}28` }]} />
+              <View key={i} style={[sheet.perfDash, { backgroundColor: `${pal.accent}28` }]} />
             ))}
           </View>
-          <View style={[styles.perfCircle, { right: -10 }]} />
+          <View style={[sheet.perfCircle, { right: -10 }]} />
         </View>
-        <View style={styles.cardBottom}>
+
+        {/* Bottom */}
+        <View className={s.cardBottom}>
           <View>
-            <Text style={styles.bottomLabel}>{booking.ticket_type_name ?? 'GENERAL'}</Text>
-            <Text style={[styles.bottomValue, { color: pal.accent }]}>
+            <Text className={s.bottomLabel}>{booking.ticket_type_name ?? 'GENERAL'}</Text>
+            <Text className={s.bottomValue} style={{ color: pal.accent }}>
               {booking.ticket_quantity}× {booking.ticket_quantity === 1 ? 'ticket' : 'tickets'}
             </Text>
           </View>
-          <View style={styles.bottomCenter}>
-            <Text style={styles.bookingNum}>#{booking.booking_number}</Text>
+          <View className={s.bottomCenter}>
+            <Text className={s.bookingNum}>#{booking.booking_number}</Text>
           </View>
-          <View style={styles.bottomRight}>
-            <Text style={styles.bottomLabel}>TOTAL</Text>
-            <Text style={[styles.bottomValue, { color: pal.accent }]}>
+          <View className={s.bottomRight}>
+            <Text className={s.bottomLabel}>TOTAL</Text>
+            <Text className={s.bottomValue} style={{ color: pal.accent }}>
               R{Math.round(booking.total_amount).toLocaleString('en-ZA')}
             </Text>
           </View>
           {booking.booking_status === 'confirmed' && (
-            <View style={[styles.qrBadge, { backgroundColor: `${pal.accent}18`, borderColor: `${pal.accent}40` }]}>
+            <View style={[sheet.qrBadge, { backgroundColor: `${pal.accent}18`, borderColor: `${pal.accent}40` }]}>
               <Ionicons name="qr-code" size={20} color={pal.accent} />
             </View>
           )}
@@ -165,312 +156,155 @@ const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: numb
   );
 };
 
+// ─── Stack ────────────────────────────────────────────────────────────────────
+
+const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: number }) => {
+  const router = useRouter();
+  return (
+    <View>
+      {bookings.map((b, i) => (
+        <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
+          <TicketCard booking={b} index={offset + i} onPress={() => router.push(`/booking/${b.id}` as any)} />
+        </View>
+      ))}
+    </View>
+  );
+};
+
 // ─── Guest Lookup ─────────────────────────────────────────────────────────────
 
 const GuestLookup = () => {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [bookingNumber, setBookingNumber] = useState('');
-  const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Booking | null>(null);
+  const [email, setEmail]               = useState('');
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const [result, setResult]             = useState<Booking | null>(null);
 
   const lookup = async () => {
     const bn = bookingNumber.trim().toUpperCase();
     const em = email.trim().toLowerCase();
-    if (!bn || !em) {
-      setError('Please enter both your booking number and email address.');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    setResult(null);
+    if (!bn || !em) { setError('Enter both your booking number and email.'); return; }
+    setLoading(true); setError(null); setResult(null);
     try {
-      const { data } = await api.get<Booking>(
-        `/v1/guest/bookings/${encodeURIComponent(bn)}`,
-        { params: { email: em } },
-      );
+      const { data } = await api.get<Booking>(`/v1/guest/bookings/${encodeURIComponent(bn)}`, { params: { email: em } });
       setResult(data);
     } catch (e: any) {
-      const msg = e?.response?.data?.error;
-      if (e?.response?.status === 404) {
-        setError('No booking found. Double-check your booking number and email.');
-      } else if (e?.response?.status === 429) {
-        setError('Too many attempts. Please wait a while before trying again.');
-      } else {
-        setError(msg ?? 'Something went wrong. Please try again.');
-      }
-    } finally {
-      setLoading(false);
-    }
+      const status = e?.response?.status;
+      setError(status === 404 ? 'No booking found. Check your booking number and email.'
+        : status === 429 ? 'Too many attempts. Wait a moment and try again.'
+        : e?.response?.data?.error ?? 'Something went wrong.');
+    } finally { setLoading(false); }
   };
 
-  const reset = () => {
-    setResult(null);
-    setBookingNumber('');
-    setEmail('');
-    setError(null);
-  };
+  if (result) {
+    return (
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={[sheet.guestScroll, { paddingBottom: insets.bottom + 40 }]} showsVerticalScrollIndicator={false}>
+        <Text className={s.sectionLabel}>YOUR TICKET</Text>
+        <TicketStack bookings={[result]} />
+        <TouchableOpacity style={sheet.lookupAgainBtn} onPress={() => setResult(null)}>
+          <Ionicons name="search-outline" size={15} color="rgba(255,255,255,0.6)" />
+          <Text className={s.lookupAgainText}>Look up another ticket</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={[styles.guestScroll, { paddingBottom: insets.bottom + 40 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {result ? (
-          <View style={{ gap: 20 }}>
-            <Text style={styles.sectionLabel}>YOUR TICKET</Text>
-            <TicketCard booking={result} index={0} onPress={() => router.push(`/booking/${result.id}`)} />
-            <TouchableOpacity style={styles.lookupAgainBtn} onPress={reset}>
-              <Ionicons name="search-outline" size={15} color="rgba(255,255,255,0.6)" />
-              <Text style={styles.lookupAgainText}>Look up another ticket</Text>
-            </TouchableOpacity>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <ScrollView contentContainerStyle={[sheet.guestScroll, { paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={sheet.guestForm}>
+          <View style={sheet.guestIconWrap}>
+            <Ionicons name="ticket-outline" size={36} color="rgba(255,255,255,0.18)" />
           </View>
-        ) : (
-          <View style={styles.guestForm}>
-            <View style={styles.guestIconWrap}>
-              <Ionicons name="ticket-outline" size={36} color="rgba(255,255,255,0.18)" />
+          <Text className={s.guestTitle}>Find your ticket</Text>
+          <Text className={s.guestSub}>Enter your booking number and email from your confirmation.</Text>
+
+          <View style={sheet.fieldGroup}>
+            <Text className={s.fieldLabel}>BOOKING NUMBER</Text>
+            <TextInput style={sheet.input} value={bookingNumber} onChangeText={setBookingNumber}
+              placeholder="e.g. BK-A3F7K2" placeholderTextColor="rgba(255,255,255,0.2)"
+              autoCapitalize="characters" autoCorrect={false} returnKeyType="next" />
+          </View>
+          <View style={sheet.fieldGroup}>
+            <Text className={s.fieldLabel}>EMAIL ADDRESS</Text>
+            <TextInput style={sheet.input} value={email} onChangeText={setEmail}
+              placeholder="you@example.com" placeholderTextColor="rgba(255,255,255,0.2)"
+              autoCapitalize="none" keyboardType="email-address" autoCorrect={false}
+              returnKeyType="search" onSubmitEditing={lookup} />
+          </View>
+
+          {error && (
+            <View style={sheet.errorBox}>
+              <Ionicons name="alert-circle-outline" size={15} color="#ff6b6b" />
+              <Text className={s.errorText}>{error}</Text>
             </View>
-            <Text style={styles.guestTitle}>Find your ticket</Text>
-            <Text style={styles.guestSub}>
-              Enter the booking number and email address from your confirmation email.
+          )}
+
+          <TouchableOpacity style={[sheet.lookupBtn, loading && { opacity: 0.6 }]} onPress={lookup} disabled={loading} activeOpacity={0.85}>
+            {loading ? <ActivityIndicator color="#0a0a0a" size="small" /> : <Text className={s.lookupBtnText}>Find Ticket</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={sheet.signInPrompt} onPress={() => router.push('/auth/login' as any)}>
+            <Text className={s.signInPromptText}>
+              Have an account? <Text style={{ color: '#ff3c6e', fontWeight: '700' }}>Sign in</Text>
             </Text>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>BOOKING NUMBER</Text>
-              <TextInput
-                style={styles.input}
-                value={bookingNumber}
-                onChangeText={t => setBookingNumber(t)}
-                placeholder="e.g. BK-00123"
-                placeholderTextColor="rgba(255,255,255,0.2)"
-                autoCapitalize="characters"
-                autoCorrect={false}
-                returnKeyType="next"
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>EMAIL ADDRESS</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={t => setEmail(t)}
-                placeholder="you@example.com"
-                placeholderTextColor="rgba(255,255,255,0.2)"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                autoCorrect={false}
-                returnKeyType="search"
-                onSubmitEditing={lookup}
-              />
-            </View>
-
-            {error && (
-              <View style={styles.errorBox}>
-                <Ionicons name="alert-circle-outline" size={15} color="#ff6b6b" />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={[styles.lookupBtn, loading && { opacity: 0.6 }]}
-              onPress={lookup}
-              disabled={loading}
-              activeOpacity={0.85}
-            >
-              {loading
-                ? <ActivityIndicator color="#0a0a0a" size="small" />
-                : <Text style={styles.lookupBtnText}>Find Ticket</Text>
-              }
-            </TouchableOpacity>
-          </View>
-        )}
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
-// ─── Authenticated Tickets ────────────────────────────────────────────────────
+// ─── Tickets View (auth + local merged) ───────────────────────────────────────
 
-const AuthTickets = () => {
-  const insets = useSafeAreaInsets();
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const mockBookings = useMockBookingStore((s) => s.bookings) as unknown as Booking[];
+const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRetry }: {
+  apiBookings: Booking[]; loading: boolean; refreshing: boolean;
+  onRefresh: () => void; error: string | null; onRetry: () => void;
+}) => {
+  const insets       = useSafeAreaInsets();
+  const localBookings = useMockBookingStore(store => store.bookings) as unknown as Booking[];
+  const all      = dedup([...localBookings, ...apiBookings]);
+  const upcoming = all.filter(isUpcoming);
+  const past     = all.filter(b => !isUpcoming(b));
 
-  const fetchBookings = useCallback(async () => {
-    try {
-      setError(null);
-      const { data } = await api.get<{ data: Booking[]; next_cursor: string | null }>('/v1/bookings', {
-        params: { limit: 50 },
-      });
-      const now = Date.now();
-      const sorted = (data.data ?? []).slice().sort((a, b) => {
-        const aT = a.event?.start_time ? new Date(a.event.start_time).getTime() : 0;
-        const bT = b.event?.start_time ? new Date(b.event.start_time).getTime() : 0;
-        const aUp = aT > now, bUp = bT > now;
-        if (aUp && !bUp) return -1;
-        if (!aUp && bUp) return 1;
-        return aUp ? aT - bT : bT - aT;
-      });
-      // Merge mock (local) bookings with real API bookings, dedup by booking_number
-      const mockSnap = useMockBookingStore.getState().bookings as unknown as Booking[];
-      const allIds = new Set(sorted.map(b => b.booking_number));
-      const merged = [...mockSnap.filter(m => !allIds.has(m.booking_number)), ...sorted];
-      setBookings(merged);
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Failed to load tickets');
-    }
-  }, []);
+  if (loading) return <View className={s.centred}><ActivityIndicator color="rgba(255,255,255,0.5)" /></View>;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    await fetchBookings();
-    setLoading(false);
-  }, [fetchBookings]);
+  if (error && all.length === 0) return (
+    <View className={s.centred}>
+      <Ionicons name="alert-circle-outline" size={36} color="rgba(255,80,80,0.4)" />
+      <Text className={s.emptyTitle}>Something went wrong</Text>
+      <Text className={s.emptySub}>{error}</Text>
+      <TouchableOpacity style={sheet.retryBtn} onPress={onRetry}><Text className={s.retryText}>Try again</Text></TouchableOpacity>
+    </View>
+  );
 
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    await fetchBookings();
-    setRefreshing(false);
-  }, [fetchBookings]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Merge any mock bookings not already in real API results
-  const allBookingIds = new Set(bookings.map(b => b.booking_number));
-  const allBookings = [
-    ...(mockBookings as Booking[]).filter(m => !allBookingIds.has(m.booking_number)),
-    ...bookings,
-  ];
-  const upcoming = allBookings.filter(isUpcoming);
-  const past = allBookings.filter(b => !isUpcoming(b));
-
-  if (loading) {
-    return <View style={styles.centred}><ActivityIndicator color="rgba(255,255,255,0.6)" /></View>;
-  }
-
-  if (error) {
-    return (
-      <View style={styles.centred}>
-        <Ionicons name="alert-circle-outline" size={36} color="rgba(255,80,80,0.4)" />
-        <Text style={styles.emptyTitle}>Something went wrong</Text>
-        <Text style={styles.emptySub}>{error}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={load}>
-          <Text style={styles.retryText}>Try again</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (bookings.length === 0) {
-    return (
-      <View style={styles.centred}>
-        <View style={styles.emptyIcon}>
-          <Ionicons name="ticket-outline" size={44} color="rgba(255,255,255,0.1)" />
-        </View>
-        <Text style={styles.emptyTitle}>No tickets yet</Text>
-        <Text style={styles.emptySub}>Events you book will appear here as digital tickets.</Text>
-      </View>
-    );
-  }
+  if (all.length === 0) return (
+    <View className={s.centred}>
+      <View style={sheet.emptyIcon}><Ionicons name="ticket-outline" size={44} color="rgba(255,255,255,0.1)" /></View>
+      <Text className={s.emptyTitle}>No tickets yet</Text>
+      <Text className={s.emptySub}>Events you book will appear here as digital tickets.</Text>
+    </View>
+  );
 
   return (
-    <ScrollView
-      contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 40 }]}
+    <ScrollView className={s.scroll} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
       showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="rgba(255,255,255,0.5)" />}
-    >
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.5)" />}>
       {upcoming.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>UPCOMING</Text>
-          <View>
-            {upcoming.map((b, i) => (
-              <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-                <TicketCard booking={b} index={i} onPress={() => router.push(`/booking/${b.id}`)} />
-              </View>
-            ))}
-          </View>
+        <View>
+          <Text className={s.sectionLabel}>UPCOMING</Text>
+          <TicketStack bookings={upcoming} offset={0} />
         </View>
       )}
       {past.length > 0 && (
-        <View style={[styles.section, upcoming.length > 0 && { marginTop: 36 }]}>
-          <Text style={styles.sectionLabel}>PAST</Text>
-          <View>
-            {past.map((b, i) => (
-              <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-                <TicketCard booking={b} index={upcoming.length + i} onPress={() => router.push(`/booking/${b.id}`)} />
-              </View>
-            ))}
-          </View>
+        <View style={upcoming.length > 0 ? { marginTop: 36 } : undefined}>
+          <Text className={s.sectionLabel}>PAST</Text>
+          <TicketStack bookings={past} offset={upcoming.length} />
         </View>
       )}
     </ScrollView>
-  );
-};
-
-// ─── Guest + Mock View ────────────────────────────────────────────────────────
-
-const GuestOrMockView = () => {
-  const insets = useSafeAreaInsets();
-  const mockBookings = useMockBookingStore((s) => s.bookings) as unknown as Booking[];
-  const router = useRouter();
-
-  const upcoming = mockBookings.filter(isUpcoming);
-  const past = mockBookings.filter(b => !isUpcoming(b));
-
-  if (mockBookings.length === 0) {
-    return <GuestLookup />;
-  }
-
-  return (
-    <View style={{ flex: 1 }}>
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 40 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        {upcoming.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>UPCOMING</Text>
-            <View>
-              {upcoming.map((b, i) => (
-                <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-                  <TicketCard booking={b} index={i} onPress={() => router.push(`/booking/${b.id}`)} />
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-        {past.length > 0 && (
-          <View style={[styles.section, upcoming.length > 0 && { marginTop: 36 }]}>
-            <Text style={styles.sectionLabel}>PAST</Text>
-            <View>
-              {past.map((b, i) => (
-                <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-                  <TicketCard booking={b} index={upcoming.length + i} onPress={() => router.push(`/booking/${b.id}`)} />
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-        <TouchableOpacity
-          style={styles.signInPrompt}
-          onPress={() => router.push('/auth/login')}
-        >
-          <Text style={styles.signInPromptText}>
-            Sign in to sync tickets across devices →
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
   );
 };
 
@@ -479,127 +313,62 @@ const GuestOrMockView = () => {
 export default function TicketsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
+  const hydrated = useMockBookingStore(store => store.bookings.length > 0);
+  const localBookings = useMockBookingStore(store => store.bookings);
+
+  const [apiBookings, setApiBookings] = useState<Booking[]>([]);
+  const [loading, setLoading]         = useState(false);
+  const [refreshing, setRefreshing]   = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+
+  useEffect(() => {}, []);
+
+  const fetchApiBookings = useCallback(async () => {
+    if (!user) return;
+    setError(null);
+    try {
+      const { data } = await api.get<{ data: Booking[]; next_cursor: string | null }>('/v1/bookings', { params: { limit: 50 } });
+      const now = Date.now();
+      const sorted = (data.data ?? []).slice().sort((a, b) => {
+        const aT = a.event?.start_time ? new Date(a.event.start_time).getTime() : 0;
+        const bT = b.event?.start_time ? new Date(b.event.start_time).getTime() : 0;
+        const aUp = aT > now, bUp = bT > now;
+        if (aUp && !bUp) return -1; if (!aUp && bUp) return 1;
+        return aUp ? aT - bT : bT - aT;
+      });
+      setApiBookings(sorted);
+    } catch (e: any) { setError(e?.response?.data?.error ?? 'Failed to load tickets'); }
+  }, [user]);
+
+  const load    = useCallback(async () => { setLoading(true); await fetchApiBookings(); setLoading(false); }, [fetchApiBookings]);
+  const refresh = useCallback(async () => { setRefreshing(true); await fetchApiBookings(); setRefreshing(false); }, [fetchApiBookings]);
+
+  useEffect(() => { if (hydrated) load(); }, [hydrated, user]);
+
+  const totalCount = dedup([...(localBookings as unknown as Booking[]), ...apiBookings]).length;
+  const showGuestLookup = !user && localBookings.length === 0;
 
   return (
-    <View style={styles.root}>
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Text style={styles.headerTitle}>My Tickets</Text>
+    <View className={s.root}>
+      <View className={s.header} style={{ paddingTop: insets.top + 10 }}>
+        <Text className={s.headerTitle}>My Tickets</Text>
+        {totalCount > 0 && (
+          <View style={sheet.countPill}><Text style={sheet.countText}>{totalCount}</Text></View>
+        )}
       </View>
-      {user ? <AuthTickets /> : <GuestOrMockView />}
+
+      {showGuestLookup ? (
+        <GuestLookup />
+      ) : (
+        <TicketsView
+          apiBookings={apiBookings}
+          loading={loading && !hydrated}
+          refreshing={refreshing}
+          onRefresh={refresh}
+          error={error}
+          onRetry={load}
+        />
+      )}
     </View>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0a0a0a' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 24, paddingBottom: 18 },
-  headerTitle: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  centred: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40 },
-  scroll: { paddingHorizontal: 20, paddingTop: 4 },
-  section: {},
-  sectionLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 2.5, color: 'rgba(255,255,255,0.28)', marginBottom: 14, marginLeft: 2 },
-
-  // Card
-  cardTouchable: {
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.6,
-    shadowRadius: 22,
-    elevation: 16,
-  },
-  card: {
-    width: '100%', height: CARD_HEIGHT, borderRadius: 20, padding: 18,
-    overflow: 'hidden', justifyContent: 'space-between',
-  },
-  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  logoMark: { width: 26, height: 26, borderRadius: 7, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)' },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
-  statusDot: { width: 5, height: 5, borderRadius: 3 },
-  statusText: { fontSize: 9, fontWeight: '800', letterSpacing: 1.5 },
-  eventTitle: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: -0.2, lineHeight: 22, flex: 1, marginVertical: 2 },
-  metaGroup: { gap: 3 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  metaText: { fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: '500', flex: 1 },
-  perfRow: { flexDirection: 'row', alignItems: 'center', marginHorizontal: -18, position: 'relative' },
-  perfCircle: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#0a0a0a', position: 'absolute', zIndex: 2 },
-  perfLine: { flex: 1, flexDirection: 'row', gap: 4, overflow: 'hidden', marginHorizontal: 8 },
-  perfDash: { flex: 1, height: 1 },
-  cardBottom: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  bottomLabel: { fontSize: 8, fontWeight: '700', letterSpacing: 1.5, color: 'rgba(255,255,255,0.38)', marginBottom: 2 },
-  bottomValue: { fontSize: 13, fontWeight: '800' },
-  bottomCenter: { flex: 1, alignItems: 'center' },
-  bookingNum: { fontSize: 10, color: 'rgba(255,255,255,0.25)', fontWeight: '600', letterSpacing: 0.5 },
-  bottomRight: { alignItems: 'flex-end' },
-  qrBadge: { width: 38, height: 38, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-
-  // Empty / error
-  emptyIcon: { width: 80, height: 80, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.04)', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontSize: 19, fontWeight: '800', color: '#fff' },
-  emptySub: { fontSize: 13, color: 'rgba(255,255,255,0.32)', textAlign: 'center', lineHeight: 20 },
-  retryBtn: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.07)' },
-  retryText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-
-  // Guest lookup
-  guestScroll: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 4 },
-  guestForm: { flex: 1, gap: 20 },
-  guestIconWrap: { width: 72, height: 72, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.04)', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginTop: 24 },
-  guestTitle: { fontSize: 22, fontWeight: '800', color: '#fff', textAlign: 'center', letterSpacing: -0.3 },
-  guestSub: { fontSize: 13, color: 'rgba(255,255,255,0.38)', textAlign: 'center', lineHeight: 20 },
-  fieldGroup: { gap: 8 },
-  fieldLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 2, color: 'rgba(255,255,255,0.3)' },
-  input: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: 'rgba(255,80,80,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,80,80,0.2)',
-    borderRadius: 10,
-    padding: 12,
-  },
-  errorText: { color: '#ff8080', fontSize: 13, lineHeight: 18, flex: 1 },
-  lookupBtn: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  lookupBtnText: { color: '#0a0a0a', fontSize: 15, fontWeight: '800', letterSpacing: 0.2 },
-  lookupAgainBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  lookupAgainText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '600' },
-  signInPrompt: {
-    marginTop: 32,
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  signInPromptText: { color: 'rgba(255,255,255,0.35)', fontSize: 13, fontWeight: '500' },
-});

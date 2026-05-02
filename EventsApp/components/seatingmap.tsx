@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  ScrollView,
 } from 'react-native';
 import type { TicketType } from '../lib/api';
 
@@ -24,384 +23,432 @@ interface SeatingMapProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Detect venue type from event category / venue name
 export function detectVenueType(category: string, venueName?: string): VenueType {
-  const cat = category.toLowerCase();
+  const cat   = category.toLowerCase();
   const venue = (venueName ?? '').toLowerCase();
-
-  if (
-    cat.includes('sport') ||
-    cat.includes('soccer') ||
-    cat.includes('football') ||
-    cat.includes('rugby') ||
-    cat.includes('cricket') ||
-    venue.includes('stadium') ||
-    venue.includes('park') ||
-    venue.includes('arena') ||
-    venue.includes('field')
-  ) return 'stadium';
-
-  if (
-    cat.includes('concert') ||
-    cat.includes('music') ||
-    cat.includes('show') ||
-    cat.includes('theatre') ||
-    cat.includes('theater') ||
-    cat.includes('comedy') ||
-    cat.includes('opera') ||
-    cat.includes('dance') ||
-    cat.includes('performance') ||
-    venue.includes('theatre') ||
-    venue.includes('theater') ||
-    venue.includes('hall') ||
-    venue.includes('auditorium')
-  ) return 'auditorium';
-
+  if (cat.includes('sport') || cat.includes('soccer') || cat.includes('football') ||
+      cat.includes('rugby') || cat.includes('cricket') ||
+      venue.includes('stadium') || venue.includes('park') ||
+      venue.includes('arena') || venue.includes('field')) return 'stadium';
+  if (cat.includes('concert') || cat.includes('music') || cat.includes('show') ||
+      cat.includes('theatre') || cat.includes('theater') || cat.includes('comedy') ||
+      cat.includes('opera') || cat.includes('dance') || cat.includes('performance') ||
+      venue.includes('theatre') || venue.includes('theater') ||
+      venue.includes('hall') || venue.includes('auditorium')) return 'auditorium';
   return 'none';
 }
 
-// Assign tier index to each ticket type (sorted cheapest → most expensive)
-function buildTierMap(ticketTypes: TicketType[]): Map<string, number> {
-  const sorted = [...ticketTypes].sort((a, b) => a.price - b.price);
-  const map = new Map<string, number>();
-  sorted.forEach((tt, i) => map.set(tt.id, i));
-  return map;
+// ─── Color tokens ─────────────────────────────────────────────────────────────
+
+// tier 0 = cheapest (upper/gray), 1 = lower (navy), 2 = club (gold)
+const TIER_COLORS = [
+  { bg: '#c8cdd8', border: '#a8b0bf', text: '#4a5568' },   // upper
+  { bg: '#1a2e5e', border: '#0f1e3e', text: '#ffffff' },   // lower
+  { bg: '#b8820f', border: '#8a6200', text: '#ffffff' },   // club
+];
+const SEL = { bg: '#1d6cf5', border: '#1558d0', text: '#ffffff' };
+
+function tc(i: number) { return TIER_COLORS[Math.min(i, TIER_COLORS.length - 1)]; }
+
+// ─── Geometry helpers ─────────────────────────────────────────────────────────
+
+const MAP_W   = SW - 32;
+const MAP_H   = MAP_W * 0.82;   // slightly taller for a football oval
+const CX      = MAP_W / 2;
+const CY      = MAP_H / 2;
+
+// Ellipse radii for each tier ring centre-line
+const RX_UPPER = MAP_W * 0.455;
+const RY_UPPER = MAP_H * 0.455;
+
+const RX_CLUB  = MAP_W * 0.335;
+const RY_CLUB  = MAP_H * 0.335;
+
+const RX_LOWER = MAP_W * 0.225;
+const RY_LOWER = MAP_H * 0.255;
+
+// Pitch
+const RX_PITCH = MAP_W * 0.148;
+const RY_PITCH = MAP_H * 0.185;
+
+// Oval ring widths (for background layers)
+const BG_UPPER_W  = MAP_W;
+const BG_UPPER_H  = MAP_H;
+const BG_CLUB_W   = MAP_W * 0.76;
+const BG_CLUB_H   = MAP_H * 0.76;
+const BG_LOWER_W  = MAP_W * 0.558;
+const BG_LOWER_H  = MAP_H * 0.604;
+const BG_PITCH_W  = MAP_W * 0.355;
+const BG_PITCH_H  = MAP_H * 0.445;
+
+// Convert polar → absolute left/top for a section tile
+function pos(rx: number, ry: number, angleDeg: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return {
+    left: CX + rx * Math.cos(rad),
+    top:  CY + ry * Math.sin(rad),
+  };
 }
 
-// Tier colour palette — matches app design: pink accent, dark navy, gold, gray
-const TIER_COLORS = [
-  { bg: '#e8edf5', border: '#b0bec5', text: '#546e7a', label: 'UPPER' },   // 0 cheapest → upper
-  { bg: '#1a2e5e', border: '#1a2e5e', text: '#ffffff', label: 'LOWER' },   // 1 → lower/mezzanine
-  { bg: '#c8962a', border: '#c8962a', text: '#ffffff', label: 'CLUB' },    // 2 → club/premium
-  { bg: '#ff3c6e', border: '#ff3c6e', text: '#ffffff', label: 'VIP' },     // 3+ → VIP/front
+// ─── Section definitions ──────────────────────────────────────────────────────
+// angle 0=right, -90=top, 90=bottom, 180/±180=left
+
+// Upper tier — 20 sections spread around the full oval
+const UPPER_SECTIONS = [
+  { label:'301', angle:-155 },
+  { label:'302', angle:-135 },
+  { label:'301', angle:-115 },
+  { label:'302', angle:-90  },
+  { label:'302', angle:-65  },
+  { label:'301', angle:-45  },
+  { label:'301', angle:-25  },
+  { label:'303', angle:  0  },
+  { label:'304', angle: 25  },
+  { label:'304', angle: 45  },
+  { label:'305', angle: 65  },
+  { label:'306', angle: 90  },
+  { label:'307', angle:115  },
+  { label:'307', angle:135  },
+  { label:'302', angle:155  },
+  { label:'303', angle: 180 },
 ];
 
-function tierColor(idx: number) {
-  return TIER_COLORS[Math.min(idx, TIER_COLORS.length - 1)];
-}
+// Club level — 6 wide sections
+const CLUB_SECTIONS = [
+  { label:'CLUB\n201', angle:-90  },
+  { label:'CLUB\n201', angle:-30  },
+  { label:'CLUB\n201', angle: 30  },
+  { label:'CLUB\n202', angle: 90  },
+  { label:'CLUB\n202', angle:150  },
+  { label:'CLUB\n202', angle:-150 },
+];
+
+// Lower tier — 16 sections tightly around the pitch
+const LOWER_SECTIONS = [
+  { label:'101', angle:-155 },
+  { label:'102', angle:-130 },
+  { label:'103', angle:-105 },
+  { label:'104', angle:-80  },
+  { label:'105', angle:-55  },
+  { label:'106', angle:-30  },
+  { label:'107', angle:  0  },
+  { label:'108', angle: 30  },
+  { label:'105', angle: 55  },
+  { label:'104', angle: 80  },
+  { label:'103', angle:105  },
+  { label:'102', angle:130  },
+  { label:'101', angle:155  },
+  { label:'100', angle:180  },
+  { label:'109', angle:-180 },
+];
 
 // ─── Stadium Map ──────────────────────────────────────────────────────────────
-//
-// Approximate soccer stadium layout:
-//  Upper tier (outer) — cheapest
-//  Club level  (mid)  — middle
-//  Lower tier (inner) — expensive
-//  Pitch at centre    — not a section
 
-const STADIUM_SECTIONS = [
-  // ── TOP ROW (Upper tier) ──
-  { id: 'U301', label: '301', tier: 0, row: 0, col: 0, span: 1 },
-  { id: 'U302', label: '302', tier: 0, row: 0, col: 1, span: 1 },
-  { id: 'U303', label: '303', tier: 0, row: 0, col: 2, span: 1 },
-  { id: 'U304', label: '304', tier: 0, row: 0, col: 3, span: 1 },
-  { id: 'U305', label: '305', tier: 0, row: 0, col: 4, span: 1 },
-  { id: 'U306', label: '306', tier: 0, row: 0, col: 5, span: 1 },
+function StadiumMap({ ticketTypes, selectedTypeId, onSelectType }: Omit<SeatingMapProps, 'venueType'>) {
+  const sorted = useMemo(() => [...ticketTypes].sort((a, b) => a.price - b.price), [ticketTypes]);
 
-  // ── CLUB TOP ──
-  { id: 'C201a', label: 'CLUB 201', tier: 2, row: 1, col: 1, span: 2 },
-  { id: 'C201b', label: 'CLUB 201', tier: 2, row: 1, col: 3, span: 2 },
-
-  // ── MIDDLE ROW LEFT ──
-  { id: 'L101', label: '101', tier: 1, row: 2, col: 0, span: 1 },
-  { id: 'L102', label: '102', tier: 1, row: 3, col: 0, span: 1 },
-
-  // ── MIDDLE ROW RIGHT ──
-  { id: 'L107', label: '107', tier: 1, row: 2, col: 5, span: 1 },
-  { id: 'L108', label: '108', tier: 1, row: 3, col: 5, span: 1 },
-
-  // ── LOWER INSIDE TOP ──
-  { id: 'L104', label: '104', tier: 1, row: 2, col: 1, span: 1 },
-  { id: 'L105', label: '105', tier: 1, row: 2, col: 2, span: 1 },
-  { id: 'L106', label: '106', tier: 1, row: 2, col: 3, span: 1 },
-  { id: 'L106b', label: '107', tier: 1, row: 2, col: 4, span: 1 },
-
-  // ── LOWER INSIDE BOTTOM ──
-  { id: 'L100', label: '100', tier: 1, row: 4, col: 1, span: 1 },
-  { id: 'L103', label: '103', tier: 1, row: 4, col: 2, span: 1 },
-  { id: 'L103b', label: '104', tier: 1, row: 4, col: 3, span: 1 },
-  { id: 'L107b', label: '105', tier: 1, row: 4, col: 4, span: 1 },
-
-  // ── CLUB BOTTOM ──
-  { id: 'C202a', label: 'CLUB 202', tier: 2, row: 5, col: 1, span: 2 },
-  { id: 'C202b', label: 'CLUB 202', tier: 2, row: 5, col: 3, span: 2 },
-
-  // ── BOTTOM ROW (Upper tier) ──
-  { id: 'U307', label: '307', tier: 0, row: 6, col: 0, span: 1 },
-  { id: 'U308', label: '308', tier: 0, row: 6, col: 1, span: 1 },
-  { id: 'U309', label: '309', tier: 0, row: 6, col: 2, span: 1 },
-  { id: 'U310', label: '310', tier: 0, row: 6, col: 3, span: 1 },
-  { id: 'U311', label: '311', tier: 0, row: 6, col: 4, span: 1 },
-  { id: 'U312', label: '312', tier: 0, row: 6, col: 5, span: 1 },
-];
-
-// Pitch placeholder (rows 3, cols 1–4)
-const PITCH_CELL = { row: 3, col: 1, colEnd: 5 };
-
-function StadiumMap({
-  ticketTypes,
-  selectedTypeId,
-  onSelectType,
-}: Omit<SeatingMapProps, 'venueType'>) {
-  const tierMap = useMemo(() => buildTierMap(ticketTypes), [ticketTypes]);
-
-  // Map stadium tier (0=Upper, 1=Lower, 2=Club, 3=VIP) to ticket type
-  // Clamp to number of actual ticket types
-  function typeForTier(sectionTier: number): TicketType | null {
-    const sorted = [...ticketTypes].sort((a, b) => a.price - b.price);
-    if (sorted.length === 0) return null;
-    // Upper → cheapest, Club → most expensive, Lower → middle
-    if (sectionTier === 0) return sorted[0];
-    if (sectionTier === 2) return sorted[sorted.length - 1];
-    if (sectionTier === 1) return sorted[Math.floor(sorted.length / 2)];
-    return sorted[sorted.length - 1];
+  function ttFor(tierIdx: number): TicketType | null {
+    if (!sorted.length) return null;
+    if (tierIdx === 0) return sorted[0];
+    if (tierIdx === 2) return sorted[sorted.length - 1];
+    return sorted[Math.min(1, sorted.length - 1)];
   }
 
-  const COLS = 6;
-  const ROWS = 7;
-  const cellW = (SW - 40) / COLS;
-  const cellH = 34;
+  function isSel(tierIdx: number) { return ttFor(tierIdx)?.id === selectedTypeId; }
+  function press(tierIdx: number) { const tt = ttFor(tierIdx); if (tt) onSelectType(tt.id); }
 
-  // Build occupied grid for pitch
-  const isPitch = (row: number, col: number) =>
-    row === PITCH_CELL.row && col >= PITCH_CELL.col && col < PITCH_CELL.colEnd;
-
-  // Check if a section is selected
-  function isSectionSelected(sectionTier: number) {
-    const tt = typeForTier(sectionTier);
-    return tt?.id === selectedTypeId;
+  // Section tile style per tier
+  function tileStyle(tierIdx: number) {
+    const sel = isSel(tierIdx);
+    const c   = sel ? SEL : tc(tierIdx);
+    return {
+      backgroundColor: c.bg,
+      borderColor:     c.border,
+      borderWidth:     sel ? 1.5 : 1,
+    };
   }
+  function textStyle(tierIdx: number) {
+    return { color: isSel(tierIdx) ? SEL.text : tc(tierIdx).text };
+  }
+
+  // Oval background helper
+  const ovalLayer = (w: number, h: number, color: string, borderColor: string) => ({
+    position: 'absolute' as const,
+    width:  w,
+    height: h,
+    left:   (MAP_W - w) / 2,
+    top:    (MAP_H - h) / 2,
+    borderRadius: h / 2,
+    backgroundColor: color,
+    borderWidth: 1,
+    borderColor,
+  });
+
+  // Section tile sizes
+  const UT_W = 28, UT_H = 16;   // upper tile
+  const CT_W = 32, CT_H = 20;   // club tile
+  const LT_W = 24, LT_H = 14;   // lower tile
 
   return (
-    <View style={styles.mapContainer}>
-      <Text style={styles.mapTitle}>VENUE MAP</Text>
+    <View style={{ width: MAP_W, height: MAP_H, position: 'relative', alignSelf: 'center' }}>
 
-      {/* Legend */}
-      <View style={styles.legend}>
-        {ticketTypes
-          .sort((a, b) => a.price - b.price)
-          .map((tt, idx) => {
-            const color = tierColor(idx);
-            return (
-              <View key={tt.id} style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: color.bg, borderColor: color.border }]} />
-                <Text style={styles.legendText}>{tt.name.toUpperCase()}</Text>
-              </View>
-            );
-          })}
+      {/* ── Oval background layers (outermost → innermost) ── */}
+
+      {/* Upper tier oval (full stadium shape) */}
+      <View style={ovalLayer(BG_UPPER_W, BG_UPPER_H,
+        isSel(0) ? SEL.bg       : tc(0).bg,
+        isSel(0) ? SEL.border   : tc(0).border)} />
+
+      {/* Club oval */}
+      <View style={ovalLayer(BG_CLUB_W, BG_CLUB_H,
+        isSel(2) ? SEL.bg     : tc(2).bg,
+        isSel(2) ? SEL.border : tc(2).border)} />
+
+      {/* Lower tier oval */}
+      <View style={ovalLayer(BG_LOWER_W, BG_LOWER_H,
+        isSel(1) ? SEL.bg     : tc(1).bg,
+        isSel(1) ? SEL.border : tc(1).border)} />
+
+      {/* Pitch oval (green, not tappable) */}
+      <View style={[ovalLayer(BG_PITCH_W, BG_PITCH_H, '#2e7d32', '#1b5e20'), { overflow: 'hidden' }]}>
+        {/* Field markings */}
+        <View style={{ position:'absolute', left:0, right:0, top:'50%', height:1, backgroundColor:'rgba(255,255,255,0.35)' }} />
+        <View style={{
+          position:'absolute',
+          width: BG_PITCH_W * 0.42,
+          height: BG_PITCH_W * 0.42,
+          borderRadius: BG_PITCH_W * 0.21,
+          borderWidth: 1,
+          borderColor: 'rgba(255,255,255,0.40)',
+          alignSelf: 'center',
+          top: (BG_PITCH_H - BG_PITCH_W * 0.42) / 2,
+        }} />
+        {/* Goal boxes */}
+        <View style={{ position:'absolute', alignSelf:'center', top:4, width:'52%', height:'20%', borderWidth:1, borderColor:'rgba(255,255,255,0.30)', borderRadius:2 }} />
+        <View style={{ position:'absolute', alignSelf:'center', bottom:4, width:'52%', height:'20%', borderWidth:1, borderColor:'rgba(255,255,255,0.30)', borderRadius:2 }} />
+        {/* Small goal areas */}
+        <View style={{ position:'absolute', alignSelf:'center', top:4, width:'28%', height:'9%', borderWidth:1, borderColor:'rgba(255,255,255,0.25)', borderRadius:1 }} />
+        <View style={{ position:'absolute', alignSelf:'center', bottom:4, width:'28%', height:'9%', borderWidth:1, borderColor:'rgba(255,255,255,0.25)', borderRadius:1 }} />
+        {/* Penalty spots */}
+        <View style={{ position:'absolute', alignSelf:'center', top:'24%', width:4, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.5)' }} />
+        <View style={{ position:'absolute', alignSelf:'center', bottom:'24%', width:4, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.5)' }} />
       </View>
 
-      {/* Stadium grid */}
-      <View style={[styles.stadiumGrid, { height: ROWS * cellH + 4 }]}>
-        {Array.from({ length: ROWS }, (_, row) => (
-          <View key={row} style={[styles.gridRow, { height: cellH }]}>
-            {Array.from({ length: COLS }, (_, col) => {
-              if (isPitch(row, col)) {
-                // Render pitch spanning cols
-                if (col === PITCH_CELL.col) {
-                  return (
-                    <View
-                      key={col}
-                      style={[
-                        styles.pitchCell,
-                        { width: cellW * (PITCH_CELL.colEnd - PITCH_CELL.col) - 4, height: cellH - 4 },
-                      ]}
-                    >
-                      <View style={styles.pitchLines}>
-                        <View style={styles.pitchCircle} />
-                        <View style={styles.pitchMidLine} />
-                      </View>
-                    </View>
-                  );
-                }
-                return null;
-              }
+      {/* ── Touchable overlay rings — make entire oval band tappable ── */}
 
-              // Find section at this row/col
-              const section = STADIUM_SECTIONS.find(
-                (s) => s.row === row && s.col === col
-              );
-              if (!section) {
-                return <View key={col} style={{ width: cellW, height: cellH }} />;
-              }
-              if (section.span > 1 && STADIUM_SECTIONS.find(s => s.row === row && s.col !== col && s.id === section.id)) {
-                return null;
-              }
+      {/* Upper tier ring touch area (tap outermost oval, not covered by club oval) */}
+      <TouchableOpacity
+        onPress={() => press(0)}
+        style={{
+          position: 'absolute',
+          width: BG_UPPER_W, height: BG_UPPER_H,
+          left: 0, top: 0,
+          borderRadius: BG_UPPER_H / 2,
+          backgroundColor: 'transparent',
+        }}
+        activeOpacity={0.6}
+      />
 
-              const tt = typeForTier(section.tier);
-              const color = tt ? tierColor(tierMap.get(tt.id) ?? section.tier) : tierColor(section.tier);
-              const selected = isSectionSelected(section.tier);
+      {/* Club touch area */}
+      <TouchableOpacity
+        onPress={() => press(2)}
+        style={{
+          position: 'absolute',
+          width: BG_CLUB_W, height: BG_CLUB_H,
+          left: (MAP_W - BG_CLUB_W) / 2,
+          top:  (MAP_H - BG_CLUB_H) / 2,
+          borderRadius: BG_CLUB_H / 2,
+          backgroundColor: 'transparent',
+        }}
+        activeOpacity={0.6}
+      />
 
-              return (
-                <TouchableOpacity
-                  key={col}
-                  onPress={() => tt && onSelectType(tt.id)}
-                  style={[
-                    styles.sectionCell,
-                    {
-                      width: cellW * (section.span ?? 1) - 4,
-                      height: cellH - 4,
-                      backgroundColor: selected ? '#ff3c6e' : color.bg,
-                      borderColor: selected ? '#ff3c6e' : color.border,
-                    },
-                  ]}
-                  activeOpacity={0.75}
-                >
-                  <Text
-                    style={[
-                      styles.sectionLabel,
-                      { color: selected ? '#fff' : color.text },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {section.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
+      {/* Lower tier touch area */}
+      <TouchableOpacity
+        onPress={() => press(1)}
+        style={{
+          position: 'absolute',
+          width: BG_LOWER_W, height: BG_LOWER_H,
+          left: (MAP_W - BG_LOWER_W) / 2,
+          top:  (MAP_H - BG_LOWER_H) / 2,
+          borderRadius: BG_LOWER_H / 2,
+          backgroundColor: 'transparent',
+        }}
+        activeOpacity={0.6}
+      />
+
+      {/* ── Section label tiles — positioned on each oval ring ── */}
+
+      {/* Upper tier labels */}
+      {UPPER_SECTIONS.map((sec, i) => {
+        const { left, top } = pos(RX_UPPER, RY_UPPER, sec.angle);
+        return (
+          <TouchableOpacity
+            key={`u${i}`}
+            onPress={() => press(0)}
+            activeOpacity={0.75}
+            style={[
+              {
+                position: 'absolute',
+                width: UT_W, height: UT_H,
+                left: left - UT_W / 2,
+                top:  top  - UT_H / 2,
+                borderRadius: 3,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              tileStyle(0),
+            ]}
+          >
+            <Text style={[{ fontSize: 5.5, fontWeight: '800', letterSpacing: 0.2, textAlign: 'center' }, textStyle(0)]}>
+              {sec.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+
+      {/* Club labels */}
+      {CLUB_SECTIONS.map((sec, i) => {
+        const { left, top } = pos(RX_CLUB, RY_CLUB, sec.angle);
+        return (
+          <TouchableOpacity
+            key={`c${i}`}
+            onPress={() => press(2)}
+            activeOpacity={0.75}
+            style={[
+              {
+                position: 'absolute',
+                width: CT_W, height: CT_H,
+                left: left - CT_W / 2,
+                top:  top  - CT_H / 2,
+                borderRadius: 3,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              tileStyle(2),
+            ]}
+          >
+            <Text style={[{ fontSize: 5, fontWeight: '900', letterSpacing: 0.3, textAlign: 'center', lineHeight: 7 }, textStyle(2)]}>
+              {sec.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+
+      {/* Lower tier labels */}
+      {LOWER_SECTIONS.map((sec, i) => {
+        const { left, top } = pos(RX_LOWER, RY_LOWER, sec.angle);
+        return (
+          <TouchableOpacity
+            key={`l${i}`}
+            onPress={() => press(1)}
+            activeOpacity={0.75}
+            style={[
+              {
+                position: 'absolute',
+                width: LT_W, height: LT_H,
+                left: left - LT_W / 2,
+                top:  top  - LT_H / 2,
+                borderRadius: 2,
+                alignItems: 'center',
+                justifyContent: 'center',
+              },
+              tileStyle(1),
+            ]}
+          >
+            <Text style={[{ fontSize: 5, fontWeight: '800', letterSpacing: 0.2, textAlign: 'center' }, textStyle(1)]}>
+              {sec.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+
+      {/* Compass */}
+      <View style={{ position:'absolute', bottom:8, right:10, alignItems:'center', opacity:0.55 }}>
+        <Text style={{ fontSize:7, fontWeight:'900', color:'#333' }}>N</Text>
+        <View style={{ width:5, height:5, borderRadius:2.5, backgroundColor:'#333', marginVertical:1 }} />
+        <Text style={{ fontSize:7, fontWeight:'900', color:'#333' }}>S</Text>
       </View>
-
-      <Text style={styles.mapNote}>Tap a section to select your ticket tier</Text>
     </View>
   );
 }
 
-// ─── Auditorium / Theater Map ─────────────────────────────────────────────────
+// ─── Legend ───────────────────────────────────────────────────────────────────
 
-const AUDITORIUM_SECTIONS = [
-  // Orchestra Premium (row 0)
-  { id: 'A', label: 'A', tier: 3, row: 0, col: 1 },
-  { id: 'B', label: 'B', tier: 3, row: 0, col: 2 },
-  { id: 'C', label: 'C', tier: 3, row: 0, col: 3 },
-  // Orchestra (row 1)
-  { id: 'D', label: 'D', tier: 2, row: 1, col: 1 },
-  { id: 'E', label: 'E', tier: 2, row: 1, col: 2 },
-  { id: 'F', label: 'F', tier: 2, row: 1, col: 3 },
-  // Mezzanine (row 2)
-  { id: 'G', label: 'G', tier: 1, row: 2, col: 1 },
-  { id: 'H', label: 'H', tier: 1, row: 2, col: 2 },
-  { id: 'I', label: 'I', tier: 1, row: 2, col: 3 },
-  // Balcony (row 3)
-  { id: 'J', label: 'J', tier: 0, row: 3, col: 1 },
-  { id: 'K', label: 'K', tier: 0, row: 3, col: 2 },
-  { id: 'L', label: 'L', tier: 0, row: 3, col: 3 },
-  // Side sections
-  { id: 'X1', label: 'X1', tier: 0, row: 0, col: 0 },
-  { id: 'X2', label: 'X2', tier: 0, row: 1, col: 0 },
-  { id: 'X3', label: 'X3', tier: 0, row: 2, col: 0 },
-  { id: 'Y1', label: 'Y1', tier: 0, row: 0, col: 4 },
-  { id: 'Y2', label: 'Y2', tier: 0, row: 1, col: 4 },
-  { id: 'Y3', label: 'Y3', tier: 0, row: 2, col: 4 },
-];
-
-// Tier color for auditorium: 3=Premium, 2=Orchestra, 1=Mezzanine, 0=Balcony
-const AUD_TIER_COLORS = [
-  { bg: '#7c5cbf', border: '#7c5cbf', text: '#fff', label: 'BALCONY' },      // 0
-  { bg: '#3a7d44', border: '#3a7d44', text: '#fff', label: 'MEZZANINE' },    // 1
-  { bg: '#1a2e5e', border: '#1a2e5e', text: '#fff', label: 'ORCHESTRA' },    // 2
-  { bg: '#c8962a', border: '#c8962a', text: '#fff', label: 'PREMIUM' },      // 3
-];
-
-function audTierColor(tier: number) {
-  return AUD_TIER_COLORS[Math.min(tier, AUD_TIER_COLORS.length - 1)];
-}
-
-function AuditoriumMap({
+export function MapLegend({
   ticketTypes,
   selectedTypeId,
-  onSelectType,
-}: Omit<SeatingMapProps, 'venueType'>) {
-  const sortedTypes = useMemo(
-    () => [...ticketTypes].sort((a, b) => a.price - b.price),
-    [ticketTypes]
-  );
-
-  // Map auditorium tier (0=Balcony … 3=Premium) → ticket type
-  function typeForAudTier(tier: number): TicketType | null {
-    if (sortedTypes.length === 0) return null;
-    const idx = Math.floor((tier / 3) * (sortedTypes.length - 1));
-    return sortedTypes[Math.min(idx, sortedTypes.length - 1)];
-  }
-
-  const COLS = 5;
-  const ROWS = 4;
-  const cellW = (SW - 40) / COLS;
-  const cellH = 48;
-
+}: {
+  ticketTypes: TicketType[];
+  selectedTypeId: string | null;
+}) {
+  const sorted = [...ticketTypes].sort((a, b) => a.price - b.price);
+  const labels = ['Upper tier', 'Lower tier', 'Club level'];
   return (
-    <View style={styles.mapContainer}>
-      <Text style={styles.mapTitle}>VENUE MAP</Text>
-
-      {/* Stage */}
-      <View style={styles.stageBar}>
-        <Text style={styles.stageText}>STAGE</Text>
-      </View>
-
-      {/* Legend */}
-      <View style={styles.legend}>
-        {sortedTypes.map((tt, idx) => {
-          // assign display color based on sorted position
-          const colorIdx = Math.round((idx / Math.max(sortedTypes.length - 1, 1)) * 3);
-          const color = AUD_TIER_COLORS[colorIdx];
-          return (
-            <View key={tt.id} style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: color.bg, borderColor: color.border }]} />
-              <Text style={styles.legendText}>{tt.name.toUpperCase()}</Text>
-            </View>
-          );
-        })}
-      </View>
-
-      {/* Auditorium grid */}
-      <View style={[styles.auditoriumGrid, { borderRadius: 12 }]}>
-        {Array.from({ length: ROWS }, (_, row) => (
-          <View key={row} style={[styles.gridRow, { height: cellH }]}>
-            {Array.from({ length: COLS }, (_, col) => {
-              const section = AUDITORIUM_SECTIONS.find(
-                (s) => s.row === row && s.col === col
-              );
-
-              // Empty corner cells (bottom row, cols 0 and 4)
-              if (!section) {
-                return (
-                  <View key={col} style={{ width: cellW, height: cellH }} />
-                );
-              }
-
-              const tt = typeForAudTier(section.tier);
-              const color = audTierColor(section.tier);
-              const selected = tt?.id === selectedTypeId;
-
-              return (
-                <TouchableOpacity
-                  key={col}
-                  onPress={() => tt && onSelectType(tt.id)}
-                  style={[
-                    styles.audSection,
-                    {
-                      width: cellW - 5,
-                      height: cellH - 5,
-                      backgroundColor: selected ? '#ff3c6e' : color.bg,
-                      borderColor: selected ? '#ff3c6e' : color.border,
-                      opacity: tt ? 1 : 0.4,
-                    },
-                  ]}
-                  activeOpacity={0.75}
-                >
-                  <Text
-                    style={[styles.audSectionLabel, { color: selected ? '#fff' : color.text }]}
-                  >
-                    {section.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+      {sorted.map((tt, i) => {
+        const sel = tt.id === selectedTypeId;
+        const c   = sel ? SEL : tc(i);
+        return (
+          <View key={tt.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <View style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: c.bg, borderWidth: 1, borderColor: c.border }} />
+            <Text style={{ fontSize: 10, fontWeight: sel ? '700' : '500', color: sel ? SEL.bg : '#555' }}>
+              {labels[i] ?? tt.name}
+            </Text>
           </View>
-        ))}
-      </View>
+        );
+      })}
+    </View>
+  );
+}
 
-      <Text style={styles.mapNote}>Tap a section to select your ticket tier</Text>
+// ─── Auditorium Map ───────────────────────────────────────────────────────────
+
+const AUD_COLORS = [
+  { bg: '#d4dae6', border: '#b0bac8', text: '#5a6478' },
+  { bg: '#3a7d44', border: '#3a7d44', text: '#fff' },
+  { bg: '#1a2e5e', border: '#1a2e5e', text: '#fff' },
+  { bg: '#c8962a', border: '#c8962a', text: '#fff' },
+];
+
+const AUD_ROWS = [
+  [{ id:'BAL_L', label:'BALCONY\nLEFT', tier:0 }, { id:'BAL_C', label:'BALCONY\nCENTER', tier:0 }, { id:'BAL_R', label:'BALCONY\nRIGHT', tier:0 }],
+  [{ id:'MEZ_L', label:'MEZZ\nLEFT', tier:1 },    { id:'MEZ_C', label:'MEZZ\nCENTER', tier:1 },    { id:'MEZ_R', label:'MEZZ\nRIGHT', tier:1 }],
+  [{ id:'ORC_L', label:'ORCH\nLEFT', tier:2 },    { id:'ORC_C', label:'ORCH\nCENTER', tier:2 },    { id:'ORC_R', label:'ORCH\nRIGHT', tier:2 }],
+  [{ id:'PIT',   label:'PIT / GA', tier:3, wide:true }],
+];
+
+function AuditoriumMap({ ticketTypes, selectedTypeId, onSelectType }: Omit<SeatingMapProps, 'venueType'>) {
+  const sorted = useMemo(() => [...ticketTypes].sort((a, b) => a.price - b.price), [ticketTypes]);
+  function ttForTier(t: number): TicketType | null {
+    if (!sorted.length) return null;
+    const idx = Math.round((t / 3) * (sorted.length - 1));
+    return sorted[Math.min(idx, sorted.length - 1)];
+  }
+  return (
+    <View style={{ gap: 5 }}>
+      <View style={{ backgroundColor: '#111', borderRadius: 6, paddingVertical: 10, alignItems: 'center', marginBottom: 4 }}>
+        <Text style={{ fontSize: 9, fontWeight: '900', letterSpacing: 4, color: '#fff' }}>S T A G E</Text>
+      </View>
+      {AUD_ROWS.map((row, ri) => (
+        <View key={ri} style={{ flexDirection: 'row', gap: 5 }}>
+          {row.map((sec: any) => {
+            const tt  = ttForTier(sec.tier);
+            const sel = tt?.id === selectedTypeId;
+            const c   = sel ? SEL : AUD_COLORS[Math.min(sec.tier, AUD_COLORS.length - 1)];
+            return (
+              <TouchableOpacity key={sec.id} onPress={() => tt && onSelectType(tt.id)}
+                style={{ flex: sec.wide ? 3 : 1, paddingVertical: 14, borderRadius: 6,
+                  alignItems: 'center', justifyContent: 'center',
+                  borderWidth: sel ? 2 : 1, backgroundColor: c.bg, borderColor: c.border }}>
+                <Text style={{ fontSize: 8, fontWeight: '800', letterSpacing: 0.4, textAlign: 'center', lineHeight: 12, color: c.text }}>
+                  {sec.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
@@ -410,144 +457,7 @@ function AuditoriumMap({
 
 export default function SeatingMap(props: SeatingMapProps) {
   const { venueType, ...rest } = props;
-
   if (venueType === 'stadium') return <StadiumMap {...rest} />;
   if (venueType === 'auditorium') return <AuditoriumMap {...rest} />;
   return null;
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  mapContainer: {
-    marginHorizontal: 20,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  mapTitle: {
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 2,
-    color: 'rgba(0,0,0,0.4)',
-    marginBottom: 10,
-  },
-  stageBar: {
-    backgroundColor: '#1a1a2e',
-    marginBottom: 6,
-    borderRadius: 6,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  stageText: {
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 3,
-    color: '#ffffff',
-  },
-  legend: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 10,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 2,
-    borderWidth: 1,
-  },
-  legendText: {
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: 'rgba(0,0,0,0.55)',
-  },
-  stadiumGrid: {
-    backgroundColor: '#d0d8e4',
-    borderRadius: 12,
-    padding: 2,
-    overflow: 'hidden',
-  },
-  auditoriumGrid: {
-    backgroundColor: '#f0f0f0',
-    padding: 3,
-    overflow: 'hidden',
-  },
-  gridRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-    marginVertical: 1,
-  },
-  sectionCell: {
-    borderRadius: 4,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 1,
-  },
-  sectionLabel: {
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-    textAlign: 'center',
-  },
-  pitchCell: {
-    backgroundColor: '#3a7d44',
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 2,
-    overflow: 'hidden',
-  },
-  pitchLines: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pitchCircle: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.6)',
-    position: 'absolute',
-  },
-  pitchMidLine: {
-    width: '100%',
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.5)',
-    position: 'absolute',
-  },
-  audSection: {
-    borderRadius: 6,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 2,
-    marginVertical: 2,
-  },
-  audSectionLabel: {
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 0.5,
-  },
-  mapNote: {
-    fontSize: 9,
-    color: 'rgba(0,0,0,0.35)',
-    textAlign: 'center',
-    marginTop: 6,
-    letterSpacing: 0.5,
-    fontWeight: '500',
-  },
-});

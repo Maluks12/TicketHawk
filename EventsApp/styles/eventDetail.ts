@@ -1,112 +1,266 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Dimensions, Platform } from 'react-native';
+
+const { height: SCREEN_H } = Dimensions.get('window');
+
+// ─── Design tokens (DESIGN.md) ────────────────────────────────────────────────
+
+export const C = {
+  primary:              '#ba0034',
+  primaryContainer:     '#e51245',
+  cta:                  '#FF2D55',
+  surfaceContainer:     '#ffe9e9',
+  surface:              '#fff8f7',
+  onSurface:            '#281718',
+  onSurfaceVariant:     '#5d3f40',
+  outlineVariant:       '#e6bcbd',
+  outline:              '#916e6f',
+};
+
+// ~60 vh
+export const HERO_H = Math.round(SCREEN_H * 0.58);
 
 // ─── className strings ────────────────────────────────────────────────────────
-// Import as:  import { s, sheet } from '../styles/eventDetail';
 
 export const s = {
 
-  // ── Screen shell ─────────────────────────────────────────────────────────────
-  screen:           'flex-1 bg-white',
-  scroll:           'flex-1 bg-white',
+  screen:   'flex-1 bg-[#fff8f7]',
+  scroll:   'flex-1',
 
   // ── Hero ─────────────────────────────────────────────────────────────────────
-  hero:                 'relative h-[320px] bg-[#1a1a1a]',
+  hero:                 'relative bg-[#1a1a1a]',
   heroImagePlaceholder: 'absolute inset-0 bg-[#2a2a2a]',
+  backBtn:  'absolute top-14 left-5 z-10 w-12 h-12 rounded-full bg-white/20 items-center justify-center',
+  backIcon: 'text-white text-[22px] font-black leading-none',
+  shareBtn: 'absolute top-14 right-5 z-10 w-12 h-12 rounded-full bg-white/20 items-center justify-center',
+  shareIcon:'text-white text-base font-bold',
+  soldOutBadge: 'absolute top-16 left-1/2 bg-black/60 rounded-full px-4 py-1',
+  soldOutText:  'text-[#FF2D55] text-[9px] font-extrabold tracking-[2px]',
 
-  // Back button — glassmorphism lite, overlaid on dark hero
-  backBtn:              'absolute top-14 left-4 z-10 w-10 h-10 rounded-[2px] bg-black/40 items-center justify-center',
-  backIcon:             'text-white text-lg font-black',
-  shareBtn:             'absolute top-14 right-4 z-10 w-10 h-10 rounded-[2px] bg-black/40 items-center justify-center',
-  shareIcon:            'text-white text-base',
+  // ── Metadata items inside card ────────────────────────────────────────────────
+  metaItemRow:       'flex-row items-center gap-4 mb-5',
+  metaIconBox:       'w-12 h-12 rounded-xl bg-[#ffe9e9] items-center justify-center',
+  metaIconText:      'text-[22px]',
+  metaLabelText:     'text-[10px] font-bold tracking-[0.1em] uppercase text-[#5d3f40] mb-0.5',
+  metaValueText:     'text-[16px] font-bold text-[#281718] leading-snug',
 
-  // Badges overlaid on hero
-  heroCategoryBadge:    'absolute top-14 left-1/2 -translate-x-1/2 bg-[#ff3c6e] px-3 py-1 rounded-[2px]',
-  heroCategoryText:     'text-white text-[9px] font-extrabold tracking-[2px] uppercase',
-  heroPriceBadge:       'absolute top-[70px] right-14 bg-black/60 rounded-[5px] px-2.5 py-1',
-  heroPriceText:        'text-white text-[9px] font-bold',
+  // ── CTA ───────────────────────────────────────────────────────────────────────
+  ctaWrap:           'mt-1',
+  btnPrimary:        'w-full bg-[#FF2D55] py-5 rounded-xl items-center mb-3',
+  btnPrimaryText:    'text-white text-[18px] font-extrabold tracking-[0.07em] uppercase',
+  btnSoldOut:        'w-full bg-black/10 py-5 rounded-xl items-center mb-3',
+  btnSoldOutText:    'text-black/30 text-[18px] font-extrabold tracking-[0.07em] uppercase',
+  actionRow:         'flex-row gap-3',
+  btnOutline:        'flex-1 border border-[#916e6f] bg-white py-4 rounded-xl flex-row items-center justify-center gap-1.5',
+  btnOutlineText:    'text-[#281718] text-[12px] font-bold tracking-[0.1em] uppercase',
+  btnOutlineIcon:    'text-[16px]',
 
-  // Sold out ribbon
-  soldOutBadge:         'absolute top-[70px] left-14 bg-black/70 rounded-[5px] px-2.5 py-1',
-  soldOutText:          'text-[#ff3c6e] text-[9px] font-extrabold tracking-[1.5px]',
+  // ── Sections ─────────────────────────────────────────────────────────────────
+  content:           'px-5',
+  sectionHeader:     'flex-row items-center justify-between mb-4',
+  sectionTitle:      'text-[18px] font-extrabold text-[#281718] tracking-[0.05em] uppercase',
+  sectionLink:       'text-[10px] font-bold text-[#ba0034] tracking-[0.1em]',
+  divider:           'h-[1px] bg-[#e6bcbd] my-6',
 
-  // ── Image gallery ─────────────────────────────────────────────────────────────
-  galleryWrap:          'py-4',
-  galleryScroll:        'px-5 gap-3',
-  galleryThumb:         'w-[192px] h-[110px] rounded-[10px] overflow-hidden bg-[#e5e5e5]',
+  // ── About ─────────────────────────────────────────────────────────────────────
+  descText:          'text-[15px] text-[#5d3f40] leading-[24px]',
+  descReadMore:      'text-[12px] font-bold text-[#ba0034] tracking-[0.1em] mt-3 border-b-2 border-[#ba0034] self-start pb-0.5',
 
-  // ── Content area ─────────────────────────────────────────────────────────────
-  content:              'px-5',
+  // ── Bento ─────────────────────────────────────────────────────────────────────
+  bentoGrid:         'flex-row gap-3',
+  bentoCard:         'flex-1 bg-[#ffe9e9] rounded-xl p-5 border border-[#e6bcbd]/30',
+  bentoIcon:         'text-[24px] mb-2',
+  bentoLabel:        'text-[10px] font-bold text-[#5d3f40] tracking-[0.1em] uppercase mb-1',
+  bentoValue:        'text-[16px] font-bold text-[#281718] leading-snug',
+  bentoSub:          'text-[11px] text-[#5d3f40] mt-0.5',
 
-  // ── Title block ──────────────────────────────────────────────────────────────
-  category:             'text-[10px] font-extrabold text-[#ff3c6e] tracking-[2px] uppercase mb-1.5',
-  title:                'text-[32px] font-black text-black tracking-[1px] leading-[36px] mb-3',
+  // ── Location ─────────────────────────────────────────────────────────────────
+  locationCard:            'rounded-xl overflow-hidden border border-[#e6bcbd]/50 bg-white',
+  locationMapPlaceholder:  'h-48 bg-[#ffe1e1] items-center justify-center',
+  locationMapPin:          'w-10 h-10 bg-[#ba0034] rounded-full items-center justify-center',
+  locationMapPinText:      'text-white text-[22px]',
+  locationInfoRow:         'p-5 flex-row items-start justify-between',
+  locationInfoLeft:        'flex-1 mr-3',
+  locationName:            'text-[16px] font-bold text-[#281718] mb-0.5',
+  locationAddr:            'text-[13px] text-[#5d3f40]',
+  locationBtnRow:          'flex-col gap-2',
+  locationBtnFilled:       'bg-[#ffe9e9] px-4 py-2.5 rounded-lg items-center',
+  locationBtnFilledText:   'text-[11px] font-bold text-[#ba0034] tracking-[0.1em] uppercase',
+  locationBtnOutline:      'bg-white border border-[#916e6f] px-4 py-2.5 rounded-lg items-center',
+  locationBtnOutlineText:  'text-[11px] font-bold text-[#281718] tracking-[0.1em] uppercase',
 
-  // ── Meta row ─────────────────────────────────────────────────────────────────
+  // ── Participants ──────────────────────────────────────────────────────────────
+  participantRow:        'flex-row items-center gap-3.5 py-3.5 border-b border-[#e6bcbd]',
+  participantRowLast:    'flex-row items-center gap-3.5 py-3.5',
+  participantAvatar:     'w-10 h-10 rounded-full bg-[#ffe9e9] border border-[#e6bcbd] items-center justify-center',
+  participantAvatarText: 'text-[15px] font-black text-[#ba0034]',
+  participantName:       'flex-1 text-[14px] font-semibold text-[#281718]',
+  participantArrow:      'text-[20px] text-[#e6bcbd]',
+
+  // ── Organizer ─────────────────────────────────────────────────────────────────
+  organizerCard:        'flex-row items-center justify-between p-5 bg-white border border-[#e6bcbd]/50 rounded-xl',
+  organizerLeft:        'flex-row items-center gap-4 flex-1',
+  organizerAvatar:      'w-14 h-14 rounded-full bg-[#ffe9e9] border border-[#e6bcbd] items-center justify-center overflow-hidden',
+  organizerAvatarText:  'text-[22px] font-black text-[#ba0034]',
+  organizerByLabel:     'text-[10px] font-bold tracking-[0.1em] uppercase text-[#5d3f40] mb-0.5',
+  organizerName:        'text-[15px] font-bold text-[#281718] uppercase',
+
+  bottomPad:            'h-32',
+
+  // ── Legacy (kept for other screens that may import) ──────────────────────────
   metaRow:              'flex-row items-center gap-1.5 mb-1.5',
   metaIcon:             'text-[13px]',
   metaText:             'text-[12px] text-black/55 font-medium',
   metaTextBold:         'text-[12px] text-black/80 font-semibold',
-
-  // ── Divider ──────────────────────────────────────────────────────────────────
-  divider:              'h-[1px] bg-black/[0.07] my-5',
-
-  // ── Primary CTA ──────────────────────────────────────────────────────────────
-  ctaWrap:              'mb-4',
-  btnPrimary:           'bg-[#ff3c6e] py-4 rounded-[2px] items-center',
-  btnPrimaryText:       'text-white font-extrabold text-[11px] tracking-[2px]',
-  btnSoldOut:           'bg-black/10 py-4 rounded-[2px] items-center',
-  btnSoldOutText:       'text-black/30 font-extrabold text-[11px] tracking-[2px]',
-
-  // ── Secondary actions ────────────────────────────────────────────────────────
-  actionRow:            'flex-row gap-3 mb-1',
-  btnOutline:           'flex-1 border border-black/20 py-3 rounded-[2px] flex-row items-center justify-center gap-1.5',
-  btnOutlineText:       'text-black font-extrabold text-[10px] tracking-[1.5px]',
-  btnOutlineIcon:       'text-[14px]',
-
-  // ── Section header ───────────────────────────────────────────────────────────
-  sectionHeader:        'flex-row items-center justify-between mb-3.5',
-  sectionTitle:         'text-[13px] font-black text-black tracking-[2px]',
-  sectionLink:          'text-[10px] font-extrabold text-[#ff3c6e] tracking-[1.5px]',
-
-  // ── Description ──────────────────────────────────────────────────────────────
-  descText:             'text-[13px] text-black/60 leading-[20px]',
-  descReadMore:         'text-[11px] font-extrabold text-[#ff3c6e] tracking-[1px] mt-1.5',
-
-  // ── Bento info grid ──────────────────────────────────────────────────────────
-  bentoGrid:            'flex-row gap-3',
-  bentoCard:            'flex-1 bg-[#f5f5f5] rounded-[10px] p-3.5',
-  bentoIcon:            'text-[18px] mb-1.5',
-  bentoLabel:           'text-[10px] font-extrabold text-black/35 tracking-[1.5px] uppercase mb-0.5',
-  bentoValue:           'text-[15px] font-black text-black',
-  bentoSub:             'text-[10px] text-black/40 mt-0.5',
-
-  // ── Location block ───────────────────────────────────────────────────────────
-  locationCard:         'bg-[#f5f5f5] rounded-[10px] p-4',
-  locationName:         'text-[15px] font-black text-black mb-0.5',
-  locationAddr:         'text-[12px] text-black/50',
-  locationDirections:   'flex-row items-center gap-1 mt-3',
-  locationDirText:      'text-[10px] font-extrabold text-[#ff3c6e] tracking-[1.5px]',
-  locationDirIcon:      'text-[12px] text-[#ff3c6e]',
-
-  // ── Availability bar ─────────────────────────────────────────────────────────
+  galleryWrap:          'py-4',
+  galleryScroll:        'px-5 gap-3',
+  galleryThumb:         'w-[192px] h-[110px] rounded-[10px] overflow-hidden bg-[#ffe9e9]',
   availTrack:           'h-1.5 bg-black/[0.07] rounded-full mt-2.5 overflow-hidden',
-  availFill:            'h-full bg-[#ff3c6e] rounded-full',
-
-  // ── Participants (teams / performers) ───────────────────────────────────────
-  participantRow:         'flex-row items-center gap-3.5 py-3.5 border-b border-black/[0.07]',
-  participantRowLast:     'flex-row items-center gap-3.5 py-3.5',
-  participantAvatar:      'w-10 h-10 rounded-full bg-[#f0f0f0] border border-black/10 items-center justify-center',
-  participantAvatarText:  'text-[15px] font-black text-black/60',
-  participantName:        'flex-1 text-[14px] font-semibold text-black',
-  participantArrow:       'text-[20px] text-black/20',
-
-  // ── Bottom padding ───────────────────────────────────────────────────────────
-  bottomPad:            'h-28',
+  availFill:            'h-full bg-[#FF2D55] rounded-full',
 };
 
-// ─── StyleSheet ────────────────────────────────────────────────────────────────
+// ─── StyleSheet ───────────────────────────────────────────────────────────────
+
+const PARALLAX_EXTRA = Math.round(HERO_H * 0.35);
+
 export const sheet = StyleSheet.create({
-  absoluteFill:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+
+  // ── Parallax hero ─────────────────────────────────────────────────────────
+  // Outer clip container — exactly HERO_H tall, overflow:hidden so the
+  // oversized image is clipped as translateY pulls it upward on scroll
+  heroContainer: {
+    height: HERO_H,
+    overflow: 'hidden',
+    backgroundColor: '#1a1a1a',
+  },
+
+  // Image is taller than the container by PARALLAX_EXTRA so no gap appears
+  // Image is taller than container by PARALLAX_EXTRA — no gap when translating up
+  heroImage: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: -PARALLAX_EXTRA,
+  } as any,
+
+  // Fixed nav overlay — pointerEvents="box-none" on the View so touches pass through
+  navOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    paddingTop: Platform.OS === "ios" ? 52 : 40,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  } as any,
+
+  // Both nav buttons use the same static semi-transparent style
+  navBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(0,0,0,0.30)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Kept as alias so no import errors if referenced elsewhere
+  navBtnRight: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(0,0,0,0.30)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // ── Hero title block ──────────────────────────────────────────────────────
+  heroTitleBlock: {
+    position: 'absolute',
+    bottom: 36,
+    left: 20,
+    right: 20,
+  },
+
+  trendingBadge: {
+    backgroundColor: '#e51245',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 9999,
+  },
+  trendingBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+  viewsText: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  heroCategory: {
+    color: '#FF2D55',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  heroTitle: {
+    color: '#ffffff',
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    lineHeight: 36,
+    textTransform: 'uppercase',
+  },
+
+  // ── Floating action card ──────────────────────────────────────────────────
+  actionCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginTop: -28,
+    padding: 24,
+    shadowColor: '#281718',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 16,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(230,188,189,0.3)',
+    zIndex: 10,
+  },
+
+  metaDivider: {
+    height: 1,
+    backgroundColor: 'rgba(230,188,189,0.5)',
+    marginBottom: 20,
+  },
+
+  soldOutBadge: {
+    position: 'absolute',
+    top: 64,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 9999,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  soldOutText: {
+    color: '#FF2D55',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+
+  // Kept for back-compat
+  hero: { height: HERO_H, backgroundColor: '#1a1a1a' },
   centerTranslate: { transform: [{ translateX: -50 }] },
   shadow: {
     shadowColor: '#000',

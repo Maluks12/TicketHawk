@@ -12,6 +12,7 @@ services:
     volumes:
       - dev-db-data:/var/lib/postgresql/data
       - ./seed.sql:/seed.sql   # makes seed.sql available inside the container
+      - ./seed_ticket_types.sql:/seed_ticket_types.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U devuser -d events_dev"]
       interval: 5s
