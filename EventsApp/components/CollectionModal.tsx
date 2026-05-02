@@ -431,7 +431,7 @@ export const CollectionModal = ({
   const isLive = activeItem?.sale_status === 'live';
 
   return (
-    <Modal visible animationType="none" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
 
       <Animated.View style={{ flex: 1, backgroundColor: bg, transform: [{ translateY }] }}>

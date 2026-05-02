@@ -298,7 +298,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const untilSecs  = useTickingSeconds(item.seconds_until ?? 0);
 
   return (
-    <Modal visible animationType="none" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
       <Animated.View style={[sheet.modalFlex, { backgroundColor: bg, transform: [{ translateY }] }]}>
 
