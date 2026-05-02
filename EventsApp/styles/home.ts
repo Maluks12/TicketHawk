@@ -18,7 +18,7 @@ export const s = {
   menuIcon:               'text-2xl text-[#0a0a0a]',
 
   // ── Hero banner ──────────────────────────────────────────────────────────────
-  hero:                  'relative h-[380px]',
+  hero:                  'relative h-[380px] mt-[80px]',
   heroImagePlaceholder:  'absolute inset-0 bg-[#e5e5e5]',
   heroContent:           'absolute bottom-0 left-0 right-0 p-5 pb-8',
   heroBadge:             'text-[11px] font-bold text-[#ff3c6e] tracking-[2px] uppercase mb-2.5',

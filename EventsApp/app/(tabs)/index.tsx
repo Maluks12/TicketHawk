@@ -20,7 +20,6 @@ import FilterModal, { FilterParams, buildFilterQueryString,formatDateRangeLabel 
 
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
-const HEADER_HEIGHT = 120;
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -176,6 +175,7 @@ export default function Index() {
   const lastScrollY  = useRef(0);
   const headerOffset = useRef(0);
   const headerAnim   = useRef(new Animated.Value(0)).current;
+  const headerHeight = useRef(120);   // ← ADD this line here
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -286,7 +286,7 @@ export default function Index() {
 
   // ── Snap helper ──────────────────────────────────────────────────────────
   const snapHeader = () => {
-    const target = headerOffset.current < -(HEADER_HEIGHT / 2) ? -HEADER_HEIGHT : 0;
+   const target = headerOffset.current < -(headerHeight.current / 2) ? -headerHeight.current : 0;
     Animated.spring(headerAnim, {
       toValue: target,
       useNativeDriver: true,
@@ -300,37 +300,28 @@ export default function Index() {
   return (
     <View className={s.screen}>
 
-      {/* Animated Header */}
-      <Animated.View
-        style={{ transform: [{ translateY: headerAnim }] }}
-        className={s.locationHeader}
-      >
-        {/* Tapping the location/date row opens the filter sheet */}
-        <TouchableOpacity onPress={() => setFilterOpen(true)}>
-          <Text className={s.locationCity}>{locationLabel}</Text>
-          <Text className={s.locationSub}>{dateLabelText}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity className={s.menuBtn}>
-          <Text className={s.menuIcon}>🛒</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
       <ScrollView
         className={s.scroll}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
-        onScroll={(e) => {
-          const currentY = e.nativeEvent.contentOffset.y;
-          const delta    = currentY - lastScrollY.current;
-          lastScrollY.current = currentY;
-
-          headerOffset.current = Math.min(
-            0,
-            Math.max(-HEADER_HEIGHT, headerOffset.current - delta)
-          );
-          headerAnim.setValue(headerOffset.current);
-          setScrolled(currentY > 10);
-        }}
+       onScroll={(e) => {
+  const currentY = e.nativeEvent.contentOffset.y;
+  const delta    = currentY - lastScrollY.current;
+  lastScrollY.current = currentY;
+if (currentY <= 0) {
+  // Only force-lock at the very top to kill overscroll jank
+  headerOffset.current = 0;
+  headerAnim.setValue(0);
+} else {
+  // Track scroll speed in BOTH directions
+  headerOffset.current = Math.min(
+    0,
+    Math.max(-headerHeight.current, headerOffset.current - delta)
+  );
+  headerAnim.setValue(headerOffset.current);
+}
+        setScrolled(currentY > 10);
+      }}
         onScrollEndDrag={snapHeader}
         onMomentumScrollEnd={snapHeader}
         refreshControl={
@@ -542,6 +533,23 @@ export default function Index() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+            {/* Animated Header */}
+      <Animated.View
+        style={{ transform: [{ translateY: headerAnim }] }}
+        className={s.locationHeader}
+        onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
+      >
+        {/* Tapping the location/date row opens the filter sheet */}
+        <TouchableOpacity onPress={() => setFilterOpen(true)}>
+          <Text className={s.locationCity}>{locationLabel}</Text>
+          <Text className={s.locationSub}>{dateLabelText}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity className={s.menuBtn}>
+          <Text className={s.menuIcon}>🛒</Text>
+        </TouchableOpacity>
+      </Animated.View>
+
 
       {/* Filter bottom sheet */}
       <FilterModal
