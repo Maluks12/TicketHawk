@@ -213,8 +213,20 @@ export default function Index() {
     .flatMap((sec) => sec.events ?? [])
     .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i);
 
-  // Pick the first SPOTLIGHT_CONFIG whose category has matching events.
-  // This guarantees the section always shows, even if the random pick has no data.
+  // If the current spotlightConfig has no matching events, switch to one that does.
+  // This must be a top-level hook — never inside a loop or IIFE.
+  useEffect(() => {
+    if (!allEvents.length) return;
+    const hasEvents = (cfg: typeof SPOTLIGHT_CONFIGS[0]) =>
+      allEvents.some((e) => e.category?.toLowerCase().includes(cfg.category));
+    if (hasEvents(spotlightConfig)) return;
+    const fallback = SPOTLIGHT_CONFIGS.find(
+      (cfg) => cfg.category !== spotlightConfig.category && hasEvents(cfg)
+    );
+    if (fallback) setSpotlightConfig(fallback);
+  }, [allEvents, spotlightConfig]);
+
+  // Pick events for the spotlight section — pure computation, no hooks.
   const spotlightEvents = (() => {
     const preferred = allEvents.filter((e) =>
       e.category?.toLowerCase().includes(spotlightConfig.category)
@@ -226,17 +238,7 @@ export default function Index() {
       const fallback = allEvents.filter((e) =>
         e.category?.toLowerCase().includes(cfg.category)
       ).slice(0, 4);
-
-      useEffect(() => {
-        if (!allEvents.length) return;
-        const hasEvents = (cfg: typeof SPOTLIGHT_CONFIGS[0]) =>
-          allEvents.some((e) => e.category?.toLowerCase().includes(cfg.category));
-        if (hasEvents(spotlightConfig)) return;
-        const fallback = SPOTLIGHT_CONFIGS.find(
-          (cfg) => cfg.category !== spotlightConfig.category && hasEvents(cfg)
-        );
-        if (fallback) setSpotlightConfig(fallback);
-      }, [allEvents]);
+      if (fallback.length > 0) return fallback;
     }
     // Last resort: just use the first 4 events regardless of category
     return allEvents.slice(0, 4);
