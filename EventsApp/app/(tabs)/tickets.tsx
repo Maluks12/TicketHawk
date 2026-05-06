@@ -12,6 +12,7 @@ import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useMockBookingStore } from '../../store/mockBookingStore';
 import { s, sheet } from '../../styles/tickets';
+import { useAppTheme } from '../../theme/colors'; 
 
 const CARD_HEIGHT = 200;
 const CARD_PEEK   = 72;
@@ -315,6 +316,7 @@ export default function TicketsScreen() {
   const { user } = useAuthStore();
   const hydrated = useMockBookingStore(store => store.bookings.length > 0);
   const localBookings = useMockBookingStore(store => store.bookings);
+  const { colors } = useAppTheme(); 
 
   const [apiBookings, setApiBookings] = useState<Booking[]>([]);
   const [loading, setLoading]         = useState(false);
@@ -349,9 +351,9 @@ export default function TicketsScreen() {
   const showGuestLookup = !user && localBookings.length === 0;
 
   return (
-    <View className={s.root}>
-      <View className={s.header} style={{ paddingTop: insets.top + 10 }}>
-        <Text className={s.headerTitle}>My Tickets</Text>
+    <View className={s.root} style={{ backgroundColor: colors.background }}>
+      <View className={s.header} style={{ paddingTop: insets.top + 10, backgroundColor: colors.background }}>
+        <Text className={s.headerTitle} style={{ color: colors.text }}>My Tickets</Text>
         {totalCount > 0 && (
           <View style={sheet.countPill}><Text style={sheet.countText}>{totalCount}</Text></View>
         )}

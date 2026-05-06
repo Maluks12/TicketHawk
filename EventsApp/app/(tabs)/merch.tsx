@@ -17,6 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getDropsFeed, type MerchandiseItem } from '../../lib/api';
 import { s, sheet } from '../../styles/merch';
 import { CollectionModal } from '../../components/CollectionModal';
+import { useAppTheme } from '../../theme/colors';
 
 // ─── Card colour palette ──────────────────────────────────────────────────────
 
@@ -465,6 +466,7 @@ export default function Merch() {
   const [loading,          setLoading]          = useState(true);
   const [refreshing,       setRefreshing]       = useState(false);
   const [error,            setError]            = useState<string | null>(null);
+  const { colors }                              = useAppTheme();
 
   const fetchDrops = useCallback(async () => {
     try {
@@ -503,7 +505,7 @@ export default function Merch() {
   }, []);
 
   return (
-    <View className={s.screen}>
+    <View className={s.screen} style={{ backgroundColor: colors.background }}>
       <SafeAreaView edges={['top', 'left', 'right']}>
         <View className={s.header}>
           <Text className={s.headerTitle}>DROPS</Text>

@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, Linking, Switch } from 'react-native';import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
@@ -36,9 +37,12 @@ const Row = ({ icon, label, value, valueColor, onPress, destructive, hideChevron
 
 // ─── Section ──────────────────────────────────────────────────────────────────
 
-const Section = ({ title, children, colors }: { title?: string; children: React.ReactNode; colors?: { subText: string; sectionCardBg: string; dividerColor: string } }) => (  <View className={s.section}>
-    {title && <Text className={s.sectionTitle}>{title}</Text>}
-    <View style={sheet.sectionCard}>{children}</View>
+const Section = ({ title, children, colors }: { title?: string; children: React.ReactNode; colors?: { subText: string; sectionCardBg: string; dividerColor: string } }) => (
+  <View className={s.section}>
+    {title && <Text className={s.sectionTitle} style={colors ? { color: colors.subText } : undefined}>{title}</Text>}
+    <View style={[sheet.sectionCard, colors ? { backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor } : undefined]}>
+      {children}
+    </View>
   </View>
 );
 
@@ -84,55 +88,70 @@ export default function ProfileScreen() {
   const fullName = user?.first_name ?? user?.email?.split('@')[0] ?? 'Guest';
 
   return (
-    <View className={s.root}>
-      <View className={s.header} style={{ paddingTop: insets.top + 10 }}>
-        <Text className={s.headerTitle}>Profile</Text>
-      </View>
+     <View className={s.root} style={{ backgroundColor: colors.background }}>
+      <View className={s.header} style={{ paddingTop: insets.top + 10, backgroundColor: colors.background }}>
+        <Text className={s.headerTitle} style={{ color: colors.text }}>Profile</Text>
+        </View>
 
       <ScrollView className={s.scroll} contentContainerStyle={{ paddingBottom: insets.bottom + 32 }} showsVerticalScrollIndicator={false}>
-        {!user && (
-          <Section>
-            <TouchableOpacity className={s.signInRow} activeOpacity={0.7} onPress={() => router.push('/auth/login' as any)}>
-              <View className={s.signInAvatar}>
-                <Feather name="user" size={26} color={colors.iconColor} />
-              </View>
-             <View className={s.root} style={{ backgroundColor: colors.background }}>
-                <Text className={s.headerTitle} style={{ color: colors.text }}>Profile</Text>
-                <Text className={s.signInTitle}>Sign up or log in</Text>
-                <Text className={s.signInSub}>Access your tickets and bookings</Text>
-              </View>
-              <Section title="APPEARANCE" colors={colors}>
-                <Row
-                  icon={<Feather name="sun" size={16} color={colors.iconColor} />}
-                  label="Theme"
-                  value={themeModeLabel[mode]}
-                  onPress={cycleTheme}
-                  colors={colors}
-                />
-              </Section>
-              <Feather name="chevron-right" size={16} color={colors.iconColor} />
-            </TouchableOpacity>
-          </Section>
+         {!user && (
+          <>
+            <Section colors={colors}>
+              <TouchableOpacity className={s.signInRow} activeOpacity={0.7} onPress={() => router.push('/auth/login' as any)}>
+                <View className={s.signInAvatar} style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
+                  <Feather name="user" size={26} color={colors.iconColor} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text className={s.signInTitle} style={{ color: colors.text }}>Sign up or log in</Text>
+                  <Text className={s.signInSub} style={{ color: colors.subText }}>Access your tickets and bookings</Text>
+                </View>
+                <Feather name="chevron-right" size={16} color={colors.iconColor} />
+              </TouchableOpacity>
+            </Section>
+
+            <Section title="APPEARANCE" colors={colors}>
+              <Row
+                icon={<Feather name={isDark ? 'moon' : 'sun'} size={16} color={colors.iconColor} />}
+                label="Theme"
+                value={themeModeLabel[mode]}
+                onPress={cycleTheme}
+                colors={colors}
+              />
+            </Section>
+          </>
         )}
 
         {user && <Avatar name={fullName} email={user.email} />}
 
         {user && (
-          <Section title="ACCOUNT">
-            <Row icon={<Feather name="user" size={16} color="rgba(255,255,255,0.55)" />} label="Edit profile" onPress={() => {}} />
-            <View style={sheet.divider} />
-            <Row icon={<Ionicons name="notifications-outline" size={16} color="rgba(255,255,255,0.55)" />} label="Notifications" onPress={() => {}} />
-            <View style={sheet.divider} />
-            <Row icon={<Feather name="lock" size={16} color="rgba(255,255,255,0.55)" />} label="Change password" onPress={() => {}} />
+            <>
+            <Section title="ACCOUNT" colors={colors}>
+            <Row icon={<Feather name="user" size={16} color={colors.iconColor} />} label="Edit profile" onPress={() => {}} colors={colors} />
+            <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
+            <Row icon={<Ionicons name="notifications-outline" size={16} color={colors.iconColor} />} label="Notifications" onPress={() => {}} colors={colors} />
+            <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
+            <Row icon={<Feather name="lock" size={16} color={colors.iconColor} />} label="Change password" onPress={() => {}} colors={colors} />
           </Section>
+
+          {/* ADD Appearance section for logged-in users too */}
+          <Section title="APPEARANCE" colors={colors}>
+            <Row
+              icon={<Feather name={isDark ? 'moon' : 'sun'} size={16} color={colors.iconColor} />}
+              label="Theme"
+              value={themeModeLabel[mode]}
+              onPress={cycleTheme}
+              colors={colors}
+            />
+          </Section>
+          </>
         )}
 
-        <Section title="SUPPORT">
-          <Row icon={<Feather name="help-circle" size={16} color="rgba(255,255,255,0.55)" />} label="Help & support" onPress={() => Linking.openURL('mailto:support@example.com')} />
-          <View style={sheet.divider} />
-          <Row icon={<Feather name="file-text" size={16} color="rgba(255,255,255,0.55)" />} label="Terms of use" onPress={() => {}} />
-          <View style={sheet.divider} />
-          <Row icon={<Feather name="shield" size={16} color="rgba(255,255,255,0.55)" />} label="Privacy policy" onPress={() => {}} />
+        <Section title="SUPPORT" colors={colors}>
+          <Row icon={<Feather name="help-circle" size={16} color={colors.iconColor} />} label="Help & support" onPress={() => Linking.openURL('mailto:support@example.com')} colors={colors} />
+          <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
+          <Row icon={<Feather name="file-text" size={16} color={colors.iconColor} />} label="Terms of use" onPress={() => {}} colors={colors} />
+          <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
+          <Row icon={<Feather name="shield" size={16} color={colors.iconColor} />} label="Privacy policy" onPress={() => {}} colors={colors} />
         </Section>
 
         {user && (

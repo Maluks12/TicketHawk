@@ -9,11 +9,11 @@ import { useRouter } from 'expo-router';
 import { searchEvents, getSuggestionEvents, type Event } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/search';
+import { useAppTheme } from '../../theme/colors'; // ADD
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ACCENT    = '#ff3c6e';
-const GREY_TEXT = 'rgba(10,10,10,0.45)';
 
 const SUGGESTIONS = [
   { key: 'popular',        label: 'Popular Events',  icon: 'star'     as const, iconColor: '#3b82f6', bgColor: 'rgba(59,130,246,0.12)'  },
@@ -27,32 +27,32 @@ const formatDate  = (iso: string)   => iso ? new Date(iso).toLocaleDateString('e
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-const SuggestionRow = ({ item, onPress }: { item: typeof SUGGESTIONS[number]; onPress: () => void }) => (
-  <TouchableOpacity className={s.suggRow} onPress={onPress} activeOpacity={0.7}>
+const SuggestionRow = ({ item, onPress, colors }: { item: typeof SUGGESTIONS[number]; onPress: () => void; colors: any }) => (
+  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 }} onPress={onPress} activeOpacity={0.7}>
     <View style={[sheet.suggIcon, { backgroundColor: item.bgColor }]}>
       <Ionicons name={item.icon} size={20} color={item.iconColor} />
     </View>
-    <Text className={s.suggLabel}>{item.label}</Text>
-    <Ionicons name="chevron-forward" size={18} color="rgba(10,10,10,0.25)" />
+    <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: colors.text }}>{item.label}</Text>
+    <Ionicons name="chevron-forward" size={18} color={colors.iconColor} />
   </TouchableOpacity>
 );
 
-const EventResultRow = ({ item, onPress }: { item: Event; onPress: () => void }) => (
-  <TouchableOpacity className={s.resultRow} onPress={onPress} activeOpacity={0.75}>
+const EventResultRow = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
+  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 }} onPress={onPress} activeOpacity={0.75}>
     <View style={sheet.resultThumb}>
       {item.cover_image_url
         ? <Image source={{ uri: item.cover_image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-        : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#e5e5e5' }]} />
+        : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.sectionCardBg }]} />
       }
     </View>
-    <View className={s.resultInfo}>
-      <Text className={s.resultCat} numberOfLines={1}>{item.category?.toUpperCase()}</Text>
-      <Text className={s.resultTitle} numberOfLines={2}>{item.title}</Text>
-      <Text className={s.resultMeta} numberOfLines={1}>📍 {item.venue_name}{item.city ? `, ${item.city}` : ''}</Text>
-      {item.start_time ? <Text className={s.resultDate}>{formatDate(item.start_time)}</Text> : null}
+    <View style={{ flex: 1 }}>
+      <Text style={{ fontSize: 9, fontWeight: '800', color: '#ff3c6e', letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 2 }} numberOfLines={1}>{item.category?.toUpperCase()}</Text>
+      <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, lineHeight: 19, marginBottom: 3 }} numberOfLines={2}>{item.title}</Text>
+      <Text style={{ fontSize: 11, color: colors.subText, marginBottom: 1 }} numberOfLines={1}>📍 {item.venue_name}{item.city ? `, ${item.city}` : ''}</Text>
+      {item.start_time ? <Text style={{ fontSize: 11, color: colors.subText }}>{formatDate(item.start_time)}</Text> : null}
     </View>
-    <View className={s.resultPriceCol}>
-      <Text className={s.resultPrice}>{formatPrice(item.price)}</Text>
+    <View style={{ alignItems: 'flex-end', minWidth: 56 }}>
+      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }}>{formatPrice(item.price)}</Text>
     </View>
   </TouchableOpacity>
 );
@@ -65,6 +65,7 @@ export default function SearchScreen() {
   const inputRef         = useRef<TextInput>(null);
   const debounce         = useRef<ReturnType<typeof setTimeout> | null>(null);
   const underlineAnim    = useRef(new Animated.Value(0)).current;
+  const { isDark, colors } = useAppTheme();
 
   const [query,       setQuery]       = useState('');
   const [isFocused,   setIsFocused]   = useState(false);
@@ -104,19 +105,21 @@ export default function SearchScreen() {
 
   const showCancel  = isFocused || query.length > 0;
   const activeItems = view === 'suggestion' ? suggResults : results;
+  const searchBoxBg = isFocused
+    ? (isDark ? '#1c1c1c' : '#fff')
+    : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(10,10,10,0.06)');
 
   return (
-    <SafeAreaView className={s.safe}>
+     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
 
       {/* Header */}
-      <View className={s.header}>
-        <Text className={s.headerTitle}>Search</Text>
+     <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4, backgroundColor: colors.background }}>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text, letterSpacing: 0.2 }}>Search</Text>
       </View>
 
       {/* Search bar */}
       <View className={s.searchRow}>
-        <View style={[sheet.searchBox, isFocused && sheet.searchBoxFocused]}>
-          <Ionicons name="search" size={17} color={GREY_TEXT} style={{ marginRight: 8 }} />
+           <View style={[sheet.searchBox, { backgroundColor: searchBoxBg }, isFocused && { borderColor: '#ff3c6e' }]}>
           <TextInput
             ref={inputRef}
             value={query}
@@ -124,17 +127,10 @@ export default function SearchScreen() {
             onFocus={() => { setIsFocused(true); animateFocus(true); }}
             onBlur={() => animateFocus(false)}
             placeholder="Search events…"
-            placeholderTextColor={GREY_TEXT}
-            className={s.searchInput}
-            returnKeyType="search"
-            onSubmitEditing={() => runSearch(query)}
-            clearButtonMode="never"
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
+            placeholderTextColor={colors.iconColor} style={{ flex: 1, fontSize: 15, color: colors.text }} />
           {query.length > 0 && (
             <TouchableOpacity onPress={handleClear} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close-circle" size={16} color={GREY_TEXT} />
+              <Ionicons name="close-circle" size={16} color={colors.iconColor} />
             </TouchableOpacity>
           )}
         </View>
@@ -150,11 +146,11 @@ export default function SearchScreen() {
         <FlatList
           data={SUGGESTIONS}
           keyExtractor={item => item.key}
-          ListHeaderComponent={<Text className={s.suggHeading}>Suggestions</Text>}
+          ListHeaderComponent={<Text style={{ fontSize: 18, fontWeight: '800', color: colors.text, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 }}>Suggestions</Text>}
           renderItem={({ item }) => (
-            <SuggestionRow item={item} onPress={() => handleSuggestion(item.key, item.label)} />
+           <SuggestionRow item={item} onPress={() => handleSuggestion(item.key, item.label)} colors={colors} />
           )}
-          ItemSeparatorComponent={() => <View style={sheet.divider} />}
+         ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor, marginLeft: 20 }} />}
           keyboardShouldPersistTaps="handled"
         />
       )}
@@ -178,13 +174,13 @@ export default function SearchScreen() {
               data={activeItems}
               keyExtractor={e => e.id}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => <EventResultRow item={item} onPress={() => handleEventPress(item)} />}
-              ItemSeparatorComponent={() => <View style={sheet.divider} />}
+              renderItem={({ item }) => <EventResultRow item={item} onPress={() => handleEventPress(item)} colors={colors} />}
+              ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor, marginLeft: 20 }} />}
               ListEmptyComponent={
                 <View className={s.centred}>
-                  <Ionicons name="search-outline" size={48} color="rgba(10,10,10,0.15)" />
-                  <Text className={s.emptyTitle}>No events found</Text>
-                  <Text className={s.emptySubtitle}>
+                  <Ionicons name="search-outline" size={48} color={colors.iconColor} />
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 6 }}>No events found</Text>
+                  <Text style={{ fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 19 }}>
                     {view === 'results' ? `No results for "${query}". Try a different keyword.` : 'Check back later for updates.'}
                   </Text>
                 </View>
