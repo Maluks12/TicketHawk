@@ -41,7 +41,7 @@ function formatPrice(price: number, currency: string) {
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-const EventCard = ({ item, onPress }: { item: Event; onPress: () => void }) => (
+const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
@@ -54,19 +54,20 @@ const EventCard = ({ item, onPress }: { item: Event; onPress: () => void }) => (
           <Text className={s.hCardBadgeText}>LIVE</Text>
         </View>
       )}
+
       <View className={s.hCardPriceBadge}>
         <Text className={s.hCardPriceBadgeText}>{formatPrice(item.price, item.currency)}</Text>
       </View>
     </View>
     <View className={s.hCardBody}>
       <Text className={s.hCardCat} numberOfLines={1}>{item.category}</Text>
-      <Text className={s.hCardTitle} numberOfLines={2}>{item.title}</Text>
-      <Text className={s.hCardMeta} numberOfLines={1}>📍 {item.venue_name}</Text>
+      <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
+      <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>📍 {item.venue_name}</Text>
     </View>
   </TouchableOpacity>
 );
 
-const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress: () => void }) => (
+const Top10Card = ({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
@@ -87,8 +88,8 @@ const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress
     </View>
     <View className={s.hCardBody}>
       <Text className={s.hCardCat} numberOfLines={1}>{item.category}</Text>
-      <Text className={s.hCardTitle} numberOfLines={2}>{item.title}</Text>
-      <Text className={s.hCardMeta} numberOfLines={1}>📍 {item.venue_name}</Text>
+      <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
+      <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>📍 {item.venue_name}</Text>
     </View>
   </TouchableOpacity>
 );
@@ -96,15 +97,10 @@ const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress
 // ─── Section row (paginated) ──────────────────────────────────────────────────
 
 const SectionRow = ({
-  section,
-  isTop10 = false,
-  marginTop = false,
-  onEventPress,
+  section, isTop10 = false, marginTop = false, onEventPress, colors,
 }: {
-  section: HomeSection;
-  isTop10?: boolean;
-  marginTop?: boolean;
-  onEventPress: (event: Event) => void;
+  section: HomeSection; isTop10?: boolean; marginTop?: boolean;
+  onEventPress: (event: Event) => void; colors: any;
 }) => {
   const [events,     setEvents]     = useState<Event[]>(section.events ?? []);
   const [nextCursor, setNextCursor] = useState<string>(section.next_cursor ?? '');
@@ -137,11 +133,12 @@ const SectionRow = ({
   return (
     <>
       {marginTop && (
-        <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+        <View style={{ height: 1, backgroundColor: colors.dividerColor, marginVertical: 4 }} />
       )}
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
-          <Text className={s.sectionTitle}>{section.title.toUpperCase()}</Text>
+          <Text className={s.sectionTitle} style={{ color: colors.text }}>{section.title.toUpperCase()}</Text>
+          {/* Only show "VIEW ALL" indicator when there are more pages */}
           {nextCursor ? (
             <TouchableOpacity onPress={handleLoadMore} disabled={loadingMore}>
               <Text className={s.sectionLink}>{loadingMore ? '…' : 'MORE'}</Text>
@@ -168,8 +165,8 @@ const SectionRow = ({
         }
         renderItem={({ item, index }) =>
           isTop10
-            ? <Top10Card item={item} rank={index + 1} onPress={() => onEventPress(item)} />
-            : <EventCard item={item} onPress={() => onEventPress(item)} />
+          ? <Top10Card item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
+          : <EventCard item={item} onPress={() => onEventPress(item)} colors={colors} />
         }
       />
     </>
@@ -430,7 +427,7 @@ export default function Index() {
         </View>
 
         {/* Thin divider below filter */}
-        <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: 4 }} />
+       <View style={{ height: 1, backgroundColor: colors.dividerColor, marginBottom: 4 }} />
 
         {/* Category Dropdown Modal */}
         <Modal visible={dropdownOpen} transparent animationType="fade" onRequestClose={() => setDropdownOpen(false)}>
@@ -467,7 +464,7 @@ export default function Index() {
             <Text style={{ color: '#ff3c6e', fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
               ⚠ COULD NOT LOAD SECTIONS
             </Text>
-            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>{error}</Text>
+            <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
             <TouchableOpacity
               onPress={onRefresh}
               style={{
@@ -498,6 +495,7 @@ export default function Index() {
               isTop10={section.id === 'trending'}
               marginTop={true}
               onEventPress={handleEventPress}
+              colors={colors}
             />
           ))
         )}
@@ -505,10 +503,10 @@ export default function Index() {
         {/* Dynamic Spotlight Section */}
         {!loading && sportsBannerEvent && (
           <>
-            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+            <View style={{ height: 1, backgroundColor: colors.dividerColor, marginVertical: 4 }} />
             <View className={s.sectionMt}>
               <View className={s.sectionHeader}>
-                <Text className={s.sectionTitle} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
+                <Text className={s.sectionTitle} style={{ color: colors.text }} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
                 <TouchableOpacity><Text className={s.sectionLink} style={{ color: spotlightConfig.accentColor }}>EXPLORE</Text></TouchableOpacity>
               </View>
             </View>
@@ -563,9 +561,9 @@ export default function Index() {
                       )}
                     </View>
                     <View className={s.sportInfo}>
-                      <Text className={s.sportCat} style={{ color: spotlightConfig.accentColor }}>{sport.category}</Text>
-                      <Text className={s.sportTitle}>{sport.title}</Text>
-                      <Text className={s.sportLoc}>{sport.city}</Text>
+                      <Text className={s.sportCat}>{sport.category}</Text>
+                      <Text className={s.sportTitle} style={{ color: colors.text }}>{sport.title}</Text>
+                      <Text className={s.sportLoc} style={{ color: colors.subText }}>{sport.city}</Text>
                     </View>
                     <Text className={s.sportArrow} style={{ color: spotlightConfig.accentColor }}>›</Text>
                   </TouchableOpacity>
