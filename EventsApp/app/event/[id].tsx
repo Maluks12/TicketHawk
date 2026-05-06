@@ -61,25 +61,24 @@ function MetaItem({ icon, label, value }: { icon: string; label: string; value: 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function EventDetail() {
-  const router   = useRouter();
-  const event    = useEventStore((state) => state.selectedEvent);
+  const router = useRouter();
+  const event  = useEventStore((state) => state.selectedEvent);
   const [expanded, setExpanded] = useState(false);
   const { colors } = useAppTheme();
 
-  // Parallax scroll driver
   const scrollY = useRef(new Animated.Value(0)).current;
 
   if (!event) {
     return (
-      <View className="flex-1 bg-[#fff8f7] items-center justify-center">
-        <Text className="text-[#5d3f40]/40 font-bold text-sm tracking-widest">
+      <View className="flex-1 bg-white items-center justify-center">
+        <Text className="text-[#888888] font-bold text-sm tracking-widest">
           EVENT NOT FOUND
         </Text>
         <TouchableOpacity
           onPress={() => router.back()}
-          className="mt-4 border border-[#e6bcbd] px-5 py-2.5 rounded-xl"
+          className="mt-4 border border-[#DDDDDD] px-5 py-2.5 rounded-xl"
         >
-          <Text className="text-[#281718] text-[10px] font-extrabold tracking-[1.5px]">
+          <Text className="text-[#111111] text-[10px] font-extrabold tracking-[1.5px]">
             ← GO BACK
           </Text>
         </TouchableOpacity>
@@ -95,6 +94,7 @@ export default function EventDetail() {
   const teams:      string[] = ev.teams      ?? [];
   const performers: string[] = ev.performers ?? [];
 
+  // Routing unchanged — matches index.tsx push to /event/${event.id}
   const handleGetTickets = () => router.push('/event/purchase');
 
   const handleShare = async () => {
@@ -106,9 +106,9 @@ export default function EventDetail() {
   };
 
   const handleDirections = async () => {
-    const query      = encodeURIComponent(`${event.venue_name}, ${event.city}`);
-    const nativeUrl  = Platform.OS === 'ios' ? `maps://?q=${query}` : `geo:0,0?q=${query}`;
-    const webUrl     = `https://www.google.com/maps/search/?api=1&query=${query}`;
+    const query     = encodeURIComponent(`${event.venue_name}, ${event.city}`);
+    const nativeUrl = Platform.OS === 'ios' ? `maps://?q=${query}` : `geo:0,0?q=${query}`;
+    const webUrl    = `https://www.google.com/maps/search/?api=1&query=${query}`;
     try {
       const ok = await Linking.canOpenURL(nativeUrl);
       await Linking.openURL(ok ? nativeUrl : webUrl);
@@ -125,8 +125,7 @@ export default function EventDetail() {
   const organizerName    = ev.organizer_name ?? 'EVENT ORGANIZER';
   const organizerInitial = organizerName.charAt(0).toUpperCase();
 
-  // ── Parallax: image moves up at 50% of scroll speed ──────────────────────
-  const PARALLAX_EXTRA = Math.round(HERO_H * 0.35);
+  const PARALLAX_EXTRA  = Math.round(HERO_H * 0.35);
   const imageTranslateY = scrollY.interpolate({
     inputRange:  [-HERO_H, 0, HERO_H],
     outputRange: [-PARALLAX_EXTRA / 2, 0, PARALLAX_EXTRA * 0.6],
@@ -137,26 +136,16 @@ export default function EventDetail() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar barStyle="light-content" />
 
-      {/* ── Nav buttons — absolutely positioned over everything ─────── */}
+      {/* ── Nav overlay ─────────────────────────────────────────────── */}
       <View style={sheet.navOverlay} pointerEvents="box-none">
-        <TouchableOpacity
-          style={sheet.navBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.8}
-        >
+        <TouchableOpacity style={sheet.navBtn} onPress={() => router.back()} activeOpacity={0.8}>
           <Text className={s.backIcon}>‹</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={sheet.navBtn}
-          onPress={handleShare}
-          activeOpacity={0.8}
-        >
+        <TouchableOpacity style={sheet.navBtn} onPress={handleShare} activeOpacity={0.8}>
           <Text className={s.shareIcon}>↑</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ── Scrollable body — hero is first child ────────────────────── */}
       <Animated.ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
@@ -175,34 +164,31 @@ export default function EventDetail() {
               resizeMode="cover"
             />
           ) : (
-            <View style={[sheet.heroImage, { backgroundColor: '#2a2a2a' }]} />
+            <View style={[sheet.heroImage, { backgroundColor: '#222222' }]} />
           )}
 
-          {/* Bottom scrim */}
           <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.45)', 'rgba(0,0,0,0.85)']}
+            colors={['transparent', 'rgba(0,0,0,0.50)', 'rgba(0,0,0,0.90)']}
             locations={[0.3, 0.6, 1]}
             style={sheet.absoluteFill}
             pointerEvents="none"
           />
-          {/* Top scrim for nav */}
           <LinearGradient
-            colors={['rgba(0,0,0,0.5)', 'transparent']}
+            colors={['rgba(0,0,0,0.55)', 'transparent']}
             locations={[0, 1]}
             style={[sheet.absoluteFill, { bottom: undefined, height: 130 }]}
             pointerEvents="none"
           />
 
-          {/* Sold-out pill */}
           {isSoldOut && (
             <View style={sheet.soldOutBadge}>
               <Text style={sheet.soldOutText}>SOLD OUT</Text>
             </View>
           )}
 
-          {/* Title block */}
           <View style={sheet.heroTitleBlock}>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+              {/* TRENDING — #FF2D55 badge retained */}
               {event.is_featured && (
                 <View style={sheet.trendingBadge}>
                   <Text style={sheet.trendingBadgeText}>TRENDING #1</Text>
@@ -215,6 +201,7 @@ export default function EventDetail() {
                 </Text>
               </View>
             </View>
+            {/* Category — #FF2D55 text on dark, not a fill */}
             <Text style={sheet.heroCategory}>✦ {event.category}</Text>
             <Text style={sheet.heroTitle} numberOfLines={3}>
               {event.title.toUpperCase()}
@@ -237,6 +224,7 @@ export default function EventDetail() {
                 <Text className={s.btnSoldOutText}>🎟  SOLD OUT</Text>
               </TouchableOpacity>
             ) : (
+              /* GET TICKETS — only full #FF2D55 fill in the whole screen */
               <TouchableOpacity className={s.btnPrimary} onPress={handleGetTickets} activeOpacity={0.88}>
                 <Text className={s.btnPrimaryText}>GET TICKETS</Text>
               </TouchableOpacity>
@@ -341,17 +329,23 @@ export default function EventDetail() {
             </View>
             <View className={s.locationCard}>
               <View className={s.locationMapPlaceholder}>
-                {/* Grid lines */}
-                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.15 }}>
+                {/* Grid lines — neutral grey */}
+                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.18 }}>
                   {[1,2,3,4,5,6].map(i => (
-                    <View key={`h${i}`} style={{ position: 'absolute', left: 0, right: 0, top: `${i * 14}%` as any, height: 1, backgroundColor: '#ba0034' }} />
+                    <View key={`h${i}`} style={{ position: 'absolute', left: 0, right: 0, top: `${i * 14}%` as any, height: 1, backgroundColor: '#999999' }} />
                   ))}
                   {[1,2,3,4,5,6].map(i => (
-                    <View key={`v${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${i * 14}%` as any, width: 1, backgroundColor: '#ba0034' }} />
+                    <View key={`v${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${i * 14}%` as any, width: 1, backgroundColor: '#999999' }} />
                   ))}
                 </View>
-                {/* Pin */}
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#ba0034', alignItems: 'center', justifyContent: 'center', shadowColor: '#ba0034', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 }}>
+                {/* Pin — dark, not red */}
+                <View style={{
+                  width: 44, height: 44, borderRadius: 22,
+                  backgroundColor: '#1A1A1A',
+                  alignItems: 'center', justifyContent: 'center',
+                  shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.25, shadowRadius: 8, elevation: 6,
+                }}>
                   <Text style={{ fontSize: 22 }}>📍</Text>
                 </View>
               </View>
