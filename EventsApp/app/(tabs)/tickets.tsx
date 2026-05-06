@@ -312,8 +312,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
 export default function TicketsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const hydrated = useMockBookingStore(store => store.bookings.length > 0);
-  const localBookings = useMockBookingStore(store => store.bookings);
   const { colors } = useAppTheme(); 
 
   const [apiBookings, setApiBookings] = useState<Booking[]>([]);

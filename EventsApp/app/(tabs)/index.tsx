@@ -187,9 +187,9 @@ export default function Index() {
   const headerHeight = useRef(120);
 
   // Stable random spotlight config — picked once on mount
-  const spotlightConfig = useRef(
-    SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
-  ).current;
+  const [spotlightConfig, setSpotlightConfig] = useState(
+  () => SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
+  );
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -226,13 +226,17 @@ export default function Index() {
       const fallback = allEvents.filter((e) =>
         e.category?.toLowerCase().includes(cfg.category)
       ).slice(0, 4);
-      if (fallback.length > 0) {
-        // Mutate the config label so the UI reflects the actual category shown
-        spotlightConfig.title       = cfg.title;
-        spotlightConfig.badge       = cfg.badge;
-        spotlightConfig.accentColor = cfg.accentColor;
-        return fallback;
-      }
+
+      useEffect(() => {
+        if (!allEvents.length) return;
+        const hasEvents = (cfg: typeof SPOTLIGHT_CONFIGS[0]) =>
+          allEvents.some((e) => e.category?.toLowerCase().includes(cfg.category));
+        if (hasEvents(spotlightConfig)) return;
+        const fallback = SPOTLIGHT_CONFIGS.find(
+          (cfg) => cfg.category !== spotlightConfig.category && hasEvents(cfg)
+        );
+        if (fallback) setSpotlightConfig(fallback);
+      }, [allEvents]);
     }
     // Last resort: just use the first 4 events regardless of category
     return allEvents.slice(0, 4);
@@ -506,7 +510,7 @@ export default function Index() {
             <View style={{ height: 1, backgroundColor: colors.dividerColor, marginVertical: 4 }} />
             <View className={s.sectionMt}>
               <View className={s.sectionHeader}>
-                <Text className={s.sectionTitle} style={{ color: colors.text }} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
+                <Text className={s.sectionTitle} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
                 <TouchableOpacity><Text className={s.sectionLink} style={{ color: spotlightConfig.accentColor }}>EXPLORE</Text></TouchableOpacity>
               </View>
             </View>
@@ -593,7 +597,7 @@ export default function Index() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                  <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
                 )}
               />
             </>
@@ -620,7 +624,7 @@ export default function Index() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                  <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
                 )}
               />
             </>
@@ -654,7 +658,7 @@ export default function Index() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                 <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
                 )}
               />
             </>
@@ -683,7 +687,7 @@ export default function Index() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                  <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
                 )}
               />
             </>
@@ -711,7 +715,7 @@ export default function Index() {
                 keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
@@ -738,7 +742,7 @@ export default function Index() {
                 keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
@@ -765,7 +769,7 @@ export default function Index() {
                 keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
@@ -792,7 +796,7 @@ export default function Index() {
                 keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
