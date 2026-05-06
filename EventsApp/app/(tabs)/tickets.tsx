@@ -8,9 +8,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
-import { api } from '../../lib/api';
+import { api, clearCart } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
-import { useMockBookingStore } from '../../store/mockBookingStore';
 import { s, sheet } from '../../styles/tickets';
 
 const CARD_HEIGHT = 200;
@@ -264,8 +263,7 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   onRefresh: () => void; error: string | null; onRetry: () => void;
 }) => {
   const insets       = useSafeAreaInsets();
-  const localBookings = useMockBookingStore(store => store.bookings) as unknown as Booking[];
-  const all      = dedup([...localBookings, ...apiBookings]);
+  const all      = dedup([...apiBookings]);
   const upcoming = all.filter(isUpcoming);
   const past     = all.filter(b => !isUpcoming(b));
 
@@ -313,15 +311,23 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
 export default function TicketsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const hydrated = useMockBookingStore(store => store.bookings.length > 0);
-  const localBookings = useMockBookingStore(store => store.bookings);
+
 
   const [apiBookings, setApiBookings] = useState<Booking[]>([]);
   const [loading, setLoading]         = useState(false);
   const [refreshing, setRefreshing]   = useState(false);
   const [error, setError]             = useState<string | null>(null);
+  const [resetting, setResetting]     = useState(false);
 
   useEffect(() => {}, []);
+
+  const handleReset = async () => {
+    setResetting(true);
+    try { await clearCart(); } catch (_) {}
+    setApiBookings([]);
+    await load();
+    setResetting(false);
+  };
 
   const fetchApiBookings = useCallback(async () => {
     if (!user) return;
@@ -343,10 +349,10 @@ export default function TicketsScreen() {
   const load    = useCallback(async () => { setLoading(true); await fetchApiBookings(); setLoading(false); }, [fetchApiBookings]);
   const refresh = useCallback(async () => { setRefreshing(true); await fetchApiBookings(); setRefreshing(false); }, [fetchApiBookings]);
 
-  useEffect(() => { if (hydrated) load(); }, [hydrated, user]);
+  useEffect(() => { load(); }, [user]);
 
-  const totalCount = dedup([...(localBookings as unknown as Booking[]), ...apiBookings]).length;
-  const showGuestLookup = !user && localBookings.length === 0;
+  const totalCount = dedup([...apiBookings]).length;
+  const showGuestLookup = !user;
 
   return (
     <View className={s.root}>
@@ -355,6 +361,12 @@ export default function TicketsScreen() {
         {totalCount > 0 && (
           <View style={sheet.countPill}><Text style={sheet.countText}>{totalCount}</Text></View>
         )}
+        <TouchableOpacity onPress={handleReset} disabled={resetting} style={{ marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', marginRight: 4 }}>
+          {resetting
+            ? <ActivityIndicator size='small' color='rgba(255,255,255,0.5)' />
+            : <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 }}>RESET</Text>
+          }
+        </TouchableOpacity>
       </View>
 
       {showGuestLookup ? (
@@ -362,7 +374,7 @@ export default function TicketsScreen() {
       ) : (
         <TicketsView
           apiBookings={apiBookings}
-          loading={loading && !hydrated}
+          loading={loading}
           refreshing={refreshing}
           onRefresh={refresh}
           error={error}

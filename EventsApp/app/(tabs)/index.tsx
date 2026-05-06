@@ -21,7 +21,16 @@ import { useAppTheme } from '../../theme/colors';
 
 
 const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
+// ─── Dynamic spotlight section configs ────────────────────────────────────────
+// One of these is picked at random on every app load.
+const SPOTLIGHT_CONFIGS = [
+  { title: 'SPORTS ELITE',    category: 'sports',   badge: '⚡ SPORTS',    accentColor: '#e8c14a', bgColor: '#1a1200', gradientDark: 'rgba(26,18,0,0.82)',   gradientLight: 'rgba(26,18,0,0.25)'   },
+  { title: 'BEST FESTIVALS',  category: 'music',    badge: '🎪 FESTIVAL',  accentColor: '#ff3c6e', bgColor: '#1a0010', gradientDark: 'rgba(26,0,16,0.82)',   gradientLight: 'rgba(26,0,16,0.25)'   },
+  { title: 'GALA NIGHTS',     category: 'gala',     badge: '✨ GALA',      accentColor: '#c084fc', bgColor: '#0e0018', gradientDark: 'rgba(14,0,24,0.82)',   gradientLight: 'rgba(14,0,24,0.25)'   },
+  { title: 'TECH SUMMIT',     category: 'tech',     badge: '💻 TECH',      accentColor: '#38bdf8', bgColor: '#00101a', gradientDark: 'rgba(0,16,26,0.82)',   gradientLight: 'rgba(0,16,26,0.25)'   },
+  { title: 'FOOD & CULTURE',  category: 'food',     badge: '🍽 FOOD',      accentColor: '#fb923c', bgColor: '#1a0800', gradientDark: 'rgba(26,8,0,0.82)',    gradientLight: 'rgba(26,8,0,0.25)'    },
+  { title: 'TOP CONCERTS',    category: 'concerts', badge: '🎵 MUSIC',     accentColor: '#34d399', bgColor: '#001a10', gradientDark: 'rgba(0,26,16,0.82)',   gradientLight: 'rgba(0,26,16,0.25)'   },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -63,9 +72,15 @@ const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress
       {item.cover_image_url && (
         <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
       )}
-      <View className={s.rankBadge}>
-        <Text className={s.rankText}>{rank}</Text>
-      </View>
+      {/* Dark gradient on the left so the number is always readable */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0.18)', 'transparent']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.7, y: 0 }}
+        style={sheet.absoluteFill}
+      />
+      {/* Apple-style rank number — top-left, ON the card */}
+      <Text style={sheet.top10Rank}>{rank}</Text>
       <View className={s.hCardPriceBadge}>
         <Text className={s.hCardPriceBadgeText}>{formatPrice(item.price, item.currency)}</Text>
       </View>
@@ -79,9 +94,6 @@ const Top10Card = ({ item, rank, onPress }: { item: Event; rank: number; onPress
 );
 
 // ─── Section row (paginated) ──────────────────────────────────────────────────
-//
-// Converts the horizontal ScrollView into a FlatList so we can call
-// loadMoreSectionEvents when the user scrolls near the end.
 
 const SectionRow = ({
   section,
@@ -98,7 +110,6 @@ const SectionRow = ({
   const [nextCursor, setNextCursor] = useState<string>(section.next_cursor ?? '');
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Re-sync when the parent section refreshes (e.g. pull-to-refresh)
   useEffect(() => {
     setEvents(section.events ?? []);
     setNextCursor(section.next_cursor ?? '');
@@ -116,7 +127,7 @@ const SectionRow = ({
       });
       setNextCursor(result.next_cursor ?? '');
     } else {
-      setNextCursor(''); // nothing left to load
+      setNextCursor('');
     }
     setLoadingMore(false);
   }, [nextCursor, loadingMore, section.id]);
@@ -131,7 +142,6 @@ const SectionRow = ({
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
           <Text className={s.sectionTitle}>{section.title.toUpperCase()}</Text>
-          {/* Only show "VIEW ALL" indicator when there are more pages */}
           {nextCursor ? (
             <TouchableOpacity onPress={handleLoadMore} disabled={loadingMore}>
               <Text className={s.sectionLink}>{loadingMore ? '…' : 'MORE'}</Text>
@@ -177,7 +187,12 @@ export default function Index() {
   const lastScrollY  = useRef(0);
   const headerOffset = useRef(0);
   const headerAnim   = useRef(new Animated.Value(0)).current;
-  const headerHeight = useRef(120);   // ← ADD this line here
+  const headerHeight = useRef(120);
+
+  // Stable random spotlight config — picked once on mount
+  const spotlightConfig = useRef(
+    SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
+  ).current;
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -195,15 +210,39 @@ export default function Index() {
   const featuredEvent: Event | null =
     sections.find((sec) => sec.id === 'featured')?.events?.[0] ?? null;
 
-  const sportsEvents = sections
+  // All non-featured events (deduped)
+  const allEvents = sections
     .filter((sec) => sec.id !== 'featured')
     .flatMap((sec) => sec.events ?? [])
-    .filter((e) => e.category?.toLowerCase() === 'sports')
-    .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i)
-    .slice(0, 4);
+    .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i);
 
-  const sportsBannerEvent = sportsEvents[0] ?? null;
-  const sportsListEvents  = sportsEvents.slice(1);
+  // Pick the first SPOTLIGHT_CONFIG whose category has matching events.
+  // This guarantees the section always shows, even if the random pick has no data.
+  const spotlightEvents = (() => {
+    const preferred = allEvents.filter((e) =>
+      e.category?.toLowerCase().includes(spotlightConfig.category)
+    ).slice(0, 4);
+    if (preferred.length > 0) return preferred;
+    // Fallback: try other configs in order until one has events
+    for (const cfg of SPOTLIGHT_CONFIGS) {
+      if (cfg.category === spotlightConfig.category) continue;
+      const fallback = allEvents.filter((e) =>
+        e.category?.toLowerCase().includes(cfg.category)
+      ).slice(0, 4);
+      if (fallback.length > 0) {
+        // Mutate the config label so the UI reflects the actual category shown
+        spotlightConfig.title       = cfg.title;
+        spotlightConfig.badge       = cfg.badge;
+        spotlightConfig.accentColor = cfg.accentColor;
+        return fallback;
+      }
+    }
+    // Last resort: just use the first 4 events regardless of category
+    return allEvents.slice(0, 4);
+  })();
+
+  const sportsBannerEvent = spotlightEvents[0] ?? null;
+  const sportsListEvents  = spotlightEvents.slice(1);
   const feedSections      = sections.filter((sec) => sec.id !== 'featured');
 
   const fetchSections = useCallback(async () => {
@@ -241,7 +280,6 @@ export default function Index() {
     setFilterParams(params);
     setFilterOpen(false);
 
-    // Always snap the header back into view so the updated city / date label is visible
     headerOffset.current = 0;
     Animated.spring(headerAnim, {
       toValue: 0,
@@ -254,10 +292,10 @@ export default function Index() {
       setLoading(true);
       setError(null);
       const qs = buildFilterQueryString(params);
-      const res = await fetch(`${BASE_URL}/v1/events/filter?${qs}`);
+      const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
+      const res = await fetch(`${apiUrl}/v1/events/filter?${qs}`);
       if (!res.ok) throw new Error('Filter request failed');
       const data = await res.json();
-      // data.data is the filtered events array — wrap it into a section for display
       if (data.data) {
         setSections([{
           id: 'filtered', title: 'Results', events: data.data,
@@ -265,7 +303,6 @@ export default function Index() {
         }]);
       }
     } catch (err: any) {
-      // If the filter endpoint isn't ready yet, fall back to the full home feed
       await fetchSections();
     } finally {
       setLoading(false);
@@ -288,7 +325,7 @@ export default function Index() {
 
   // ── Snap helper ──────────────────────────────────────────────────────────
   const snapHeader = () => {
-   const target = headerOffset.current < -(headerHeight.current / 2) ? -headerHeight.current : 0;
+    const target = headerOffset.current < -(headerHeight.current / 2) ? -headerHeight.current : 0;
     Animated.spring(headerAnim, {
       toValue: target,
       useNativeDriver: true,
@@ -300,28 +337,28 @@ export default function Index() {
   };
 
   return (
-<View className={s.screen} style={{ backgroundColor: colors.background }}>
-<ScrollView className={s.scroll} style={{ backgroundColor: colors.background }}        
+    <View className={s.screen} style={{ backgroundColor: colors.background }}>
+      <ScrollView
+        className={s.scroll}
+        style={{ backgroundColor: colors.background }}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
-       onScroll={(e) => {
-  const currentY = e.nativeEvent.contentOffset.y;
-  const delta    = currentY - lastScrollY.current;
-  lastScrollY.current = currentY;
-if (currentY <= 0) {
-  // Only force-lock at the very top to kill overscroll jank
-  headerOffset.current = 0;
-  headerAnim.setValue(0);
-} else {
-  // Track scroll speed in BOTH directions
-  headerOffset.current = Math.min(
-    0,
-    Math.max(-headerHeight.current, headerOffset.current - delta)
-  );
-  headerAnim.setValue(headerOffset.current);
-}
-        setScrolled(currentY > 10);
-      }}
+        onScroll={(e) => {
+          const currentY = e.nativeEvent.contentOffset.y;
+          const delta    = currentY - lastScrollY.current;
+          lastScrollY.current = currentY;
+          if (currentY <= 0) {
+            headerOffset.current = 0;
+            headerAnim.setValue(0);
+          } else {
+            headerOffset.current = Math.min(
+              0,
+              Math.max(-headerHeight.current, headerOffset.current - delta)
+            );
+            headerAnim.setValue(headerOffset.current);
+          }
+          setScrolled(currentY > 10);
+        }}
         onScrollEndDrag={snapHeader}
         onMomentumScrollEnd={snapHeader}
         refreshControl={
@@ -459,27 +496,27 @@ if (currentY <= 0) {
               key={section.id}
               section={section}
               isTop10={section.id === 'trending'}
-              marginTop={index > 0}
+              marginTop={true}
               onEventPress={handleEventPress}
             />
           ))
         )}
 
-        {/* Sports Elite */}
+        {/* Dynamic Spotlight Section */}
         {!loading && sportsBannerEvent && (
           <>
             <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
             <View className={s.sectionMt}>
               <View className={s.sectionHeader}>
-                <Text className={s.sectionTitle}>SPORTS ELITE</Text>
-                <TouchableOpacity><Text className={s.sectionLink}>EXPLORE</Text></TouchableOpacity>
+                <Text className={s.sectionTitle} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
+                <TouchableOpacity><Text className={s.sectionLink} style={{ color: spotlightConfig.accentColor }}>EXPLORE</Text></TouchableOpacity>
               </View>
             </View>
             <TouchableOpacity
               activeOpacity={0.92}
               onPress={() => handleEventPress(sportsBannerEvent)}
             >
-              <View className={s.sportsBanner}>
+              <View className={s.sportsBanner} style={{ backgroundColor: spotlightConfig.bgColor }}>
                 {(sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url) ? (
                   <Image
                     source={{ uri: sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url! }}
@@ -487,13 +524,20 @@ if (currentY <= 0) {
                     resizeMode="cover"
                   />
                 ) : null}
-                <View className={s.sportsBannerBg} />
+                {/* Tinted gradient — colour comes from the active spotlight config */}
                 <LinearGradient
-                  colors={['rgba(10,10,10,0.3)', 'rgba(10,10,10,0.75)']}
+                  colors={[spotlightConfig.gradientLight, spotlightConfig.gradientDark]}
                   style={sheet.absoluteFill}
                 />
+                {/* Accent colour strip at the bottom edge */}
+                <View style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0,
+                  height: 3, backgroundColor: spotlightConfig.accentColor, opacity: 0.85,
+                }} />
                 <View className={s.sportsBannerContent}>
-                  <Text className={s.sportsBadge}>{sportsBannerEvent.category}</Text>
+                  <Text className={s.sportsBadge} style={{ color: spotlightConfig.accentColor }}>
+                    {spotlightConfig.badge}
+                  </Text>
                   <Text className={s.sportsTitle}>{sportsBannerEvent.title.toUpperCase()}</Text>
                   <Text className={s.sportsSub} numberOfLines={2}>{sportsBannerEvent.description}</Text>
                   <TouchableOpacity
@@ -519,11 +563,11 @@ if (currentY <= 0) {
                       )}
                     </View>
                     <View className={s.sportInfo}>
-                      <Text className={s.sportCat}>{sport.category}</Text>
+                      <Text className={s.sportCat} style={{ color: spotlightConfig.accentColor }}>{sport.category}</Text>
                       <Text className={s.sportTitle}>{sport.title}</Text>
                       <Text className={s.sportLoc}>{sport.city}</Text>
                     </View>
-                    <Text className={s.sportArrow}>›</Text>
+                    <Text className={s.sportArrow} style={{ color: spotlightConfig.accentColor }}>›</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -531,16 +575,240 @@ if (currentY <= 0) {
           </>
         )}
 
+        {/* ── Free Events ─────────────────────────────────────────── */}
+        {!loading && (() => {
+          const freeEvents = allEvents.filter((e) => e.price === 0);
+          if (!freeEvents.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>FREE EVENTS</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={freeEvents}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => (
+                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                )}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Premium & Exclusive ──────────────────────────────────── */}
+        {!loading && (() => {
+          const premiumEvents = allEvents.filter((e) => e.price >= 3000).slice(0, 10);
+          if (!premiumEvents.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>PREMIUM & EXCLUSIVE</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={premiumEvents}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => (
+                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                )}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Coming Up (15–45 days out) ───────────────────────────── */}
+        {!loading && (() => {
+          const now = Date.now();
+          const comingUp = allEvents
+            .filter((e) => {
+              const ms = new Date(e.start_time).getTime() - now;
+              const days = ms / 86400000;
+              return days >= 15 && days <= 45;
+            })
+            .slice(0, 10);
+          if (!comingUp.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>COMING NEXT MONTH</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={comingUp}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => (
+                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                )}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Around the Country ───────────────────────────────────── */}
+        {!loading && (() => {
+          const otherCities = allEvents
+            .filter((e) => !['Johannesburg','johannesburg'].includes(e.city ?? ''))
+            .slice(0, 10);
+          if (!otherCities.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>AROUND THE COUNTRY</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={otherCities}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => (
+                  <EventCard item={item} onPress={() => handleEventPress(item)} />
+                )}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Music & Concerts ─────────────────────────────────────── */}
+        {!loading && (() => {
+          const musicEvents = allEvents
+            .filter((e) => e.category?.toLowerCase().includes('concert') || e.category?.toLowerCase().includes('music'))
+            .slice(0, 10);
+          if (!musicEvents.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>MUSIC & CONCERTS</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={musicEvents}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Gala & Black Tie ─────────────────────────────────────── */}
+        {!loading && (() => {
+          const galaEvents = allEvents
+            .filter((e) => e.category?.toLowerCase().includes('gala') || e.category?.toLowerCase().includes('exclusive'))
+            .slice(0, 10);
+          if (!galaEvents.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>GALA & BLACK TIE</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={galaEvents}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Tech & Business ──────────────────────────────────────── */}
+        {!loading && (() => {
+          const techEvents = allEvents
+            .filter((e) => e.category?.toLowerCase().includes('tech'))
+            .slice(0, 10);
+          if (!techEvents.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>TECH & BUSINESS</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={techEvents}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+              />
+            </>
+          );
+        })()}
+
+        {/* ── Food & Lifestyle ─────────────────────────────────────── */}
+        {!loading && (() => {
+          const foodEvents = allEvents
+            .filter((e) => e.category?.toLowerCase().includes('food'))
+            .slice(0, 10);
+          if (!foodEvents.length) return null;
+          return (
+            <>
+              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              <View className={s.sectionMt}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle}>FOOD & LIFESTYLE</Text>
+                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
+                </View>
+              </View>
+              <FlatList
+                horizontal
+                data={foodEvents}
+                keyExtractor={(e) => e.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} />}
+              />
+            </>
+          );
+        })()}
+
         <View style={{ height: 100 }} />
       </ScrollView>
 
-            {/* Animated Header */}
+      {/* Animated Header */}
       <Animated.View
         style={[{ transform: [{ translateY: headerAnim }], backgroundColor: colors.headerBg }]}
         className={s.locationHeader}
         onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
       >
-        {/* Tapping the location/date row opens the filter sheet */}
         <TouchableOpacity onPress={() => setFilterOpen(true)}>
           <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
           <Text className={s.locationSub} style={{ color: colors.subText }}>{dateLabelText}</Text>
@@ -549,7 +817,6 @@ if (currentY <= 0) {
           <Text className={s.menuIcon}>🛒</Text>
         </TouchableOpacity>
       </Animated.View>
-
 
       {/* Filter bottom sheet */}
       <FilterModal

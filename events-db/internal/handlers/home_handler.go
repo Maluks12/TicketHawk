@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"events-db/internal/cache"
 	"events-db/internal/repository"
@@ -45,21 +44,14 @@ func HomeSectionsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			userID = &s
 		}
 
-		// Resolve optional coordinates from ?lat=X&lng=Y
-		var lat, lng *float64
-		if latStr := c.Query("lat"); latStr != "" {
-			if v, err := strconv.ParseFloat(latStr, 64); err == nil {
-				lat = &v
-			}
-		}
-		if lngStr := c.Query("lng"); lngStr != "" {
-			if v, err := strconv.ParseFloat(lngStr, 64); err == nil {
-				lng = &v
-			}
+		// Resolve optional city from ?city=Johannesburg
+		var city *string
+		if cityStr := c.Query("city"); cityStr != "" {
+			city = &cityStr
 		}
 
 		// Only cache fully anonymous, location-free requests
-		isPersonalized := userID != nil || (lat != nil && lng != nil)
+		isPersonalized := userID != nil || city != nil
 
 		if !isPersonalized && ec != nil {
 			if result, ok := ec.GetHome(ctx); ok {
@@ -68,7 +60,7 @@ func HomeSectionsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			}
 		}
 
-		result, err := repository.GetHomeSections(pool, userID, lat, lng)
+		result, err := repository.GetHomeSections(pool, userID, city)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load home sections"})
 			return

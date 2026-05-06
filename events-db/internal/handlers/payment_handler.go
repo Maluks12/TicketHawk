@@ -4,6 +4,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -188,4 +189,76 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 			"currency":           booking.Currency,
 		})
 	}
+}
+
+// PaymentPageHandler serves the Stitch Secure Fields host page.
+// The client_token is injected server-side so the WebView can render
+// the card form entirely in-app — no browser redirect occurs.
+func PaymentPageHandler() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        bookingID   := c.Param("id")
+        clientToken := c.Query("client_token")
+        if clientToken == "" {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "client_token required"})
+            return
+        }
+        html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Payment</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+           background: #f9f9f9; padding: 24px 16px; }
+    h3   { font-size: 15px; color: #888; font-weight: 500; margin-bottom: 16px; }
+    #stitch-secure-fields { background: #fff; border-radius: 14px;
+           padding: 20px; box-shadow: 0 1px 8px rgba(0,0,0,0.07); min-height: 180px; }
+    #pay-btn { display: block; width: 100%%; margin-top: 24px;
+               background: #e8163c; color: #fff; border: none; border-radius: 14px;
+               padding: 17px; font-size: 17px; font-weight: 700;
+               letter-spacing: 0.3px; cursor: pointer; transition: opacity .2s; }
+    #pay-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    #status { margin-top: 14px; text-align: center; font-size: 13px; color: #666; min-height: 20px; }
+  </style>
+</head>
+<body>
+  <h3>Card Details</h3>
+  <div id="stitch-secure-fields"></div>
+  <button id="pay-btn" disabled>Pay Now</button>
+  <p id="status"></p>
+
+  <script src="https://secure.stitch.money/sdk/secure-fields/v1/index.js"></script>
+  <script>
+    var btn    = document.getElementById('pay-btn');
+    var status = document.getElementById('status');
+
+    var sf = new StitchSecureFields({
+      clientToken: '%s',
+      containerId: 'stitch-secure-fields',
+      onReady: function() { btn.disabled = false; },
+      onComplete: function() {
+        status.textContent = 'Payment submitted — confirming…';
+        btn.disabled = true;
+        // Deep-link back into the app — WebView intercepts this URL
+        window.location.href = 'eventsapp://payment/success?booking_id=%s';
+      },
+      onError: function(err) {
+        status.textContent = err && err.message ? err.message : 'Payment failed. Please try again.';
+        btn.disabled = false;
+      }
+    });
+
+    btn.onclick = function() {
+      btn.disabled = true;
+      status.textContent = 'Processing…';
+      sf.submit();
+    };
+  </script>
+</body>
+</html>`, clientToken, bookingID)
+
+        c.Header("Content-Type", "text/html; charset=utf-8")
+        c.String(http.StatusOK, html)
+    }
 }

@@ -10,7 +10,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
-import { useMockBookingStore } from '../../store/mockBookingStore';
 import { s, sheet } from '../../styles/booking';
 
 const { width: SW } = Dimensions.get('window');
@@ -173,8 +172,6 @@ export default function BookingDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuthStore();
-  const mockBookings = useMockBookingStore(s => s.bookings);
-
   const [booking, setBooking]       = useState<BookingDetail | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refundOpen, setRefundOpen] = useState(false);
@@ -183,8 +180,6 @@ export default function BookingDetailScreen() {
 
   useEffect(() => {
     const load = async () => {
-      const mock = mockBookings.find(b => b.id === id);
-      if (mock) { setBooking(mock as unknown as BookingDetail); setLoading(false); return; }
       if (!user) { setLoading(false); return; }
       try {
         const { data } = await api.get<BookingDetail>(`/v1/bookings/${id}`);

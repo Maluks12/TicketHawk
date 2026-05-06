@@ -1,24 +1,24 @@
 import { StyleSheet } from 'react-native';
 
-// ─── className strings ────────────────────────────────────────────────────────
+//  className strings 
 // Import as:  import { s, sheet } from '../styles/home';
 // Use as:     <View className={s.screen}>
 
 export const s = {
 
-  // ── Screen shell ────────────────────────────────────────────────────────────
+  //  Screen shell 
   screen:           'flex-1 bg-white',
   scroll:           'flex-1 bg-white',
 
-  // ── Location header ─────────────────────────────────────────────────────────
+  //  Location header 
   locationHeader:         'absolute top-0 left-0 right-0 flex-row items-center justify-between px-5 pt-16 pb-6 bg-white z-10',
   locationCity:           'text-[22px] font-extrabold text-[#0a0a0a] tracking-[0.3px]',
   locationSub:            'text-[17px] font-extrabold text-black/30 mt-0.5',
   menuBtn:                'p-1.5',
   menuIcon:               'text-2xl text-[#0a0a0a]',
 
-  // ── Hero banner ──────────────────────────────────────────────────────────────
-  hero:                  'relative h-[380px] mt-[80px]',
+  //  Hero banner 
+  hero:                  'relative h-[380px]',
   heroImagePlaceholder:  'absolute inset-0 bg-[#e5e5e5]',
   heroContent:           'absolute bottom-0 left-0 right-0 p-5 pb-8',
   heroBadge:             'text-[11px] font-bold text-[#ff3c6e] tracking-[2px] uppercase mb-2.5',
@@ -26,7 +26,7 @@ export const s = {
   heroSub:               'text-[13px] text-white/80 leading-5 mb-5 max-w-[300px]',
   heroActions:           'flex-row gap-3',
 
-  // ── Buttons ──────────────────────────────────────────────────────────────────
+  //  Buttons 
   btnPrimary:            'bg-[#ff3c6e] px-[22px] py-3 rounded-[2px]',
   btnPrimaryText:        'text-white font-extrabold text-[11px] tracking-[1.5px]',
   btnOutline:            'border border-white/50 px-[22px] py-3 rounded-[2px]',
@@ -34,7 +34,7 @@ export const s = {
   btnOutlineLight:       'border border-black/20 px-[22px] py-3 rounded-[2px]',
   btnOutlineLightText:   'text-black font-bold text-[11px] tracking-[1px]',
 
-  // ── Category filter ──────────────────────────────────────────────────────────
+  //  Category filter 
   filterRow:             'flex-row items-center px-5 py-3.5 gap-2.5',
   filterClearBtn:        'w-[34px] h-[34px] rounded-[2px] border border-black/15 items-center justify-center',
   filterClearText:       'text-black text-xs',
@@ -44,7 +44,7 @@ export const s = {
   filterChipTextActive:  'text-white',
   filterChipArrow:       'text-black/35 text-[11px]',
 
-  // ── Category modal ───────────────────────────────────────────────────────────
+  //  Category modal 
   modalBackdrop:         'flex-1 bg-black/40 justify-end',
   modalSheet:            'bg-white rounded-t-[4px] pt-5 pb-10 max-h-[80%] items-center border-t border-black/10',
   modalItem:             'py-[18px] px-10 w-full items-start',
@@ -53,7 +53,7 @@ export const s = {
   modalCloseBtn:         'mt-4 w-11 h-11 rounded-[2px] bg-black/[0.06] items-center justify-center',
   modalCloseBtnText:     'text-black text-base font-bold',
 
-  // ── Section header ───────────────────────────────────────────────────────────
+  //  Section header 
   section:               'px-5 mb-4',
   sectionMt:             'px-5 mb-4 mt-7',
   sectionHeader:         'flex-row items-center justify-between',
@@ -61,7 +61,7 @@ export const s = {
   sectionLink:           'text-[10px] font-extrabold text-[#ff3c6e] tracking-[1.5px]',
   hScrollContent:        'px-5 gap-3.5 pb-2',
 
-  // ── Event card ───────────────────────────────────────────────────────────────
+  //  Event card 
   hCard:                 'w-[200px]',
   hCardImageArea:        'w-full h-[130px] bg-[#e5e5e5] rounded-[14px] overflow-hidden',
   hCardBadge:            'absolute top-2.5 left-2.5 bg-[#ff3c6e] rounded-[5px] px-2.5 py-1 flex-row items-center gap-1',
@@ -73,11 +73,11 @@ export const s = {
   hCardTitle:            'text-sm font-bold text-black mb-1 leading-[18px]',
   hCardMeta:             'text-[11px] text-black/40',
 
-  // ── Rank badge (Top 10 cards) ─────────────────────────────────────────────
+  //  Rank badge (kept for compat) 
   rankBadge:             'absolute bottom-2.5 left-2.5 bg-[#e8c14a] rounded-[2px] px-2 py-0.5',
   rankText:              'text-black text-xs font-black',
 
-  // ── Sports Elite banner ───────────────────────────────────────────────────
+  //  Sports Elite banner 
   sportsBanner:          'rounded-[3px] overflow-hidden min-h-[200px] relative mx-5',
   sportsBannerBg:        'absolute inset-0 bg-[#1a1a1a]',
   sportsBannerContent:   'p-6 relative z-[2]',
@@ -85,7 +85,7 @@ export const s = {
   sportsTitle:           'text-[28px] font-black text-white tracking-[1px] mb-2',
   sportsSub:             'text-xs text-white/50 mb-4',
 
-  // ── Sports list ────────────────────────────────────────────────────────────
+  //  Sports list 
   sportsListContainer:   'mt-4 px-5',
   sportRow:              'flex-row items-center gap-3.5 py-3.5 border-b border-black/[0.07]',
   sportRowLast:          'flex-row items-center gap-3.5 py-3.5',
@@ -96,20 +96,28 @@ export const s = {
   sportLoc:              'text-[11px] text-black/40',
   sportArrow:            'text-[20px] text-black/20',
 
-  // ── Loading ────────────────────────────────────────────────────────────────
+  //  Loading 
   loadingRow:            'items-center py-10',
 };
 
-// ─── StyleSheet ────────────────────────────────────────────────────────────────
+//  StyleSheet 
 export const sheet = StyleSheet.create({
   absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  locationHeaderShadow: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(0,0,0,0.08)',
+
+  // ── Apple TV-style Top 10 rank number ────────────────────────────────────
+  // Sits top-left ON the card image. Card keeps its normal 200×130px dimensions.
+  top10Rank: {
+    position: 'absolute',
+    top: 6,
+    left: 10,
+    fontSize: 52,
+    fontWeight: '900',
+    color: '#ffffff',
+    lineHeight: 58,
+    letterSpacing: -2,
+    zIndex: 3,
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
 });

@@ -20,9 +20,9 @@ import { useRouter } from 'expo-router';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
 import {
+  api,
   getTicketTypes,
-  addTicketToCart,
-  checkoutBegin,
+  createBooking,
   type TicketType,
 } from '../../lib/api';
 import SeatingMap, { detectVenueType, MapLegend } from '../../components/seatingmap';
@@ -77,7 +77,10 @@ export default function TicketPurchaseScreen() {
   const [guestName, setGuestName]         = useState('');
   const [guestEmail, setGuestEmail]       = useState('');
   const [contactModalOpen, setContactModalOpen] = useState(false);
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal' | 'apple_pay'>('card');
   const modalSlide = useRef(new Animated.Value(300)).current;
+  const paymentSlide = useRef(new Animated.Value(400)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   function openContactModal() {
@@ -89,6 +92,22 @@ export default function TicketPurchaseScreen() {
     Animated.timing(modalSlide, { toValue: 300, duration: 220, useNativeDriver: true }).start(() => {
       setContactModalOpen(false);
     });
+  }
+
+  function openPaymentSheet() {
+    setPaymentSheetOpen(true);
+    Animated.spring(paymentSlide, { toValue: 0, useNativeDriver: true, bounciness: 4 }).start();
+  }
+
+  function closePaymentSheet() {
+    Animated.timing(paymentSlide, { toValue: 400, duration: 220, useNativeDriver: true }).start(() => {
+      setPaymentSheetOpen(false);
+    });
+  }
+
+  function selectPaymentMethod(method: 'card' | 'paypal' | 'apple_pay') {
+    setPaymentMethod(method);
+    closePaymentSheet();
   }
 
   function animateStep(next: 'select' | 'map' | 'summary') {
@@ -152,7 +171,8 @@ export default function TicketPurchaseScreen() {
 
   const handleAddToCart = async () => {
     if (!selectedType || !event) return;
-    // Validate guest details when not logged in
+
+    // Guest validation — must have filled in contact details
     if (!user) {
       if (!guestName.trim()) {
         Alert.alert('Name required', 'Please enter your name so we can personalise your ticket.');
@@ -164,24 +184,49 @@ export default function TicketPurchaseScreen() {
         return;
       }
     }
+
     setAdding(true);
     try {
-      if (selectedId === 'ga-fallback') {
-        Alert.alert('🎟 Added!', `${quantity}× ${selectedType.name} for ${fmtPrice(grandTotal)} added to your cart.`, [
-          { text: 'Continue Shopping', style: 'cancel' },
-          { text: 'Checkout', onPress: () => router.push('/(tabs)/tickets') },
-        ]);
-        setAdding(false);
-        return;
-      }
-      await addTicketToCart({ item_type: 'ticket', event_id: event.id, ticket_type_id: selectedId ?? undefined, quantity });
-      const checkout = await checkoutBegin();
-      Alert.alert('🎟 Reserved!', `${quantity}× ${selectedType.name}. You have ${Math.floor(checkout.expires_in_seconds / 60)} min to complete payment.`, [
-        { text: 'Continue Shopping', style: 'cancel' },
-        { text: 'Checkout', onPress: () => router.push('/(tabs)/tickets') },
-      ]);
+      const nameParts = guestName.trim().split(' ');
+      const firstName = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');
+      const lastRaw   = user ? String((user as any).last_name ?? '') : (nameParts.slice(1).join(' '));
+      const lastName  = lastRaw.trim() !== '' ? lastRaw : firstName;
+      const email     = user ? String((user as any).email ?? '') : guestEmail.trim();
+
+      const endpoint  = user ? '/v1/bookings' : '/v1/guest/bookings';
+      const payload   = user
+        ? {
+            event_id:            event.id,
+            ticket_type_id:      selectedId !== 'ga-fallback' ? (selectedId ?? undefined) : undefined,
+            ticket_quantity:     quantity,
+            attendee_first_name: firstName,
+            attendee_last_name:  lastName,
+            attendee_email:      email,
+          }
+        : {
+            event_id:            event.id,
+            ticket_quantity:     quantity,
+            attendee_first_name: firstName,
+            attendee_last_name:  lastName,
+            attendee_email:      email,
+          };
+
+      console.log('[PAY] endpoint:', endpoint, 'payload:', JSON.stringify(payload));
+      const { data: booking } = await api.post(endpoint, payload);
+
+      // Navigate to the payment WebView screen
+      router.push({
+        pathname: '/payment/[id]',
+        params: {
+          id:       (booking as any).booking_id,
+          token:    booking.client_token,
+          amount:   String(booking.total_amount),
+          currency: booking.currency,
+        },
+      });
     } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.error ?? 'Failed to reserve tickets. Please try again.');
+      const msg = err?.response?.data?.error ?? 'Failed to create booking. Please try again.';
+      Alert.alert('Error', msg);
     } finally {
       setAdding(false);
     }
@@ -431,14 +476,18 @@ export default function TicketPurchaseScreen() {
                     </View>
                   </TouchableOpacity>
 
-                  <View style={ss.detailRow}>
+                  <TouchableOpacity style={ss.detailRow} onPress={openPaymentSheet} activeOpacity={0.7}>
                     <Text style={ss.detailLabel}>Payment</Text>
                     <View style={ss.detailRight}>
-                      <Text style={{ fontSize: 16 }}>💳</Text>
-                      <Text style={ss.detailValue}>Secure via Stitch</Text>
+                      <Text style={{ fontSize: 15 }}>
+                        {paymentMethod === 'apple_pay' ? '🍎' : paymentMethod === 'paypal' ? '🅿️' : '💳'}
+                      </Text>
+                      <Text style={ss.detailValue}>
+                        {paymentMethod === 'apple_pay' ? 'Apple Pay' : paymentMethod === 'paypal' ? 'PayPal' : 'Credit / Debit Card'}
+                      </Text>
                       <Text style={ss.chevron}>›</Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
 
                   <View style={ss.detailRow}>
                     <Text style={ss.detailLabel}>Quantity</Text>
@@ -622,6 +671,53 @@ export default function TicketPurchaseScreen() {
           </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
+
+    {/* ── Payment Method Sheet ───────────────────────────────── */}
+    <Modal visible={paymentSheetOpen} transparent animationType="none" onRequestClose={closePaymentSheet}>
+      <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={closePaymentSheet} />
+      <Animated.View style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        paddingBottom: 40, transform: [{ translateY: paymentSlide }],
+      }}>
+        <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 8 }}>
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#e0e0e0' }} />
+        </View>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: '#0a0a0a', paddingHorizontal: 20, paddingBottom: 8 }}>
+          Payments
+        </Text>
+
+        {/* Apple Pay */}
+        <TouchableOpacity onPress={() => selectPaymentMethod('apple_pay')} activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: '#222', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#000', letterSpacing: -0.5 }}>Pay</Text>
+          </View>
+          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>Apple Pay</Text>
+          {paymentMethod === 'apple_pay' && <Text style={{ fontSize: 18, color: '#0a0a0a' }}>✓</Text>}
+        </TouchableOpacity>
+
+        {/* PayPal */}
+        <TouchableOpacity onPress={() => selectPaymentMethod('paypal')} activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+          <View style={{ width: 52, height: 34, borderRadius: 8, backgroundColor: '#003087', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: '#fff' }}>P</Text>
+          </View>
+          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>PayPal</Text>
+          {paymentMethod === 'paypal' && <Text style={{ fontSize: 18, color: '#0a0a0a' }}>✓</Text>}
+        </TouchableOpacity>
+
+        {/* Credit Card */}
+        <TouchableOpacity onPress={() => selectPaymentMethod('card')} activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+            <Text style={{ fontSize: 18 }}>💳</Text>
+          </View>
+          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>Add credit card</Text>
+          {paymentMethod === 'card' && <Text style={{ fontSize: 18, color: '#0a0a0a' }}>✓</Text>}
+        </TouchableOpacity>
+      </Animated.View>
+    </Modal>
 
     </View>
     </KeyboardAvoidingView>

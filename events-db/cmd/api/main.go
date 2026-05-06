@@ -390,10 +390,12 @@ func main() {
 			paymentRoutes.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
 			paymentRoutes.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			paymentRoutes.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
+			bookings.GET("/:id/payment/page", handlers.PaymentPageHandler())
 		} else {
 			bookings.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
 			bookings.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
+			bookings.GET("/:id/payment/page", handlers.PaymentPageHandler())
 		}
 	}
 

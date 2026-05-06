@@ -24,11 +24,9 @@ api.interceptors.response.use(
       const refresh = await SecureStore.getItemAsync('refresh_token');
       if (!refresh) throw error;
       try {
-        // FIX: path must include /v1 prefix
         const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, {
           refresh_token: refresh,
         });
-        // FIX: backend key is "access_token" (was "access_tokens" typo, now fixed in backend too)
         const newToken = data.access_token;
         await SecureStore.setItemAsync('access_token', newToken);
         await SecureStore.setItemAsync('refresh_token', data.refresh_token);
@@ -99,7 +97,9 @@ export interface PaginatedEvents {
 
 // ── API functions ──────────────────────────────────────────────────────────
 
-export const getHomeSections     = ()                               => api.get<HomeResponse>('/v1/home');
+// CHANGED: accepts optional city string → sends ?city=Johannesburg to backend
+// which triggers the Near You section for that city
+export const getHomeSections     = (city?: string)                  => api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);
 export const getFeaturedEvents   = (limit = 1)                      => api.get<EventPage>(`/v1/events/featured?limit=${limit}`);
 export const getTrendingEvents   = (limit = 10)                     => api.get<EventPage>(`/v1/events/trending?limit=${limit}`);
 export const getActiveEvents     = (limit = 10)                     => api.get<EventPage>(`/v1/events/active?limit=${limit}`);
@@ -232,12 +232,10 @@ export interface RegisterDTO {
   first_name: string;
   last_name: string;
   phone_number: string;
-  date_of_birth: string; // *string in Go — accepted as plain string, not parsed as time.Time
+  date_of_birth: string;
 }
 
 // ── Auth API calls ─────────────────────────────────────────────────────────
-// All routes: POST /v1/auth/login, /v1/auth/register, /v1/auth/logout
-// Profile:    GET  /v1/user/me
 
 export const authLogin    = (email: string, password: string) =>
   api.post<TokenResponse>('/v1/auth/login', { email, password });
@@ -251,10 +249,8 @@ export const authLogout   = () =>
 export const getMe = () =>
   api.get<AuthUser>('/v1/user/me');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Ticket Types ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
- 
+// ── Ticket Types ───────────────────────────────────────────────────────────
+
 export interface TicketType {
   id: string;
   event_id: string;
@@ -264,7 +260,6 @@ export interface TicketType {
   capacity?: number | null;
   tickets_sold: number;
   reserved_count: number;
-  /** Computed server-side: capacity - tickets_sold - reserved_count (null = unlimited) */
   available?: number | null;
   sort_order: number;
   is_visible: boolean;
@@ -273,24 +268,18 @@ export interface TicketType {
   created_at: string;
   updated_at: string;
 }
- 
-/**
- * GET /v1/events/:eventId/ticket-types
- * Returns only visible, on-sale ticket types for the public purchase flow.
- */
+
 export async function getTicketTypes(eventId: string): Promise<TicketType[]> {
   const res = await api.get<{ ticket_types: TicketType[]; count: number }>(
     `/v1/events/${eventId}/ticket-types`
   );
   return res.data.ticket_types ?? [];
 }
- 
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Cart ─────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
- 
+
+// ── Cart ───────────────────────────────────────────────────────────────────
+
 export type CartItemType = 'ticket' | 'merch';
- 
+
 export interface CartItem {
   id: string;
   cart_id: string;
@@ -305,25 +294,21 @@ export interface CartItem {
   fulfillment_method?: string | null;
   event_title?: string;
 }
- 
+
 export interface CartSummary {
   id: string;
   items: CartItem[];
   total: number;
   item_count: number;
 }
- 
+
 export interface AddTicketToCartDTO {
   item_type: 'ticket';
   event_id: string;
   ticket_type_id?: string;
   quantity: number;
 }
- 
-/**
- * POST /v1/cart/items
- * Adds a ticket item to the cart. Pass sessionId for guest (unauthenticated) carts.
- */
+
 export async function addTicketToCart(
   dto: AddTicketToCartDTO,
   sessionId?: string | null,
@@ -333,31 +318,20 @@ export async function addTicketToCart(
   const res = await api.post<CartItem>('/v1/cart/items', dto, { headers });
   return res.data;
 }
- 
-/**
- * GET /v1/cart
- */
+
 export async function getCart(sessionId?: string | null): Promise<CartSummary> {
   const headers: Record<string, string> = {};
   if (sessionId) headers['X-Session-ID'] = sessionId;
   const res = await api.get<CartSummary>('/v1/cart', { headers });
   return res.data;
 }
- 
-/**
- * DELETE /v1/cart
- * Clears all items from the cart.
- */
+
 export async function clearCart(sessionId?: string | null): Promise<void> {
   const headers: Record<string, string> = {};
   if (sessionId) headers['X-Session-ID'] = sessionId;
   await api.delete('/v1/cart', { headers });
 }
- 
-/**
- * PATCH /v1/cart/items/:id
- * Updates quantity of a single cart item.
- */
+
 export async function updateCartItem(
   itemId: string,
   quantity: number,
@@ -368,11 +342,7 @@ export async function updateCartItem(
   const res = await api.patch<CartItem>(`/v1/cart/items/${itemId}`, { quantity }, { headers });
   return res.data;
 }
- 
-/**
- * DELETE /v1/cart/items/:id
- * Removes one item from the cart.
- */
+
 export async function removeCartItem(
   itemId: string,
   sessionId?: string | null,
@@ -381,11 +351,9 @@ export async function removeCartItem(
   if (sessionId) headers['X-Session-ID'] = sessionId;
   await api.delete(`/v1/cart/items/${itemId}`, { headers });
 }
- 
-// ─────────────────────────────────────────────────────────────────────────────
-// ── Checkout ─────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
- 
+
+// ── Checkout ───────────────────────────────────────────────────────────────
+
 export interface ReservationSummary {
   reservation_id: string;
   event_id: string;
@@ -393,46 +361,89 @@ export interface ReservationSummary {
   quantity: number;
   seconds_left: number;
 }
- 
+
 export interface CheckoutBeginResponse {
   reservations: ReservationSummary[];
-  /** Shortest TTL across all reservations — use this for the countdown timer */
   expires_in_seconds: number;
   cart_total: number;
 }
- 
-/**
- * POST /v1/checkout/begin
- * Creates 10-minute ticket reservations for all ticket items in the cart.
- * Call this before sending the user to the Stitch payment page.
- */
-export async function checkoutBegin(
-  sessionId?: string | null,
-): Promise<CheckoutBeginResponse> {
+
+export async function checkoutBegin(sessionId?: string | null): Promise<CheckoutBeginResponse> {
   const headers: Record<string, string> = {};
   if (sessionId) headers['X-Session-ID'] = sessionId;
   const res = await api.post<CheckoutBeginResponse>('/v1/checkout/begin', {}, { headers });
   return res.data;
 }
- 
-/**
- * POST /v1/checkout/heartbeat
- * Extends the reservation TTL. Call every ~60 s while the user is on the
- * payment page to prevent the reservation from expiring mid-payment.
- */
+
 export async function checkoutHeartbeat(sessionId?: string | null): Promise<void> {
   const headers: Record<string, string> = {};
   if (sessionId) headers['X-Session-ID'] = sessionId;
   await api.post('/v1/checkout/heartbeat', {}, { headers });
 }
- 
-/**
- * POST /v1/checkout/abandon
- * Releases all active reservations and clears the cart.
- * Call when the user navigates away from payment without completing it.
- */
+
 export async function checkoutAbandon(sessionId?: string | null): Promise<void> {
   const headers: Record<string, string> = {};
   if (sessionId) headers['X-Session-ID'] = sessionId;
   await api.post('/v1/checkout/abandon', {}, { headers });
+}
+
+// ── Bookings ───────────────────────────────────────────────────────────────
+
+export interface CreateBookingDTO {
+  event_id: string;
+  ticket_type_id?: string;
+  ticket_quantity: number;
+  attendee_first_name?: string;
+  attendee_last_name?: string;
+  attendee_email?: string;
+}
+
+export interface BookingResponse {
+  booking_id: string;
+  booking_number: string;
+  total_amount: number;
+  currency: string;
+  client_token: string;
+  payment_request_id: string;
+  expires_at: string;
+}
+
+export interface PaymentStatusResponse {
+  booking_id: string;
+  booking_number: string;
+  payment_status: 'pending' | 'processing' | 'completed' | 'failed' | 'refunded';
+  payment_method?: string;
+  amount: number;
+  currency: string;
+  stitch_payment_url?: string;
+  stitch_payment_request_id?: string;
+  transaction_id?: string;
+  completed_at?: string;
+  webhook_received: boolean;
+}
+
+export async function createBooking(dto: CreateBookingDTO): Promise<BookingResponse> {
+  const res = await api.post<BookingResponse>('/v1/bookings', dto);
+  return res.data;
+}
+
+export async function getPaymentStatus(bookingId: string): Promise<PaymentStatusResponse> {
+  const res = await api.get<PaymentStatusResponse>(`/v1/payments/${bookingId}/status`);
+  return res.data;
+}
+
+export async function pollPaymentStatus(
+  bookingId: string,
+  intervalMs = 2000,
+  timeoutMs = 120_000,
+): Promise<PaymentStatusResponse> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await getPaymentStatus(bookingId);
+    if (status.payment_status === 'completed' || status.payment_status === 'failed') {
+      return status;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  throw new Error('Payment confirmation timed out');
 }

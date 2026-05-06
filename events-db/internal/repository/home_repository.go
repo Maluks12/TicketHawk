@@ -5,6 +5,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/utils"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +40,7 @@ type HomeSectionsResult struct {
 // Each section receives up to 2 sponsored cards at positions 3 and 7
 // (1-indexed). Sponsored ranking weights daily_budget × category affinity,
 // so ads relevant to the user rank higher regardless of raw budget alone.
-func GetHomeSections(pool *pgxpool.Pool, userID *string, lat, lng *float64) (*HomeSectionsResult, error) {
+func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSectionsResult, error) {
 	type sectionFetcher struct {
 		id    string
 		title string
@@ -98,13 +99,13 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, lat, lng *float64) (*Ho
 		},
 	)
 
-	if lat != nil && lng != nil {
-		la, lo := *lat, *lng
+	if city != nil && *city != "" {
+		ct := *city
 		fetchers = append(fetchers, sectionFetcher{
 			id:    "near_you",
 			title: "Near You",
 			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				events, err := NearYou(pool, la, lo, 10, 150)
+				events, err := NearYou(pool, ct, 10)
 				return events, nil, err
 			},
 		})
@@ -229,42 +230,31 @@ func ForYou(pool *pgxpool.Pool, userID string, limit int) ([]models.Event, error
 	return events, rows.Err()
 }
 
-// ── Near You ──────────────────────────────────────────────────────────────────
+// ── Near You (city-based) ─────────────────────────────────────────────────────
 //
-// Haversine formula in SQL — no PostGIS required.
-// LEAST(1.0, ...) guards acos() from receiving > 1.0 due to float rounding.
-// maxKm=150 covers the entire JHB metro + Pretoria + Vereeniging.
-func NearYou(pool *pgxpool.Pool, lat, lng float64, limit int, maxKm float64) ([]models.Event, error) {
+// Returns events whose city matches the user's selected city or any known
+// suburb/district in the same metro. No lat/lng or PostGIS required.
+func NearYou(pool *pgxpool.Pool, city string, limit int) ([]models.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	cities := cityAndNeighbours(city)
+
 	rows, err := pool.Query(ctx, `
-		WITH distances AS (
-			SELECT ev.id,
-			       (6371 * acos(LEAST(1.0,
-			           cos(radians($1)) * cos(radians(ev.latitude))
-			           * cos(radians(ev.longitude) - radians($2))
-			           + sin(radians($1)) * sin(radians(ev.latitude))
-			       ))) AS distance_km
-			FROM events ev
-			WHERE ev.status     = 'published'
-			  AND ev.start_time > NOW()
-			  AND ev.latitude   IS NOT NULL
-			  AND ev.longitude  IS NOT NULL
-		)
 		SELECT
 			ev.id, ev.title, ev.description, ev.cover_image_url,
 			ev.start_time, ev.end_time, ev.price, ev.currency,
 			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
 			ev.is_featured, ev.status, ev.views, ev.created_at,
 			c.name AS category
-		FROM   distances d
-		JOIN   events     ev ON ev.id = d.id
-		JOIN   categories c  ON c.id  = ev.category_id
-		WHERE  d.distance_km < $3
-		ORDER BY d.distance_km ASC, ev.start_time ASC
-		LIMIT $4
-	`, lat, lng, maxKm, limit)
+		FROM events ev
+		JOIN categories c ON c.id = ev.category_id
+		WHERE ev.status     = 'published'
+		  AND ev.start_time > NOW()
+		  AND LOWER(ev.city) = ANY($1)
+		ORDER BY ev.start_time ASC, ev.views DESC
+		LIMIT $2
+	`, cities, limit)
 	if err != nil {
 		return nil, fmt.Errorf("NearYou: %w", err)
 	}
@@ -286,6 +276,32 @@ func NearYou(pool *pgxpool.Pool, lat, lng float64, limit int, maxKm float64) ([]
 		events = append(events, e)
 	}
 	return events, rows.Err()
+}
+
+// cityAndNeighbours returns lowercase city + known suburb names for SA metros.
+func cityAndNeighbours(city string) []string {
+	lower := strings.ToLower(strings.TrimSpace(city))
+	metros := map[string][]string{
+		"johannesburg": {
+			"johannesburg", "sandton", "midrand", "soweto", "roodepoort",
+			"randburg", "fourways", "maboneng", "braamfontein", "melville",
+			"rosebank", "illovo", "newtown", "doornfontein", "sun city",
+		},
+		"cape town": {
+			"cape town", "sea point", "green point", "waterfront",
+			"newlands", "claremont", "stellenbosch", "franschhoek", "paarl",
+		},
+		"durban": {
+			"durban", "umhlanga", "ballito", "pinetown", "westville",
+		},
+		"pretoria": {
+			"pretoria", "centurion", "hatfield", "arcadia", "menlyn",
+		},
+	}
+	if neighbours, ok := metros[lower]; ok {
+		return neighbours
+	}
+	return []string{lower}
 }
 
 // ── Trending Now ──────────────────────────────────────────────────────────────
