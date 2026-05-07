@@ -9,18 +9,77 @@ import {
   ActivityIndicator,
   RefreshControl,
   Animated,
+  StyleSheet,
 } from 'react-native';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getHomeSections, loadMoreSectionEvents, type Event, type HomeSection } from '../../lib/api';
+import { Ionicons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
+import { getHomeSections, loadMoreSectionEvents, type Event, type HomeSection, api } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString,formatDateRangeLabel } from '../../components/FilterModal';
 import { useAppTheme } from '../../theme/colors';
 
+// ─── Cart header button ───────────────────────────────────────────────────────
 
-const CATEGORIES = ['All', 'Concerts', 'Sports', 'Gala', 'Tech', 'Food'];
+function CartHeaderButton() {
+  const router = useRouter();
+  const { colors } = useAppTheme();
+  const [count, setCount] = useState(0);
+  const prevCount = useRef(0);
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      try {
+        const sid = await SecureStore.getItemAsync('session_id').catch(() => null);
+        const headers: Record<string, string> = {};
+        if (sid) headers['X-Session-ID'] = sid;
+        const res = await api.get<{ total_items: number }>('/v1/cart', { headers });
+        const n = res.data?.total_items ?? 0;
+        if (mounted) {
+          if (n !== prevCount.current && n > 0) {
+            Animated.sequence([
+              Animated.spring(scaleAnim, { toValue: 1.4, useNativeDriver: true, bounciness: 14 }),
+              Animated.spring(scaleAnim, { toValue: 1,   useNativeDriver: true, bounciness: 6  }),
+            ]).start();
+          }
+          prevCount.current = n;
+          setCount(n);
+        }
+      } catch { /* guest with no cart yet */ }
+    };
+    refresh();
+    const interval = setInterval(refresh, 30_000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
+
+  return (
+    <TouchableOpacity
+      onPress={() => router.push('/cart' as any)}
+      style={cartStyles.btn}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      activeOpacity={0.75}
+    >
+      <Ionicons name="cart-outline" size={28} color={colors.text} />
+      {count > 0 && (
+        <Animated.View style={[cartStyles.badge, { transform: [{ scale: scaleAnim }] }]}>
+          <Text style={cartStyles.badgeText}>{count > 9 ? '9+' : count}</Text>
+        </Animated.View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+const cartStyles = StyleSheet.create({
+  btn:       { position: 'relative', padding: 4 },
+  badge:     { position: 'absolute', top: 0, right: 0, minWidth: 17, height: 17, borderRadius: 9, backgroundColor: '#ff2d55', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#fff' },
+  badgeText: { fontSize: 9, fontWeight: '900', color: '#fff', lineHeight: 11 },
+});
+
 // ─── Dynamic spotlight section configs ────────────────────────────────────────
 // One of these is picked at random on every app load.
 const SPOTLIGHT_CONFIGS = [
@@ -183,6 +242,7 @@ const SectionRow = ({
 export default function Index() {
   const router = useRouter();
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
+  const setAllEvents     = useEventStore((state) => state.setAllEvents);   // ← category page filter
   const { colors } = useAppTheme();
 
   // ── Refs ─────────────────────────────────────────────────────────────────
@@ -218,8 +278,36 @@ export default function Index() {
     .flatMap((sec) => sec.events ?? [])
     .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i);
 
+  // Keep the store in sync so the category page can filter without an extra API call.
+  useEffect(() => {
+    if (allEvents.length > 0) setAllEvents(allEvents);
+  }, [allEvents.length]);
+
+  // Derive unique categories from the loaded events — always in sync with the DB.
+  const categories = useMemo(() => {
+    const seen = new Set<string>();
+    const cats: string[] = [];
+    for (const event of allEvents) {
+      const raw = event.category?.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        cats.push(raw.replace(/\b\w/g, (c) => c.toUpperCase()));
+      }
+    }
+    cats.sort((a, b) => a.localeCompare(b));
+    return ['All', ...cats];
+  }, [allEvents]);
+
+  // Reset active category if it no longer exists (e.g. after a filter refresh).
+  useEffect(() => {
+    if (activeCategory !== 'All' && !categories.includes(activeCategory)) {
+      setActiveCategory('All');
+    }
+  }, [categories, activeCategory]);
+
   // If the current spotlightConfig has no matching events, switch to one that does.
-  // This must be a top-level hook — never inside a loop or IIFE.
   useEffect(() => {
     if (!allEvents.length) return;
     const hasEvents = (cfg: typeof SPOTLIGHT_CONFIGS[0]) =>
@@ -237,7 +325,6 @@ export default function Index() {
       e.category?.toLowerCase().includes(spotlightConfig.category)
     ).slice(0, 4);
     if (preferred.length > 0) return preferred;
-    // Fallback: try other configs in order until one has events
     for (const cfg of SPOTLIGHT_CONFIGS) {
       if (cfg.category === spotlightConfig.category) continue;
       const fallback = allEvents.filter((e) =>
@@ -245,7 +332,6 @@ export default function Index() {
       ).slice(0, 4);
       if (fallback.length > 0) return fallback;
     }
-    // Last resort: just use the first 4 events regardless of category
     return allEvents.slice(0, 4);
   })();
 
@@ -274,8 +360,12 @@ export default function Index() {
   }, [fetchSections]);
 
   const handleSelectCategory = (cat: string) => {
-    setActiveCategory(cat);
     setDropdownOpen(false);
+    if (cat === 'All') {
+      setActiveCategory('All');
+      return;
+    }
+    router.push(`/category/${encodeURIComponent(cat)}`);
   };
 
   const handleEventPress = (event: Event) => {
@@ -445,7 +535,7 @@ export default function Index() {
           <View className={s.modalBackdrop}>
             <View className={s.modalSheet}>
               <FlatList
-                data={CATEGORIES}
+                data={categories}
                 keyExtractor={(item) => item}
                 renderItem={({ item }) => (
                   <TouchableOpacity className={s.modalItem} onPress={() => handleSelectCategory(item)}>
@@ -822,9 +912,7 @@ export default function Index() {
           <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
           <Text className={s.locationSub} style={{ color: colors.subText }}>{dateLabelText}</Text>
         </TouchableOpacity>
-        <TouchableOpacity className={s.menuBtn}>
-          <Text className={s.menuIcon}>🛒</Text>
-        </TouchableOpacity>
+        <CartHeaderButton />
       </Animated.View>
 
       {/* Filter bottom sheet */}

@@ -14,6 +14,11 @@ export default function RootLayout() {
       <Stack.Screen name="event/[id]" />
 
       <Stack.Screen
+        name="category/[name]"
+        options={{ animation: 'slide_from_right' }}
+      />
+
+      <Stack.Screen
         name="event/purchase"
         options={{ animation: 'slide_from_right' }}
       />

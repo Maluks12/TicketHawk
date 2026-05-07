@@ -11,9 +11,10 @@ import {
   StatusBar,
   StyleSheet,
 } from 'react-native';
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type MerchandiseItem } from '../lib/api';
+import { CartConfirmSheet } from './CartConfirmSheet';
 
 // ─── Palette (mirrors merch.tsx — single source of truth for colours) ─────────
 
@@ -69,6 +70,61 @@ function useTickingSeconds(initial: number) {
   return secs;
 }
 
+// ─── Variant grouping ─────────────────────────────────────────────────────────
+// Variants carry JSONB attributes e.g. {"size":"UK 8"} or {"size":"M","fit":"player"}.
+// We group by the primary attribute key so each sizing dimension gets its own row.
+
+type VariantItem = NonNullable<MerchandiseItem['variants']>[number];
+
+interface VariantGroup {
+  key:      string;
+  label:    string;
+  variants: VariantItem[];
+}
+
+function groupVariantsByAttr(variants: VariantItem[]): VariantGroup[] {
+  const ordered: string[] = [];
+  const map = new Map<string, VariantItem[]>();
+
+  for (const v of variants) {
+    try {
+      const attr = JSON.parse(v.attributes) as Record<string, string>;
+      const primaryKey = Object.keys(attr)[0] ?? 'variant';
+      if (!map.has(primaryKey)) {
+        ordered.push(primaryKey);
+        map.set(primaryKey, []);
+      }
+      map.get(primaryKey)!.push(v);
+    } catch {
+      if (!map.has('variant')) {
+        ordered.push('variant');
+        map.set('variant', []);
+      }
+      map.get('variant')!.push(v);
+    }
+  }
+
+  return ordered.map((key) => ({
+    key,
+    label:
+      key === 'size'   ? 'SIZE'   :
+      key === 'colour' ? 'COLOUR' :
+      key === 'fit'    ? 'FIT'    :
+      key === 'type'   ? 'TYPE'   :
+      key.toUpperCase(),
+    variants: map.get(key)!,
+  }));
+}
+
+function getVariantLabel(v: VariantItem): string {
+  try {
+    const attr = JSON.parse(v.attributes) as Record<string, string>;
+    return Object.values(attr).join(' / ');
+  } catch {
+    return v.sku;
+  }
+}
+
 // ─── Carousel dimensions ──────────────────────────────────────────────────────
 
 const { width: W } = Dimensions.get('window');
@@ -76,6 +132,7 @@ const CARD_W   = W * 0.72;
 const CARD_GAP = 14;
 const SNAP_W   = CARD_W + CARD_GAP;
 const SIDE_PAD = (W - CARD_W) / 2;
+
 // ─── Carousel Card ────────────────────────────────────────────────────────────
 
 const CarouselCard = ({
@@ -120,6 +177,7 @@ const CarouselCard = ({
     extrapolate: 'clamp',
   });
 
+  // Show up to 4 in-stock size labels as preview chips on the card
   let variantLabels: string[] = [];
   if (item.variants && item.variants.length > 0) {
     variantLabels = item.variants
@@ -147,7 +205,7 @@ const CarouselCard = ({
       <TouchableOpacity
         activeOpacity={0.93}
         onPress={onPress}
-       style={{ backgroundColor: bg, borderRadius: 20, overflow: 'hidden' }}
+        style={{ backgroundColor: bg, borderRadius: 20, overflow: 'hidden' }}
       >
         {/* ── Hero image ───────────────────────────────────────────────── */}
         <View style={{ width: '100%', height: CARD_W * 1.0 }}>
@@ -169,7 +227,7 @@ const CarouselCard = ({
             </View>
           )}
 
-          {/* Status/timer pill */}
+          {/* Status / timer pill */}
           <View
             style={{
               position: 'absolute',
@@ -214,7 +272,7 @@ const CarouselCard = ({
             </Text>
           </View>
 
-          {/* Gradient scrim */}
+          {/* Bottom scrim */}
           <View
             style={{
               position: 'absolute',
@@ -255,6 +313,7 @@ const CarouselCard = ({
             {item.name}
           </Text>
 
+          {/* Available size preview chips */}
           {variantLabels.length > 0 && (
             <View style={{ flexDirection: 'row', gap: 5, marginBottom: 12, flexWrap: 'wrap' }}>
               {variantLabels.map((lbl, i) => (
@@ -347,6 +406,298 @@ const PaginationDots = ({
     })}
   </View>
 );
+
+// ─── Detail overlay ───────────────────────────────────────────────────────────
+// Extracted from an inline IIFE into a proper component so it can hold its own
+// selectedVariant state without lifting it into CollectionModal.
+
+interface DetailOverlayProps {
+  item:        MerchandiseItem;
+  detailX:     Animated.Value;
+  detailY:     Animated.Value;
+  detailOpacity: Animated.Value;
+  onClose:     () => void;
+  bottom:      number;
+  top:         number;
+}
+
+const DetailOverlay = ({
+  item,
+  detailX,
+  detailY,
+  detailOpacity,
+  onClose,
+  bottom,
+  top,
+}: DetailOverlayProps) => {
+  const { bg: dBg, text: dtc } = paletteFor(item);
+  const imgs = parseImages(item.images);
+  const isDetailLive = item.sale_status === 'live';
+  const remainSecs   = useTickingSeconds(item.seconds_remain ?? 0);
+  const untilSecs    = useTickingSeconds(item.seconds_until  ?? 0);
+
+  // ── Variant / size selection ─────────────────────────────────────────────
+  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
+  const [showCart, setShowCart] = useState(false);
+  const variantGroups = useMemo(
+    () => (item.variants && item.variants.length > 0 ? groupVariantsByAttr(item.variants) : []),
+    [item.variants],
+  );
+  const hasVariants = variantGroups.length > 0;
+  const displayPrice =
+    selectedVariant?.price_override != null ? selectedVariant.price_override : item.effective_price;
+
+  // Reset selection whenever the item changes (user swipes to different card)
+  useEffect(() => { setSelectedVariant(null); }, [item.id]);
+
+  const buyDisabled = isDetailLive && hasVariants && !selectedVariant;
+
+  const dismissPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 12 && g.dy > Math.abs(g.dx),
+      onPanResponderMove:   (_, g) => { if (g.dy > 0) detailY.setValue(g.dy); },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80 || g.vy > 0.5) onClose();
+        else Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
+      },
+    })
+  ).current;
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: dBg,
+        transform: [{ translateX: detailX }, { translateY: detailY }],
+        opacity: detailOpacity,
+      }}
+      {...dismissPan.panHandlers}
+    >
+      {/* ── Header ──────────────────────────────────────────────────── */}
+      <View style={{ paddingTop: top + 12, alignItems: 'center', paddingBottom: 4 }}>
+        <View style={{ width: 44, height: 5, borderRadius: 3, backgroundColor: dtc + '55' }} />
+        <View style={{
+          flexDirection: 'row', alignItems: 'center',
+          paddingHorizontal: 20, width: '100%', marginTop: 12,
+        }}>
+          <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
+            {isDetailLive ? '● AVAILABLE NOW' : '◎ DROPPING SOON'}
+          </Text>
+          <View style={{ flex: 1 }} />
+          {isDetailLive && remainSecs > 0 && (
+            <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
+              ENDS {formatCountdown(remainSecs)}
+            </Text>
+          )}
+          {!isDetailLive && untilSecs > 0 && (
+            <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
+              IN {formatCountdown(untilSecs)}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* ── Scrollable body ─────────────────────────────────────────── */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 120 }}
+      >
+        {/* Price box — updates live when a variant is selected */}
+        <View style={{
+          borderWidth: 1, borderColor: dtc + '40',
+          margin: 16, padding: 16, borderRadius: 2,
+        }}>
+          <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + '90' }}>
+            {(item.category ?? 'MERCHANDISE').toUpperCase()}
+          </Text>
+          <Text style={{ fontSize: 36, fontWeight: '900', color: dtc, marginTop: 4 }}>
+            {formatPrice(displayPrice)}
+          </Text>
+          <Text style={{ fontSize: 11, fontWeight: '500', color: dtc + '90', marginTop: 2 }}>
+            {item.name}
+          </Text>
+        </View>
+
+        {/* Hero image */}
+        {imgs.length > 0 && (
+          <Image
+            source={{ uri: imgs[0] }}
+            style={{ width: '100%', height: 300 }}
+            resizeMode="cover"
+          />
+        )}
+
+        {/* Title */}
+        <Text style={{
+          fontSize: 28, fontWeight: '800', color: dtc,
+          paddingHorizontal: 20, paddingTop: 16,
+        }}>
+          {item.name}
+        </Text>
+
+        {/* ── Size / variant selector ─────────────────────────────── */}
+        {hasVariants && variantGroups.map((group) => {
+          const groupSelected = group.variants.find((v) => v.id === selectedVariant?.id) ?? null;
+          return (
+            <View
+              key={group.key}
+              style={{
+                paddingHorizontal: 20,
+                paddingVertical: 14,
+                borderTopWidth: 1,
+                borderBottomWidth: 1,
+                borderTopColor: dtc + '20',
+                borderBottomColor: dtc + '20',
+                marginTop: 2,
+              }}
+            >
+              {/* Row header */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + '70' }}>
+                  {group.label}
+                </Text>
+                {groupSelected && (
+                  <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, color: dtc + 'bb' }}>
+                    {getVariantLabel(groupSelected).toUpperCase()}
+                    {groupSelected.stock_quantity > 0 && groupSelected.stock_quantity <= 5
+                      ? `  —  ONLY ${groupSelected.stock_quantity} LEFT`
+                      : ''}
+                  </Text>
+                )}
+              </View>
+
+              {/* Chips */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {group.variants.map((v) => {
+                  const label      = getVariantLabel(v);
+                  const outOfStock = v.stock_quantity === 0;
+                  const lowStock   = !outOfStock && v.stock_quantity <= 5;
+                  const isSelected = selectedVariant?.id === v.id;
+
+                  return (
+                    <TouchableOpacity
+                      key={v.id}
+                      onPress={() => setSelectedVariant(isSelected ? null : v)}
+                      disabled={outOfStock}
+                      style={{
+                        borderWidth: isSelected ? 2 : 1,
+                        borderColor: outOfStock
+                          ? dtc + '20'
+                          : isSelected
+                          ? dtc
+                          : dtc + '50',
+                        backgroundColor: isSelected ? dtc + '18' : 'transparent',
+                        paddingHorizontal: 14,
+                        paddingVertical: 9,
+                        borderRadius: 2,
+                        marginRight: 8,
+                        alignItems: 'center',
+                        minWidth: 54,
+                      }}
+                    >
+                      <Text style={{
+                        fontSize: 11,
+                        fontWeight: isSelected ? '900' : '700',
+                        letterSpacing: 0.8,
+                        color: outOfStock ? dtc + '28' : isSelected ? dtc : dtc + 'cc',
+                      }}>
+                        {label.toUpperCase()}
+                      </Text>
+
+                      {lowStock && (
+                        <Text style={{ fontSize: 7, color: '#ff9500', fontWeight: '800', marginTop: 2, letterSpacing: 0.5 }}>
+                          LOW
+                        </Text>
+                      )}
+
+                      {outOfStock && (
+                        <Text style={{ fontSize: 8, color: dtc + '30', fontWeight: '600', marginTop: 2, letterSpacing: 0.5 }}>
+                          SOLD OUT
+                        </Text>
+                      )}
+
+                      {v.price_override != null && (
+                        <Text style={{ fontSize: 8, color: dtc + '80', fontWeight: '700', marginTop: 2 }}>
+                          {formatPrice(v.price_override)}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          );
+        })}
+
+        {/* Description */}
+        {item.description && (
+          <Text style={{
+            fontSize: 15, lineHeight: 24, color: dtc + 'cc',
+            paddingHorizontal: 20, paddingTop: 12,
+          }}>
+            {item.description}
+          </Text>
+        )}
+      </ScrollView>
+
+      {/* ── Bottom bar ──────────────────────────────────────────────── */}
+      <View style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        flexDirection: 'row', alignItems: 'center',
+        paddingHorizontal: 20, paddingTop: 14,
+        paddingBottom: bottom > 0 ? bottom : 24,
+        borderTopWidth: 1, borderTopColor: dtc + '20',
+        backgroundColor: dBg, gap: 10,
+      }}>
+        <TouchableOpacity onPress={onClose}>
+          <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
+            BACK
+          </Text>
+        </TouchableOpacity>
+
+        <View style={{ flex: 1, alignItems: 'center' }}>
+          <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: '700', color: dtc }}>
+            {item.name}
+          </Text>
+          <Text style={{ fontSize: 10, color: dtc + '80', marginTop: 2 }}>
+            {formatPrice(displayPrice)}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          disabled={buyDisabled}
+          onPress={isDetailLive && !buyDisabled ? () => setShowCart(true) : undefined}
+          style={{
+            borderWidth: 1,
+            borderColor: buyDisabled ? dtc + '25' : dtc + '60',
+            paddingHorizontal: 18,
+            paddingVertical: 8,
+            borderRadius: 2,
+            opacity: buyDisabled ? 0.45 : 1,
+          }}
+        >
+          <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc }}>
+            {isDetailLive
+              ? buyDisabled ? 'SELECT SIZE' : 'BUY'
+              : 'ALERT'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Cart confirmation sheet ──────────────────────────────────────── */}
+      {showCart && (
+        <CartConfirmSheet
+          item={item}
+          selectedVariant={selectedVariant}
+          onClose={() => setShowCart(false)}
+          onAddToCart={(_item, _variant) => {
+            // TODO: wire to cart store
+          }}
+        />
+      )}
+    </Animated.View>
+  );
+};
 
 // ─── CollectionModal ──────────────────────────────────────────────────────────
 
@@ -569,137 +920,24 @@ export const CollectionModal = ({
               }}
             >
               <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: tc }}>
-                {isLive ? 'BUY' : 'ALERT'}
+                {isLive ? 'VIEW' : 'ALERT'}
               </Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* ── Detail overlay (replaces second Modal) ────────────────────── */}
-        {selectedItem && (() => {
-          const { bg: dBg, text: dtc } = paletteFor(selectedItem);
-          const imgs = parseImages(selectedItem.images);
-          const isDetailLive = selectedItem.sale_status === 'live';
-          const remainSecs = selectedItem.seconds_remain ?? 0;
-          const untilSecs  = selectedItem.seconds_until  ?? 0;
-
-          return (
-            <Animated.View
-              style={{
-                position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                backgroundColor: dBg,
-                transform: [{ translateX: detailX }, { translateY: detailY }],
-                opacity: detailOpacity,
-              }}
-              {...detailDismissPan.panHandlers}
-            >
-              {/* Header */}
-              <View style={{ paddingTop: top + 12, alignItems: 'center', paddingBottom: 4 }}>
-                <View style={{ width: 44, height: 5, borderRadius: 3, backgroundColor: dtc + '55' }} />
-                <View style={{
-                  flexDirection: 'row', alignItems: 'center',
-                  paddingHorizontal: 20, width: '100%', marginTop: 12,
-                }}>
-                  <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
-                    {isDetailLive ? '● AVAILABLE NOW' : '◎ DROPPING SOON'}
-                  </Text>
-                  <View style={{ flex: 1 }} />
-                  {isDetailLive && remainSecs > 0 && (
-                    <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
-                      ENDS {formatCountdown(remainSecs)}
-                    </Text>
-                  )}
-                  {!isDetailLive && untilSecs > 0 && (
-                    <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
-                      IN {formatCountdown(untilSecs)}
-                    </Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Scrollable content */}
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 120 }}
-              >
-                {/* Price box */}
-                <View style={{
-                  borderWidth: 1, borderColor: dtc + '40',
-                  margin: 16, padding: 16, borderRadius: 2,
-                }}>
-                  <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + '90' }}>
-                    {(selectedItem.category ?? 'MERCHANDISE').toUpperCase()}
-                  </Text>
-                  <Text style={{ fontSize: 36, fontWeight: '900', color: dtc, marginTop: 4 }}>
-                    {formatPrice(selectedItem.effective_price)}
-                  </Text>
-                  <Text style={{ fontSize: 11, fontWeight: '500', color: dtc + '90', marginTop: 2 }}>
-                    {selectedItem.name}
-                  </Text>
-                </View>
-
-                {/* Hero image */}
-                {imgs.length > 0 && (
-                  <Image
-                    source={{ uri: imgs[0] }}
-                    style={{ width: '100%', height: 300 }}
-                    resizeMode="cover"
-                  />
-                )}
-
-                {/* Title */}
-                <Text style={{
-                  fontSize: 28, fontWeight: '800', color: dtc,
-                  paddingHorizontal: 20, paddingTop: 16,
-                }}>
-                  {selectedItem.name}
-                </Text>
-
-                {/* Description */}
-                {selectedItem.description && (
-                  <Text style={{
-                    fontSize: 15, lineHeight: 24, color: dtc + 'cc',
-                    paddingHorizontal: 20, paddingTop: 8,
-                  }}>
-                    {selectedItem.description}
-                  </Text>
-                )}
-              </ScrollView>
-
-              {/* Bottom bar */}
-              <View style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                flexDirection: 'row', alignItems: 'center',
-                paddingHorizontal: 20, paddingTop: 14,
-                paddingBottom: bottom > 0 ? bottom : 24,
-                borderTopWidth: 1, borderTopColor: dtc + '20',
-                backgroundColor: dBg, gap: 10,
-              }}>
-                <TouchableOpacity onPress={closeDetail}>
-                  <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc + 'aa' }}>
-                    ALERTS
-                  </Text>
-                </TouchableOpacity>
-                <View style={{ flex: 1, alignItems: 'center' }}>
-                  <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: '700', color: dtc }}>
-                    {selectedItem.name}
-                  </Text>
-                  <Text style={{ fontSize: 10, color: dtc + '80', marginTop: 2 }}>
-                    {formatPrice(selectedItem.effective_price)}
-                  </Text>
-                </View>
-                <TouchableOpacity style={{
-                  borderWidth: 1, borderColor: dtc + '60',
-                  paddingHorizontal: 18, paddingVertical: 8, borderRadius: 2,
-                }}>
-                  <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: dtc }}>
-                    {isDetailLive ? 'BUY' : 'ALERT'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </Animated.View>
-          );
-        })()}
+        {/* ── Detail overlay ────────────────────────────────────────────── */}
+        {selectedItem && (
+          <DetailOverlay
+            item={selectedItem}
+            detailX={detailX}
+            detailY={detailY}
+            detailOpacity={detailOpacity}
+            onClose={closeDetail}
+            bottom={bottom}
+            top={top}
+          />
+        )}
 
       </Animated.View>
     </Modal>
