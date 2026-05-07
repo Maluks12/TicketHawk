@@ -452,17 +452,22 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
     })
   ).current;
 
-  const scrollPan = useRef(
+ const scrollPan = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) =>
-        scrollOffset.current <= 0 && g.dy > 12 && g.dy > Math.abs(g.dx),
+      // Capture intercepts before the ScrollView's native handler —
+      // this is what makes the dismiss reliable when scrolled to top
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        scrollOffset.current <= 0 && g.dy > 8 && g.dy > Math.abs(g.dx),
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
-        if (g.dy > 100 || g.vy > 0.6) {
+        if (g.dy > 80 || g.vy > 0.5) {
           Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
         }
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
       },
     })
   ).current;
@@ -607,17 +612,20 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
-const EmptyState = ({ tab }: { tab: 'available' | 'upcoming' }) => (
-  <View className={s.empty}>
-    <Text className={s.emptyIcon}>{tab === 'available' ? '🛍' : '⏳'}</Text>
-    <Text className={s.emptyTitle}>
-      {tab === 'available' ? 'No drops live right now' : 'Nothing dropping soon'}
-    </Text>
-    <Text className={s.emptySub}>
-      Check back later — drops are time-limited and rotate often.
-    </Text>
-  </View>
-);
+const EmptyState = ({ tab }: { tab: 'available' | 'upcoming' }) => {
+  const { colors } = useAppTheme();
+  return (
+    <View className={s.empty}>
+      <Text className={s.emptyIcon}>{tab === 'available' ? '🛍' : '⏳'}</Text>
+      <Text className={s.emptyTitle} style={{ color: colors.text }}>
+        {tab === 'available' ? 'No drops live right now' : 'Nothing dropping soon'}
+      </Text>
+      <Text className={s.emptySub} style={{ color: colors.subText }}>
+        Check back later — drops are time-limited and rotate often.
+      </Text>
+    </View>
+  );
+};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -637,7 +645,18 @@ export default function Merch() {
   const [loading,          setLoading]          = useState(true);
   const [refreshing,       setRefreshing]       = useState(false);
   const [error,            setError]            = useState<string | null>(null);
-  const { colors }                              = useAppTheme();
+ const { colors }                              = useAppTheme();
+
+  const lastScrollY  = useRef(0);
+  const headerOffset = useRef(0);
+  const headerAnim   = useRef(new Animated.Value(0)).current;
+  const [headerH, setHeaderH] = useState(0);
+
+  const snapHeader = useCallback(() => {
+    const target = headerOffset.current < -(headerH / 2) ? -headerH : 0;
+    Animated.spring(headerAnim, { toValue: target, useNativeDriver: true, bounciness: 0, speed: 14 })
+      .start(() => { headerOffset.current = target; });
+  }, [headerH]);
 
   const fetchDrops = useCallback(async () => {
     try {
@@ -677,38 +696,55 @@ export default function Merch() {
 
   return (
     <View className={s.screen} style={{ backgroundColor: colors.background }}>
-      <SafeAreaView edges={['top', 'left', 'right']}>
-        <View className={s.header}>
-          <Text className={s.headerTitle}>DROPS</Text>
-          <View className={s.headerRight}>
-            <TouchableOpacity className={s.cartBtn}>
-              <Text className={s.cartIcon}>🛒</Text>
+
+      {/* ── Floating animated header ── */}
+      <Animated.View
+        style={{
+          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+          backgroundColor: colors.background,
+          transform: [{ translateY: headerAnim }],
+        }}
+        onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
+      >
+        <SafeAreaView edges={['top', 'left', 'right']}>
+          <View className={s.header}>
+            <Text className={s.headerTitle} style={{ color: colors.text }}>DROPS</Text>
+            <View className={s.headerRight}>
+              <TouchableOpacity className={s.cartBtn}>
+                <Text className={s.cartIcon}>🛒</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View className={s.toggle} style={{ backgroundColor: colors.sectionCardBg }}>
+            <TouchableOpacity
+              className={`${s.toggleBtn} ${tab === 'available' ? s.toggleBtnActive : ''}`}
+              onPress={() => setTab('available')}
+            >
+              <Text
+                className={`${s.toggleText} ${tab === 'available' ? s.toggleTextActive : ''}`}
+                style={{ color: tab === 'available' ? '#fff' : colors.subText }}
+              >
+                AVAILABLE NOW
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              className={`${s.toggleBtn} ${tab === 'upcoming' ? s.toggleBtnActive : ''}`}
+              onPress={() => setTab('upcoming')}
+            >
+              <Text
+                className={`${s.toggleText} ${tab === 'upcoming' ? s.toggleTextActive : ''}`}
+                style={{ color: tab === 'upcoming' ? '#fff' : colors.subText }}
+              >
+                DROPPING SOON
+              </Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        <View className={s.toggle}>
-          <TouchableOpacity
-            className={`${s.toggleBtn} ${tab === 'available' ? s.toggleBtnActive : ''}`}
-            onPress={() => setTab('available')}
-          >
-            <Text className={`${s.toggleText} ${tab === 'available' ? s.toggleTextActive : ''}`}>
-              AVAILABLE NOW
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className={`${s.toggleBtn} ${tab === 'upcoming' ? s.toggleBtnActive : ''}`}
-            onPress={() => setTab('upcoming')}
-          >
-            <Text className={`${s.toggleText} ${tab === 'upcoming' ? s.toggleTextActive : ''}`}>
-              DROPPING SOON
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </Animated.View>
 
       {error && (
-        <View className={s.errorBanner}>
+        <View className={s.errorBanner} style={{ marginTop: headerH }}>
           <Text className={s.errorText}>⚠ {error}</Text>
           <TouchableOpacity onPress={onRefresh} className={s.retryBtn}>
             <Text className={s.retryText}>RETRY</Text>
@@ -730,8 +766,23 @@ export default function Merch() {
               : <UpcomingCard  entry={entry} onPress={() => handleEntryPress(entry)} />
           }
           ListEmptyComponent={<EmptyState tab={tab} />}
-          contentContainerStyle={{ paddingBottom: 110, flexGrow: 1 }}
+          contentContainerStyle={{ paddingTop: headerH, paddingBottom: 110, flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            const delta = y - lastScrollY.current;
+            lastScrollY.current = y;
+            if (y <= 0) {
+              headerOffset.current = 0;
+              headerAnim.setValue(0);
+            } else {
+              headerOffset.current = Math.min(0, Math.max(-headerH, headerOffset.current - delta));
+              headerAnim.setValue(headerOffset.current);
+            }
+          }}
+          onScrollEndDrag={snapHeader}
+          onMomentumScrollEnd={snapHeader}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
           }

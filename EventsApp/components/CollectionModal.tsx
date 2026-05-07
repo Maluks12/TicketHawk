@@ -763,6 +763,20 @@ export const CollectionModal = ({
     ]).start(() => setSelectedItem(null));
   }, []);
 
+  const detailDismissPan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_, g) => g.dy > 8 && g.dy > Math.abs(g.dx),
+      onPanResponderMove:   (_, g) => { if (g.dy > 0) detailY.setValue(g.dy); },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80 || g.vy > 0.5) closeDetail();
+        else Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
+      },
+    })
+  ).current;
+
   // ── Carousel tracking ─────────────────────────────────────────────────────
   const scrollX    = useRef(new Animated.Value(0)).current;
   const [activeIndex, setActiveIndex] = useState(0);

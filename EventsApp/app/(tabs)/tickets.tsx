@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
-  ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform,
-  Animated,
+ ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -241,77 +240,98 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   apiBookings: Booking[]; loading: boolean; refreshing: boolean;
   onRefresh: () => void; error: string | null; onRetry: () => void;
 }) => {
-  const insets = useSafeAreaInsets();
+  const insets             = useSafeAreaInsets();
+  const { colors, isDark } = useAppTheme();
+
   const all      = dedup([...apiBookings]);
   const upcoming = all.filter(isUpcoming);
   const past     = all.filter(b => !isUpcoming(b));
 
-  const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
+  const [activeTab,   setActiveTab]   = useState<'upcoming' | 'past'>('upcoming');
+  const [tabBarWidth, setTabBarWidth] = useState(0);
   const indicatorAnim = React.useRef(new Animated.Value(0)).current;
 
   const switchTab = (tab: 'upcoming' | 'past') => {
     setActiveTab(tab);
     Animated.spring(indicatorAnim, {
-      toValue: tab === 'upcoming' ? 0 : 1,
+      toValue: tab === 'past' ? tabBarWidth / 2 : 0,
       useNativeDriver: true,
-      tension: 160,
-      friction: 20,
+      tension: 180,
+      friction: 22,
     }).start();
   };
 
-  if (loading) return <View className={s.centred}><ActivityIndicator color="rgba(255,255,255,0.5)" /></View>;
+  const subTextColor  = colors.subText;
+  const badgeBg       = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  const badgeBgActive = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+  const iconTint      = isDark ? 'rgba(255,255,255,0.1)'  : 'rgba(0,0,0,0.1)';
+
+  if (loading) return (
+    <View className={s.centred}>
+      <ActivityIndicator color={subTextColor} />
+    </View>
+  );
 
   if (error && all.length === 0) return (
     <View className={s.centred}>
       <Ionicons name="alert-circle-outline" size={36} color="rgba(255,80,80,0.4)" />
-      <Text className={s.emptyTitle}>Something went wrong</Text>
-      <Text className={s.emptySub}>{error}</Text>
-      <TouchableOpacity style={sheet.retryBtn} onPress={onRetry}><Text className={s.retryText}>Try again</Text></TouchableOpacity>
+      <Text className={s.emptyTitle} style={{ color: colors.text }}>Something went wrong</Text>
+      <Text className={s.emptySub}   style={{ color: subTextColor }}>{error}</Text>
+      <TouchableOpacity style={sheet.retryBtn} onPress={onRetry}>
+        <Text className={s.retryText} style={{ color: colors.text }}>Try again</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  if (all.length === 0) return (
+    <View className={s.centred}>
+      <View style={sheet.emptyIcon}>
+        <Ionicons name="ticket-outline" size={44} color={iconTint} />
+      </View>
+      <Text className={s.emptyTitle} style={{ color: colors.text }}>No tickets yet</Text>
+      <Text className={s.emptySub}   style={{ color: subTextColor }}>
+        Events you book will appear here as digital tickets.
+      </Text>
     </View>
   );
 
   const visibleBookings = activeTab === 'upcoming' ? upcoming : past;
-  const isEmpty = all.length === 0;
-  const tabEmpty = visibleBookings.length === 0;
-
-  const indicatorTranslate = indicatorAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
+  const tabEmpty        = visibleBookings.length === 0;
 
   return (
     <View style={{ flex: 1 }}>
-      {/* ── Twitter-style tab bar ── */}
+      {/* ── Tab bar ────────────────────────────────────────────────────── */}
       <View style={sheet.tabBarWrapper}>
-        <View style={sheet.tabBar}>
-          <TouchableOpacity
-            style={sheet.tabItem}
-            activeOpacity={0.75}
-            onPress={() => switchTab('upcoming')}
-          >
-            <Text className={activeTab === 'upcoming' ? s.tabLabelActive : s.tabLabelInactive}>
+        <View
+          style={[sheet.tabBar, { borderBottomColor: colors.dividerColor }]}
+          onLayout={(e) => setTabBarWidth(e.nativeEvent.layout.width)}
+        >
+          <TouchableOpacity style={sheet.tabItem} activeOpacity={0.75} onPress={() => switchTab('upcoming')}>
+            <Text
+              className={activeTab === 'upcoming' ? s.tabLabelActive : s.tabLabelInactive}
+              style={{ color: activeTab === 'upcoming' ? colors.text : subTextColor }}
+            >
               Upcoming
             </Text>
             {upcoming.length > 0 && (
-              <View style={[sheet.tabBadge, activeTab === 'upcoming' && sheet.tabBadgeActive]}>
-                <Text style={[sheet.tabBadgeText, activeTab === 'upcoming' && sheet.tabBadgeTextActive]}>
+              <View style={[sheet.tabBadge, { backgroundColor: activeTab === 'upcoming' ? badgeBgActive : badgeBg }]}>
+                <Text style={[sheet.tabBadgeText, { color: activeTab === 'upcoming' ? colors.text : subTextColor }]}>
                   {upcoming.length}
                 </Text>
               </View>
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={sheet.tabItem}
-            activeOpacity={0.75}
-            onPress={() => switchTab('past')}
-          >
-            <Text className={activeTab === 'past' ? s.tabLabelActive : s.tabLabelInactive}>
+          <TouchableOpacity style={sheet.tabItem} activeOpacity={0.75} onPress={() => switchTab('past')}>
+            <Text
+              className={activeTab === 'past' ? s.tabLabelActive : s.tabLabelInactive}
+              style={{ color: activeTab === 'past' ? colors.text : subTextColor }}
+            >
               Past
             </Text>
             {past.length > 0 && (
-              <View style={[sheet.tabBadge, activeTab === 'past' && sheet.tabBadgeActive]}>
-                <Text style={[sheet.tabBadgeText, activeTab === 'past' && sheet.tabBadgeTextActive]}>
+              <View style={[sheet.tabBadge, { backgroundColor: activeTab === 'past' ? badgeBgActive : badgeBg }]}>
+                <Text style={[sheet.tabBadgeText, { color: activeTab === 'past' ? colors.text : subTextColor }]}>
                   {past.length}
                 </Text>
               </View>
@@ -319,38 +339,36 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
           </TouchableOpacity>
         </View>
 
-        {/* sliding underline */}
+        {/* Sliding underline — pixel values so useNativeDriver: true works */}
         <Animated.View
           style={[
             sheet.tabIndicator,
-            { transform: [{ translateX: indicatorTranslate }] },
+            {
+              width: tabBarWidth / 2,
+              backgroundColor: colors.text,
+              transform: [{ translateX: indicatorAnim }],
+            },
           ]}
         />
       </View>
 
-      {/* ── Content ── */}
-      {isEmpty ? (
-        <View className={s.centred}>
-          <View style={sheet.emptyIcon}><Ionicons name="ticket-outline" size={44} color="rgba(255,255,255,0.1)" /></View>
-          <Text className={s.emptyTitle}>No tickets yet</Text>
-          <Text className={s.emptySub}>Events you book will appear here as digital tickets.</Text>
-        </View>
-      ) : tabEmpty ? (
+      {/* ── Content ────────────────────────────────────────────────────── */}
+      {tabEmpty ? (
         <View className={s.centred}>
           <View style={sheet.emptyIcon}>
             <Ionicons
               name={activeTab === 'upcoming' ? 'calendar-outline' : 'time-outline'}
               size={44}
-              color="rgba(255,255,255,0.1)"
+              color={iconTint}
             />
           </View>
-          <Text className={s.emptyTitle}>
+          <Text className={s.emptyTitle} style={{ color: colors.text }}>
             {activeTab === 'upcoming' ? 'No upcoming events' : 'No past events'}
           </Text>
-          <Text className={s.emptySub}>
+          <Text className={s.emptySub} style={{ color: subTextColor }}>
             {activeTab === 'upcoming'
               ? 'Your future bookings will show up here.'
-              : 'Events you\'ve attended will appear here.'}
+              : "Events you've attended will appear here."}
           </Text>
         </View>
       ) : (
@@ -358,7 +376,9 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
           className={s.scroll}
           contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.5)" />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={subTextColor} />
+          }
         >
           <TicketStack bookings={visibleBookings} offset={0} />
         </ScrollView>
@@ -366,6 +386,8 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
     </View>
   );
 };
+
+ 
 
 // ─── Mock tickets (remove when real data is flowing) ──────────────────────────
 
