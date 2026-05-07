@@ -107,7 +107,7 @@ const fmtCardDate = (iso?: string | null) => {
 
 const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
-    <View className={s.hCardImageArea}>
+    <View className={s.hCardImageArea} style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
         <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
       )}
@@ -124,7 +124,7 @@ const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void
       </View>
     </View>
     <View className={s.hCardBody}>
-      <Text className={s.hCardCat} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
+      <Text className={s.hCardCat} style={{ color: colors.subText }} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
       <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
       <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
@@ -511,41 +511,55 @@ export default function Index() {
 
         {/* Category Filter */}
         <View className={s.filterRow}>
-          {activeCategory !== 'All' && (
-            <TouchableOpacity className={s.filterClearBtn} onPress={() => setActiveCategory('All')}>
-              <Text className={s.filterClearText}>✕</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            className={`${s.filterChip} ${activeCategory !== 'All' ? s.filterChipActive : ''}`}
-            onPress={() => setDropdownOpen(true)}
-          >
-            <Text className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}>
-              {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
-            </Text>
-            <Text className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}> ▾</Text>
-          </TouchableOpacity>
-        </View>
+  {activeCategory !== 'All' && (
+      <TouchableOpacity
+        className={s.filterClearBtn}
+        style={{ borderColor: colors.dividerColor }}
+        onPress={() => setActiveCategory('All')}
+      >
+        <Text className={s.filterClearText} style={{ color: colors.text }}>✕</Text>
+      </TouchableOpacity>
+    )}
+    <TouchableOpacity
+      className={`${s.filterChip} ${activeCategory !== 'All' ? s.filterChipActive : ''}`}
+      style={activeCategory === 'All' ? { borderColor: colors.dividerColor, backgroundColor: colors.sectionCardBg } : undefined}
+      onPress={() => setDropdownOpen(true)}
+    >
+      <Text
+        className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
+        style={activeCategory === 'All' ? { color: colors.subText } : undefined}
+      >
+        {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
+      </Text>
+      <Text
+        className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
+        style={activeCategory === 'All' ? { color: colors.subText } : undefined}
+      > ▾</Text>
+    </TouchableOpacity>
+  </View>
 
-        {/* Thin divider below filter */}
-       <View style={{ height: 1, backgroundColor: colors.dividerColor, marginBottom: 4 }} />
+       
 
         {/* Category Dropdown Modal */}
         <Modal visible={dropdownOpen} transparent animationType="fade" onRequestClose={() => setDropdownOpen(false)}>
           <View className={s.modalBackdrop}>
-            <View className={s.modalSheet}>
+            <View className={s.modalSheet} style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor }}>
               <FlatList
                 data={categories}
                 keyExtractor={(item) => item}
                 renderItem={({ item }) => (
                   <TouchableOpacity className={s.modalItem} onPress={() => handleSelectCategory(item)}>
-                    <Text className={`${s.modalItemText} ${activeCategory === item ? s.modalItemTextActive : ''}`}>
+                    <Text
+                      className={`${s.modalItemText} ${activeCategory === item ? s.modalItemTextActive : ''}`}
+                      style={{ color: activeCategory === item ? colors.text : colors.subText }}
+                      >
                       {item}
                     </Text>
                   </TouchableOpacity>
                 )}
               />
-              <TouchableOpacity className={s.modalCloseBtn} onPress={() => setDropdownOpen(false)}>
+              <TouchableOpacity className={s.modalCloseBtn} style={{ backgroundColor: colors.sectionCardBg }} onPress={() => setDropdownOpen(false)}>
+             <Text className={s.modalCloseBtnText} style={{ color: colors.text }}>✕</Text>
                 <Text className={s.modalCloseBtnText}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -558,11 +572,11 @@ export default function Index() {
             margin: 20,
             backgroundColor: 'rgba(255,60,110,0.12)',
             borderWidth: 1,
-            borderColor: '#0a0a0a',
+            borderColor: colors.dividerColor,
             borderRadius: 3,
             padding: 14,
           }}>
-            <Text style={{ color: '#0a0a0a', fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
               ⚠ COULD NOT LOAD SECTIONS
             </Text>
             <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
@@ -586,7 +600,7 @@ export default function Index() {
         {/* Dynamic Feed Sections */}
         {loading ? (
           <View className={s.loadingRow}>
-            <ActivityIndicator size="small" color="#000000" />
+           <ActivityIndicator size="small" color={colors.text} />
           </View>
         ) : (
           feedSections.map((section, index) => (
@@ -662,7 +676,7 @@ export default function Index() {
                       )}
                     </View>
                     <View className={s.sportInfo}>
-                      <Text className={s.sportCat}>{sport.category}</Text>
+                      <Text className={s.sportCat} style={{ color: colors.subText }}>{sport.category}</Text>
                       <Text className={s.sportTitle} style={{ color: colors.text }}>{sport.title}</Text>
                       <Text className={s.sportLoc} style={{ color: colors.subText }}>{sport.city}</Text>
                     </View>

@@ -7,12 +7,12 @@ import { StyleSheet } from 'react-native';
 export const s = {
 
   //  Screen shell 
-  screen:           'flex-1 bg-white',
-  scroll:           'flex-1 bg-white',
+  screen:           'flex-1',
+  scroll:           'flex-1',
 
   //  Location header 
-  locationHeader:         'absolute top-0 left-0 right-0 flex-row items-center justify-between px-5 pt-16 pb-6 bg-white z-10',
-  locationCity:           'text-[22px] font-extrabold text-[#0a0a0a] tracking-[0.3px]',
+  locationHeader:         'absolute top-0 left-0 right-0 flex-row items-center justify-between px-5 pt-16 pb-6 z-10',
+  locationCity:           'text-[22px] font-extrabold tracking-[0.3px]',
   locationSub:            'text-[17px] font-extrabold text-black/30 mt-0.5',
   menuBtn:                'p-1.5',
   menuIcon:               'text-2xl text-[#0a0a0a]',
@@ -36,40 +36,40 @@ export const s = {
 
   //  Category filter 
   filterRow:             'flex-row items-center px-5 py-3.5 gap-2.5',
-  filterClearBtn:        'w-[34px] h-[34px] rounded-[2px] border border-black/15 items-center justify-center',
-  filterClearText:       'text-black text-xs',
-  filterChip:            'flex-row items-center px-4 py-2 rounded-[2px] border border-black/15 bg-black/[0.04]',
   filterChipActive:      'bg-black border-black',
-  filterChipText:        'text-black/45 text-[10px] font-extrabold tracking-[1.2px]',
+  filterClearBtn:        'w-[34px] h-[34px] rounded-[2px] border items-center justify-center',
+  filterClearText:       'text-xs',
+  filterChip:            'flex-row items-center px-4 py-2 rounded-[2px] border',
+  filterChipText:        'text-[10px] font-extrabold tracking-[1.2px]',
+  filterChipArrow:       'text-[11px]',
   filterChipTextActive:  'text-white',
-  filterChipArrow:       'text-black/35 text-[11px]',
+
 
   //  Category modal 
   modalBackdrop:         'flex-1 bg-black/40 justify-end',
-  modalSheet:            'bg-white rounded-t-[4px] pt-5 pb-10 max-h-[80%] items-center border-t border-black/10',
+  modalSheet:            'rounded-t-[4px] pt-5 pb-10 max-h-[80%] items-center border-t',
   modalItem:             'py-[18px] px-10 w-full items-start',
-  modalItemText:         'text-[22px] text-black/25 font-normal',
-  modalItemTextActive:   'text-black font-black tracking-[1px]',
-  modalCloseBtn:         'mt-4 w-11 h-11 rounded-[2px] bg-black/[0.06] items-center justify-center',
-  modalCloseBtnText:     'text-black text-base font-bold',
-
+  modalItemText:         'text-[22px] font-normal',
+  modalItemTextActive:   'font-black tracking-[1px]',
+  modalCloseBtn:         'mt-4 w-11 h-11 rounded-[2px] items-center justify-center',
+  modalCloseBtnText:     'text-base font-bold',
   //  Section header 
   section:               'px-5 mb-4',
   sectionMt:             'px-5 mb-4 mt-7',
   sectionHeader:         'flex-row items-center justify-between',
-  sectionTitle:          'text-[14px] font-black text-black tracking-[2px]',
+  sectionTitle:          'text-[14px] font-black tracking-[2px]',
   sectionLink:           'text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]',
   hScrollContent:        'px-5 gap-3.5 pb-2',
 
   //  Event card 
   hCard:                 'w-[200px]',
-  hCardImageArea:        'w-full h-[130px] bg-[#e5e5e5] rounded-[14px] overflow-hidden',
+  hCardImageArea:         'w-full h-[130px] rounded-[14px] overflow-hidden',
   hCardBadge:            'absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 py-1 flex-row items-center gap-1',
   hCardBadgeText:        'text-white text-[9px] font-extrabold tracking-[1.2px]',
   hCardPriceBadge:       'absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1',
   hCardPriceBadgeText:   'text-white text-[9px] font-bold',
   hCardBody:             'pt-2.5 px-0.5',
-  hCardCat:              'text-[10px] font-semibold text-black/40 tracking-[0.5px] mb-0.5',
+  hCardCat:              'text-[10px] font-semibold tracking-[0.5px] mb-0.5',
   hCardTitle:            'text-sm font-bold text-black mb-1 leading-[18px]',
   hCardMeta:             'text-[11px] text-black/40',
 
@@ -87,15 +87,14 @@ export const s = {
 
   //  Sports list 
   sportsListContainer:   'mt-4 px-5',
-  sportRow:              'flex-row items-center gap-3.5 py-3.5 border-b border-black/[0.07]',
+  sportRow:              'flex-row items-center gap-3.5 py-3.5',
   sportRowLast:          'flex-row items-center gap-3.5 py-3.5',
   sportThumb:            'w-32 h-[64px] rounded-[8px] bg-[#e5e5e5] shrink-0 overflow-hidden',
   sportInfo:             'flex-1',
-  sportCat:              'text-[10px] font-semibold text-black/40 tracking-[0.5px] mb-0.5',
   sportTitle:            'text-sm font-semibold text-black mb-0.5',
-  sportLoc:              'text-[11px] text-black/40',
-  sportArrow:            'text-[20px] text-black/20',
-
+  sportCat:              'text-[10px] font-semibold tracking-[0.5px] mb-0.5',
+  sportLoc:              'text-[11px]',
+  sportArrow:            'text-[20px]',
   //  Loading 
   loadingRow:            'items-center py-10',
 };
