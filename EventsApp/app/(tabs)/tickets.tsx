@@ -13,7 +13,7 @@ import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
 
-const CARD_HEIGHT = 200;
+const CARD_HEIGHT = 210;
 const CARD_PEEK   = 72;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -79,81 +79,58 @@ const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: numb
     : booking.booking_status === 'cancelled' || booking.booking_status === 'refunded' ? '#ff4d4d'
     : '#888';
 
-  return (
-    <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={[sheet.cardTouchable, { zIndex: 100 - index }]}>
-      <LinearGradient colors={[pal.top, pal.bottom]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={sheet.card}>
-        {booking.event?.cover_image_url && (
-          <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} blurRadius={2} />
-        )}
-        {booking.event?.cover_image_url && (
-          <LinearGradient colors={[`${pal.top}e0`, `${pal.bottom}f5`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
-        )}
+ return (
+  <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={[sheet.cardTouchable, { zIndex: 100 - index }]}>
+    <LinearGradient colors={[pal.top, pal.bottom]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={sheet.card}>
+      {booking.event?.cover_image_url && (
+        <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} blurRadius={3} />
+      )}
+      {booking.event?.cover_image_url && (
+        <LinearGradient colors={[`${pal.top}d8`, `${pal.bottom}f0`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
+      )}
 
-        {/* Top row */}
-        <View className={s.cardTopRow}>
-          <View style={[sheet.logoMark, { borderColor: `${pal.accent}50` }]}>
-            <Ionicons name="ticket" size={12} color={pal.accent} />
-          </View>
-          <View className={s.statusPill} style={{ borderColor: `${statusColor}40`, backgroundColor: `${statusColor}18` }}>
-            <View className={s.statusDot} style={{ backgroundColor: statusColor }} />
-            <Text className={s.statusText} style={{ color: statusColor }}>{statusLabel}</Text>
-          </View>
+      {/* Top — location only */}
+      {booking.event && (
+        <View className={s.metaRow}>
+          <Ionicons name="location-outline" size={10} color="rgba(255,255,255,0.70)" />
+          <Text className={s.metaText} style={{ color: 'rgba(255,255,255,0.70)' }} numberOfLines={1}>
+            {booking.event.venue_name}, {booking.event.city}
+          </Text>
         </View>
+      )}
 
-        <Text className={s.eventTitle} numberOfLines={2}>{booking.event?.title ?? 'Event'}</Text>
-
-        <View className={s.metaGroup}>
-          {booking.event?.start_time && (
-            <View className={s.metaRow}>
-              <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.45)" />
-              <Text className={s.metaText}>{fmt(booking.event.start_time)} · {fmtTime(booking.event.start_time)}</Text>
-            </View>
-          )}
-          {booking.event && (
-            <View className={s.metaRow}>
-              <Ionicons name="location-outline" size={10} color="rgba(255,255,255,0.45)" />
-              <Text className={s.metaText} numberOfLines={1}>{booking.event.venue_name}, {booking.event.city}</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Perforation */}
-        <View style={sheet.perfRow}>
-          <View style={[sheet.perfCircle, { left: -10 }]} />
-          <View style={sheet.perfLine}>
-            {Array.from({ length: 20 }).map((_, i) => (
-              <View key={i} style={[sheet.perfDash, { backgroundColor: `${pal.accent}28` }]} />
-            ))}
-          </View>
-          <View style={[sheet.perfCircle, { right: -10 }]} />
-        </View>
-
-        {/* Bottom */}
-        <View className={s.cardBottom}>
-          <View>
-            <Text className={s.bottomLabel}>{booking.ticket_type_name ?? 'GENERAL'}</Text>
-            <Text className={s.bottomValue} style={{ color: pal.accent }}>
-              {booking.ticket_quantity}× {booking.ticket_quantity === 1 ? 'ticket' : 'tickets'}
+      {/* Middle — vertically centered, left-aligned */}
+      <View style={{ flex: 1, justifyContent: 'center' }}>
+        <Text className={s.eventTitle} numberOfLines={3}>{booking.event?.title ?? 'Event'}</Text>
+        {booking.event?.start_time && (
+          <View className={s.metaRow} style={{ marginTop: 5 }}>
+            <Ionicons name="calendar-outline" size={10} color="rgba(255,255,255,0.70)" />
+            <Text className={s.metaText} style={{ color: 'rgba(255,255,255,0.70)' }}>
+              {fmt(booking.event.start_time)} · {fmtTime(booking.event.start_time)}
             </Text>
           </View>
-          <View className={s.bottomCenter}>
-            <Text className={s.bookingNum}>#{booking.booking_number}</Text>
-          </View>
-          <View className={s.bottomRight}>
-            <Text className={s.bottomLabel}>TOTAL</Text>
-            <Text className={s.bottomValue} style={{ color: pal.accent }}>
-              R{Math.round(booking.total_amount).toLocaleString('en-ZA')}
-            </Text>
-          </View>
-          {booking.booking_status === 'confirmed' && (
-            <View style={[sheet.qrBadge, { backgroundColor: `${pal.accent}18`, borderColor: `${pal.accent}40` }]}>
-              <Ionicons name="qr-code" size={20} color={pal.accent} />
-            </View>
-          )}
+        )}
+      </View>
+
+    
+      {/* Bottom — quantity left, status indicator right */}
+      <View className={s.cardBottom}>
+        <View>
+          <Text className={s.bottomLabel}>{booking.ticket_type_name ?? 'GENERAL'}</Text>
+          <Text className={s.bottomValue} style={{ color: pal.accent }}>
+            {booking.ticket_quantity}x {booking.ticket_quantity === 1 ? 'ticket' : 'tickets'}
+          </Text>
         </View>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
+        <View style={{ flex: 1 }} />
+        <View className={s.statusPill} style={{ borderColor: `${statusColor}55`, backgroundColor: `${statusColor}22` }}>
+          <View className={s.statusDot} style={{ backgroundColor: statusColor }} />
+          <Text className={s.statusText} style={{ color: statusColor }}>{statusLabel}</Text>
+        </View>
+      </View>
+
+    </LinearGradient>
+  </TouchableOpacity>
+);
 };
 
 // ─── Stack ────────────────────────────────────────────────────────────────────
