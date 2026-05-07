@@ -3,7 +3,7 @@ import { Tabs } from 'expo-router';
 import { View, StyleSheet } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAppTheme } from '../../theme/colors'; 
+import { useAppTheme } from '../../theme/colors';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DOT_CLR  = '#ff3c6e';

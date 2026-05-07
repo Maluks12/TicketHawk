@@ -17,6 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getDropsFeed, type MerchandiseItem } from '../../lib/api';
 import { s, sheet } from '../../styles/merch';
 import { CollectionModal } from '../../components/CollectionModal';
+import { CartConfirmSheet } from '../../components/CartConfirmSheet';
 import { useAppTheme } from '../../theme/colors';
 
 // ─── Card colour palette ──────────────────────────────────────────────────────
@@ -73,6 +74,61 @@ function formatCountdown(totalSecs: number): string {
   const sec = totalSecs % 60;
   if (d > 0) return `${d}D  ${String(h).padStart(2, '0')}H  ${String(m).padStart(2, '0')}M`;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+// ─── Variant grouping ─────────────────────────────────────────────────────────
+// Variants carry JSONB attributes e.g. {"size":"UK 8"} or {"size":"M","fit":"player"}.
+// We group by the primary attribute key so each sizing dimension gets its own row.
+
+type VariantItem = NonNullable<MerchandiseItem['variants']>[number];
+
+interface VariantGroup {
+  key:      string;   // raw attribute key e.g. "size"
+  label:    string;   // display label e.g. "SIZE"
+  variants: VariantItem[];
+}
+
+function groupVariantsByAttr(variants: VariantItem[]): VariantGroup[] {
+  const ordered: string[] = [];
+  const map = new Map<string, VariantItem[]>();
+
+  for (const v of variants) {
+    try {
+      const attr = JSON.parse(v.attributes) as Record<string, string>;
+      const primaryKey = Object.keys(attr)[0] ?? 'variant';
+      if (!map.has(primaryKey)) {
+        ordered.push(primaryKey);
+        map.set(primaryKey, []);
+      }
+      map.get(primaryKey)!.push(v);
+    } catch {
+      if (!map.has('variant')) {
+        ordered.push('variant');
+        map.set('variant', []);
+      }
+      map.get('variant')!.push(v);
+    }
+  }
+
+  return ordered.map((key) => ({
+    key,
+    label:
+      key === 'size'   ? 'SIZE'   :
+      key === 'colour' ? 'COLOUR' :
+      key === 'fit'    ? 'FIT'    :
+      key === 'type'   ? 'TYPE'   :
+      key.toUpperCase(),
+    variants: map.get(key)!,
+  }));
+}
+
+function getVariantLabel(v: VariantItem): string {
+  try {
+    const attr = JSON.parse(v.attributes) as Record<string, string>;
+    return Object.values(attr).join(' / ');
+  } catch {
+    return v.sku;
+  }
 }
 
 // ─── Collection grouping ──────────────────────────────────────────────────────
@@ -252,6 +308,111 @@ const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () 
   );
 };
 
+// ─── Size selector ────────────────────────────────────────────────────────────
+
+const SizeSelector = ({
+  groups,
+  selectedVariant,
+  onSelect,
+  tc,
+}: {
+  groups: VariantGroup[];
+  selectedVariant: VariantItem | null;
+  onSelect: (v: VariantItem | null) => void;
+  tc: string;
+}) => (
+  <>
+    {groups.map((group) => {
+      const groupSelected = group.variants.find((v) => v.id === selectedVariant?.id) ?? null;
+      return (
+        <View
+          key={group.key}
+          className={s.variantsRow}
+          style={{ borderTopColor: tc + '20', borderBottomColor: tc + '20', marginTop: 2 }}
+        >
+          {/* Row header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <Text className={s.variantsLabel} style={{ color: tc + '70' }}>
+              {group.label}
+            </Text>
+            {groupSelected && (
+              <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, color: tc + 'bb' }}>
+                {getVariantLabel(groupSelected).toUpperCase()}
+                {groupSelected.stock_quantity > 0 && groupSelected.stock_quantity <= 5
+                  ? `  —  ONLY ${groupSelected.stock_quantity} LEFT`
+                  : ''}
+              </Text>
+            )}
+          </View>
+
+          {/* Chips */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {group.variants.map((v) => {
+              const label      = getVariantLabel(v);
+              const outOfStock = v.stock_quantity === 0;
+              const lowStock   = !outOfStock && v.stock_quantity <= 5;
+              const isSelected = selectedVariant?.id === v.id;
+
+              return (
+                <TouchableOpacity
+                  key={v.id}
+                  onPress={() => onSelect(isSelected ? null : v)}
+                  disabled={outOfStock}
+                  style={{
+                    borderWidth: isSelected ? 2 : 1,
+                    borderColor: outOfStock
+                      ? tc + '20'
+                      : isSelected
+                      ? tc
+                      : tc + '50',
+                    backgroundColor: isSelected ? tc + '18' : 'transparent',
+                    paddingHorizontal: 14,
+                    paddingVertical: 9,
+                    borderRadius: 2,
+                    marginRight: 8,
+                    alignItems: 'center',
+                    minWidth: 54,
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 11,
+                    fontWeight: isSelected ? '900' : '700',
+                    letterSpacing: 0.8,
+                    color: outOfStock ? tc + '28' : isSelected ? tc : tc + 'cc',
+                  }}>
+                    {label.toUpperCase()}
+                  </Text>
+
+                  {/* Low stock warning */}
+                  {lowStock && (
+                    <Text style={{ fontSize: 7, color: '#ff9500', fontWeight: '800', marginTop: 2, letterSpacing: 0.5 }}>
+                      LOW
+                    </Text>
+                  )}
+
+                  {/* Sold out label */}
+                  {outOfStock && (
+                    <Text className={s.variantSoldOut} style={{ color: tc + '30' }}>
+                      SOLD OUT
+                    </Text>
+                  )}
+
+                  {/* Price override badge */}
+                  {v.price_override != null && (
+                    <Text style={{ fontSize: 8, color: tc + '80', fontWeight: '700', marginTop: 2 }}>
+                      {formatPrice(v.price_override)}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      );
+    })}
+  </>
+);
+
 // ─── Detail modal (for direct feed card taps) ─────────────────────────────────
 
 const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => void }) => {
@@ -263,6 +424,18 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
     Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
   }, []);
   const scrollOffset = useRef(0);
+
+  // ── Variant / size selection ───────────────────────────────────────────────
+  const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
+  const [showCart, setShowCart] = useState(false);
+  const variantGroups = useMemo(
+    () => (item.variants && item.variants.length > 0 ? groupVariantsByAttr(item.variants) : []),
+    [item.variants],
+  );
+  const hasVariants = variantGroups.length > 0;
+  // If the selected variant has a price override, show that; otherwise fall back to item price
+  const displayPrice =
+    selectedVariant?.price_override != null ? selectedVariant.price_override : item.effective_price;
 
   const pilePan = useRef(
     PanResponder.create({
@@ -298,11 +471,15 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const remainSecs = useTickingSeconds(item.seconds_remain ?? 0);
   const untilSecs  = useTickingSeconds(item.seconds_until ?? 0);
 
+  // BUY button is disabled when the item is live AND has sizes but none is chosen yet
+  const buyDisabled = isAvailable && hasVariants && !selectedVariant;
+
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
       <Animated.View style={[sheet.modalFlex, { backgroundColor: bg, transform: [{ translateY }] }]}>
 
+        {/* ── Drag handle + status bar ───────────────────────────────── */}
         <View className={s.dragHandleArea} style={{ paddingTop: top + 8 }} {...pilePan.panHandlers}>
           <View className={s.dragHandle} style={{ backgroundColor: tc + '55' }} />
           <View className={s.modalTopBar}>
@@ -323,6 +500,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           </View>
         </View>
 
+        {/* ── Scrollable body ────────────────────────────────────────── */}
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 120 }}
@@ -330,12 +508,13 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           scrollEventThrottle={16}
           {...scrollPan.panHandlers}
         >
+          {/* Price / category box — price updates when a variant is selected */}
           <View className={s.heatScoreBox} style={{ borderColor: tc + '40' }}>
             <Text className={s.heatScoreBoxLabel} style={{ color: tc + '90' }}>
               {(item.category ?? 'MERCHANDISE').toUpperCase()}
             </Text>
             <Text className={s.heatScoreBoxScore} style={{ color: tc }}>
-              {formatPrice(item.effective_price)}
+              {formatPrice(displayPrice)}
             </Text>
             <Text className={s.heatScoreBoxName} style={{ color: tc + '90' }} numberOfLines={2}>
               {item.name}
@@ -348,48 +527,20 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
 
           <Text className={s.detailTitle} style={{ color: tc }}>{item.name}</Text>
 
-          {item.variants && item.variants.length > 0 && (
-            <View
-              className={s.variantsRow}
-              style={{ borderTopColor: tc + '20', borderBottomColor: tc + '20' }}
-            >
-              <Text className={s.variantsLabel} style={{ color: tc + '70' }}>VARIANTS</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
-                {item.variants.map((v) => {
-                  let label = v.sku;
-                  try {
-                    const attr = JSON.parse(v.attributes);
-                    label = Object.values(attr).join(' / ');
-                  } catch {}
-                  const outOfStock = v.stock_quantity === 0;
-                  return (
-                    <TouchableOpacity
-                      key={v.id}
-                      className={s.variantChip}
-                      style={{ borderColor: tc + (outOfStock ? '25' : '60') }}
-                      disabled={outOfStock}
-                    >
-                      <Text
-                        className={s.variantChipText}
-                        style={{ color: tc + (outOfStock ? '40' : 'ff') }}
-                      >
-                        {label.toUpperCase()}
-                      </Text>
-                      {outOfStock && (
-                        <Text className={s.variantSoldOut} style={{ color: tc + '40' }}>
-                          SOLD OUT
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
+          {/* ── Size / variant selector ─────────────────────────────── */}
+          {hasVariants && (
+            <SizeSelector
+              groups={variantGroups}
+              selectedVariant={selectedVariant}
+              onSelect={setSelectedVariant}
+              tc={tc}
+            />
           )}
 
+          {/* ── Info grid ──────────────────────────────────────────── */}
           <View className={s.detailGrid}>
             {[
-              ['PRICE',    formatPrice(item.effective_price)],
+              ['PRICE',    formatPrice(displayPrice)],
               ['CATEGORY', (item.category ?? '—').toUpperCase()],
               ['STATUS',   item.sale_status.toUpperCase()],
               ['RELEASE',  item.sale_start
@@ -410,6 +561,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           )}
         </ScrollView>
 
+        {/* ── Bottom action bar ─────────────────────────────────────── */}
         <View className={s.modalBottom} style={{ borderTopColor: tc + '20', backgroundColor: bg }}>
           <TouchableOpacity>
             <Text className={s.modalBottomAlerts} style={{ color: tc + 'aa' }}>ALERTS</Text>
@@ -419,17 +571,36 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
               {item.name}
             </Text>
             <Text className={s.modalBottomDate} style={{ color: tc + '80' }}>
-              {formatPrice(item.effective_price)}
+              {formatPrice(displayPrice)}
             </Text>
           </View>
-          <TouchableOpacity className={s.buyNowBtn} style={{ borderColor: tc + '60' }}>
+          <TouchableOpacity
+            className={s.buyNowBtn}
+            style={{ borderColor: buyDisabled ? tc + '25' : tc + '60', opacity: buyDisabled ? 0.45 : 1 }}
+            disabled={buyDisabled}
+            onPress={isAvailable && !buyDisabled ? () => setShowCart(true) : undefined}
+          >
             <Text className={s.buyNowText} style={{ color: tc }}>
-              {isAvailable ? 'BUY' : 'ALERT'}
+              {isAvailable
+                ? buyDisabled ? 'SELECT SIZE' : 'BUY'
+                : 'ALERT'}
             </Text>
           </TouchableOpacity>
         </View>
 
       </Animated.View>
+
+      {/* ── Cart confirmation sheet ──────────────────────────────────────── */}
+      {showCart && (
+        <CartConfirmSheet
+          item={item}
+          selectedVariant={selectedVariant}
+          onClose={() => setShowCart(false)}
+          onAddToCart={(_item, _variant) => {
+            // TODO: wire to cart store
+          }}
+        />
+      )}
     </Modal>
   );
 };

@@ -108,8 +108,6 @@ func main() {
 	workers.StartAdWorker(pool, ctx)
 	log.Info().Msg("ad worker started")
 
-	// FIX 3: instantiate all repository queriers up front so both the booking
-	// handlers and the checkout handlers receive interfaces, not a raw pool.
 	bookingRepo    := repository.NewPgxBookingQuerier(pool)
 	eventRepo      := repository.NewPgxEventQuerier(pool)
 	cartQuerier    := repository.NewPgxCartQuerier(pool)
@@ -295,6 +293,20 @@ func main() {
 	}
 
 	// ==========================================
+	// Public Collection Routes
+	// ==========================================
+	collections := v1.Group("/collections")
+	collections.Use(middleware.OptionalAuth(cfg))
+	if rateLimitManager != nil {
+		collections.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 200, RefillRate: 5.0, TTL: 15 * time.Minute},
+			"collections"))
+	}
+	{
+		collections.GET("/:id", handlers.GetCollectionByIDHandler(pool))
+	}
+
+	// ==========================================
 	// Cart Routes
 	// ==========================================
 	cart := v1.Group("/cart")
@@ -458,14 +470,21 @@ func main() {
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))
 		// All merch (event-linked + standalone) — for admin dashboard
 		admin.GET("/merch",          handlers.GetAllMerchHandler(pool))
-		admin.PUT("/merch/:id", handlers.AdminUpdateMerchHandler(pool, eventCache))
+		admin.PUT("/merch/:id",      handlers.AdminUpdateMerchHandler(pool, eventCache))
 		// Create standalone merch (not linked to any event) — admin
 		admin.POST("/merch",         handlers.AdminCreateMerchHandler(pool, eventCache))
-		admin.GET("/users",          controllers.GetAllUsersHandler(pool))
-		admin.PUT("/users/promote/:id",    controllers.PromoteUserHandler(pool))
-		admin.PUT("/users/demote/:id",     controllers.DemoteUserHandler(pool))
-		admin.DELETE("/users/delete/:id",  handlers.DeleteUserHandler(pool))
-		admin.GET("/campaigns",      handlers.AdminGetCampaignsHandler(pool))
+		// Assign / un-assign any merch item to any collection — admin
+		admin.PUT("/merch/:id/collection", handlers.AdminAssignMerchToCollectionHandler(pool))
+		// Collection CRUD — admin has full access, no ownership checks
+		admin.POST("/collections",        handlers.AdminCreateCollectionHandler(pool))
+		admin.GET("/collections",         handlers.AdminGetCollectionsHandler(pool))
+		admin.PUT("/collections/:id",     handlers.AdminUpdateCollectionHandler(pool))
+		admin.DELETE("/collections/:id",  handlers.AdminDeactivateCollectionHandler(pool))
+		admin.GET("/users",               controllers.GetAllUsersHandler(pool))
+		admin.PUT("/users/promote/:id",   controllers.PromoteUserHandler(pool))
+		admin.PUT("/users/demote/:id",    controllers.DemoteUserHandler(pool))
+		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
+		admin.GET("/campaigns",           handlers.AdminGetCampaignsHandler(pool))
 	}
 
 	// ==========================================
@@ -506,6 +525,14 @@ func main() {
 		orgRoutes.PUT("/merch/variants/:id",  handlers.OrgUpdateVariantHandler(pool, eventCache))
 		// Standalone merch — not linked to any event
 		orgRoutes.POST("/merch",              handlers.OrgCreateStandaloneMerchHandler(pool, eventCache))
+		// Assign / un-assign a merch item to a collection
+		orgRoutes.PUT("/merch/:id/collection", handlers.OrgAssignMerchToCollectionHandler(pool))
+
+		// Collection CRUD — organiser-scoped, ownership enforced
+		orgRoutes.POST("/collections",        handlers.OrgCreateCollectionHandler(pool))
+		orgRoutes.GET("/collections",         handlers.OrgGetCollectionsHandler(pool))
+		orgRoutes.PUT("/collections/:id",     handlers.OrgUpdateCollectionHandler(pool))
+		orgRoutes.DELETE("/collections/:id",  handlers.OrgDeactivateCollectionHandler(pool))
 
 		// Ticket Types
 		orgRoutes.GET("/events/:id/ticket-types",  handlers.OrgGetTicketTypesHandler(pool))
