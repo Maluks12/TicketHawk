@@ -30,6 +30,8 @@ export const s = {
   lookupAgainText:    'text-white/60 text-[13px] font-semibold',
   signInPromptText:   'text-white/35 text-[13px] font-medium',
   errorText:          'text-[#ff8080] text-[13px] leading-[18px] flex-1',
+  tabLabelActive:     'text-[14px] font-extrabold text-white tracking-[0.2px]',
+  tabLabelInactive:   'text-[14px] font-semibold text-white/35 tracking-[0.2px]',
 };
 
 const CARD_HEIGHT = 200;
@@ -156,5 +158,50 @@ export const sheet = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 3,
   },
-  countText: { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '700' as const },
+ countText: { color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '700' as const },
+
+  tabBarWrapper: {
+    position: 'relative' as const,
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  tabBar: {
+    flexDirection: 'row' as const,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  tabItem: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingBottom: 12,
+    paddingTop: 4,
+    gap: 6,
+  },
+  tabIndicator: {
+    position: 'absolute' as const,
+    bottom: -1,
+    width: '50%' as any,
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: '#fff',
+  },
+  tabBadge: {
+    borderRadius: 20,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  tabBadgeActive: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  tabBadgeText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  tabBadgeTextActive: {
+    color: '#fff',
+  },
 });
