@@ -72,11 +72,10 @@ function useTickingSeconds(initial: number) {
 // ─── Carousel dimensions ──────────────────────────────────────────────────────
 
 const { width: W } = Dimensions.get('window');
-const CARD_W   = W * 0.78;
-const CARD_GAP = 12;
+const CARD_W   = W * 0.72;
+const CARD_GAP = 14;
 const SNAP_W   = CARD_W + CARD_GAP;
 const SIDE_PAD = (W - CARD_W) / 2;
-
 // ─── Carousel Card ────────────────────────────────────────────────────────────
 
 const CarouselCard = ({
@@ -105,19 +104,19 @@ const CarouselCard = ({
 
   const scale = scrollX.interpolate({
     inputRange,
-    outputRange: [0.86, 1, 0.86],
+    outputRange: [0.91, 1, 0.91],
     extrapolate: 'clamp',
   });
 
   const opacity = scrollX.interpolate({
     inputRange,
-    outputRange: [0.5, 1, 0.5],
+    outputRange: [0.55, 1, 0.55],
     extrapolate: 'clamp',
   });
 
   const translateY = scrollX.interpolate({
     inputRange,
-    outputRange: [20, 0, 20],
+    outputRange: [14, 0, 14],
     extrapolate: 'clamp',
   });
 
@@ -148,7 +147,7 @@ const CarouselCard = ({
       <TouchableOpacity
         activeOpacity={0.93}
         onPress={onPress}
-        style={{ backgroundColor: bg, borderRadius: 3, overflow: 'hidden' }}
+       style={{ backgroundColor: bg, borderRadius: 20, overflow: 'hidden' }}
       >
         {/* ── Hero image ───────────────────────────────────────────────── */}
         <View style={{ width: '100%', height: CARD_W * 1.0 }}>
@@ -320,22 +319,29 @@ const PaginationDots = ({
   scrollX: Animated.Value;
   tc: string;
 }) => (
-  <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 16, gap: 5 }}>
+  <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 18, gap: 7 }}>
     {Array.from({ length: count }).map((_, i) => {
-      const width = scrollX.interpolate({
+      const scale = scrollX.interpolate({
         inputRange: [(i - 1) * SNAP_W, i * SNAP_W, (i + 1) * SNAP_W],
-        outputRange: [5, 22, 5],
+        outputRange: [0.7, 1.25, 0.7],
         extrapolate: 'clamp',
       });
       const opacity = scrollX.interpolate({
         inputRange: [(i - 1) * SNAP_W, i * SNAP_W, (i + 1) * SNAP_W],
-        outputRange: [0.25, 1, 0.25],
+        outputRange: [0.22, 1, 0.22],
         extrapolate: 'clamp',
       });
       return (
         <Animated.View
           key={i}
-          style={{ height: 2, width, opacity, borderRadius: 1, backgroundColor: tc }}
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: tc,
+            opacity,
+            transform: [{ scale }],
+          }}
         />
       );
     })}
@@ -556,7 +562,7 @@ export const CollectionModal = ({
               onPress={() => openDetail(activeItem)}
               style={{
                 borderWidth: 1, borderColor: tc + '60',
-                paddingHorizontal: 18, paddingVertical: 8, borderRadius: 2,
+                paddingHorizontal: 18, paddingVertical: 8, borderRadius: 10,
               }}
             >
               <Text style={{ fontSize: 10, fontWeight: '800', letterSpacing: 1.5, color: tc }}>
