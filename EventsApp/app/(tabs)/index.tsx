@@ -41,6 +41,11 @@ function formatPrice(price: number, currency: string) {
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
+const fmtCardDate = (iso?: string | null) => {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
 const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
@@ -60,9 +65,9 @@ const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void
       </View>
     </View>
     <View className={s.hCardBody}>
-      <Text className={s.hCardCat} numberOfLines={1}>{item.category}</Text>
+      <Text className={s.hCardCat} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
       <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
-      <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>📍 {item.venue_name}</Text>
+      <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
   </TouchableOpacity>
 );
@@ -87,9 +92,9 @@ const Top10Card = ({ item, rank, onPress, colors }: { item: Event; rank: number;
       </View>
     </View>
     <View className={s.hCardBody}>
-      <Text className={s.hCardCat} numberOfLines={1}>{item.category}</Text>
+      <Text className={s.hCardCat} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
       <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
-      <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>📍 {item.venue_name}</Text>
+      <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
   </TouchableOpacity>
 );
@@ -159,7 +164,7 @@ const SectionRow = ({
         ListFooterComponent={
           loadingMore ? (
             <View style={{ width: 56, alignItems: 'center', justifyContent: 'center' }}>
-              <ActivityIndicator size="small" color="#ff3c6e" />
+              <ActivityIndicator size="small" color="#000000" />
             </View>
           ) : null
         }
@@ -365,7 +370,7 @@ export default function Index() {
         onScrollEndDrag={snapHeader}
         onMomentumScrollEnd={snapHeader}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#000000" />
         }
       >
         {/* Hero Banner */}
@@ -463,11 +468,11 @@ export default function Index() {
             margin: 20,
             backgroundColor: 'rgba(255,60,110,0.12)',
             borderWidth: 1,
-            borderColor: '#ff3c6e',
+            borderColor: '#0a0a0a',
             borderRadius: 3,
             padding: 14,
           }}>
-            <Text style={{ color: '#ff3c6e', fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
+            <Text style={{ color: '#0a0a0a', fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
               ⚠ COULD NOT LOAD SECTIONS
             </Text>
             <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
@@ -477,13 +482,13 @@ export default function Index() {
                 marginTop: 10,
                 alignSelf: 'flex-start',
                 borderWidth: 1,
-                borderColor: '#ff3c6e',
+                borderColor: '#0a0a0a',
                 paddingHorizontal: 14,
                 paddingVertical: 6,
                 borderRadius: 2,
               }}
             >
-              <Text style={{ color: '#ff3c6e', fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
+              <Text style={{ color: '#0a0a0a', fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -491,7 +496,7 @@ export default function Index() {
         {/* Dynamic Feed Sections */}
         {loading ? (
           <View className={s.loadingRow}>
-            <ActivityIndicator size="small" color="#ff3c6e" />
+            <ActivityIndicator size="small" color="#000000" />
           </View>
         ) : (
           feedSections.map((section, index) => (
