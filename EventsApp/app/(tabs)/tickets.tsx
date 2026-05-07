@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
   ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -240,10 +241,23 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   apiBookings: Booking[]; loading: boolean; refreshing: boolean;
   onRefresh: () => void; error: string | null; onRetry: () => void;
 }) => {
-  const insets       = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
   const all      = dedup([...apiBookings]);
   const upcoming = all.filter(isUpcoming);
   const past     = all.filter(b => !isUpcoming(b));
+
+  const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
+  const indicatorAnim = React.useRef(new Animated.Value(0)).current;
+
+  const switchTab = (tab: 'upcoming' | 'past') => {
+    setActiveTab(tab);
+    Animated.spring(indicatorAnim, {
+      toValue: tab === 'upcoming' ? 0 : 1,
+      useNativeDriver: true,
+      tension: 160,
+      friction: 20,
+    }).start();
+  };
 
   if (loading) return <View className={s.centred}><ActivityIndicator color="rgba(255,255,255,0.5)" /></View>;
 
@@ -256,31 +270,100 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
     </View>
   );
 
-  if (all.length === 0) return (
-    <View className={s.centred}>
-      <View style={sheet.emptyIcon}><Ionicons name="ticket-outline" size={44} color="rgba(255,255,255,0.1)" /></View>
-      <Text className={s.emptyTitle}>No tickets yet</Text>
-      <Text className={s.emptySub}>Events you book will appear here as digital tickets.</Text>
-    </View>
-  );
+  const visibleBookings = activeTab === 'upcoming' ? upcoming : past;
+  const isEmpty = all.length === 0;
+  const tabEmpty = visibleBookings.length === 0;
+
+  const indicatorTranslate = indicatorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
   return (
-    <ScrollView className={s.scroll} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
-      showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.5)" />}>
-      {upcoming.length > 0 && (
-        <View>
-          <Text className={s.sectionLabel}>UPCOMING</Text>
-          <TicketStack bookings={upcoming} offset={0} />
+    <View style={{ flex: 1 }}>
+      {/* ── Twitter-style tab bar ── */}
+      <View style={sheet.tabBarWrapper}>
+        <View style={sheet.tabBar}>
+          <TouchableOpacity
+            style={sheet.tabItem}
+            activeOpacity={0.75}
+            onPress={() => switchTab('upcoming')}
+          >
+            <Text className={activeTab === 'upcoming' ? s.tabLabelActive : s.tabLabelInactive}>
+              Upcoming
+            </Text>
+            {upcoming.length > 0 && (
+              <View style={[sheet.tabBadge, activeTab === 'upcoming' && sheet.tabBadgeActive]}>
+                <Text style={[sheet.tabBadgeText, activeTab === 'upcoming' && sheet.tabBadgeTextActive]}>
+                  {upcoming.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={sheet.tabItem}
+            activeOpacity={0.75}
+            onPress={() => switchTab('past')}
+          >
+            <Text className={activeTab === 'past' ? s.tabLabelActive : s.tabLabelInactive}>
+              Past
+            </Text>
+            {past.length > 0 && (
+              <View style={[sheet.tabBadge, activeTab === 'past' && sheet.tabBadgeActive]}>
+                <Text style={[sheet.tabBadgeText, activeTab === 'past' && sheet.tabBadgeTextActive]}>
+                  {past.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
-      )}
-      {past.length > 0 && (
-        <View style={upcoming.length > 0 ? { marginTop: 36 } : undefined}>
-          <Text className={s.sectionLabel}>PAST</Text>
-          <TicketStack bookings={past} offset={upcoming.length} />
+
+        {/* sliding underline */}
+        <Animated.View
+          style={[
+            sheet.tabIndicator,
+            { transform: [{ translateX: indicatorTranslate }] },
+          ]}
+        />
+      </View>
+
+      {/* ── Content ── */}
+      {isEmpty ? (
+        <View className={s.centred}>
+          <View style={sheet.emptyIcon}><Ionicons name="ticket-outline" size={44} color="rgba(255,255,255,0.1)" /></View>
+          <Text className={s.emptyTitle}>No tickets yet</Text>
+          <Text className={s.emptySub}>Events you book will appear here as digital tickets.</Text>
         </View>
+      ) : tabEmpty ? (
+        <View className={s.centred}>
+          <View style={sheet.emptyIcon}>
+            <Ionicons
+              name={activeTab === 'upcoming' ? 'calendar-outline' : 'time-outline'}
+              size={44}
+              color="rgba(255,255,255,0.1)"
+            />
+          </View>
+          <Text className={s.emptyTitle}>
+            {activeTab === 'upcoming' ? 'No upcoming events' : 'No past events'}
+          </Text>
+          <Text className={s.emptySub}>
+            {activeTab === 'upcoming'
+              ? 'Your future bookings will show up here.'
+              : 'Events you\'ve attended will appear here.'}
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          className={s.scroll}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="rgba(255,255,255,0.5)" />}
+        >
+          <TicketStack bookings={visibleBookings} offset={0} />
+        </ScrollView>
       )}
-    </ScrollView>
+    </View>
   );
 };
 
