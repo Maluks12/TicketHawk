@@ -11,6 +11,7 @@ import {
   PanResponder,
   ActivityIndicator,
   RefreshControl,
+  StyleSheet,
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -109,13 +110,13 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
 
 const Collage = ({ images }: { images: string[] }) => {
   if (images.length === 0) {
-    return <View className={s.collagePlaceholder} />;
+    return <View style={sheet.collagePlaceholderBox} />;
   }
   if (images.length === 1) {
-    return <Image source={{ uri: images[0] }} className={s.collageSingle} resizeMode="cover" />;
+    return <Image source={{ uri: images[0] }} style={sheet.collageSingleImg} resizeMode="cover" />;
   }
   return (
-    <View className={s.collageGrid}>
+    <View style={sheet.collageGridContainer}>
       <Image source={{ uri: images[0] }} className={s.collageLeft} resizeMode="cover" />
       <View style={sheet.collageRight}>
         {images.slice(1, 3).map((uri, i) => (
@@ -474,18 +475,46 @@ export default function Merch() {
   const [loading,          setLoading]          = useState(true);
   const [refreshing,       setRefreshing]       = useState(false);
   const [error,            setError]            = useState<string | null>(null);
- const { colors }                              = useAppTheme();
+  const { colors }                              = useAppTheme();
+  const { top: insetTop }                       = useSafeAreaInsets();
 
   const lastScrollY  = useRef(0);
-  const headerOffset = useRef(0);
   const headerAnim   = useRef(new Animated.Value(0)).current;
+  const headerHidden = useRef(false);
   const [headerH, setHeaderH] = useState(0);
 
-  const snapHeader = useCallback(() => {
-    const target = headerOffset.current < -(headerH / 2) ? -headerH : 0;
-    Animated.spring(headerAnim, { toValue: target, useNativeDriver: true, bounciness: 0, speed: 14 })
-      .start(() => { headerOffset.current = target; });
-  }, [headerH]);
+  const showHeader = useCallback(() => {
+    if (headerHidden.current) {
+      headerHidden.current = false;
+      Animated.spring(headerAnim, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+    }
+  }, [headerAnim]);
+
+  const hideHeader = useCallback(() => {
+    if (!headerHidden.current && headerH > 0) {
+      headerHidden.current = true;
+      Animated.spring(headerAnim, { toValue: -headerH, useNativeDriver: true, bounciness: 0, speed: 18 }).start();
+    }
+  }, [headerAnim, headerH]);
+
+  // ── Dynamic background ────────────────────────────────────────────────────
+const activeBgRef = useRef('#0a0a0a');
+const [bgColors, setBgColors] = useState({ active: '#0a0a0a', prev: '#0a0a0a' });
+const bgAnim = useRef(new Animated.Value(1)).current;
+
+const onViewableItemsChanged = useCallback(({ viewableItems }: any) => {
+  if (!viewableItems.length) return;
+  const entry: CollectionEntry = viewableItems[0].item;
+  const newBg = paletteFor(entry.representativeItem).bg;
+  if (newBg === activeBgRef.current) return;
+  const prev = activeBgRef.current;
+  activeBgRef.current = newBg;
+  setBgColors({ active: newBg, prev });
+  bgAnim.setValue(0);
+  Animated.timing(bgAnim, { toValue: 1, duration: 500, useNativeDriver: false }).start();
+}, [bgAnim]);
+
+const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const fetchDrops = useCallback(async () => {
     try {
@@ -524,20 +553,22 @@ export default function Merch() {
   }, []);
 
   return (
-    <View className={s.screen} style={{ backgroundColor: colors.background }}>
+   <View className={s.screen}>
+  <View style={[StyleSheet.absoluteFill, { backgroundColor: bgColors.prev }]} />
+  <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: bgColors.active, opacity: bgAnim }]} />
 
       {/* ── Floating animated header ── */}
       <Animated.View
         style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
-          backgroundColor: colors.background,
+          backgroundColor: 'transparent',
           transform: [{ translateY: headerAnim }],
         }}
         onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
       >
         <SafeAreaView edges={['top', 'left', 'right']}>
           <View className={s.header}>
-            <Text className={s.headerTitle} style={{ color: colors.text }}>DROPS</Text>
+          <Text className={s.headerTitle} style={{ color: '#ffffff' }}>DROPS</Text>
             <View className={s.headerRight}>
               <TouchableOpacity className={s.cartBtn}>
                 <Text className={s.cartIcon}>🛒</Text>
@@ -545,14 +576,14 @@ export default function Merch() {
             </View>
           </View>
 
-          <View className={s.toggle} style={{ backgroundColor: colors.sectionCardBg }}>
+          <View className={s.toggle} style={{ backgroundColor: '#ffffff18' }}>
             <TouchableOpacity
               className={`${s.toggleBtn} ${tab === 'available' ? s.toggleBtnActive : ''}`}
               onPress={() => setTab('available')}
             >
               <Text
                 className={`${s.toggleText} ${tab === 'available' ? s.toggleTextActive : ''}`}
-                style={{ color: tab === 'available' ? '#fff' : colors.subText }}
+                style={{ color: tab === 'available' ? '#fff' : '#ffffff60' }}
               >
                 AVAILABLE NOW
               </Text>
@@ -563,7 +594,7 @@ export default function Merch() {
             >
               <Text
                 className={`${s.toggleText} ${tab === 'upcoming' ? s.toggleTextActive : ''}`}
-                style={{ color: tab === 'upcoming' ? '#fff' : colors.subText }}
+                style={{ color: tab === 'upcoming' ? '#fff' : '#ffffff60' }}
               >
                 DROPPING SOON
               </Text>
@@ -571,6 +602,18 @@ export default function Merch() {
           </View>
         </SafeAreaView>
       </Animated.View>
+
+      {/* ── Floating cart — always visible ── */}
+      <View style={{
+        position: 'absolute',
+        top: insetTop + 12,
+        right: 20,
+        zIndex: 20,
+      }}>
+        <TouchableOpacity className={s.cartBtn}>
+          <Text className={s.cartIcon}>🛒</Text>
+        </TouchableOpacity>
+      </View>
 
       {error && (
         <View className={s.errorBanner} style={{ marginTop: headerH }}>
@@ -587,6 +630,8 @@ export default function Merch() {
         </View>
       ) : (
         <FlatList
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
           data={visibleCollections}
           keyExtractor={(entry) => `${entry.representativeItem.event_id}-${tab}`}
           renderItem={({ item: entry }) =>
@@ -598,20 +643,17 @@ export default function Merch() {
           contentContainerStyle={{ paddingTop: headerH, paddingBottom: 110, flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           scrollEventThrottle={16}
-          onScroll={(e) => {
-            const y = e.nativeEvent.contentOffset.y;
-            const delta = y - lastScrollY.current;
-            lastScrollY.current = y;
-            if (y <= 0) {
-              headerOffset.current = 0;
-              headerAnim.setValue(0);
-            } else {
-              headerOffset.current = Math.min(0, Math.max(-headerH, headerOffset.current - delta));
-              headerAnim.setValue(headerOffset.current);
-            }
-          }}
-          onScrollEndDrag={snapHeader}
-          onMomentumScrollEnd={snapHeader}
+         onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
+          const delta = y - lastScrollY.current;
+          lastScrollY.current = y;
+
+          if (y <= 10) {
+            showHeader();
+          } else if (delta > 4) {
+            hideHeader();
+          }
+        }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
           }

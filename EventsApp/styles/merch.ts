@@ -7,12 +7,16 @@ import { Dimensions, StyleSheet } from 'react-native';
 // Dynamic colours (bg, tc derived from item category) stay as inline style
 // props in the component — className cannot express runtime values.
 
-const { width: W } = Dimensions.get('window');
+const { width: W, height: H } = Dimensions.get('window');
+
+const IMG_SINGLE      = Math.round(H * 0.52);
+const IMG_GRID        = Math.round(H * 0.46);
+const IMG_PLACEHOLDER = Math.round(H * 0.42);
 
 export const s = {
 
   // ── Screen shell ─────────────────────────────────────────────────────────────
-  screen:           'flex-1 bg-[#0a0a0a]',
+  screen: 'flex-1',
 
   // ── Header ───────────────────────────────────────────────────────────────────
   header:           'flex-row items-center justify-between px-5 pt-2 pb-1',
@@ -54,9 +58,9 @@ export const s = {
   actionBtnText:    'text-[10px] font-bold tracking-[1.5px]',
 
   // ── Image collage ─────────────────────────────────────────────────────────
-  collagePlaceholder: 'w-full h-[220px] bg-[#1a1a1a]',
-  collageSingle:      'w-full h-[300px]',
-  collageGrid:        'flex-row h-[250px]',
+ collagePlaceholder: 'w-full bg-[#1a1a1a]',
+  collageSingle:      'w-full',
+  collageGrid:        'flex-row',
   collageLeft:        'flex-1 mr-[2px]',
   collageSmall:       'flex-1',
 
@@ -130,4 +134,17 @@ export const sheet = StyleSheet.create({
   modalFlex: {
     flex: 1,
   },
+  collageSingleImg: {
+  width: '100%',
+  height: IMG_SINGLE,
+},
+collageGridContainer: {
+  flexDirection: 'row',
+  height: IMG_GRID,
+},
+collagePlaceholderBox: {
+  width: '100%',
+  height: IMG_PLACEHOLDER,
+  backgroundColor: '#1a1a1a',
+},
 });
