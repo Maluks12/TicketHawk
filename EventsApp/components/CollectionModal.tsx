@@ -414,11 +414,14 @@ export const CollectionModal = ({
 
   const detailDismissPan = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 12 && g.dy > Math.abs(g.dx),
+      onMoveShouldSetPanResponderCapture: (_, g) => g.dy > 8 && g.dy > Math.abs(g.dx),
       onPanResponderMove:   (_, g) => { if (g.dy > 0) detailY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
         if (g.dy > 80 || g.vy > 0.5) closeDetail();
         else Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
       },
     })
   ).current;
