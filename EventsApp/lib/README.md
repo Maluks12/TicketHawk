@@ -42,6 +42,27 @@ api.interceptors.response.use(
   }
 );
 
+// ── Session ID cache ───────────────────────────────────────────────────────
+// Reads SecureStore once and keeps the result in memory so subsequent calls
+// return synchronously — no repeated native bridge round-trips.
+// This is what fixes the input-lag after navigating back from the cart screen.
+
+let _cachedSessionId: string | null | undefined = undefined; // undefined = not yet loaded
+
+export async function getCachedSessionId(): Promise<string | null> {
+  if (_cachedSessionId !== undefined) return _cachedSessionId;
+  try {
+    _cachedSessionId = await SecureStore.getItemAsync('session_id');
+  } catch {
+    _cachedSessionId = null;
+  }
+  return _cachedSessionId;
+}
+
+export function makeSessionHeaders(sid: string | null): Record<string, string> {
+  return sid ? { 'X-Session-ID': sid } : {};
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface Event {
@@ -95,10 +116,16 @@ export interface PaginatedEvents {
   next_cursor?: string;
 }
 
+export interface Category {
+  id: number;
+  name: string;
+  slug?: string;
+}
+
+export const getCategories = () => api.get<{ categories: Category[] }>('/v1/categories');
+
 // ── API functions ──────────────────────────────────────────────────────────
 
-// CHANGED: accepts optional city string → sends ?city=Johannesburg to backend
-// which triggers the Near You section for that city
 export const getHomeSections     = (city?: string)                  => api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);
 export const getFeaturedEvents   = (limit = 1)                      => api.get<EventPage>(`/v1/events/featured?limit=${limit}`);
 export const getTrendingEvents   = (limit = 10)                     => api.get<EventPage>(`/v1/events/trending?limit=${limit}`);
@@ -277,29 +304,46 @@ export async function getTicketTypes(eventId: string): Promise<TicketType[]> {
 }
 
 // ── Cart ───────────────────────────────────────────────────────────────────
-
-export type CartItemType = 'ticket' | 'merch';
+// Types match the actual backend JSON shape from GET /v1/cart.
+// Key fixes vs the old version:
+//   - item_type is 'ticket' | 'merchandise'  (backend sends 'merchandise', not 'merch')
+//   - unit_price_snapshot / delivery_fee_snapshot  (not unit_price / delivery_fee)
+//   - CartSummary is { total_items, total_amount, currency, items_by_event }
+//     instead of { id, items, total, item_count }
 
 export interface CartItem {
   id: string;
   cart_id: string;
-  item_type: CartItemType;
-  event_id?: string | null;
+  item_type: 'ticket' | 'merchandise';
+  event_id: string;
   ticket_type_id?: string | null;
   ticket_type_name?: string | null;
   merchandise_variant_id?: string | null;
   quantity: number;
-  unit_price: number;
-  delivery_fee?: number;
+  unit_price_snapshot: number;
+  delivery_fee_snapshot: number;
   fulfillment_method?: string | null;
-  event_title?: string;
+  delivery_address?: string | null;
+  event_title?: string | null;
+  variant_sku?: string | null;
+  merch_name?: string | null;
+  variant_attributes?: string | null;
+  pickup_location?: string | null;
+  created_at: string;
+}
+
+export interface CartEventGroup {
+  event_id: string;
+  event_title: string;
+  items: CartItem[];
+  subtotal: number;
 }
 
 export interface CartSummary {
-  id: string;
-  items: CartItem[];
-  total: number;
-  item_count: number;
+  total_items: number;
+  total_amount: number;
+  currency: string;
+  items_by_event: CartEventGroup[];
 }
 
 export interface AddTicketToCartDTO {
@@ -309,47 +353,75 @@ export interface AddTicketToCartDTO {
   quantity: number;
 }
 
-export async function addTicketToCart(
-  dto: AddTicketToCartDTO,
-  sessionId?: string | null,
-): Promise<CartItem> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
-  const res = await api.post<CartItem>('/v1/cart/items', dto, { headers });
-  return res.data;
-}
-
 export async function getCart(sessionId?: string | null): Promise<CartSummary> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
+  const headers = makeSessionHeaders(sessionId ?? null);
   const res = await api.get<CartSummary>('/v1/cart', { headers });
   return res.data;
 }
 
-export async function clearCart(sessionId?: string | null): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
-  await api.delete('/v1/cart', { headers });
+export async function addTicketToCart(
+  dto: AddTicketToCartDTO,
+  sessionId?: string | null,
+): Promise<CartItem> {
+  const headers = makeSessionHeaders(sessionId ?? null);
+  const res = await api.post<CartItem>('/v1/cart/items', dto, { headers });
+  return res.data;
 }
 
 export async function updateCartItem(
   itemId: string,
   quantity: number,
   sessionId?: string | null,
-): Promise<CartItem> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
-  const res = await api.patch<CartItem>(`/v1/cart/items/${itemId}`, { quantity }, { headers });
-  return res.data;
+): Promise<void> {
+  const headers = makeSessionHeaders(sessionId ?? null);
+  await api.patch(`/v1/cart/items/${itemId}`, { quantity }, { headers });
 }
 
 export async function removeCartItem(
   itemId: string,
   sessionId?: string | null,
 ): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
+  const headers = makeSessionHeaders(sessionId ?? null);
   await api.delete(`/v1/cart/items/${itemId}`, { headers });
+}
+
+export async function clearCart(sessionId?: string | null): Promise<void> {
+  const headers = makeSessionHeaders(sessionId ?? null);
+  await api.delete('/v1/cart', { headers });
+}
+
+// ── Cart UI helpers ────────────────────────────────────────────────────────
+// Single source of truth used by cart screen, checkout screen, and the
+// home header badge. Import these instead of redefining them per screen.
+
+export function cartItemLabel(
+  item: Pick<CartItem, 'item_type' | 'ticket_type_name' | 'merch_name'>
+): string {
+  if (item.item_type === 'ticket') return item.ticket_type_name ?? 'General Admission';
+  return item.merch_name ?? 'Merchandise';
+}
+
+export function cartItemSubtitle(item: CartItem): string | null {
+  if (item.item_type !== 'merchandise') return null;
+  const parts: string[] = [];
+  if (item.variant_sku) parts.push(item.variant_sku);
+  if (item.variant_attributes) {
+    try {
+      const attrs = JSON.parse(item.variant_attributes);
+      Object.entries(attrs).forEach(([k, v]) => parts.push(`${k}: ${v}`));
+    } catch {
+      parts.push(item.variant_attributes);
+    }
+  }
+  if (item.fulfillment_method === 'delivery') parts.push('📦 Delivery');
+  else if (item.fulfillment_method === 'pickup') {
+    parts.push(item.pickup_location ? `🏪 Pickup · ${item.pickup_location}` : '🏪 Pickup');
+  }
+  return parts.join(' · ') || null;
+}
+
+export function fmtZAR(amount: number): string {
+  return `R${Math.round(amount).toLocaleString('en-ZA')}`;
 }
 
 // ── Checkout ───────────────────────────────────────────────────────────────
@@ -364,26 +436,41 @@ export interface ReservationSummary {
 
 export interface CheckoutBeginResponse {
   reservations: ReservationSummary[];
-  expires_in_seconds: number;
+  seconds_left: number;   // reservation window duration (e.g. 600 = 10 min)
   cart_total: number;
+  currency: string;
+}
+
+// Added: was missing from the original file
+export interface CheckoutConfirmResponse {
+  client_token: string;
+  payment_request_id: string;
+  total_amount: number;
+  currency: string;
+  primary_booking_id: string;
+  booking_ids: string[];
 }
 
 export async function checkoutBegin(sessionId?: string | null): Promise<CheckoutBeginResponse> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
+  const headers = makeSessionHeaders(sessionId ?? null);
   const res = await api.post<CheckoutBeginResponse>('/v1/checkout/begin', {}, { headers });
   return res.data;
 }
 
+// Added: was missing from the original file
+export async function checkoutConfirm(sessionId?: string | null): Promise<CheckoutConfirmResponse> {
+  const headers = makeSessionHeaders(sessionId ?? null);
+  const res = await api.post<CheckoutConfirmResponse>('/v1/checkout/confirm', {}, { headers });
+  return res.data;
+}
+
 export async function checkoutHeartbeat(sessionId?: string | null): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
+  const headers = makeSessionHeaders(sessionId ?? null);
   await api.post('/v1/checkout/heartbeat', {}, { headers });
 }
 
 export async function checkoutAbandon(sessionId?: string | null): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (sessionId) headers['X-Session-ID'] = sessionId;
+  const headers = makeSessionHeaders(sessionId ?? null);
   await api.post('/v1/checkout/abandon', {}, { headers });
 }
 

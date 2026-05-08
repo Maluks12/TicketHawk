@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   StyleSheet,
+  Dimensions,
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -78,14 +79,12 @@ function formatCountdown(totalSecs: number): string {
 }
 
 // ─── Variant grouping ─────────────────────────────────────────────────────────
-// Variants carry JSONB attributes e.g. {"size":"UK 8"} or {"size":"M","fit":"player"}.
-// We group by the primary attribute key so each sizing dimension gets its own row.
 
 type VariantItem = NonNullable<MerchandiseItem['variants']>[number];
 
 interface VariantGroup {
-  key:      string;   // raw attribute key e.g. "size"
-  label:    string;   // display label e.g. "SIZE"
+  key:      string;
+  label:    string;
   variants: VariantItem[];
 }
 
@@ -162,7 +161,7 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
   return entries;
 }
 
-// ─── Image collage ────────────────────────────────────────────────────────────
+// ─── Image collage (main feed cards — unchanged) ──────────────────────────────
 
 const Collage = ({ images }: { images: string[] }) => {
   if (images.length === 0) {
@@ -185,6 +184,121 @@ const Collage = ({ images }: { images: string[] }) => {
           />
         ))}
       </View>
+    </View>
+  );
+};
+
+// ─── Detail image carousel (detail modal only) ────────────────────────────────
+// Dots are driven by a real-time Animated.Value so they track your finger
+// frame-by-frame rather than snapping only after momentum ends.
+
+const { width: SCREEN_W } = Dimensions.get('window');
+const CAROUSEL_SIDE   = 16;   // horizontal margin — matches card padding
+const CAROUSEL_W      = SCREEN_W - CAROUSEL_SIDE * 2;
+const CAROUSEL_RADIUS = 12;   // matches event card border radius
+const CAROUSEL_H      = 300;
+
+const DetailImageCarousel = ({ images, tc }: { images: string[]; tc: string }) => {
+  // useNativeDriver: true — scroll tracking runs on the native thread, zero JS lag.
+  // Dots use scaleX + opacity (both native-compatible) instead of width, which
+  // would require useNativeDriver: false and run on the slower JS thread.
+  const scrollX = useRef(new Animated.Value(0)).current;
+
+  if (images.length === 0) {
+    return (
+      <View style={{
+        width:           CAROUSEL_W,
+        alignSelf:       'center',
+        height:          CAROUSEL_H,
+        borderRadius:    CAROUSEL_RADIUS,
+        overflow:        'hidden',
+        backgroundColor: tc + '10',
+        alignItems:      'center',
+        justifyContent:  'center',
+      }}>
+        <Text style={{ fontSize: 40 }}>📦</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      {/*
+        Explicit width + alignSelf:'center' is more reliable than marginHorizontal
+        for clipping on Android. collapsable={false} forces Android to create a
+        real native view layer so overflow:'hidden' + borderRadius actually clips.
+      */}
+      <View
+        collapsable={false}
+        style={{
+          width:        CAROUSEL_W,
+          alignSelf:    'center',
+          height:       CAROUSEL_H,
+          borderRadius: CAROUSEL_RADIUS,
+          overflow:     'hidden',
+        }}
+      >
+        <Animated.ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={CAROUSEL_W}
+          snapToAlignment="start"
+          decelerationRate="fast"
+          disableIntervalMomentum
+          scrollEventThrottle={16}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+            { useNativeDriver: true },  // native thread — perfectly smooth
+          )}
+        >
+          {images.map((uri, i) => (
+            <Image
+              key={i}
+              source={{ uri }}
+              style={{ width: CAROUSEL_W, height: CAROUSEL_H }}
+              resizeMode="cover"
+            />
+          ))}
+        </Animated.ScrollView>
+      </View>
+
+      {/* Dots: scaleX animates from 6/22≈0.27 (inactive) → 1 (active).
+          Both scaleX and opacity run on the native thread → zero lag. */}
+      {images.length > 1 && (
+        <View style={{
+          flexDirection:  'row',
+          justifyContent: 'center',
+          alignItems:     'center',
+          gap:            6,
+          paddingTop:     10,
+        }}>
+          {images.map((_, i) => {
+            const dotScale = scrollX.interpolate({
+              inputRange:  [(i - 1) * CAROUSEL_W, i * CAROUSEL_W, (i + 1) * CAROUSEL_W],
+              outputRange: [6 / 22, 1, 6 / 22],
+              extrapolate: 'clamp',
+            });
+            const dotOpacity = scrollX.interpolate({
+              inputRange:  [(i - 1) * CAROUSEL_W, i * CAROUSEL_W, (i + 1) * CAROUSEL_W],
+              outputRange: [0.3, 1, 0.3],
+              extrapolate: 'clamp',
+            });
+            return (
+              <Animated.View
+                key={i}
+                style={{
+                  width:           22,   // always 22; scaleX shrinks inactive dots to ~6px
+                  height:          4,
+                  borderRadius:    2,
+                  backgroundColor: tc,
+                  opacity:         dotOpacity,
+                  transform:       [{ scaleX: dotScale }],
+                }}
+              />
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 };
@@ -434,7 +548,6 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
     [item.variants],
   );
   const hasVariants = variantGroups.length > 0;
-  // If the selected variant has a price override, show that; otherwise fall back to item price
   const displayPrice =
     selectedVariant?.price_override != null ? selectedVariant.price_override : item.effective_price;
 
@@ -453,15 +566,13 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
     })
   ).current;
 
- const scrollPan = useRef(
+  const scrollPan = useRef(
     PanResponder.create({
-      // Capture intercepts before the ScrollView's native handler —
-      // this is what makes the dismiss reliable when scrolled to top
       onMoveShouldSetPanResponderCapture: (_, g) =>
         scrollOffset.current <= 0 && g.dy > 8 && g.dy > Math.abs(g.dx),
       onPanResponderMove: (_, g) => { if (g.dy > 0) translateY.setValue(g.dy); },
       onPanResponderRelease: (_, g) => {
-        if (g.dy > 80 || g.vy > 0.5) {
+        if (g.dy > 100 || g.vy > 0.6) {
           Animated.timing(translateY, { toValue: 800, duration: 140, useNativeDriver: true }).start(onClose);
         } else {
           Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
@@ -514,21 +625,22 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           scrollEventThrottle={16}
           {...scrollPan.panHandlers}
         >
-          {/* Price / category box — price updates when a variant is selected */}
+          {/* Price / category box */}
           <View className={s.heatScoreBox} style={{ borderColor: tc + '40' }}>
             <Text className={s.heatScoreBoxLabel} style={{ color: tc + '90' }}>
               {(item.category ?? 'MERCHANDISE').toUpperCase()}
             </Text>
             <Text className={s.heatScoreBoxScore} style={{ color: tc }}>
-              {formatPrice(item.effective_price)}
+              {formatPrice(displayPrice)}
             </Text>
             <Text className={s.heatScoreBoxName} style={{ color: tc + '90' }} numberOfLines={2}>
               {item.name}
             </Text>
           </View>
 
+          {/* ── Image carousel — spaced + rounded, dots real-time animated ── */}
           <View style={{ marginTop: 16 }}>
-            <Collage images={images} />
+            <DetailImageCarousel images={images} tc={tc} />
           </View>
 
           <Text className={s.detailTitle} style={{ color: tc }}>{item.name}</Text>
@@ -543,49 +655,10 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
             />
           )}
 
-          {item.variants && item.variants.length > 0 && (
-            <View
-              className={s.variantsRow}
-              style={{ borderTopColor: tc + '20', borderBottomColor: tc + '20' }}
-            >
-              <Text className={s.variantsLabel} style={{ color: tc + '70' }}>VARIANTS</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
-                {item.variants.map((v) => {
-                  let label = v.sku;
-                  try {
-                    const attr = JSON.parse(v.attributes);
-                    label = Object.values(attr).join(' / ');
-                  } catch {}
-                  const outOfStock = v.stock_quantity === 0;
-                  return (
-                    <TouchableOpacity
-                      key={v.id}
-                      className={s.variantChip}
-                      style={{ borderColor: tc + (outOfStock ? '25' : '60') }}
-                      disabled={outOfStock}
-                    >
-                      <Text
-                        className={s.variantChipText}
-                        style={{ color: tc + (outOfStock ? '40' : 'ff') }}
-                      >
-                        {label.toUpperCase()}
-                      </Text>
-                      {outOfStock && (
-                        <Text className={s.variantSoldOut} style={{ color: tc + '40' }}>
-                          SOLD OUT
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-          )}
-
           {/* ── Info grid ──────────────────────────────────────────── */}
           <View className={s.detailGrid}>
             {[
-              ['PRICE',    formatPrice(item.effective_price)],
+              ['PRICE',    formatPrice(displayPrice)],
               ['CATEGORY', (item.category ?? '—').toUpperCase()],
               ['STATUS',   item.sale_status.toUpperCase()],
               ['RELEASE',  item.sale_start
@@ -616,7 +689,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
               {item.name}
             </Text>
             <Text className={s.modalBottomDate} style={{ color: tc + '80' }}>
-              {formatPrice(item.effective_price)}
+              {formatPrice(displayPrice)}
             </Text>
           </View>
           <TouchableOpacity
@@ -708,23 +781,23 @@ export default function Merch() {
   }, [headerAnim, headerH]);
 
   // ── Dynamic background ────────────────────────────────────────────────────
-const activeBgRef = useRef('#0a0a0a');
-const [bgColors, setBgColors] = useState({ active: '#0a0a0a', prev: '#0a0a0a' });
-const bgAnim = useRef(new Animated.Value(1)).current;
+  const activeBgRef = useRef('#0a0a0a');
+  const [bgColors, setBgColors] = useState({ active: '#0a0a0a', prev: '#0a0a0a' });
+  const bgAnim = useRef(new Animated.Value(1)).current;
 
-const onViewableItemsChanged = useCallback(({ viewableItems }: any) => {
-  if (!viewableItems.length) return;
-  const entry: CollectionEntry = viewableItems[0].item;
-  const newBg = paletteFor(entry.representativeItem).bg;
-  if (newBg === activeBgRef.current) return;
-  const prev = activeBgRef.current;
-  activeBgRef.current = newBg;
-  setBgColors({ active: newBg, prev });
-  bgAnim.setValue(0);
-  Animated.timing(bgAnim, { toValue: 1, duration: 500, useNativeDriver: false }).start();
-}, [bgAnim]);
+  const onViewableItemsChanged = useCallback(({ viewableItems }: any) => {
+    if (!viewableItems.length) return;
+    const entry: CollectionEntry = viewableItems[0].item;
+    const newBg = paletteFor(entry.representativeItem).bg;
+    if (newBg === activeBgRef.current) return;
+    const prev = activeBgRef.current;
+    activeBgRef.current = newBg;
+    setBgColors({ active: newBg, prev });
+    bgAnim.setValue(0);
+    Animated.timing(bgAnim, { toValue: 1, duration: 500, useNativeDriver: false }).start();
+  }, [bgAnim]);
 
-const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const fetchDrops = useCallback(async () => {
     try {
@@ -763,9 +836,9 @@ const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   }, []);
 
   return (
-   <View className={s.screen}>
-  <View style={[StyleSheet.absoluteFill, { backgroundColor: bgColors.prev }]} />
-  <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: bgColors.active, opacity: bgAnim }]} />
+    <View className={s.screen}>
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: bgColors.prev }]} />
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: bgColors.active, opacity: bgAnim }]} />
 
       {/* ── Floating animated header ── */}
       <Animated.View
@@ -778,7 +851,7 @@ const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
       >
         <SafeAreaView edges={['top', 'left', 'right']}>
           <View className={s.header}>
-          <Text className={s.headerTitle} style={{ color: '#ffffff' }}>DROPS</Text>
+            <Text className={s.headerTitle} style={{ color: '#ffffff' }}>DROPS</Text>
             <View className={s.headerRight}>
               <TouchableOpacity className={s.cartBtn}>
                 <Text className={s.cartIcon}>🛒</Text>
@@ -853,17 +926,13 @@ const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
           contentContainerStyle={{ paddingTop: headerH, paddingBottom: 110, flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           scrollEventThrottle={16}
-         onScroll={(e) => {
-          const y = e.nativeEvent.contentOffset.y;
-          const delta = y - lastScrollY.current;
-          lastScrollY.current = y;
-
-          if (y <= 10) {
-            showHeader();
-          } else if (delta > 4) {
-            hideHeader();
-          }
-        }}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            const delta = y - lastScrollY.current;
+            lastScrollY.current = y;
+            if (y <= 10) showHeader();
+            else if (delta > 4) hideHeader();
+          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#ff3c6e" />
           }

@@ -221,3 +221,10 @@ type UpdateEventDTO struct {
 	Performers         *[]string  `json:"performers"`
 	Teams              *[]string  `json:"teams"`
 }
+
+// Category represents a row from the categories table.
+type Category struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}

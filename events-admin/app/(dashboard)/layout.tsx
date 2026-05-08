@@ -10,13 +10,14 @@ const NAV = [
   { section: 'Overview' },
   { href: '/dashboard', label: 'Dashboard', icon: '▦' },
   { section: 'Content' },
-  { href: '/events',    label: 'Events',        icon: '◈' },
-  { href: '/merch',     label: 'Merchandise',   icon: '◇' },
+  { href: '/events',      label: 'Events',         icon: '◈' },
+  { href: '/merch',       label: 'Merchandise',    icon: '◇' },
+  { href: '/collections', label: 'Collections',    icon: '⬡' },
   { section: 'Users' },
-  { href: '/users',     label: 'All Users',     icon: '◉' },
-  { href: '/allmerch',  label: 'All Merchandise', icon: '◈' },
+  { href: '/users',       label: 'All Users',      icon: '◉' },
+  { href: '/allmerch',    label: 'All Merchandise', icon: '◈' },
   { section: 'Alerts' },
-  { href: '/oversold',  label: 'Oversold Orders', icon: '⚠', badge: true },
+  { href: '/oversold',    label: 'Oversold Orders', icon: '⚠', badge: true },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

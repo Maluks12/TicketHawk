@@ -9,99 +9,29 @@ import {
   Animated,
   StyleSheet,
   RefreshControl,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
 import { useAppTheme } from '../../theme/colors';
-import { api } from '../../lib/api';
-import { useAuthStore } from '../../store/authStore';
+import {
+  type CartItem,
+  type CartSummary,
+  type CartEventGroup,
+  getCart,
+  updateCartItem,
+  removeCartItem,
+  clearCart,
+  cartItemLabel,
+  cartItemSubtitle,
+  fmtZAR,
+  getCachedSessionId,
+} from '../../lib/api';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-interface BackendCartItem {
-  id: string;
-  cart_id: string;
-  item_type: 'ticket' | 'merchandise';
-  event_id: string;
-  ticket_type_id?: string | null;
-  ticket_type_name?: string | null;
-  merchandise_variant_id?: string | null;
-  quantity: number;
-  unit_price_snapshot: number;
-  delivery_fee_snapshot: number;
-  fulfillment_method?: string | null;
-  delivery_address?: string | null;
-  event_title?: string | null;
-  variant_sku?: string | null;
-  merch_name?: string | null;
-  variant_attributes?: string | null;
-  pickup_location?: string | null;
-  created_at: string;
-}
-
-interface EventGroup {
-  event_id: string;
-  event_title: string;
-  items: BackendCartItem[];
-  subtotal: number;
-}
-
-interface CartSummary {
-  total_items: number;
-  total_amount: number;
-  currency: string;
-  items_by_event: EventGroup[];
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function fmtPrice(amount: number): string {
-  return `R${Math.round(amount).toLocaleString('en-ZA')}`;
-}
-
-function itemLabel(item: BackendCartItem): string {
-  if (item.item_type === 'ticket') {
-    return item.ticket_type_name ?? 'General Admission';
-  }
-  return item.merch_name ?? 'Merchandise';
-}
-
-function itemSub(item: BackendCartItem): string | null {
-  if (item.item_type === 'merchandise') {
-    const parts: string[] = [];
-    if (item.variant_sku) parts.push(item.variant_sku);
-    if (item.variant_attributes) {
-      try {
-        const attrs = JSON.parse(item.variant_attributes);
-        Object.entries(attrs).forEach(([k, v]) => parts.push(`${k}: ${v}`));
-      } catch {
-        parts.push(item.variant_attributes);
-      }
-    }
-    if (item.fulfillment_method === 'delivery') parts.push('Delivery');
-    else if (item.fulfillment_method === 'pickup') {
-      parts.push(item.pickup_location ? `Pickup · ${item.pickup_location}` : 'Pickup');
-    }
-    return parts.join(' · ') || null;
-  }
-  return null;
-}
-
-async function getSessionId(): Promise<string | null> {
-  try {
-    return await SecureStore.getItemAsync('session_id');
-  } catch {
-    return null;
-  }
-}
-
-// ─── CartItemRow ─────────────────────────────────────────────────────────────
+// ─── CartItemRow ──────────────────────────────────────────────────────────────
 
 interface CartItemRowProps {
-  item: BackendCartItem;
+  item: CartItem;
   onQuantityChange: (id: string, qty: number) => void;
   onRemove: (id: string) => void;
   updating: boolean;
@@ -111,13 +41,13 @@ interface CartItemRowProps {
 function CartItemRow({ item, onQuantityChange, onRemove, updating, colors }: CartItemRowProps) {
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const lineTotal = item.unit_price_snapshot * item.quantity + item.delivery_fee_snapshot;
-  const sub = itemSub(item);
-  const isTicket = item.item_type === 'ticket';
+  const sub       = cartItemSubtitle(item);
+  const isTicket  = item.item_type === 'ticket';
 
   const handleRemove = () => {
     Alert.alert(
       'Remove item',
-      `Remove "${itemLabel(item)}" from your cart?`,
+      `Remove "${cartItemLabel(item)}" from your cart?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -134,7 +64,6 @@ function CartItemRow({ item, onQuantityChange, onRemove, updating, colors }: Car
 
   return (
     <Animated.View style={[styles.itemRow, { opacity: fadeAnim, backgroundColor: colors.cardBg, borderColor: colors.dividerColor }]}>
-      {/* Type badge */}
       <View style={[styles.typeBadge, isTicket ? styles.typeBadgeTicket : styles.typeBadgeMerch]}>
         {isTicket
           ? <Ionicons name="ticket-outline" size={14} color="#fff" />
@@ -142,23 +71,19 @@ function CartItemRow({ item, onQuantityChange, onRemove, updating, colors }: Car
         }
       </View>
 
-      {/* Content */}
       <View style={styles.itemContent}>
         <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={2}>
-          {itemLabel(item)}
+          {cartItemLabel(item)}
         </Text>
         {sub ? (
-          <Text style={[styles.itemSub, { color: colors.subText }]} numberOfLines={1}>
-            {sub}
-          </Text>
+          <Text style={[styles.itemSub, { color: colors.subText }]} numberOfLines={1}>{sub}</Text>
         ) : null}
         {item.delivery_fee_snapshot > 0 && (
           <Text style={[styles.itemFeeNote, { color: colors.subText }]}>
-            + {fmtPrice(item.delivery_fee_snapshot)} delivery
+            + {fmtZAR(item.delivery_fee_snapshot)} delivery
           </Text>
         )}
 
-        {/* Quantity stepper + price row */}
         <View style={styles.itemBottom}>
           <View style={[styles.stepper, { borderColor: colors.dividerColor, backgroundColor: colors.sectionCardBg }]}>
             <TouchableOpacity
@@ -186,12 +111,10 @@ function CartItemRow({ item, onQuantityChange, onRemove, updating, colors }: Car
               <Text style={[styles.stepperIcon, { color: item.quantity >= 10 ? colors.subText : colors.text }]}>＋</Text>
             </TouchableOpacity>
           </View>
-
-          <Text style={styles.lineTotal}>{fmtPrice(lineTotal)}</Text>
+          <Text style={styles.lineTotal}>{fmtZAR(lineTotal)}</Text>
         </View>
       </View>
 
-      {/* Delete button */}
       <TouchableOpacity style={styles.deleteBtn} onPress={handleRemove} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
         <Feather name="trash-2" size={16} color={colors.subText} />
       </TouchableOpacity>
@@ -221,26 +144,24 @@ function EmptyCart({ colors, onBrowse }: { colors: any; onBrowse: () => void }) 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function CartScreen() {
-  const router    = useRouter();
-  const insets    = useSafeAreaInsets();
+  const router             = useRouter();
+  const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
-  const { user }  = useAuthStore();
 
-  const [cart, setCart]         = useState<CartSummary | null>(null);
-  const [loading, setLoading]   = useState(true);
+  const [cart, setCart]           = useState<CartSummary | null>(null);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const sidRef = useRef<string | null>(null);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
   const fetchCart = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const sid = await getSessionId();
-      const headers: Record<string, string> = {};
-      if (sid) headers['X-Session-ID'] = sid;
-      const res = await api.get<CartSummary>('/v1/cart', { headers });
-      setCart(res.data);
+      if (sidRef.current === null) sidRef.current = await getCachedSessionId();
+      const data = await getCart(sidRef.current);
+      setCart(data);
     } catch {
       setCart(null);
     } finally {
@@ -256,10 +177,7 @@ export default function CartScreen() {
   const handleQuantityChange = async (itemId: string, qty: number) => {
     setUpdatingId(itemId);
     try {
-      const sid = await getSessionId();
-      const headers: Record<string, string> = {};
-      if (sid) headers['X-Session-ID'] = sid;
-      await api.patch(`/v1/cart/items/${itemId}`, { quantity: qty }, { headers });
+      await updateCartItem(itemId, qty, sidRef.current);
       await fetchCart(true);
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.error ?? 'Could not update quantity');
@@ -271,10 +189,7 @@ export default function CartScreen() {
   const handleRemove = async (itemId: string) => {
     setUpdatingId(itemId);
     try {
-      const sid = await getSessionId();
-      const headers: Record<string, string> = {};
-      if (sid) headers['X-Session-ID'] = sid;
-      await api.delete(`/v1/cart/items/${itemId}`, { headers });
+      await removeCartItem(itemId, sidRef.current);
       await fetchCart(true);
     } catch {
       Alert.alert('Error', 'Could not remove item');
@@ -290,10 +205,7 @@ export default function CartScreen() {
         text: 'Clear', style: 'destructive',
         onPress: async () => {
           try {
-            const sid = await getSessionId();
-            const headers: Record<string, string> = {};
-            if (sid) headers['X-Session-ID'] = sid;
-            await api.delete('/v1/cart', { headers });
+            await clearCart(sidRef.current);
             setCart(null);
           } catch {
             Alert.alert('Error', 'Could not clear cart');
@@ -303,24 +215,22 @@ export default function CartScreen() {
     ]);
   };
 
-  const handleCheckout = () => {
-    router.push('/cart/checkout' as any);
-  };
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const bg = isDark ? '#0a0a0a' : '#f5f5f7';
+  const bg         = isDark ? '#0a0a0a' : '#f5f5f7';
   const totalItems  = cart?.total_items ?? 0;
   const totalAmount = cart?.total_amount ?? 0;
   const hasItems    = totalItems > 0;
-
-  const allItems: BackendCartItem[] = cart?.items_by_event?.flatMap(eg => eg.items) ?? [];
+  const allItems    = cart?.items_by_event?.flatMap(g => g.items) ?? [];
 
   return (
     <View style={[styles.screen, { backgroundColor: bg, paddingBottom: insets.bottom }]}>
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: isDark ? '#0a0a0a' : '#fff', borderBottomColor: colors.dividerColor }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Feather name="arrow-left" size={22} color={colors.text} />
+        </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Cart</Text>
         <View style={styles.headerRight}>
           {hasItems && (
@@ -343,24 +253,18 @@ export default function CartScreen() {
           <Text style={[styles.loadingText, { color: colors.subText }]}>Loading cart…</Text>
         </View>
       ) : !hasItems ? (
-        <EmptyCart colors={colors} onBrowse={() => router.push('/' as any)} />
+        <EmptyCart colors={colors} onBrowse={() => router.back()} />
       ) : (
         <ScrollView
           style={styles.scroll}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 180, paddingTop: 12 }}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); fetchCart(); }}
-              tintColor="#ff2d55"
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchCart(); }} tintColor="#ff2d55" />
           }
         >
-          {/* Items grouped by event */}
-          {cart!.items_by_event.map((group) => (
+          {cart!.items_by_event.map((group: CartEventGroup) => (
             <View key={group.event_id} style={styles.group}>
-              {/* Group header */}
               <View style={[styles.groupHeader, { backgroundColor: isDark ? '#111' : '#fff' }]}>
                 <View style={styles.groupHeaderLeft}>
                   <View style={styles.groupDot} />
@@ -368,13 +272,9 @@ export default function CartScreen() {
                     {group.event_title || 'Items'}
                   </Text>
                 </View>
-                <Text style={[styles.groupSubtotal, { color: colors.subText }]}>
-                  {fmtPrice(group.subtotal)}
-                </Text>
+                <Text style={[styles.groupSubtotal, { color: colors.subText }]}>{fmtZAR(group.subtotal)}</Text>
               </View>
-
-              {/* Items */}
-              {group.items.map((item) => (
+              {group.items.map((item: CartItem) => (
                 <CartItemRow
                   key={item.id}
                   item={item}
@@ -387,16 +287,16 @@ export default function CartScreen() {
             </View>
           ))}
 
-          {/* Order summary card */}
+          {/* Order summary */}
           <View style={[styles.summaryCard, { backgroundColor: isDark ? '#111' : '#fff', borderColor: colors.dividerColor }]}>
             <Text style={[styles.summaryTitle, { color: colors.subText }]}>ORDER SUMMARY</Text>
-            {allItems.map((item) => (
+            {allItems.map((item: CartItem) => (
               <View key={item.id} style={styles.summaryRow}>
                 <Text style={[styles.summaryLabel, { color: colors.text }]} numberOfLines={1}>
-                  {itemLabel(item)} × {item.quantity}
+                  {cartItemLabel(item)} × {item.quantity}
                 </Text>
                 <Text style={[styles.summaryValue, { color: colors.text }]}>
-                  {fmtPrice(item.unit_price_snapshot * item.quantity)}
+                  {fmtZAR(item.unit_price_snapshot * item.quantity)}
                 </Text>
               </View>
             ))}
@@ -404,18 +304,17 @@ export default function CartScreen() {
               <View style={styles.summaryRow}>
                 <Text style={[styles.summaryLabel, { color: colors.subText }]}>Delivery fees</Text>
                 <Text style={[styles.summaryValue, { color: colors.subText }]}>
-                  {fmtPrice(allItems.reduce((s, i) => s + i.delivery_fee_snapshot, 0))}
+                  {fmtZAR(allItems.reduce((s, i) => s + i.delivery_fee_snapshot, 0))}
                 </Text>
               </View>
             )}
             <View style={[styles.summaryDivider, { backgroundColor: colors.dividerColor }]} />
             <View style={styles.summaryTotalRow}>
               <Text style={[styles.summaryTotalLabel, { color: colors.text }]}>Total</Text>
-              <Text style={styles.summaryTotalValue}>{fmtPrice(totalAmount)}</Text>
+              <Text style={styles.summaryTotalValue}>{fmtZAR(totalAmount)}</Text>
             </View>
           </View>
 
-          {/* Info pill */}
           <View style={[styles.infoPill, { backgroundColor: colors.sectionCardBg }]}>
             <Feather name="lock" size={13} color={colors.subText} />
             <Text style={[styles.infoPillText, { color: colors.subText }]}>
@@ -430,9 +329,9 @@ export default function CartScreen() {
         <View style={[styles.ctaBar, { paddingBottom: insets.bottom > 0 ? insets.bottom + 4 : 20, backgroundColor: isDark ? '#0a0a0a' : '#fff', borderTopColor: colors.dividerColor }]}>
           <View style={styles.ctaAmountWrap}>
             <Text style={[styles.ctaAmountLabel, { color: colors.subText }]}>Total</Text>
-            <Text style={[styles.ctaAmount, { color: colors.text }]}>{fmtPrice(totalAmount)}</Text>
+            <Text style={[styles.ctaAmount, { color: colors.text }]}>{fmtZAR(totalAmount)}</Text>
           </View>
-          <TouchableOpacity style={styles.checkoutBtn} onPress={handleCheckout} activeOpacity={0.88}>
+          <TouchableOpacity style={styles.checkoutBtn} onPress={() => router.push('/cart/checkout' as any)} activeOpacity={0.88}>
             <Text style={styles.checkoutBtnText}>Checkout</Text>
             <Feather name="arrow-right" size={18} color="#fff" />
           </TouchableOpacity>
@@ -450,16 +349,15 @@ const styles = StyleSheet.create({
   scroll:           { flex: 1 },
   loadingText:      { fontSize: 13, fontWeight: '600', marginTop: 8 },
 
-  // Header
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth },
-  headerTitle:      { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
+  header:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 },
+  backBtn:          { width: 32 },
+  headerTitle:      { fontSize: 28, fontWeight: '800', letterSpacing: -0.5, flex: 1 },
   headerRight:      { flexDirection: 'row', alignItems: 'center', gap: 10 },
   countBubble:      { minWidth: 22, height: 22, borderRadius: 11, backgroundColor: '#ff2d55', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
   countBubbleText:  { fontSize: 12, fontWeight: '800', color: '#fff' },
   clearBtn:         { paddingHorizontal: 6, paddingVertical: 4 },
   clearBtnText:     { fontSize: 14, fontWeight: '600' },
 
-  // Group
   group:            { marginBottom: 4 },
   groupHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 10, marginHorizontal: 16, marginBottom: 4, borderRadius: 12 },
   groupHeaderLeft:  { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 12 },
@@ -467,17 +365,11 @@ const styles = StyleSheet.create({
   groupTitle:       { fontSize: 13, fontWeight: '700', letterSpacing: 0.2, flex: 1 },
   groupSubtotal:    { fontSize: 13, fontWeight: '600' },
 
-  // Item row
   itemRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    gap: 12,
+    flexDirection: 'row', alignItems: 'flex-start',
+    paddingHorizontal: 16, paddingVertical: 14,
+    marginHorizontal: 16, marginBottom: 8,
+    borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, gap: 12,
   },
   typeBadge:        { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   typeBadgeTicket:  { backgroundColor: '#ff2d55' },
@@ -489,7 +381,6 @@ const styles = StyleSheet.create({
   itemBottom:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   deleteBtn:        { padding: 4, marginTop: 2 },
 
-  // Stepper
   stepper:          { flexDirection: 'row', alignItems: 'center', borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   stepperBtn:       { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   stepperIcon:      { fontSize: 16, fontWeight: '600' },
@@ -497,15 +388,9 @@ const styles = StyleSheet.create({
   stepperCountText: { fontSize: 15, fontWeight: '700' },
   lineTotal:        { fontSize: 15, fontWeight: '800', color: '#ff2d55' },
 
-  // Summary card
   summaryCard: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 8,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 18,
-    gap: 10,
+    marginHorizontal: 16, marginTop: 8, marginBottom: 8,
+    borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 18, gap: 10,
   },
   summaryTitle:     { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2 },
   summaryRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -516,19 +401,13 @@ const styles = StyleSheet.create({
   summaryTotalLabel:{ fontSize: 16, fontWeight: '700' },
   summaryTotalValue:{ fontSize: 18, fontWeight: '800', color: '#ff2d55' },
 
-  // Info pill
   infoPill:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, padding: 12, borderRadius: 10, marginBottom: 8 },
   infoPillText:     { fontSize: 12, fontWeight: '500', flex: 1 },
 
-  // CTA
   ctaBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth,
   },
   ctaAmountWrap:    { gap: 2 },
   ctaAmountLabel:   { fontSize: 12, fontWeight: '600' },
@@ -536,7 +415,6 @@ const styles = StyleSheet.create({
   checkoutBtn:      { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ff2d55', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
   checkoutBtnText:  { fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: 0.2 },
 
-  // Empty
   emptyWrap:        { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 14 },
   emptyIconCircle:  { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   emptyTitle:       { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },

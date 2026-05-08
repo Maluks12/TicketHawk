@@ -564,3 +564,16 @@ func GetOrganizerEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		})
 	}
 }
+// GetCategoriesHandler returns all active categories ordered by display_order.
+//
+//	GET /v1/categories
+func GetCategoriesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cats, err := repository.GetCategories(pool)
+		if err != nil {
+			utils.InternalError(c, err, "failed to fetch categories")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"categories": cats})
+	}
+}

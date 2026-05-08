@@ -6,7 +6,14 @@ import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
 
 interface EventOption { id: string; title: string; status: string; }
-interface MerchItem { id: string; name: string; description?: string; base_price: number; category?: string; is_active: boolean; fulfillment_mode: string; pickup_location?: string; delivery_fee?: number; sale_start?: string; sale_end?: string; images?: string; display_order: number; variants: Variant[]; }
+interface Collection { id: string; name: string; is_active: boolean; }
+interface MerchItem {
+  id: string; name: string; description?: string; base_price: number;
+  category?: string; collection_id?: string; is_active: boolean;
+  fulfillment_mode: string; pickup_location?: string; delivery_fee?: number;
+  sale_start?: string; sale_end?: string; images?: string; display_order: number;
+  variants: Variant[];
+}
 interface Variant { id: string; sku: string; attributes: string; stock_quantity: number; price_override?: number; is_active: boolean; }
 
 const EMPTY_MERCH = { name: '', description: '', base_price: '', category: '', display_order: '0', fulfillment_mode: 'delivery', pickup_location: '', delivery_fee: '0', sale_start: '', sale_end: '', images: '' };
@@ -16,21 +23,35 @@ export default function MerchPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [events, setEvents] = useState<EventOption[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [eventId, setEventId] = useState('');
   const [items, setItems] = useState<MerchItem[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Merch modal
   const [merchModal, setMerchModal] = useState(false);
   const [editingMerchId, setEditingMerchId] = useState<string | null>(null);
   const [mForm, setMForm] = useState({ ...EMPTY_MERCH });
   const [mSubmitting, setMSubmitting] = useState(false);
+
+  // Variant modal
   const [variantModal, setVariantModal] = useState(false);
   const [variantMerchId, setVariantMerchId] = useState<string | null>(null);
   const [vForm, setVForm] = useState({ ...EMPTY_VARIANT });
   const [vSubmitting, setVSubmitting] = useState(false);
 
+  // Assign collection modal
+  const [assignModal, setAssignModal] = useState(false);
+  const [assignMerchId, setAssignMerchId] = useState<string | null>(null);
+  const [assignMerchName, setAssignMerchName] = useState('');
+  const [assignCollectionId, setAssignCollectionId] = useState<string>('');
+  const [assigning, setAssigning] = useState(false);
+
   useEffect(() => {
     api.get<{ data: EventOption[] }>('/admin/events?limit=100')
       .then(r => setEvents(r.data.data || [])).catch(() => {});
+    api.get<{ data: Collection[] }>('/admin/collections')
+      .then(r => setCollections((r.data.data || []).filter(c => c.is_active))).catch(() => {});
   }, []);
 
   async function loadMerch() {
@@ -116,14 +137,42 @@ export default function MerchPage() {
     } finally { setVSubmitting(false); }
   }
 
+  function openAssign(item: MerchItem) {
+    setAssignMerchId(item.id);
+    setAssignMerchName(item.name);
+    setAssignCollectionId(item.collection_id || '');
+    setAssignModal(true);
+  }
+
+  async function submitAssign() {
+    if (!assignMerchId) return;
+    setAssigning(true);
+    try {
+      await api.put(`/admin/merch/${assignMerchId}/collection`, {
+        collection_id: assignCollectionId || null,
+      });
+      toast(assignCollectionId ? 'Assigned to collection' : 'Removed from collection', 'success');
+      setAssignModal(false);
+      loadMerch();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to assign';
+      toast(msg, 'error');
+    } finally { setAssigning(false); }
+  }
+
   const showPickup = mForm.fulfillment_mode !== 'delivery';
+
+  function collectionName(id?: string) {
+    if (!id) return null;
+    return collections.find(c => c.id === id)?.name ?? null;
+  }
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1400px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
         <div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 600 }}>Merchandise</div>
-          <div style={{ fontSize: '.8rem', color: 'var(--text-2)', marginTop: '.15rem' }}>Manage merch items and collections per event</div>
+          <div style={{ fontSize: '.8rem', color: 'var(--text-2)', marginTop: '.15rem' }}>Manage merch items per event — assign items to collections from the Collections page</div>
         </div>
       </div>
 
@@ -139,11 +188,11 @@ export default function MerchPage() {
       </div>
 
       {!eventId ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-3)', fontSize: '.9rem' }}>Select an event above to see its merch, or click "+ Add Merch Item" to create a standalone item.</div>
+        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-3)', fontSize: '.9rem' }}>Select an event above to see its merch, or click &quot;+ Add Merch Item&quot; to create a standalone item.</div>
       ) : loading ? (
         <div style={{ textAlign: 'center', padding: '2rem' }}><div className="spinner" style={{ margin: 'auto' }} /></div>
       ) : items.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-3)', fontSize: '.9rem' }}>No merch items yet. Click "+ Add Merch Item" to create one.</div>
+        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-3)', fontSize: '.9rem' }}>No merch items yet. Click &quot;+ Add Merch Item&quot; to create one.</div>
       ) : (
         <div className="merch-grid">
           {items.map(m => (
@@ -156,6 +205,13 @@ export default function MerchPage() {
                   <Badge status={m.fulfillment_mode} />
                   {m.category && <span className="badge badge-draft">{m.category}</span>}
                 </div>
+                {/* Collection assignment badge */}
+                {collectionName(m.collection_id) && (
+                  <div style={{ fontSize: '.75rem', color: 'var(--text-2)', marginBottom: '.3rem', display: 'flex', alignItems: 'center', gap: '.3rem' }}>
+                    <span style={{ color: 'var(--text-3)' }}>⬡</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{collectionName(m.collection_id)}</span>
+                  </div>
+                )}
                 {m.description && <div style={{ fontSize: '.78rem', color: 'var(--text-2)', marginBottom: '.3rem', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>{m.description}</div>}
                 <div style={{ fontSize: '.75rem', color: 'var(--text-3)' }}>Sale: {m.sale_start ? `${fmtDate(m.sale_start)} → ${fmtDate(m.sale_end)}` : 'Always live'}</div>
                 {m.variants.length > 0 && (
@@ -171,9 +227,10 @@ export default function MerchPage() {
                   </div>
                 )}
               </div>
-              <div style={{ padding: '.65rem 1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+              <div style={{ padding: '.65rem 1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <button className="btn btn-sm" onClick={() => openEditMerch(m.id)}>✎ Edit</button>
                 <button className="btn btn-sm" onClick={() => openVariant(m.id)}>+ Variant</button>
+                <button className="btn btn-sm" onClick={() => openAssign(m)} title="Assign to collection">⬡ Collection</button>
                 <button className="btn btn-sm btn-danger" onClick={() => deactivate(m.id)}>Deactivate</button>
                 <span style={{ fontSize: '.75rem', color: 'var(--text-2)', marginLeft: 'auto' }}>{m.variants.length} variants</span>
               </div>
@@ -195,7 +252,13 @@ export default function MerchPage() {
               <div className="field"><label>Description</label><textarea rows={2} value={mForm.description} onChange={e => setMF({ description: e.target.value })} placeholder="Optional description…" /></div>
               <div className="field-row">
                 <div className="field"><label>Base Price *</label><input type="number" min="0.01" step="0.01" value={mForm.base_price} onChange={e => setMF({ base_price: e.target.value })} placeholder="0.00" /></div>
-                <div className="field"><label>Collection</label><input type="text" value={mForm.category} onChange={e => setMF({ category: e.target.value })} placeholder="e.g. Shoes, Apparel" /></div>
+                <div className="field">
+                  <label>Category <small style={{ color: 'var(--text-3)', textTransform: 'none', fontWeight: 400 }}>(drives colour theme)</small></label>
+                  <input type="text" value={mForm.category} onChange={e => setMF({ category: e.target.value })} placeholder="e.g. apparel, footwear" />
+                </div>
+              </div>
+              <div className="alert alert-info" style={{ fontSize: '.76rem', marginBottom: '.5rem', marginTop: '-.25rem' }}>
+                To assign this item to a collection, use the <strong>⬡ Collection</strong> button on the merch card, or manage collections from the <strong>Collections</strong> page in the sidebar.
               </div>
               <div className="field-row">
                 <div className="field"><label>Display Order</label><input type="number" min="0" value={mForm.display_order} onChange={e => setMF({ display_order: e.target.value })} /></div>
@@ -248,6 +311,43 @@ export default function MerchPage() {
             <div className="modal-footer">
               <button className="btn" onClick={() => setVariantModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={submitVariant} disabled={vSubmitting}>{vSubmitting ? 'Saving…' : 'Add Variant'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Collection Modal */}
+      {assignModal && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setAssignModal(false); }}>
+          <div className="modal modal-sm">
+            <div className="modal-header">
+              <div className="modal-title">Assign to Collection</div>
+              <button className="modal-close" onClick={() => setAssignModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ fontSize: '.82rem', color: 'var(--text-2)', marginBottom: '.75rem' }}>
+                Item: <strong style={{ color: 'var(--text-1)' }}>{assignMerchName}</strong>
+              </div>
+              <div className="field">
+                <label>Collection</label>
+                <select value={assignCollectionId} onChange={e => setAssignCollectionId(e.target.value)}>
+                  <option value="">— No collection (standalone) —</option>
+                  {collections.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {collections.length === 0 && (
+                  <div style={{ fontSize: '.74rem', color: 'var(--text-3)', marginTop: '.3rem' }}>
+                    No active collections found. Create one from the Collections page first.
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setAssignModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={submitAssign} disabled={assigning}>
+                {assigning ? 'Saving…' : assignCollectionId ? 'Assign' : 'Remove from Collection'}
+              </button>
             </div>
           </div>
         </div>

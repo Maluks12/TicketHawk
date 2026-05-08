@@ -889,6 +889,33 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
 	return events, nextCursor, nil
 }
 
+// GetCategories returns all active categories ordered by display_order.
+func GetCategories(pool *pgxpool.Pool) ([]models.Category, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, name, slug
+		FROM categories
+		WHERE is_active = TRUE
+		ORDER BY display_order ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cats := make([]models.Category, 0)
+	for rows.Next() {
+		var c models.Category
+		if err := rows.Scan(&c.ID, &c.Name, &c.Slug); err != nil {
+			return nil, err
+		}
+		cats = append(cats, c)
+	}
+	return cats, rows.Err()
+}
+
 func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

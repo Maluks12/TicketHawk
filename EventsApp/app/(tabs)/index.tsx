@@ -10,52 +10,78 @@ import {
   RefreshControl,
   Animated,
   StyleSheet,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
-import { getHomeSections, loadMoreSectionEvents, type Event, type HomeSection, api } from '../../lib/api';
+import {
+  getHomeSections,
+  loadMoreSectionEvents,
+  getCategories,
+  getCart,
+  getCachedSessionId,
+  type Event,
+  type HomeSection,
+} from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
-import FilterModal, { FilterParams, buildFilterQueryString,formatDateRangeLabel } from '../../components/FilterModal';
+import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel } from '../../components/FilterModal';
 import { useAppTheme } from '../../theme/colors';
 
 // ─── Cart header button ───────────────────────────────────────────────────────
+// Uses AppState so it only re-fetches when the app comes back to the foreground
+// (e.g. after the user navigates back from the cart). getCachedSessionId reads
+// SecureStore once and caches the result in memory — no repeated bridge calls
+// on every render, which was causing the input-lag after visiting the cart.
 
 function CartHeaderButton() {
-  const router = useRouter();
-  const { colors } = useAppTheme();
-  const [count, setCount] = useState(0);
-  const prevCount = useRef(0);
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const router             = useRouter();
+  const { colors }         = useAppTheme();
+  const [count, setCount]  = useState(0);
+  const prevCount          = useRef(0);
+  const scaleAnim          = useRef(new Animated.Value(1)).current;
+  const isMounted          = useRef(true);
+
+  const refreshCount = useCallback(async () => {
+    try {
+      const sid  = await getCachedSessionId();
+      const data = await getCart(sid);
+      const n    = data?.total_items ?? 0;
+      if (!isMounted.current) return;
+      if (n !== prevCount.current) {
+        if (n > prevCount.current) {
+          Animated.sequence([
+            Animated.spring(scaleAnim, { toValue: 1.4, useNativeDriver: true, bounciness: 14 }),
+            Animated.spring(scaleAnim, { toValue: 1,   useNativeDriver: true, bounciness: 6  }),
+          ]).start();
+        }
+        prevCount.current = n;
+        setCount(n);
+      }
+    } catch { /* guest with no cart yet */ }
+  }, []);
 
   useEffect(() => {
-    let mounted = true;
-    const refresh = async () => {
-      try {
-        const sid = await SecureStore.getItemAsync('session_id').catch(() => null);
-        const headers: Record<string, string> = {};
-        if (sid) headers['X-Session-ID'] = sid;
-        const res = await api.get<{ total_items: number }>('/v1/cart', { headers });
-        const n = res.data?.total_items ?? 0;
-        if (mounted) {
-          if (n !== prevCount.current && n > 0) {
-            Animated.sequence([
-              Animated.spring(scaleAnim, { toValue: 1.4, useNativeDriver: true, bounciness: 14 }),
-              Animated.spring(scaleAnim, { toValue: 1,   useNativeDriver: true, bounciness: 6  }),
-            ]).start();
-          }
-          prevCount.current = n;
-          setCount(n);
-        }
-      } catch { /* guest with no cart yet */ }
+    isMounted.current = true;
+
+    // Initial fetch — fires after first paint so it never delays the home screen
+    refreshCount();
+
+    // Re-fetch only when the app returns to foreground (covers navigating back
+    // from cart, app switcher, lock screen). No polling interval = no timer
+    // accumulation that slows JS after repeated navigation.
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'active') refreshCount();
+    });
+
+    return () => {
+      isMounted.current = false;
+      sub.remove();
     };
-    refresh();
-    const interval = setInterval(refresh, 30_000);
-    return () => { mounted = false; clearInterval(interval); };
-  }, []);
+  }, [refreshCount]);
 
   return (
     <TouchableOpacity
@@ -118,7 +144,6 @@ const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void
           <Text className={s.hCardBadgeText}>LIVE</Text>
         </View>
       )}
-
       <View className={s.hCardPriceBadge}>
         <Text className={s.hCardPriceBadgeText}>{formatPrice(item.price, item.currency)}</Text>
       </View>
@@ -166,8 +191,8 @@ const SectionRow = ({
   section: HomeSection; isTop10?: boolean; marginTop?: boolean;
   onEventPress: (event: Event) => void; colors: any;
 }) => {
-  const [events,     setEvents]     = useState<Event[]>(section.events ?? []);
-  const [nextCursor, setNextCursor] = useState<string>(section.next_cursor ?? '');
+  const [events,      setEvents]      = useState<Event[]>(section.events ?? []);
+  const [nextCursor,  setNextCursor]  = useState<string>(section.next_cursor ?? '');
   const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
@@ -242,7 +267,8 @@ const SectionRow = ({
 export default function Index() {
   const router = useRouter();
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
-  const setAllEvents     = useEventStore((state) => state.setAllEvents);   // ← category page filter
+  const setAllEvents     = useEventStore((state) => state.setAllEvents);
+  const setDbCategories  = useEventStore((state) => state.setDbCategories);
   const { colors } = useAppTheme();
 
   // ── Refs ─────────────────────────────────────────────────────────────────
@@ -253,21 +279,21 @@ export default function Index() {
 
   // Stable random spotlight config — picked once on mount
   const [spotlightConfig, setSpotlightConfig] = useState(
-  () => SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
+    () => SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
   );
 
   const [activeCategory, setActiveCategory] = useState('All');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
+  const [dropdownOpen,   setDropdownOpen]   = useState(false);
+  const [scrolled,       setScrolled]       = useState(false);
 
   // ── Filter state ─────────────────────────────────────────────────────────
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterOpen,   setFilterOpen]   = useState(false);
   const [filterParams, setFilterParams] = useState<FilterParams>({ date: 'any' });
 
-  const [sections, setSections]     = useState<HomeSection[]>([]);
-  const [loading, setLoading]       = useState(true);
+  const [sections,   setSections]   = useState<HomeSection[]>([]);
+  const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState<string | null>(null);
+  const [error,      setError]      = useState<string | null>(null);
 
   const featuredEvent: Event | null =
     sections.find((sec) => sec.id === 'featured')?.events?.[0] ?? null;
@@ -342,8 +368,14 @@ export default function Index() {
   const fetchSections = useCallback(async () => {
     try {
       setError(null);
-      const { data } = await getHomeSections();
-      setSections(data.sections ?? []);
+      // Fetch sections and DB categories in parallel.
+      const [sectionsRes, categoriesRes] = await Promise.all([
+        getHomeSections(),
+        getCategories().catch(() => null),
+      ]);
+      setSections(sectionsRes.data.sections ?? []);
+      const cats = categoriesRes?.data?.categories ?? [];
+      if (cats.length > 0) setDbCategories(cats);
     } catch (err: any) {
       setError(err?.message ?? 'Failed to load. Check your API URL and that the backend is running.');
     }
@@ -511,34 +543,32 @@ export default function Index() {
 
         {/* Category Filter */}
         <View className={s.filterRow}>
-  {activeCategory !== 'All' && (
-      <TouchableOpacity
-        className={s.filterClearBtn}
-        style={{ borderColor: colors.dividerColor }}
-        onPress={() => setActiveCategory('All')}
-      >
-        <Text className={s.filterClearText} style={{ color: colors.text }}>✕</Text>
-      </TouchableOpacity>
-    )}
-    <TouchableOpacity
-      className={`${s.filterChip} ${activeCategory !== 'All' ? s.filterChipActive : ''}`}
-      style={activeCategory === 'All' ? { borderColor: colors.dividerColor, backgroundColor: colors.sectionCardBg } : undefined}
-      onPress={() => setDropdownOpen(true)}
-    >
-      <Text
-        className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
-        style={activeCategory === 'All' ? { color: colors.subText } : undefined}
-      >
-        {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
-      </Text>
-      <Text
-        className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
-        style={activeCategory === 'All' ? { color: colors.subText } : undefined}
-      > ▾</Text>
-    </TouchableOpacity>
-  </View>
-
-       
+          {activeCategory !== 'All' && (
+            <TouchableOpacity
+              className={s.filterClearBtn}
+              style={{ borderColor: colors.dividerColor }}
+              onPress={() => setActiveCategory('All')}
+            >
+              <Text className={s.filterClearText} style={{ color: colors.text }}>✕</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            className={`${s.filterChip} ${activeCategory !== 'All' ? s.filterChipActive : ''}`}
+            style={activeCategory === 'All' ? { borderColor: colors.dividerColor, backgroundColor: colors.sectionCardBg } : undefined}
+            onPress={() => setDropdownOpen(true)}
+          >
+            <Text
+              className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
+              style={activeCategory === 'All' ? { color: colors.subText } : undefined}
+            >
+              {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
+            </Text>
+            <Text
+              className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
+              style={activeCategory === 'All' ? { color: colors.subText } : undefined}
+            > ▾</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Category Dropdown Modal */}
         <Modal visible={dropdownOpen} transparent animationType="fade" onRequestClose={() => setDropdownOpen(false)}>
@@ -552,15 +582,14 @@ export default function Index() {
                     <Text
                       className={`${s.modalItemText} ${activeCategory === item ? s.modalItemTextActive : ''}`}
                       style={{ color: activeCategory === item ? colors.text : colors.subText }}
-                      >
+                    >
                       {item}
                     </Text>
                   </TouchableOpacity>
                 )}
               />
               <TouchableOpacity className={s.modalCloseBtn} style={{ backgroundColor: colors.sectionCardBg }} onPress={() => setDropdownOpen(false)}>
-             <Text className={s.modalCloseBtnText} style={{ color: colors.text }}>✕</Text>
-                <Text className={s.modalCloseBtnText}>✕</Text>
+                <Text className={s.modalCloseBtnText} style={{ color: colors.text }}>✕</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -600,10 +629,10 @@ export default function Index() {
         {/* Dynamic Feed Sections */}
         {loading ? (
           <View className={s.loadingRow}>
-           <ActivityIndicator size="small" color={colors.text} />
+            <ActivityIndicator size="small" color={colors.text} />
           </View>
         ) : (
-          feedSections.map((section, index) => (
+          feedSections.map((section) => (
             <SectionRow
               key={section.id}
               section={section}
@@ -637,12 +666,10 @@ export default function Index() {
                     resizeMode="cover"
                   />
                 ) : null}
-                {/* Tinted gradient — colour comes from the active spotlight config */}
                 <LinearGradient
                   colors={[spotlightConfig.gradientLight, spotlightConfig.gradientDark]}
                   style={sheet.absoluteFill}
                 />
-                {/* Accent colour strip at the bottom edge */}
                 <View style={{
                   position: 'absolute', bottom: 0, left: 0, right: 0,
                   height: 3, backgroundColor: spotlightConfig.accentColor, opacity: 0.85,

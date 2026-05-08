@@ -112,21 +112,42 @@ func UpdateCollection(pool *pgxpool.Pool, collectionID string, organizerID *stri
 	return &c, nil
 }
 
-// DeactivateCollection soft-deletes a collection (is_active = false).
+// DeactivateCollection soft-deletes a collection (is_active = false) AND
+// un-assigns all merchandise items that belonged to it (collection_id → NULL).
+// ON DELETE SET NULL only fires on a hard DELETE, so we do the un-assign
+// explicitly before marking the collection inactive.
 // Pass nil organizerID for admin calls (no ownership check).
 func DeactivateCollection(pool *pgxpool.Pool, collectionID string, organizerID *string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	q := `UPDATE merch_collections SET is_active = FALSE, updated_at = NOW() WHERE id = $1`
-	args := []any{collectionID}
-
+	// Verify the collection exists (and is owned by the organiser, if applicable)
+	// before touching anything.
+	checkQ := `SELECT EXISTS(SELECT 1 FROM merch_collections WHERE id = $1 AND is_active = TRUE`
+	checkArgs := []any{collectionID}
 	if organizerID != nil {
-		q += ` AND organizer_id = $2`
-		args = append(args, *organizerID)
+		checkQ += ` AND organizer_id = $2`
+		checkArgs = append(checkArgs, *organizerID)
+	}
+	checkQ += `)`
+	var exists bool
+	if err := pool.QueryRow(ctx, checkQ, checkArgs...).Scan(&exists); err != nil || !exists {
+		return ErrCollectionNotFound
 	}
 
-	tag, err := pool.Exec(ctx, q, args...)
+	// Un-assign all merch items first.
+	if _, err := pool.Exec(ctx,
+		`UPDATE merchandise SET collection_id = NULL, updated_at = NOW() WHERE collection_id = $1`,
+		collectionID,
+	); err != nil {
+		return fmt.Errorf("un-assign merch from collection: %w", err)
+	}
+
+	// Soft-delete the collection.
+	tag, err := pool.Exec(ctx,
+		`UPDATE merch_collections SET is_active = FALSE, updated_at = NOW() WHERE id = $1`,
+		collectionID,
+	)
 	if err != nil {
 		return fmt.Errorf("deactivate collection: %w", err)
 	}
@@ -163,16 +184,15 @@ func AssignMerchToCollection(pool *pgxpool.Pool, merchID string, collectionID *s
 	updateArgs := []any{collectionID, merchID}
 
 	if organizerID != nil {
-		// Organiser ownership check — the merch must belong to one of their events,
-		// OR be standalone merch they created (event_id IS NULL check is omitted here;
-		// add it if you need standalone merch support per organiser).
+		// Organiser ownership check — mirrors the pattern used by DeactivateMerchandise:
+		// events.organizer_id stores the user_id directly, no separate organizers table.
 		updateQ = `
             UPDATE merchandise m
             SET    collection_id = $1, updated_at = NOW()
             FROM   events e
             WHERE  m.id = $2
               AND  e.id = m.event_id
-              AND  e.organizer_id = (SELECT id FROM organizers WHERE user_id = $3 LIMIT 1)
+              AND  e.organizer_id = $3
         `
 		updateArgs = append(updateArgs, *organizerID)
 	}

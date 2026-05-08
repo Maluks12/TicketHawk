@@ -438,6 +438,15 @@ func main() {
 		user.GET("/me",           handlers.GetMyProfileHandler(pool))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 	}
+	categoriesGroup := v1.Group("/categories")
+		if rateLimitManager != nil {
+			categoriesGroup.Use(middleware.RateLimitByIP(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 60, RefillRate: 1.0, TTL: 15 * time.Minute},
+				"categories"))
+		}
+		{
+			categoriesGroup.GET("", handlers.GetCategoriesHandler(pool))
+		}
 
 	// ==========================================
 	// Home Feed

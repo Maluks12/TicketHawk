@@ -88,13 +88,18 @@ func createCollectionTestTables(t *testing.T, pool *pgxpool.Pool) {
 	stmts := []string{
 		// VARCHAR(50) for role — avoids dependency on the production user_role enum.
 		// OrganizerOnlyMiddleware and AdminOnlyMiddleware compare role as a string.
+		// first_name, last_name, phone_number are required by repository.CreateUser's
+		// INSERT statement even though the collection tests don't use them.
 		`CREATE TABLE users (
-			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			email      VARCHAR(255) UNIQUE NOT NULL,
-			password   TEXT NOT NULL,
-			role       VARCHAR(50) NOT NULL DEFAULT 'attendee',
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			updated_at TIMESTAMPTZ DEFAULT NOW()
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			email        VARCHAR(255) UNIQUE NOT NULL,
+			password     TEXT NOT NULL,
+			role         VARCHAR(50) NOT NULL DEFAULT 'attendee',
+			first_name   VARCHAR(100),
+			last_name    VARCHAR(100),
+			phone_number VARCHAR(20),
+			created_at   TIMESTAMPTZ DEFAULT NOW(),
+			updated_at   TIMESTAMPTZ DEFAULT NOW()
 		)`,
 
 		`CREATE TABLE refresh_tokens (
@@ -162,9 +167,9 @@ func createCollectionTestTables(t *testing.T, pool *pgxpool.Pool) {
 			display_order INTEGER NOT NULL DEFAULT 0,
 			is_active     BOOLEAN NOT NULL DEFAULT TRUE,
 			images        JSONB,
-			fulfillment_mode VARCHAR(50),
+			fulfillment_mode VARCHAR(50) NOT NULL DEFAULT 'delivery',
 			pickup_location  TEXT,
-			delivery_fee     NUMERIC(10,2),
+			delivery_fee     NUMERIC(10,2) NOT NULL DEFAULT 0,
 			sale_start    TIMESTAMPTZ,
 			sale_end      TIMESTAMPTZ,
 			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),

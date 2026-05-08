@@ -10,6 +10,8 @@ import {
   Dimensions,
   StatusBar,
   StyleSheet,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -128,10 +130,80 @@ function getVariantLabel(v: VariantItem): string {
 // ─── Carousel dimensions ──────────────────────────────────────────────────────
 
 const { width: W } = Dimensions.get('window');
-const CARD_W   = W * 0.72;
-const CARD_GAP = 14;
-const SNAP_W   = CARD_W + CARD_GAP;
-const SIDE_PAD = (W - CARD_W) / 2;
+const CARD_W    = W * 0.72;
+const CARD_GAP  = 14;
+const SNAP_W    = CARD_W + CARD_GAP;
+const SIDE_PAD  = (W - CARD_W) / 2;
+const IMAGE_H   = 260;
+
+// ─── Image carousel (used inside DetailOverlay) ───────────────────────────────
+
+const ImageCarousel = ({ images, tc }: { images: string[]; tc: string }) => {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const onMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const index = Math.round(e.nativeEvent.contentOffset.x / W);
+    setActiveIndex(Math.max(0, Math.min(index, images.length - 1)));
+  }, [images.length]);
+
+  if (images.length === 0) {
+    return (
+      <View style={{ width: W, height: IMAGE_H, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 48 }}>📦</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        decelerationRate="fast"
+        scrollEventThrottle={16}
+        style={{ width: W, height: IMAGE_H }}
+      >
+        {images.map((uri, i) => (
+          <Image
+            key={i}
+            source={{ uri }}
+            style={{ width: W, height: IMAGE_H }}
+            resizeMode="cover"
+          />
+        ))}
+      </ScrollView>
+
+      {images.length > 1 && (
+        <View style={{
+          flexDirection: 'row', justifyContent: 'center',
+          alignItems: 'center', gap: 5, paddingTop: 10,
+        }}>
+          {images.map((_, i) => (
+            <TouchableOpacity
+              key={i}
+              onPress={() => {
+                scrollRef.current?.scrollTo({ x: i * W, animated: true });
+                setActiveIndex(i);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <View style={{
+                width:           i === activeIndex ? 22 : 6,
+                height:          4,
+                borderRadius:    2,
+                backgroundColor: i === activeIndex ? tc : tc + '30',
+              }} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+};
 
 // ─── Carousel Card ────────────────────────────────────────────────────────────
 
@@ -518,14 +590,8 @@ const DetailOverlay = ({
           </Text>
         </View>
 
-        {/* Hero image */}
-        {imgs.length > 0 && (
-          <Image
-            source={{ uri: imgs[0] }}
-            style={{ width: '100%', height: 300 }}
-            resizeMode="cover"
-          />
-        )}
+        {/* Image carousel */}
+        <ImageCarousel images={imgs} tc={dtc} />
 
         {/* Title */}
         <Text style={{
@@ -762,20 +828,6 @@ export const CollectionModal = ({
       Animated.timing(detailOpacity, { toValue: 0,   duration: 140, useNativeDriver: true }),
     ]).start(() => setSelectedItem(null));
   }, []);
-
-  const detailDismissPan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (_, g) => g.dy > 8 && g.dy > Math.abs(g.dx),
-      onPanResponderMove:   (_, g) => { if (g.dy > 0) detailY.setValue(g.dy); },
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 80 || g.vy > 0.5) closeDetail();
-        else Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
-      },
-      onPanResponderTerminate: () => {
-        Animated.spring(detailY, { toValue: 0, useNativeDriver: true }).start();
-      },
-    })
-  ).current;
 
   // ── Carousel tracking ─────────────────────────────────────────────────────
   const scrollX    = useRef(new Animated.Value(0)).current;
