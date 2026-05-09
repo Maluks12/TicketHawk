@@ -43,11 +43,8 @@ api.interceptors.response.use(
 );
 
 // ── Session ID cache ───────────────────────────────────────────────────────
-// Reads SecureStore once and keeps the result in memory so subsequent calls
-// return synchronously — no repeated native bridge round-trips.
-// This is what fixes the input-lag after navigating back from the cart screen.
 
-let _cachedSessionId: string | null | undefined = undefined; // undefined = not yet loaded
+let _cachedSessionId: string | null | undefined = undefined;
 
 export async function getCachedSessionId(): Promise<string | null> {
   if (_cachedSessionId !== undefined) return _cachedSessionId;
@@ -172,8 +169,8 @@ export interface MerchandiseItem {
   id: string;
   event_id: string;
   event_name: string;
-  collection_id?: string;    // UUID of the merch_collection, null if standalone
-  collection_name?: string;  // display name of the collection
+  collection_id?: string;
+  collection_name?: string;
   name: string;
   description?: string;
   base_price: number;
@@ -190,6 +187,10 @@ export interface MerchandiseItem {
   seconds_until?: number;
   seconds_remain?: number;
   effective_price: number;
+  // ── Fulfillment — returned by backend, required when adding to cart ──────
+  fulfillment_mode?:  'delivery' | 'pickup' | 'both';
+  pickup_location?:   string | null;
+  delivery_fee?:      number;
 }
 
 export interface DropsResponse {
@@ -306,12 +307,6 @@ export async function getTicketTypes(eventId: string): Promise<TicketType[]> {
 }
 
 // ── Cart ───────────────────────────────────────────────────────────────────
-// Types match the actual backend JSON shape from GET /v1/cart.
-// Key fixes vs the old version:
-//   - item_type is 'ticket' | 'merchandise'  (backend sends 'merchandise', not 'merch')
-//   - unit_price_snapshot / delivery_fee_snapshot  (not unit_price / delivery_fee)
-//   - CartSummary is { total_items, total_amount, currency, items_by_event }
-//     instead of { id, items, total, item_count }
 
 export interface CartItem {
   id: string;
@@ -355,13 +350,21 @@ export interface AddTicketToCartDTO {
   quantity: number;
 }
 
-// ── Added: merch variant ──────────────────────────────────────────────────
 export interface AddMerchToCartDTO {
   item_type: 'merchandise';
   event_id: string;
   merchandise_variant_id?: string;
   quantity: number;
-  fulfillment_method?: 'pickup' | 'delivery';
+  // Required by the backend — must always be sent
+  fulfillment_method: 'pickup' | 'delivery';
+  // Required when fulfillment_method === 'delivery'
+  delivery_address?: {
+    street:       string;
+    suburb?:      string;
+    city:         string;
+    province:     string;
+    postal_code?: string;
+  };
 }
 
 export async function getCart(sessionId?: string | null): Promise<CartSummary> {
@@ -379,7 +382,6 @@ export async function addTicketToCart(
   return res.data;
 }
 
-// ── Added: add a merchandise variant to the cart ──────────────────────────
 export async function addMerchToCart(
   dto: AddMerchToCartDTO,
   sessionId?: string | null,
@@ -412,8 +414,6 @@ export async function clearCart(sessionId?: string | null): Promise<void> {
 }
 
 // ── Cart UI helpers ────────────────────────────────────────────────────────
-// Single source of truth used by cart screen, checkout screen, and the
-// home header badge. Import these instead of redefining them per screen.
 
 export function cartItemLabel(
   item: Pick<CartItem, 'item_type' | 'ticket_type_name' | 'merch_name'>
@@ -457,7 +457,7 @@ export interface ReservationSummary {
 
 export interface CheckoutBeginResponse {
   reservations: ReservationSummary[];
-  seconds_left: number;   // reservation window duration (e.g. 600 = 10 min)
+  seconds_left: number;
   cart_total: number;
   currency: string;
 }

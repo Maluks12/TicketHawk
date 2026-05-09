@@ -139,12 +139,10 @@ interface CollectionEntry {
   representativeItem: MerchandiseItem;
   items: MerchandiseItem[];
   isCollection: boolean;
-  collectionName?: string; // set when items are in a named merch_collection
+  collectionName?: string;
 }
 
 function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
-  // Items with collection_id → group by collection (uses the name you set in admin)
-  // Items without collection_id → group by event_id (original behaviour, preserves collage)
   const collectionMap = new Map<string, MerchandiseItem[]>();
   const eventMap      = new Map<string, MerchandiseItem[]>();
 
@@ -161,7 +159,6 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
 
   const entries: CollectionEntry[] = [];
 
-  // Named collection cards — title = collection_name from admin
   collectionMap.forEach((group) => {
     const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
     entries.push({
@@ -172,7 +169,6 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
     });
   });
 
-  // Event-grouped cards — original behaviour for items not in a named collection
   eventMap.forEach((group) => {
     const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
     entries.push({
@@ -186,7 +182,7 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
   return entries;
 }
 
-// ─── Image collage (main feed cards — unchanged) ──────────────────────────────
+// ─── Image collage ────────────────────────────────────────────────────────────
 
 const Collage = ({ images }: { images: string[] }) => {
   if (images.length === 0) {
@@ -213,7 +209,7 @@ const Collage = ({ images }: { images: string[] }) => {
   );
 };
 
-// ─── Detail image carousel (detail modal only) ────────────────────────────────
+// ─── Detail image carousel ────────────────────────────────────────────────────
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CAROUSEL_SIDE   = 16;
@@ -303,7 +299,6 @@ const AvailableCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: ()
   const hasExpiry = !!item.sale_end;
   const urgent = hasExpiry && remainSecs < 86400;
 
-  // Title priority: named collection name → event name → item name
   const title = isCollection
     ? (entry.collectionName || item.event_name || item.name)
     : item.name;
@@ -350,7 +345,6 @@ const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () 
   const images = parseImages(item.images);
   const untilSecs = useTickingSeconds(item.seconds_until ?? 0);
 
-  // Title priority: named collection name → event name → item name
   const title = isCollection
     ? (entry.collectionName || item.event_name || item.name)
     : item.name;
@@ -398,10 +392,7 @@ const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () 
 // ─── Size selector ────────────────────────────────────────────────────────────
 
 const SizeSelector = ({
-  groups,
-  selectedVariant,
-  onSelect,
-  tc,
+  groups, selectedVariant, onSelect, tc,
 }: {
   groups: VariantGroup[];
   selectedVariant: VariantItem | null;
@@ -465,7 +456,7 @@ const SizeSelector = ({
   </>
 );
 
-// ─── Detail modal (for direct feed card taps) ─────────────────────────────────
+// ─── Detail modal ─────────────────────────────────────────────────────────────
 
 const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => void }) => {
   const { bg, text: tc } = paletteFor(item);
@@ -614,12 +605,13 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
         </View>
       </Animated.View>
 
+      {/* ── Cart confirmation sheet ──────────────────────────────────────── */}
       {showCart && (
         <CartConfirmSheet
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={async (cartItem, variant) => {
+          onAddToCart={async (cartItem, variant, fulfillmentMethod, deliveryAddress) => {
             try {
               const sid = await getCachedSessionId();
               await addMerchToCart(
@@ -628,11 +620,14 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
                   event_id:               cartItem.event_id,
                   merchandise_variant_id: variant?.id,
                   quantity:               1,
+                  fulfillment_method:     fulfillmentMethod,
+                  delivery_address:       deliveryAddress,
                 },
                 sid,
               );
-            } catch {
-              // silently ignore — cart screen will show latest state on next visit
+            } catch (err: any) {
+              // Log so dev can see errors during testing; silent in prod
+              console.warn('[addMerchToCart]', err?.response?.data ?? err?.message);
             }
           }}
         />
@@ -745,7 +740,6 @@ export default function Merch() {
   const handleEntryPress = useCallback((entry: CollectionEntry) => {
     if (entry.isCollection) {
       setActiveCollection({
-        // Named collection → use collection name; event-grouped → use event name
         name:  entry.collectionName || entry.representativeItem.event_name || entry.representativeItem.name,
         items: entry.items,
       });
