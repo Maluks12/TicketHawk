@@ -45,14 +45,15 @@ function formatTime(iso: string) {
 // ─── MetaItem ─────────────────────────────────────────────────────────────────
 
 function MetaItem({ icon, label, value }: { icon: string; label: string; value: string }) {
+  const { colors, isDark } = useAppTheme();
   return (
     <View className={s.metaItemRow}>
-      <View className={s.metaIconBox}>
+      <View className={s.metaIconBox} style={{ backgroundColor: colors.sectionCardBg }}>
         <Text className={s.metaIconText}>{icon}</Text>
       </View>
       <View>
-        <Text className={s.metaLabelText}>{label}</Text>
-        <Text className={s.metaValueText}>{value}</Text>
+        <Text className={s.metaLabelText} style={{ color: colors.subText }}>{label}</Text>
+        <Text className={s.metaValueText} style={{ color: colors.text }}>{value}</Text>
       </View>
     </View>
   );
@@ -64,21 +65,22 @@ export default function EventDetail() {
   const router = useRouter();
   const event  = useEventStore((state) => state.selectedEvent);
   const [expanded, setExpanded] = useState(false);
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
   if (!event) {
     return (
-      <View className="flex-1 bg-white items-center justify-center">
-        <Text className="text-[#888888] font-bold text-sm tracking-widest">
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <Text style={{ color: colors.subText, fontWeight: '800', fontSize: 12, letterSpacing: 4 }}>
           EVENT NOT FOUND
         </Text>
         <TouchableOpacity
           onPress={() => router.back()}
-          className="mt-4 border border-[#DDDDDD] px-5 py-2.5 rounded-xl"
+          style={{ marginTop: 16, borderWidth: 1, borderColor: colors.dividerColor,
+            paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 }}
         >
-          <Text className="text-[#111111] text-[10px] font-extrabold tracking-[1.5px]">
+          <Text style={{ color: colors.text, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 }}>
             ← GO BACK
           </Text>
         </TouchableOpacity>
@@ -217,7 +219,7 @@ export default function EventDetail() {
           {maxCap > 0 && (
             <MetaItem icon="👥" label="CAPACITY" value={`${maxCap.toLocaleString('en-ZA')} Seats`} />
           )}
-          <View style={sheet.metaDivider} />
+          <View style={[sheet.metaDivider, { backgroundColor: colors.dividerColor }]} />
           <View className={s.ctaWrap}>
             {isSoldOut ? (
               <TouchableOpacity className={s.btnSoldOut} disabled>
@@ -248,87 +250,102 @@ export default function EventDetail() {
           {/* About */}
           <View style={{ marginBottom: 8 }}>
             <View className={s.sectionHeader}>
-              <Text className={s.sectionTitle}>About This Event</Text>
+              <Text className={s.sectionTitle} style={{ color: colors.text }}>About This Event</Text>
             </View>
-            <Text className={s.descText}>{displayDesc}</Text>
+           <Text className={s.descText} style={{ color: colors.subText }}>{displayDesc}</Text>
             {hasMore && (
               <TouchableOpacity onPress={() => setExpanded(v => !v)} activeOpacity={0.7}>
-                <Text className={s.descReadMore}>{expanded ? 'SHOW LESS ▴' : 'READ MORE'}</Text>
+                <Text className={s.descReadMore} style={{ color: colors.text, borderBottomColor: colors.text }}>
+                  {expanded ? 'SHOW LESS ▴' : 'READ MORE'}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
 
-          <View className={s.divider} />
+            <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+          
 
           {/* Bento */}
           <View style={{ marginBottom: 8 }}>
             <View className={s.bentoGrid}>
-              <View className={s.bentoCard}>
+              <View className={s.bentoCard}
+                style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
                 <Text className={s.bentoIcon}>🎟</Text>
-                <Text className={s.bentoLabel}>STATUS</Text>
-                <Text className={s.bentoValue}>
-                  {isSoldOut ? 'Sold Out' : (event.available_tickets ?? 0) < 50 ? 'Limited\nAvailable' : 'Available'}
-                </Text>
+                <Text className={s.bentoLabel} style={{ color: colors.subText }}>STATUS</Text>
+                <Text className={s.bentoValue} style={{ color: colors.text }}>...</Text>
               </View>
-              <View className={s.bentoCard}>
+              <View className={s.bentoCard}
+                style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
                 <Text className={s.bentoIcon}>✅</Text>
-                <Text className={s.bentoLabel}>TYPE</Text>
-                <Text className={s.bentoValue}>{event.category}</Text>
+                <Text className={s.bentoLabel} style={{ color: colors.subText }}>TYPE</Text>
+                <Text className={s.bentoValue} style={{ color: colors.text }}>{event.category}</Text>
               </View>
             </View>
           </View>
 
-          <View className={s.divider} />
+           <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Teams */}
           {isASport && teams.length > 0 && (
-            <>
-              <View style={{ marginBottom: 8 }}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>TEAMS</Text>
-                </View>
-                {teams.map((team, i) => (
-                  <View key={i} className={i < teams.length - 1 ? s.participantRow : s.participantRowLast}>
-                    <View className={s.participantAvatar}>
-                      <Text className={s.participantAvatarText}>{team.trim().charAt(0).toUpperCase()}</Text>
-                    </View>
-                    <Text className={s.participantName}>{team}</Text>
-                    <Text className={s.participantArrow}>›</Text>
-                  </View>
-                ))}
-              </View>
-              <View className={s.divider} />
-            </>
-          )}
+  <>
+    <View style={{ marginBottom: 8 }}>
+      <View className={s.sectionHeader}>
+        <Text className={s.sectionTitle} style={{ color: colors.text }}>TEAMS</Text>
+      </View>
+      {teams.map((team, i) => (
+        <View key={i} className={i < teams.length - 1 ? s.participantRow : s.participantRowLast}
+          style={i < teams.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
+          <View className={s.participantAvatar}
+            style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+            <Text className={s.participantAvatarText} style={{ color: colors.text }}>
+              {team.trim().charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <Text className={s.participantName} style={{ color: colors.text }}>{team}</Text>
+          <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+        </View>
+      ))}
+    </View>
+    <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+  </>
+)}
+
+    <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Performers */}
           {!isASport && performers.length > 0 && (
             <>
               <View style={{ marginBottom: 8 }}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>PERFORMERS</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>PERFORMERS</Text>
                 </View>
                 {performers.map((performer, i) => (
-                  <View key={i} className={i < performers.length - 1 ? s.participantRow : s.participantRowLast}>
-                    <View className={s.participantAvatar}>
-                      <Text className={s.participantAvatarText}>{performer.trim().charAt(0).toUpperCase()}</Text>
-                    </View>
-                    <Text className={s.participantName}>{performer}</Text>
-                    <Text className={s.participantArrow}>›</Text>
-                  </View>
-                ))}
+              <View key={i} className={i < performers.length - 1 ? s.participantRow : s.participantRowLast}
+                style={i < performers.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
+                <View className={s.participantAvatar}
+                  style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+                  <Text className={s.participantAvatarText} style={{ color: colors.text }}>
+                    {performer.trim().charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text className={s.participantName} style={{ color: colors.text }}>{performer}</Text>
+                <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
               </View>
-              <View className={s.divider} />
+            ))}
+              </View>
+             
             </>
           )}
 
           {/* Location */}
           <View style={{ marginBottom: 8 }}>
             <View className={s.sectionHeader}>
-              <Text className={s.sectionTitle}>LOCATION</Text>
+              <Text className={s.sectionTitle} style={{ color: colors.text }}>LOCATION</Text>
             </View>
-            <View className={s.locationCard}>
-              <View className={s.locationMapPlaceholder}>
+            <View className={s.locationCard}
+              style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor }}>
+              <View className={s.locationMapPlaceholder}
+                style={{ backgroundColor: isDark ? '#1a1a1a' : '#F0F0F0' }}>
                 {/* Grid lines — neutral grey */}
                 <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: 0.18 }}>
                   {[1,2,3,4,5,6].map(i => (
@@ -341,7 +358,7 @@ export default function EventDetail() {
                 {/* Pin — dark, not red */}
                 <View style={{
                   width: 44, height: 44, borderRadius: 22,
-                  backgroundColor: '#1A1A1A',
+                  backgroundColor: isDark ? '#ffffff' : '#1A1A1A',
                   alignItems: 'center', justifyContent: 'center',
                   shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.25, shadowRadius: 8, elevation: 6,
@@ -351,9 +368,9 @@ export default function EventDetail() {
               </View>
               <View className={s.locationInfoRow}>
                 <View className={s.locationInfoLeft}>
-                  <Text className={s.locationName}>{event.venue_name}</Text>
-                  {ev.address ? <Text className={s.locationAddr}>{ev.address}</Text> : null}
-                  <Text className={s.locationAddr}>{event.city}</Text>
+                  <Text className={s.locationName} style={{ color: colors.text }}>{event.venue_name}</Text>
+                  {ev.address ? <Text className={s.locationAddr} style={{ color: colors.subText }}>{ev.address}</Text> : null}
+                  <Text className={s.locationAddr} style={{ color: colors.subText }}>{event.city}</Text>
                 </View>
                 <View className={s.locationBtnRow}>
                   <TouchableOpacity className={s.locationBtnFilled} onPress={handleDirections} activeOpacity={0.8}>
@@ -367,28 +384,29 @@ export default function EventDetail() {
             </View>
           </View>
 
-          <View className={s.divider} />
+          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Organizer */}
-          <View className={s.organizerCard} style={{ marginBottom: 8 }}>
-            <View className={s.organizerLeft}>
-              <View className={s.organizerAvatar}>
-                {ev.organizer_avatar ? (
-                  <Image source={{ uri: ev.organizer_avatar }} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
-                ) : (
-                  <Text className={s.organizerAvatarText}>{organizerInitial}</Text>
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text className={s.organizerByLabel}>Organized by</Text>
-                <Text className={s.organizerName} numberOfLines={2}>{organizerName}</Text>
-              </View>
-            </View>
-            <TouchableOpacity style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 22 }}>💬</Text>
-            </TouchableOpacity>
+     <View className={s.organizerCard}
+        style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor, marginBottom: 8 }}>
+        <View className={s.organizerLeft}>
+          <View className={s.organizerAvatar}
+            style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+            {ev.organizer_avatar ? (
+              <Image source={{ uri: ev.organizer_avatar }} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
+            ) : (
+              <Text className={s.organizerAvatarText} style={{ color: colors.text }}>{organizerInitial}</Text>
+            )}
           </View>
-
+          <View style={{ flex: 1 }}>
+            <Text className={s.organizerByLabel} style={{ color: colors.subText }}>Organized by</Text>
+            <Text className={s.organizerName} style={{ color: colors.text }} numberOfLines={2}>{organizerName}</Text>
+          </View>
+        </View>
+        <TouchableOpacity style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+          <Text style={{ fontSize: 22 }}>💬</Text>
+        </TouchableOpacity>
+      </View>
           <View className={s.bottomPad} />
         </View>
       </Animated.ScrollView>
