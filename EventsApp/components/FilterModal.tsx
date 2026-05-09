@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
+import { useAppTheme } from '../theme/colors';
 
 const { width: SW } = Dimensions.get('window');
 const CELL = Math.floor((SW - 48) / 7);
@@ -160,9 +161,11 @@ interface CalendarMonthProps {
   from: string; to: string;
   todayStr: string;
   onDayPress: (iso: string) => void;
+  isDark: boolean;  
 }
 
-function CalendarMonth({ year, month, from, to, todayStr, onDayPress }: CalendarMonthProps) {
+function CalendarMonth({ year, month, from, to, todayStr, onDayPress, isDark }: CalendarMonthProps) {
+  const cal = calStyles(isDark);
   const grid = buildDaysGrid(year, month);
   return (
     <View style={{ marginBottom: 28 }}>
@@ -205,19 +208,24 @@ function CalendarMonth({ year, month, from, to, todayStr, onDayPress }: Calendar
   );
 }
 
-const cal = StyleSheet.create({
-  monthName:      { fontSize: 16, fontWeight: '800', color: '#0a0a0a', marginBottom: 10, paddingHorizontal: 24 },
-  grid:           { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 24 },
-  cell:           { alignItems: 'center', justifyContent: 'center' },
-  cellSelected:   { backgroundColor: '#0a0a0a', borderRadius: CELL / 2 },
-  cellRange:      { backgroundColor: 'rgba(10,10,10,0.08)', borderRadius: 0 },
-  cellRangeStart: { borderTopLeftRadius: CELL / 2, borderBottomLeftRadius: CELL / 2, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
-  cellRangeEnd:   { borderTopRightRadius: CELL / 2, borderBottomRightRadius: CELL / 2, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
-  dayText:        { fontSize: 15, fontWeight: '500', color: '#0a0a0a' },
-  dayPast:        { color: 'rgba(10,10,10,0.2)' },
-  daySelected:    { color: '#fff', fontWeight: '800' },
-  dayRange:       { color: '#0a0a0a' },
-});
+function calStyles(isDark: boolean) {
+  const text = isDark ? '#ffffff' : '#0a0a0a';
+  const textFaint = isDark ? 'rgba(255,255,255,0.2)' : 'rgba(10,10,10,0.2)';
+  const rangeBg = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(10,10,10,0.08)';
+  return StyleSheet.create({
+    monthName:      { fontSize: 16, fontWeight: '800', color: text, marginBottom: 10, paddingHorizontal: 24 },
+    grid:           { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 24 },
+    cell:           { alignItems: 'center', justifyContent: 'center' },
+    cellSelected:   { backgroundColor: text, borderRadius: CELL / 2 },
+    cellRange:      { backgroundColor: rangeBg, borderRadius: 0 },
+    cellRangeStart: { borderTopLeftRadius: CELL / 2, borderBottomLeftRadius: CELL / 2, borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+    cellRangeEnd:   { borderTopRightRadius: CELL / 2, borderBottomRightRadius: CELL / 2, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
+    dayText:        { fontSize: 15, fontWeight: '500', color: text },
+    dayPast:        { color: textFaint },
+    daySelected:    { color: isDark ? '#000' : '#fff', fontWeight: '800' },
+    dayRange:       { color: text },
+  });
+}
 
 // ─── Province → cities mapping (client-side province search) ─────────────────
 
@@ -274,6 +282,7 @@ function buildLocationResults(query: string, backendCities: CityResult[]): LocRo
 export default function FilterModal({ visible, onClose, onApply, initialParams }: FilterModalProps) {
 
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useAppTheme();
 
   const [screen, setScreen] = useState<Screen>('filter');
 
@@ -431,55 +440,87 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
     >
 
       {/* ══════════ FILTER SHEET ══════════ */}
-      {screen === 'filter' && (
-        <View style={s.filterRoot}>
-          <Pressable style={s.backdrop} onPress={onClose} />
-          <View style={s.sheet}>
-            <View style={s.handle} />
+     {screen === 'filter' && (
+  <View style={s.filterRoot}>
+    <Pressable style={s.backdrop} onPress={onClose} />
+    <View style={[s.sheet, { backgroundColor: colors.background }]}>
+      <View style={[s.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)' }]} />
 
-            <Text style={s.sectionTitle}>Location</Text>
-            <TouchableOpacity onPress={() => setScreen('location')} style={s.locationRow} activeOpacity={0.7}>
-              <View style={s.locationIcon}><Text style={{ fontSize: 20 }}>📍</Text></View>
-              <Text style={[s.locationText, locationIsSet && s.locationTextSet]}>{locationLabel}</Text>
-              <Text style={s.chevron}>›</Text>
-            </TouchableOpacity>
-
-            <View style={s.divider} />
-
-            <Text style={[s.sectionTitle, { marginTop: 8 }]}>Dates</Text>
-            <View style={s.pillRow}>
-              {PILLS.map(({ key, label }) => {
-                const active = datePreset === key;
-                return (
-                  <TouchableOpacity key={key} onPress={() => handleDatePreset(key)} style={[s.pill, active && s.pillActive]} activeOpacity={0.7}>
-                    <Text style={[s.pillText, active && s.pillTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <TouchableOpacity onPress={() => handleDatePreset('custom')} style={[s.setDatesBtn, datePreset === 'custom' && s.setDatesBtnActive]} activeOpacity={0.7}>
-              <Text style={[s.setDatesText, datePreset === 'custom' && s.setDatesTextActive]}>{customBtnLabel}</Text>
-            </TouchableOpacity>
-
-            <View style={s.doneRow}>
-              <TouchableOpacity onPress={handleDone} style={s.doneBtn} activeOpacity={0.85}>
-                <Text style={s.doneBtnText}>Done</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+      {/* ── Header ── */}
+      <View style={s.filterHeader}>
+        <Text style={[s.filterTitle, { color: colors.text }]}>Filters</Text>
+        <View style={[s.filterPinCircle, { backgroundColor: colors.ctaBg }]}>
+          <Ionicons name="location" size={16} color="#fff" />
         </View>
-      )}
+      </View>
+
+      {/* ── Location ── */}
+      <Text style={[s.sectionTitle, { color: colors.text }]}>Location</Text>
+      <TouchableOpacity onPress={() => setScreen('location')} style={s.locationRow} activeOpacity={0.7}>
+        <View style={[s.locationIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}>
+          <Ionicons name="location-outline" size={20} color={colors.text} />
+        </View>
+        <Text style={[s.locationText, { color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)' },
+          locationIsSet && { color: colors.text, fontWeight: '600' }]}>
+          {locationLabel}
+        </Text>
+        <Text style={[s.chevron, { color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }]}>›</Text>
+      </TouchableOpacity>
+
+      <View style={[s.divider, { backgroundColor: colors.dividerColor }]} />
+
+      {/* ── Dates ── */}
+      <View style={s.datesHeader}>
+        <Text style={[s.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Dates</Text>
+        <Ionicons name="calendar-outline" size={22} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'} />
+      </View>
+
+      {/* Segmented toggle: Any date | Pick date */}
+      <View style={[s.segmentTrack, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }]}>
+        <TouchableOpacity
+          style={[s.segmentBtn, datePreset === 'any' && { backgroundColor: colors.ctaBg }]}
+          onPress={() => handleDatePreset('any')}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.segmentText, { color: datePreset === 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
+            Any date
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.segmentBtn, datePreset !== 'any' && { backgroundColor: isDark ? '#2a2a2a' : '#2a2a2a' }]}
+          onPress={() => handleDatePreset('custom')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="calendar-outline" size={14}
+            color={datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)')}
+            style={{ marginRight: 5 }}
+          />
+          <Text style={[s.segmentText, { color: datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
+            {datePreset === 'custom' && dateFrom && dateTo ? formatDateRangeLabel(dateFrom, dateTo) : 'Pick date'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Done ── */}
+      <View style={s.doneRow}>
+        <TouchableOpacity onPress={handleDone} style={[s.doneBtn, { backgroundColor: colors.secondaryBg }]} activeOpacity={0.85}>
+          <Text style={[s.doneBtnText, { color: colors.secondaryText }]}>DONE</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </View>
+)}
 
       {/* ══════════ LOCATION SCREEN ══════════ */}
       {screen === 'location' && (
-        <View style={[s.fullScreen, { paddingTop: insets.top }]}>
+        <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
             {/* ── Search bar — matches search tab design ── */}
             <View style={s.locTopBar}>
-              <View style={[s.locSearchBox, locInputFocused && s.locSearchBoxFocused]}>
-                <Ionicons name="search" size={17} color="rgba(10,10,10,0.45)" style={{ marginRight: 8 }} />
+              <View style={[s.locSearchBox, locInputFocused && s.locSearchBoxFocused,
+                { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(10,10,10,0.06)' }]}>
+                <Ionicons name="search" size={17} color={isDark ? 'rgba(255,255,255,0.45)' : 'rgba(10,10,10,0.45)'} style={{ marginRight: 8 }} />
                 <TextInput
                   ref={inputRef}
                   value={query}
@@ -487,8 +528,8 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                   onFocus={() => setLocInputFocused(true)}
                   onBlur={() => setLocInputFocused(false)}
                   placeholder="Search by city or province…"
-                  placeholderTextColor="rgba(10,10,10,0.38)"
-                  style={s.locSearchInput}
+                  placeholderTextColor={isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.38)'}
+                  style={[s.locSearchInput, { color: colors.text }]}
                   returnKeyType="search"
                   onSubmitEditing={Keyboard.dismiss}
                   autoCorrect={false}
@@ -496,7 +537,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                 />
                 {query.length > 0 && (
                   <TouchableOpacity onPress={() => { setQuery(''); setCities([]); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Ionicons name="close-circle" size={16} color="rgba(10,10,10,0.35)" />
+                    <Ionicons name="close-circle" size={16} color={isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)'} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -531,8 +572,8 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                         activeOpacity={0.7}
                       >
                         <View style={s.locRowLeft}>
-                          <Ionicons name="map-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
-                          <Text style={[s.locRowText, s.locProvinceRowText, selectedProvince === item.label && s.locRowTextSelected]}>
+                          <Ionicons name="map-outline" size={18} color={isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)'} style={{ marginRight: 12 }} />
+                          <Text style={[s.locRowText, selectedProvince === item.label && s.locRowTextSelected, { color: colors.text }]}>
                             {item.label}
                           </Text>
                         </View>
@@ -543,8 +584,8 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                   return (
                     <TouchableOpacity onPress={() => handleCitySelect(item.label)} style={s.locRow} activeOpacity={0.7}>
                       <View style={s.locRowLeft}>
-                        <Ionicons name="location-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
-                        <Text style={[s.locRowText, selectedCity === item.label && s.locRowTextSelected]}>
+                        <Ionicons name="location-outline" size={18} color={isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)'} style={{ marginRight: 12 }} />
+                        <Text style={[s.locRowText, selectedCity === item.label && s.locRowTextSelected, { color: colors.text }]}>
                           {item.label}
                         </Text>
                       </View>
@@ -556,9 +597,9 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                 }}
                 ListEmptyComponent={
                   query.trim() ? (
-                    <Text style={s.locEmpty}>No results for "{query}"</Text>
+                    <Text style={[s.locEmpty, { color: colors.subText }]}>No results for "{query}"</Text>
                   ) : (
-                    <Text style={s.locEmpty}>Start typing a city or province…</Text>
+                    <Text style={[s.locEmpty, { color: colors.subText }]}>Start typing a city or province…</Text>
                   )
                 }
                 ItemSeparatorComponent={() => <View style={s.locDivider} />}
@@ -570,9 +611,9 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
               <View style={s.hairline} />
               <TouchableOpacity onPress={handleNearMe} style={s.currentLocBtn} activeOpacity={0.7}>
                 {locLoading
-                  ? <ActivityIndicator size="small" color="#0a0a0a" style={{ marginRight: 8 }} />
-                  : <Ionicons name="navigate" size={16} color="#0a0a0a" style={{ marginRight: 6 }} />}
-                <Text style={s.currentLocText}>Use Current Location</Text>
+                  ? <ActivityIndicator size="small" color={colors.text} style={{ marginRight: 8 }} />
+                  : <Ionicons name="navigate" size={16} color={colors.text} style={{ marginRight: 6 }} />}
+                <Text style={[s.currentLocText, { color: colors.text }]}>Use Current Location</Text>
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
@@ -581,16 +622,16 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
       {/* ══════════ CALENDAR SCREEN ══════════ */}
       {screen === 'calendar' && (
-        <View style={[s.fullScreen, { paddingTop: insets.top }]}>
+       <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
           <View style={s.calHeader}>
             <TouchableOpacity style={[s.calHeaderCol, calStep === 'from' && s.calHeaderColActive]} onPress={() => setCalStep('from')} activeOpacity={0.7}>
               <Text style={s.calHeaderLabel}>FROM</Text>
-              <Text style={[s.calHeaderDate, !calFrom && s.calHeaderDateEmpty]}>{calFrom ? formatDisplay(calFrom) : 'Select date'}</Text>
+              <Text style={[s.calHeaderDate, !calFrom && s.calHeaderDateEmpty, { color: colors.text }]}>{calFrom ? formatDisplay(calFrom) : 'Select date'}</Text>
             </TouchableOpacity>
             <View style={s.calHeaderDivider} />
             <TouchableOpacity style={[s.calHeaderCol, calStep === 'to' && s.calHeaderColActive]} onPress={() => calFrom && setCalStep('to')} activeOpacity={calFrom ? 0.7 : 1}>
               <Text style={s.calHeaderLabel}>TO</Text>
-              <Text style={[s.calHeaderDate, !calTo && s.calHeaderDateEmpty]}>{calTo ? formatDisplay(calTo) : 'Select date'}</Text>
+              <Text style={[s.calHeaderDate, !calTo && s.calHeaderDateEmpty, { color: colors.text }]}>{calTo ? formatDisplay(calTo) : 'Select date'}</Text>
             </TouchableOpacity>
           </View>
 
@@ -605,13 +646,13 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 16, paddingBottom: 8 }}>
             {months.map(({ year, month }) => (
-              <CalendarMonth key={`${year}-${month}`} year={year} month={month} from={calFrom} to={calTo} todayStr={todayStr} onDayPress={handleDayPress} />
+              <CalendarMonth key={`${year}-${month}`} year={year} month={month} from={calFrom} to={calTo} todayStr={todayStr} onDayPress={handleDayPress} isDark={isDark} />
             ))}
           </ScrollView>
 
           <View style={s.calFooter}>
             <TouchableOpacity onPress={() => setScreen('filter')} activeOpacity={0.7}>
-              <Text style={s.calCancelText}>Cancel</Text>
+              <Text style={[s.calCancelText, { color: colors.text }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={handleCalendarApply} style={[s.calApplyBtn, !calCanApply && s.calApplyBtnDisabled]} activeOpacity={calCanApply ? 0.85 : 1}>
               <Text style={s.calApplyText}>Apply</Text>
@@ -630,9 +671,12 @@ const s = StyleSheet.create({
   backdrop:            { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet:               { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 44, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 24 },
   handle:              { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.12)', alignSelf: 'center', marginTop: 12, marginBottom: 24 },
-  sectionTitle:        { fontSize: 22, fontWeight: '800', color: '#0a0a0a', paddingHorizontal: 24, marginBottom: 4 },
-  locationRow:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 14 },
-  locationIcon:        { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(10,10,10,0.06)', alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  filterHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 20 },
+  filterTitle:    { fontSize: 18, fontWeight: '700' },
+  filterPinCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  sectionTitle:   { fontSize: 18, fontWeight: '800', paddingHorizontal: 24, marginBottom: 4 },
+  locationRow:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 14 },
+  locationIcon:   { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
   locationText:        { flex: 1, fontSize: 17, fontWeight: '400', color: 'rgba(10,10,10,0.45)' },
   locationTextSet:     { fontWeight: '600', color: '#0a0a0a' },
   chevron:             { fontSize: 22, color: 'rgba(10,10,10,0.3)' },
@@ -646,14 +690,18 @@ const s = StyleSheet.create({
   setDatesBtnActive:   { borderWidth: 2, borderColor: '#0a0a0a' },
   setDatesText:        { fontSize: 15, fontWeight: '600', color: 'rgba(10,10,10,0.6)' },
   setDatesTextActive:  { fontWeight: '800', color: '#0a0a0a' },
-  doneRow:             { paddingHorizontal: 24, marginTop: 24, alignItems: 'flex-end' },
-  doneBtn:             { backgroundColor: '#0a0a0a', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 40 },
-  doneBtnText:         { color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.3 },
+  datesHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginTop: 8, marginBottom: 14 },
+  segmentTrack:   { flexDirection: 'row', marginHorizontal: 24, borderRadius: 28, padding: 4, marginBottom: 28 },
+  segmentBtn:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 24 },
+  segmentText:    { fontSize: 14, fontWeight: '600' },
+  doneRow:        { paddingHorizontal: 24, marginTop: 28 },
+  doneBtn:        { borderRadius: 16, paddingVertical: 17, alignItems: 'center' },
+  doneBtnText:    { fontWeight: '800', fontSize: 16, letterSpacing: 1 },
   fullScreen:          { flex: 1, backgroundColor: '#fff' },
-  hairline:            { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.1)' },
+  hairline:       { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.25)' },
   locTopBar:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, gap: 10 },
   locSearchBox:        { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,10,10,0.06)', borderRadius: 14, paddingHorizontal: 14, height: 46, borderWidth: 1.5, borderColor: 'transparent' },
-  locSearchBoxFocused: { borderColor: '#ff3c6e', backgroundColor: '#fff' },
+  locSearchBoxFocused: { borderColor: '#ff2d55', backgroundColor: 'transparent' },
   locSearchInput:      { flex: 1, fontSize: 15, color: '#0a0a0a', fontWeight: '400' },
   locCancelBtn:        { paddingLeft: 4, paddingVertical: 8 },
   locCancelText:       { fontSize: 16, color: '#ff3c6e', fontWeight: '600' },
@@ -663,24 +711,23 @@ const s = StyleSheet.create({
   locRowText:          { flex: 1, fontSize: 16, fontWeight: '400', color: '#0a0a0a' },
   locRowTextSelected:  { fontWeight: '700', color: '#ff3c6e' },
   locProvinceRowText:  { fontWeight: '600' },
-  locProvinceTag:      { fontSize: 11, fontWeight: '700', color: 'rgba(10,10,10,0.35)', letterSpacing: 0.8, textTransform: 'uppercase', marginLeft: 8 },
-  locRowCount:         { fontSize: 12, color: 'rgba(10,10,10,0.35)', marginLeft: 8 },
-  locDivider:          { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(10,10,10,0.07)', marginLeft: 46 },
+  locProvinceTag: { fontSize: 11, fontWeight: '700', color: 'rgba(128,128,128,0.6)', letterSpacing: 0.8, textTransform: 'uppercase', marginLeft: 8 },
+  locRowCount:    { fontSize: 12, color: 'rgba(128,128,128,0.6)', marginLeft: 8 },  locDivider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.15)', marginLeft: 46 },
   locEmpty:            { textAlign: 'center', color: 'rgba(10,10,10,0.35)', fontSize: 14, marginTop: 48, lineHeight: 22 },
   currentLocBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 8 },
   currentLocText:      { fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
-  calHeader:           { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(0,0,0,0.12)' },
-  calHeaderCol:        { flex: 1, paddingVertical: 16, paddingHorizontal: 24 },
-  calHeaderColActive:  { borderBottomWidth: 2, borderBottomColor: '#0a0a0a' },
-  calHeaderLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: 'rgba(10,10,10,0.4)', marginBottom: 5 },
-  calHeaderDate:       { fontSize: 17, fontWeight: '800', color: '#0a0a0a' },
-  calHeaderDateEmpty:  { fontWeight: '400', color: 'rgba(10,10,10,0.35)' },
+  calHeader:           { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(128,128,128,0.2)' },
+  calHeaderColActive:  { borderBottomWidth: 2, borderBottomColor: '#ff2d55' },
+  calHeaderLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: 'rgba(128,128,128,0.6)', marginBottom: 5 },
+  calHeaderDate:       { fontSize: 17, fontWeight: '800' },        // color set inline
+  calHeaderDateEmpty:  { fontWeight: '400' }, 
   calHeaderDivider:    { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.15)', marginVertical: 14 },
+  calHeaderCol:        { flex: 1, paddingVertical: 16, paddingHorizontal: 24 },
   calDowRow:           { flexDirection: 'row', paddingHorizontal: 24, paddingTop: 14, paddingBottom: 8 },
-  calDowText:          { fontSize: 13, fontWeight: '600', color: 'rgba(10,10,10,0.35)' },
+  calDowText:          { fontSize: 13, fontWeight: '600', color: 'rgba(128,128,128,0.6)' },
   calFooter:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(0,0,0,0.08)' },
-  calCancelText:       { fontSize: 16, fontWeight: '500', color: '#0a0a0a' },
-  calApplyBtn:         { backgroundColor: '#0a0a0a', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 44 },
+  calApplyBtn:         { backgroundColor: '#1c2e61', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 44 },
+  calCancelText:       { fontSize: 16, fontWeight: '500' },
   calApplyBtnDisabled: { backgroundColor: 'rgba(10,10,10,0.2)' },
   calApplyText:        { color: '#fff', fontWeight: '800', fontSize: 15 },
 });

@@ -248,7 +248,7 @@ const SectionRow = ({
         ListFooterComponent={
           loadingMore ? (
             <View style={{ width: 56, alignItems: 'center', justifyContent: 'center' }}>
-              <ActivityIndicator size="small" color="#000000" />
+              <ActivityIndicator size="small" color={colors.text} />
             </View>
           ) : null
         }
@@ -611,17 +611,10 @@ export default function Index() {
             <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
             <TouchableOpacity
               onPress={onRefresh}
-              style={{
-                marginTop: 10,
-                alignSelf: 'flex-start',
-                borderWidth: 1,
-                borderColor: '#0a0a0a',
-                paddingHorizontal: 14,
-                paddingVertical: 6,
-                borderRadius: 2,
-              }}
+              style={{ marginTop: 10, alignSelf: 'flex-start', borderWidth: 1,
+                borderColor: colors.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 2 }}
             >
-              <Text style={{ color: '#0a0a0a', fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
+              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -647,7 +640,6 @@ export default function Index() {
         {/* Dynamic Spotlight Section */}
         {!loading && sportsBannerEvent && (
           <>
-            <View style={{ height: 1, backgroundColor: colors.dividerColor, marginVertical: 4 }} />
             <View className={s.sectionMt}>
               <View className={s.sectionHeader}>
                 <Text className={s.sectionTitle} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
@@ -721,10 +713,10 @@ export default function Index() {
           if (!freeEvents.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
+              
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>FREE EVENTS</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>FREE EVENTS</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -748,10 +740,9 @@ export default function Index() {
           if (!premiumEvents.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>PREMIUM & EXCLUSIVE</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>PREMIUM & EXCLUSIVE</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -782,10 +773,9 @@ export default function Index() {
           if (!comingUp.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>COMING NEXT MONTH</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>COMING NEXT MONTH</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -811,10 +801,9 @@ export default function Index() {
           if (!otherCities.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>AROUND THE COUNTRY</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>AROUND THE COUNTRY</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -840,10 +829,9 @@ export default function Index() {
           if (!musicEvents.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>MUSIC & CONCERTS</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>MUSIC & CONCERTS</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -867,10 +855,9 @@ export default function Index() {
           if (!galaEvents.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>GALA & BLACK TIE</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>GALA & BLACK TIE</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -894,10 +881,9 @@ export default function Index() {
           if (!techEvents.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>TECH & BUSINESS</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>TECH & BUSINESS</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
@@ -921,10 +907,9 @@ export default function Index() {
           if (!foodEvents.length) return null;
           return (
             <>
-              <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 4 }} />
               <View className={s.sectionMt}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle}>FOOD & LIFESTYLE</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>FOOD & LIFESTYLE</Text>
                   <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
                 </View>
               </View>
