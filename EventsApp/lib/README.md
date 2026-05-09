@@ -172,6 +172,8 @@ export interface MerchandiseItem {
   id: string;
   event_id: string;
   event_name: string;
+  collection_id?: string;    // UUID of the merch_collection, null if standalone
+  collection_name?: string;  // display name of the collection
   name: string;
   description?: string;
   base_price: number;
@@ -353,6 +355,15 @@ export interface AddTicketToCartDTO {
   quantity: number;
 }
 
+// ── Added: merch variant ──────────────────────────────────────────────────
+export interface AddMerchToCartDTO {
+  item_type: 'merchandise';
+  event_id: string;
+  merchandise_variant_id?: string;
+  quantity: number;
+  fulfillment_method?: 'pickup' | 'delivery';
+}
+
 export async function getCart(sessionId?: string | null): Promise<CartSummary> {
   const headers = makeSessionHeaders(sessionId ?? null);
   const res = await api.get<CartSummary>('/v1/cart', { headers });
@@ -361,6 +372,16 @@ export async function getCart(sessionId?: string | null): Promise<CartSummary> {
 
 export async function addTicketToCart(
   dto: AddTicketToCartDTO,
+  sessionId?: string | null,
+): Promise<CartItem> {
+  const headers = makeSessionHeaders(sessionId ?? null);
+  const res = await api.post<CartItem>('/v1/cart/items', dto, { headers });
+  return res.data;
+}
+
+// ── Added: add a merchandise variant to the cart ──────────────────────────
+export async function addMerchToCart(
+  dto: AddMerchToCartDTO,
   sessionId?: string | null,
 ): Promise<CartItem> {
   const headers = makeSessionHeaders(sessionId ?? null);
@@ -441,7 +462,6 @@ export interface CheckoutBeginResponse {
   currency: string;
 }
 
-// Added: was missing from the original file
 export interface CheckoutConfirmResponse {
   client_token: string;
   payment_request_id: string;
@@ -457,7 +477,6 @@ export async function checkoutBegin(sessionId?: string | null): Promise<Checkout
   return res.data;
 }
 
-// Added: was missing from the original file
 export async function checkoutConfirm(sessionId?: string | null): Promise<CheckoutConfirmResponse> {
   const headers = makeSessionHeaders(sessionId ?? null);
   const res = await api.post<CheckoutConfirmResponse>('/v1/checkout/confirm', {}, { headers });

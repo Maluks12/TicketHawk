@@ -15,7 +15,9 @@ import {
 } from 'react-native';
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { type MerchandiseItem } from '../lib/api';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { type MerchandiseItem, addMerchToCart, getCachedSessionId } from '../lib/api';
 import { CartConfirmSheet } from './CartConfirmSheet';
 
 // ─── Palette (mirrors merch.tsx — single source of truth for colours) ─────────
@@ -756,8 +758,21 @@ const DetailOverlay = ({
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={(_item, _variant) => {
-            // TODO: wire to cart store
+          onAddToCart={async (cartItem, variant) => {
+            try {
+              const sid = await getCachedSessionId();
+              await addMerchToCart(
+                {
+                  item_type:              'merchandise',
+                  event_id:               cartItem.event_id,
+                  merchandise_variant_id: variant?.id,
+                  quantity:               1,
+                },
+                sid,
+              );
+            } catch {
+              // silently ignore — cart screen will show latest state on next visit
+            }
           }}
         />
       )}

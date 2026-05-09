@@ -16,7 +16,9 @@ import {
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getDropsFeed, type MerchandiseItem } from '../../lib/api';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { getDropsFeed, addMerchToCart, getCachedSessionId, type MerchandiseItem } from '../../lib/api';
 import { s, sheet } from '../../styles/merch';
 import { CollectionModal } from '../../components/CollectionModal';
 import { CartConfirmSheet } from '../../components/CartConfirmSheet';
@@ -137,23 +139,46 @@ interface CollectionEntry {
   representativeItem: MerchandiseItem;
   items: MerchandiseItem[];
   isCollection: boolean;
+  collectionName?: string; // set when items are in a named merch_collection
 }
 
 function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
-  const map = new Map<string, MerchandiseItem[]>();
+  // Items with collection_id → group by collection (uses the name you set in admin)
+  // Items without collection_id → group by event_id (original behaviour, preserves collage)
+  const collectionMap = new Map<string, MerchandiseItem[]>();
+  const eventMap      = new Map<string, MerchandiseItem[]>();
+
   for (const item of items) {
-    const key = item.event_id;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(item);
+    if (item.collection_id) {
+      if (!collectionMap.has(item.collection_id)) collectionMap.set(item.collection_id, []);
+      collectionMap.get(item.collection_id)!.push(item);
+    } else {
+      const key = item.event_id || item.id;
+      if (!eventMap.has(key)) eventMap.set(key, []);
+      eventMap.get(key)!.push(item);
+    }
   }
 
   const entries: CollectionEntry[] = [];
-  map.forEach((group) => {
+
+  // Named collection cards — title = collection_name from admin
+  collectionMap.forEach((group) => {
     const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
     entries.push({
       representativeItem: sorted[0],
-      items: sorted,
-      isCollection: sorted.length > 1,
+      items:              sorted,
+      isCollection:       true,
+      collectionName:     sorted[0].collection_name || undefined,
+    });
+  });
+
+  // Event-grouped cards — original behaviour for items not in a named collection
+  eventMap.forEach((group) => {
+    const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
+    entries.push({
+      representativeItem: sorted[0],
+      items:              sorted,
+      isCollection:       sorted.length > 1,
     });
   });
 
@@ -189,32 +214,22 @@ const Collage = ({ images }: { images: string[] }) => {
 };
 
 // ─── Detail image carousel (detail modal only) ────────────────────────────────
-// Dots are driven by a real-time Animated.Value so they track your finger
-// frame-by-frame rather than snapping only after momentum ends.
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const CAROUSEL_SIDE   = 16;   // horizontal margin — matches card padding
+const CAROUSEL_SIDE   = 16;
 const CAROUSEL_W      = SCREEN_W - CAROUSEL_SIDE * 2;
-const CAROUSEL_RADIUS = 12;   // matches event card border radius
+const CAROUSEL_RADIUS = 12;
 const CAROUSEL_H      = 300;
 
 const DetailImageCarousel = ({ images, tc }: { images: string[]; tc: string }) => {
-  // useNativeDriver: true — scroll tracking runs on the native thread, zero JS lag.
-  // Dots use scaleX + opacity (both native-compatible) instead of width, which
-  // would require useNativeDriver: false and run on the slower JS thread.
   const scrollX = useRef(new Animated.Value(0)).current;
 
   if (images.length === 0) {
     return (
       <View style={{
-        width:           CAROUSEL_W,
-        alignSelf:       'center',
-        height:          CAROUSEL_H,
-        borderRadius:    CAROUSEL_RADIUS,
-        overflow:        'hidden',
-        backgroundColor: tc + '10',
-        alignItems:      'center',
-        justifyContent:  'center',
+        width: CAROUSEL_W, alignSelf: 'center', height: CAROUSEL_H,
+        borderRadius: CAROUSEL_RADIUS, overflow: 'hidden',
+        backgroundColor: tc + '10', alignItems: 'center', justifyContent: 'center',
       }}>
         <Text style={{ fontSize: 40 }}>📦</Text>
       </View>
@@ -223,78 +238,41 @@ const DetailImageCarousel = ({ images, tc }: { images: string[]; tc: string }) =
 
   return (
     <View>
-      {/*
-        Explicit width + alignSelf:'center' is more reliable than marginHorizontal
-        for clipping on Android. collapsable={false} forces Android to create a
-        real native view layer so overflow:'hidden' + borderRadius actually clips.
-      */}
-      <View
-        collapsable={false}
-        style={{
-          width:        CAROUSEL_W,
-          alignSelf:    'center',
-          height:       CAROUSEL_H,
-          borderRadius: CAROUSEL_RADIUS,
-          overflow:     'hidden',
-        }}
-      >
+      <View collapsable={false} style={{
+        width: CAROUSEL_W, alignSelf: 'center', height: CAROUSEL_H,
+        borderRadius: CAROUSEL_RADIUS, overflow: 'hidden',
+      }}>
         <Animated.ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={CAROUSEL_W}
-          snapToAlignment="start"
-          decelerationRate="fast"
-          disableIntervalMomentum
-          scrollEventThrottle={16}
+          horizontal showsHorizontalScrollIndicator={false}
+          snapToInterval={CAROUSEL_W} snapToAlignment="start"
+          decelerationRate="fast" disableIntervalMomentum scrollEventThrottle={16}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { useNativeDriver: true },  // native thread — perfectly smooth
+            { useNativeDriver: true },
           )}
         >
           {images.map((uri, i) => (
-            <Image
-              key={i}
-              source={{ uri }}
-              style={{ width: CAROUSEL_W, height: CAROUSEL_H }}
-              resizeMode="cover"
-            />
+            <Image key={i} source={{ uri }} style={{ width: CAROUSEL_W, height: CAROUSEL_H }} resizeMode="cover" />
           ))}
         </Animated.ScrollView>
       </View>
 
-      {/* Dots: scaleX animates from 6/22≈0.27 (inactive) → 1 (active).
-          Both scaleX and opacity run on the native thread → zero lag. */}
       {images.length > 1 && (
-        <View style={{
-          flexDirection:  'row',
-          justifyContent: 'center',
-          alignItems:     'center',
-          gap:            6,
-          paddingTop:     10,
-        }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingTop: 10 }}>
           {images.map((_, i) => {
             const dotScale = scrollX.interpolate({
               inputRange:  [(i - 1) * CAROUSEL_W, i * CAROUSEL_W, (i + 1) * CAROUSEL_W],
-              outputRange: [6 / 22, 1, 6 / 22],
-              extrapolate: 'clamp',
+              outputRange: [6 / 22, 1, 6 / 22], extrapolate: 'clamp',
             });
             const dotOpacity = scrollX.interpolate({
               inputRange:  [(i - 1) * CAROUSEL_W, i * CAROUSEL_W, (i + 1) * CAROUSEL_W],
-              outputRange: [0.3, 1, 0.3],
-              extrapolate: 'clamp',
+              outputRange: [0.3, 1, 0.3], extrapolate: 'clamp',
             });
             return (
-              <Animated.View
-                key={i}
-                style={{
-                  width:           22,   // always 22; scaleX shrinks inactive dots to ~6px
-                  height:          4,
-                  borderRadius:    2,
-                  backgroundColor: tc,
-                  opacity:         dotOpacity,
-                  transform:       [{ scaleX: dotScale }],
-                }}
-              />
+              <Animated.View key={i} style={{
+                width: 22, height: 4, borderRadius: 2, backgroundColor: tc,
+                opacity: dotOpacity, transform: [{ scaleX: dotScale }],
+              }} />
             );
           })}
         </View>
@@ -310,12 +288,8 @@ const CollectionBadge = ({ count, tc }: { count: number; tc: string }) => (
     borderWidth: 1, borderColor: tc + '50', borderRadius: 2,
     paddingHorizontal: 8, paddingVertical: 4, alignItems: 'center', marginLeft: 8,
   }}>
-    <Text style={{ fontSize: 13, fontWeight: '900', color: tc, lineHeight: 15 }}>
-      {count}
-    </Text>
-    <Text style={{ fontSize: 7, fontWeight: '700', letterSpacing: 1.2, color: tc + '60' }}>
-      ITEMS
-    </Text>
+    <Text style={{ fontSize: 13, fontWeight: '900', color: tc, lineHeight: 15 }}>{count}</Text>
+    <Text style={{ fontSize: 7, fontWeight: '700', letterSpacing: 1.2, color: tc + '60' }}>ITEMS</Text>
   </View>
 );
 
@@ -329,6 +303,11 @@ const AvailableCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: ()
   const hasExpiry = !!item.sale_end;
   const urgent = hasExpiry && remainSecs < 86400;
 
+  // Title priority: named collection name → event name → item name
+  const title = isCollection
+    ? (entry.collectionName || item.event_name || item.name)
+    : item.name;
+
   return (
     <TouchableOpacity activeOpacity={0.95} onPress={onPress}>
       <View className={s.card} style={{ backgroundColor: bg }}>
@@ -340,19 +319,13 @@ const AvailableCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: ()
           <View style={{ flex: 1 }} />
           {hasExpiry && (
             <View className={s.expiryBadge} style={{ borderColor: urgent ? '#ff3c6e' : tc + '40' }}>
-              <Text className={s.expiryLabel} style={{ color: urgent ? '#ff3c6e' : tc + '80' }}>
-                ENDS IN
-              </Text>
-              <Text className={s.expiryTimer} style={{ color: urgent ? '#ff3c6e' : tc }}>
-                {formatCountdown(remainSecs)}
-              </Text>
+              <Text className={s.expiryLabel} style={{ color: urgent ? '#ff3c6e' : tc + '80' }}>ENDS IN</Text>
+              <Text className={s.expiryTimer} style={{ color: urgent ? '#ff3c6e' : tc }}>{formatCountdown(remainSecs)}</Text>
             </View>
           )}
         </View>
         <Collage images={images} />
-        <Text className={s.cardTitle} style={{ color: tc }} numberOfLines={3}>
-          {isCollection ? (item.event_name || item.name) : item.name}
-        </Text>
+        <Text className={s.cardTitle} style={{ color: tc }} numberOfLines={3}>{title}</Text>
         <View className={s.cardBottom} style={{ borderTopColor: tc + '25' }}>
           <Text className={s.category} style={{ color: tc + 'aa' }}>
             {isCollection ? `${entry.items.length} ITEMS` : (item.category ?? 'MERCHANDISE').toUpperCase()}
@@ -377,6 +350,11 @@ const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () 
   const images = parseImages(item.images);
   const untilSecs = useTickingSeconds(item.seconds_until ?? 0);
 
+  // Title priority: named collection name → event name → item name
+  const title = isCollection
+    ? (entry.collectionName || item.event_name || item.name)
+    : item.name;
+
   return (
     <TouchableOpacity activeOpacity={0.95} onPress={onPress}>
       <View className={s.card} style={{ backgroundColor: bg }}>
@@ -386,19 +364,13 @@ const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () 
           </Text>
           {isCollection && <CollectionBadge count={entry.items.length} tc={tc} />}
           <View style={{ flex: 1 }} />
-          <Text className={s.upcomingLabel} style={{ color: tc + '80' }}>
-            DROPS IN
-          </Text>
+          <Text className={s.upcomingLabel} style={{ color: tc + '80' }}>DROPS IN</Text>
         </View>
         <View className={s.countdownRow} style={{ borderTopColor: tc + '15', borderBottomColor: tc + '15' }}>
-          <Text className={s.countdownText} style={{ color: tc }}>
-            {formatCountdown(untilSecs)}
-          </Text>
+          <Text className={s.countdownText} style={{ color: tc }}>{formatCountdown(untilSecs)}</Text>
         </View>
         <Collage images={images} />
-        <Text className={s.cardTitle} style={{ color: tc }} numberOfLines={3}>
-          {isCollection ? (item.event_name || item.name) : item.name}
-        </Text>
+        <Text className={s.cardTitle} style={{ color: tc }} numberOfLines={3}>{title}</Text>
         <View className={s.cardBottom} style={{ borderTopColor: tc + '25' }}>
           <Text className={s.category} style={{ color: tc + 'aa' }}>
             {isCollection ? `${entry.items.length} ITEMS` : (item.category ?? 'MERCHANDISE').toUpperCase()}
@@ -445,29 +417,22 @@ const SizeSelector = ({
           className={s.variantsRow}
           style={{ borderTopColor: tc + '20', borderBottomColor: tc + '20', marginTop: 2 }}
         >
-          {/* Row header */}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <Text className={s.variantsLabel} style={{ color: tc + '70' }}>
-              {group.label}
-            </Text>
+            <Text className={s.variantsLabel} style={{ color: tc + '70' }}>{group.label}</Text>
             {groupSelected && (
               <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 1, color: tc + 'bb' }}>
                 {getVariantLabel(groupSelected).toUpperCase()}
                 {groupSelected.stock_quantity > 0 && groupSelected.stock_quantity <= 5
-                  ? `  —  ONLY ${groupSelected.stock_quantity} LEFT`
-                  : ''}
+                  ? `  —  ONLY ${groupSelected.stock_quantity} LEFT` : ''}
               </Text>
             )}
           </View>
-
-          {/* Chips */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {group.variants.map((v) => {
               const label      = getVariantLabel(v);
               const outOfStock = v.stock_quantity === 0;
               const lowStock   = !outOfStock && v.stock_quantity <= 5;
               const isSelected = selectedVariant?.id === v.id;
-
               return (
                 <TouchableOpacity
                   key={v.id}
@@ -475,49 +440,21 @@ const SizeSelector = ({
                   disabled={outOfStock}
                   style={{
                     borderWidth: isSelected ? 2 : 1,
-                    borderColor: outOfStock
-                      ? tc + '20'
-                      : isSelected
-                      ? tc
-                      : tc + '50',
+                    borderColor: outOfStock ? tc + '20' : isSelected ? tc : tc + '50',
                     backgroundColor: isSelected ? tc + '18' : 'transparent',
-                    paddingHorizontal: 14,
-                    paddingVertical: 9,
-                    borderRadius: 2,
-                    marginRight: 8,
-                    alignItems: 'center',
-                    minWidth: 54,
+                    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 2,
+                    marginRight: 8, alignItems: 'center', minWidth: 54,
                   }}
                 >
                   <Text style={{
-                    fontSize: 11,
-                    fontWeight: isSelected ? '900' : '700',
-                    letterSpacing: 0.8,
+                    fontSize: 11, fontWeight: isSelected ? '900' : '700', letterSpacing: 0.8,
                     color: outOfStock ? tc + '28' : isSelected ? tc : tc + 'cc',
                   }}>
                     {label.toUpperCase()}
                   </Text>
-
-                  {/* Low stock warning */}
-                  {lowStock && (
-                    <Text style={{ fontSize: 7, color: '#ff9500', fontWeight: '800', marginTop: 2, letterSpacing: 0.5 }}>
-                      LOW
-                    </Text>
-                  )}
-
-                  {/* Sold out label */}
-                  {outOfStock && (
-                    <Text className={s.variantSoldOut} style={{ color: tc + '30' }}>
-                      SOLD OUT
-                    </Text>
-                  )}
-
-                  {/* Price override badge */}
-                  {v.price_override != null && (
-                    <Text style={{ fontSize: 8, color: tc + '80', fontWeight: '700', marginTop: 2 }}>
-                      {formatPrice(v.price_override)}
-                    </Text>
-                  )}
+                  {lowStock && <Text style={{ fontSize: 7, color: '#ff9500', fontWeight: '800', marginTop: 2, letterSpacing: 0.5 }}>LOW</Text>}
+                  {outOfStock && <Text className={s.variantSoldOut} style={{ color: tc + '30' }}>SOLD OUT</Text>}
+                  {v.price_override != null && <Text style={{ fontSize: 8, color: tc + '80', fontWeight: '700', marginTop: 2 }}>{formatPrice(v.price_override)}</Text>}
                 </TouchableOpacity>
               );
             })}
@@ -534,13 +471,13 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const { bg, text: tc } = paletteFor(item);
   const images = parseImages(item.images);
   const { top } = useSafeAreaInsets();
+  const router = useRouter();
   const translateY = useRef(new Animated.Value(800)).current;
   useEffect(() => {
     Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
   }, []);
   const scrollOffset = useRef(0);
 
-  // ── Variant / size selection ───────────────────────────────────────────────
   const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
   const [showCart, setShowCart] = useState(false);
   const variantGroups = useMemo(
@@ -587,8 +524,6 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const isAvailable = item.sale_status === 'live';
   const remainSecs = useTickingSeconds(item.seconds_remain ?? 0);
   const untilSecs  = useTickingSeconds(item.seconds_until ?? 0);
-
-  // BUY button is disabled when the item is live AND has sizes but none is chosen yet
   const buyDisabled = isAvailable && hasVariants && !selectedVariant;
 
   return (
@@ -596,7 +531,6 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
       <StatusBar barStyle={tc === '#ffffff' ? 'light-content' : 'dark-content'} />
       <Animated.View style={[sheet.modalFlex, { backgroundColor: bg, transform: [{ translateY }] }]}>
 
-        {/* ── Drag handle + status bar ───────────────────────────────── */}
         <View className={s.dragHandleArea} style={{ paddingTop: top + 8 }} {...pilePan.panHandlers}>
           <View className={s.dragHandle} style={{ backgroundColor: tc + '55' }} />
           <View className={s.modalTopBar}>
@@ -605,19 +539,14 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
             </Text>
             <View style={{ flex: 1 }} />
             {isAvailable && item.seconds_remain != null && (
-              <Text className={s.modalHeat} style={{ color: tc + 'aa' }}>
-                ENDS {formatCountdown(remainSecs)}
-              </Text>
+              <Text className={s.modalHeat} style={{ color: tc + 'aa' }}>ENDS {formatCountdown(remainSecs)}</Text>
             )}
             {!isAvailable && item.seconds_until != null && (
-              <Text className={s.modalHeat} style={{ color: tc + 'aa' }}>
-                IN {formatCountdown(untilSecs)}
-              </Text>
+              <Text className={s.modalHeat} style={{ color: tc + 'aa' }}>IN {formatCountdown(untilSecs)}</Text>
             )}
           </View>
         </View>
 
-        {/* ── Scrollable body ────────────────────────────────────────── */}
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 120 }}
@@ -625,46 +554,31 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           scrollEventThrottle={16}
           {...scrollPan.panHandlers}
         >
-          {/* Price / category box */}
           <View className={s.heatScoreBox} style={{ borderColor: tc + '40' }}>
             <Text className={s.heatScoreBoxLabel} style={{ color: tc + '90' }}>
               {(item.category ?? 'MERCHANDISE').toUpperCase()}
             </Text>
-            <Text className={s.heatScoreBoxScore} style={{ color: tc }}>
-              {formatPrice(displayPrice)}
-            </Text>
-            <Text className={s.heatScoreBoxName} style={{ color: tc + '90' }} numberOfLines={2}>
-              {item.name}
-            </Text>
+            <Text className={s.heatScoreBoxScore} style={{ color: tc }}>{formatPrice(displayPrice)}</Text>
+            <Text className={s.heatScoreBoxName} style={{ color: tc + '90' }} numberOfLines={2}>{item.name}</Text>
           </View>
 
-          {/* ── Image carousel — spaced + rounded, dots real-time animated ── */}
           <View style={{ marginTop: 16 }}>
             <DetailImageCarousel images={images} tc={tc} />
           </View>
 
           <Text className={s.detailTitle} style={{ color: tc }}>{item.name}</Text>
 
-          {/* ── Size / variant selector ─────────────────────────────── */}
           {hasVariants && (
-            <SizeSelector
-              groups={variantGroups}
-              selectedVariant={selectedVariant}
-              onSelect={setSelectedVariant}
-              tc={tc}
-            />
+            <SizeSelector groups={variantGroups} selectedVariant={selectedVariant} onSelect={setSelectedVariant} tc={tc} />
           )}
 
-          {/* ── Info grid ──────────────────────────────────────────── */}
           <View className={s.detailGrid}>
             {[
               ['PRICE',    formatPrice(displayPrice)],
               ['CATEGORY', (item.category ?? '—').toUpperCase()],
               ['STATUS',   item.sale_status.toUpperCase()],
               ['RELEASE',  item.sale_start
-                ? new Date(item.sale_start)
-                    .toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' })
-                    .toUpperCase()
+                ? new Date(item.sale_start).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase()
                 : 'NOW'],
             ].map(([label, value]) => (
               <View key={label} className={s.detailRow} style={{ borderBottomColor: tc + '20' }}>
@@ -679,18 +593,13 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           )}
         </ScrollView>
 
-        {/* ── Bottom action bar ─────────────────────────────────────── */}
         <View className={s.modalBottom} style={{ borderTopColor: tc + '20', backgroundColor: bg }}>
           <TouchableOpacity>
             <Text className={s.modalBottomAlerts} style={{ color: tc + 'aa' }}>ALERTS</Text>
           </TouchableOpacity>
           <View className={s.modalBottomCenter}>
-            <Text className={s.modalBottomTitle} style={{ color: tc }} numberOfLines={1}>
-              {item.name}
-            </Text>
-            <Text className={s.modalBottomDate} style={{ color: tc + '80' }}>
-              {formatPrice(displayPrice)}
-            </Text>
+            <Text className={s.modalBottomTitle} style={{ color: tc }} numberOfLines={1}>{item.name}</Text>
+            <Text className={s.modalBottomDate} style={{ color: tc + '80' }}>{formatPrice(displayPrice)}</Text>
           </View>
           <TouchableOpacity
             className={s.buyNowBtn}
@@ -699,23 +608,32 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
             onPress={isAvailable && !buyDisabled ? () => setShowCart(true) : undefined}
           >
             <Text className={s.buyNowText} style={{ color: tc }}>
-              {isAvailable
-                ? buyDisabled ? 'SELECT SIZE' : 'BUY'
-                : 'ALERT'}
+              {isAvailable ? buyDisabled ? 'SELECT SIZE' : 'BUY' : 'ALERT'}
             </Text>
           </TouchableOpacity>
         </View>
-
       </Animated.View>
 
-      {/* ── Cart confirmation sheet ──────────────────────────────────────── */}
       {showCart && (
         <CartConfirmSheet
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={(_item, _variant) => {
-            // TODO: wire to cart store
+          onAddToCart={async (cartItem, variant) => {
+            try {
+              const sid = await getCachedSessionId();
+              await addMerchToCart(
+                {
+                  item_type:              'merchandise',
+                  event_id:               cartItem.event_id,
+                  merchandise_variant_id: variant?.id,
+                  quantity:               1,
+                },
+                sid,
+              );
+            } catch {
+              // silently ignore — cart screen will show latest state on next visit
+            }
           }}
         />
       )}
@@ -750,6 +668,7 @@ interface ActiveCollection {
 }
 
 export default function Merch() {
+  const router                                  = useRouter();
   const [selected,         setSelected]         = useState<MerchandiseItem | null>(null);
   const [activeCollection, setActiveCollection] = useState<ActiveCollection | null>(null);
   const [tab,              setTab]              = useState<Tab>('available');
@@ -759,7 +678,7 @@ export default function Merch() {
   const [refreshing,       setRefreshing]       = useState(false);
   const [error,            setError]            = useState<string | null>(null);
   const { colors }                              = useAppTheme();
-  const { top: insetTop }                       = useSafeAreaInsets();
+  const insets                                  = useSafeAreaInsets();
 
   const lastScrollY  = useRef(0);
   const headerAnim   = useRef(new Animated.Value(0)).current;
@@ -780,7 +699,6 @@ export default function Merch() {
     }
   }, [headerAnim, headerH]);
 
-  // ── Dynamic background ────────────────────────────────────────────────────
   const activeBgRef = useRef('#0a0a0a');
   const [bgColors, setBgColors] = useState({ active: '#0a0a0a', prev: '#0a0a0a' });
   const bgAnim = useRef(new Animated.Value(1)).current;
@@ -827,7 +745,8 @@ export default function Merch() {
   const handleEntryPress = useCallback((entry: CollectionEntry) => {
     if (entry.isCollection) {
       setActiveCollection({
-        name:  entry.representativeItem.event_name || entry.representativeItem.name,
+        // Named collection → use collection name; event-grouped → use event name
+        name:  entry.collectionName || entry.representativeItem.event_name || entry.representativeItem.name,
         items: entry.items,
       });
     } else {
@@ -853,8 +772,8 @@ export default function Merch() {
           <View className={s.header}>
             <Text className={s.headerTitle} style={{ color: '#ffffff' }}>DROPS</Text>
             <View className={s.headerRight}>
-              <TouchableOpacity className={s.cartBtn}>
-                <Text className={s.cartIcon}>🛒</Text>
+              <TouchableOpacity className={s.cartBtn} onPress={() => router.push('/cart' as any)}>
+                <Ionicons name="cart-outline" size={26} color="#ffffff" />
               </TouchableOpacity>
             </View>
           </View>
@@ -886,18 +805,6 @@ export default function Merch() {
         </SafeAreaView>
       </Animated.View>
 
-      {/* ── Floating cart — always visible ── */}
-      <View style={{
-        position: 'absolute',
-        top: insetTop + 12,
-        right: 20,
-        zIndex: 20,
-      }}>
-        <TouchableOpacity className={s.cartBtn}>
-          <Text className={s.cartIcon}>🛒</Text>
-        </TouchableOpacity>
-      </View>
-
       {error && (
         <View className={s.errorBanner} style={{ marginTop: headerH }}>
           <Text className={s.errorText}>⚠ {error}</Text>
@@ -916,7 +823,9 @@ export default function Merch() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           data={visibleCollections}
-          keyExtractor={(entry) => `${entry.representativeItem.event_id}-${tab}`}
+          keyExtractor={(entry) =>
+            `${entry.representativeItem.collection_id ?? entry.representativeItem.event_id ?? entry.representativeItem.id}-${tab}`
+          }
           renderItem={({ item: entry }) =>
             entry.representativeItem.sale_status === 'live'
               ? <AvailableCard entry={entry} onPress={() => handleEntryPress(entry)} />
@@ -939,12 +848,10 @@ export default function Merch() {
         />
       )}
 
-      {/* Single-item detail modal (direct feed card taps) */}
       {selected && (
         <DetailModal item={selected} onClose={() => setSelected(null)} />
       )}
 
-      {/* Collection carousel — detail is handled internally by CollectionModal */}
       {activeCollection && (
         <CollectionModal
           collectionName={activeCollection.name}

@@ -165,6 +165,138 @@ const RefundModal = ({ visible, bookingId, onClose, onSuccess }: {
   );
 };
 
+// ─── Mock booking details (mirrors MOCK_BOOKINGS in tickets.tsx) ──────────────
+
+const MOCK_DETAILS: Record<string, BookingDetail> = {
+  'mock-1': {
+    id: 'mock-1',
+    booking_number: 'BK-A3F7K2',
+    event_id: 'evt-1',
+    ticket_quantity: 2,
+    unit_price: 700,
+    subtotal: 1400,
+    platform_fee: 80,
+    organizer_fee: 0,
+    total_amount: 1480,
+    discount_amount: 0,
+    currency: 'ZAR',
+    booking_status: 'confirmed',
+    payment_status: 'completed',
+    qr_code_url: null,
+    tickets_sent: true,
+    ticket_type_name: 'VIP',
+    attendee_first_name: 'Demo',
+    attendee_last_name: 'User',
+    attendee_email: 'demo@example.com',
+    created_at: new Date(Date.now() - 3 * 86400000).toISOString(),
+    confirmed_at: new Date(Date.now() - 3 * 86400000 + 60000).toISOString(),
+    event: {
+      title: 'Sun Met 2026 — Cape Town',
+      start_time: new Date(Date.now() + 7 * 86400000).toISOString(),
+      venue_name: 'Kenilworth Racecourse',
+      city: 'Cape Town',
+      cover_image_url: 'https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=800',
+      address: 'Kenilworth Racecourse, Rosmead Ave, Kenilworth, Cape Town, 7708',
+    },
+  },
+  'mock-2': {
+    id: 'mock-2',
+    booking_number: 'BK-R9Q2M1',
+    event_id: 'evt-2',
+    ticket_quantity: 1,
+    unit_price: 650,
+    subtotal: 650,
+    platform_fee: 45,
+    organizer_fee: 0,
+    total_amount: 695,
+    discount_amount: 0,
+    currency: 'ZAR',
+    booking_status: 'confirmed',
+    payment_status: 'completed',
+    qr_code_url: null,
+    tickets_sent: true,
+    ticket_type_name: 'GENERAL ADMISSION',
+    attendee_first_name: 'Demo',
+    attendee_last_name: 'User',
+    attendee_email: 'demo@example.com',
+    created_at: new Date(Date.now() - 1 * 86400000).toISOString(),
+    confirmed_at: new Date(Date.now() - 1 * 86400000 + 60000).toISOString(),
+    event: {
+      title: 'Afro Nation Johannesburg',
+      start_time: new Date(Date.now() + 1 * 86400000).toISOString(),
+      venue_name: 'FNB Stadium',
+      city: 'Johannesburg',
+      cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800',
+      address: 'FNB Stadium, Soccer City Ave, Nasrec, Johannesburg, 1809',
+    },
+  },
+  'mock-3': {
+    id: 'mock-3',
+    booking_number: 'BK-T5X8N4',
+    event_id: 'evt-3',
+    ticket_quantity: 3,
+    unit_price: 700,
+    subtotal: 2100,
+    platform_fee: 120,
+    organizer_fee: 0,
+    total_amount: 2220,
+    discount_amount: 0,
+    currency: 'ZAR',
+    booking_status: 'confirmed',
+    payment_status: 'completed',
+    qr_code_url: null,
+    tickets_sent: true,
+    ticket_type_name: 'PREMIUM',
+    attendee_first_name: 'Demo',
+    attendee_last_name: 'User',
+    attendee_email: 'demo@example.com',
+    created_at: new Date(Date.now() - 40 * 86400000).toISOString(),
+    confirmed_at: new Date(Date.now() - 40 * 86400000 + 60000).toISOString(),
+    event: {
+      title: 'Ultra South Africa — Johannesburg',
+      start_time: new Date(Date.now() - 10 * 86400000).toISOString(),
+      venue_name: 'Expo Centre',
+      city: 'Johannesburg',
+      cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800',
+      address: 'Expo Centre, Nasrec Rd, Johannesburg, 2109',
+    },
+  },
+  'mock-4': {
+    id: 'mock-4',
+    booking_number: 'BK-D2W6P9',
+    event_id: 'evt-4',
+    ticket_quantity: 1,
+    unit_price: 350,
+    subtotal: 350,
+    platform_fee: 30,
+    organizer_fee: 0,
+    total_amount: 380,
+    discount_amount: 0,
+    currency: 'ZAR',
+    booking_status: 'cancelled',
+    payment_status: 'refunded',
+    qr_code_url: null,
+    tickets_sent: false,
+    ticket_type_name: 'GENERAL ADMISSION',
+    attendee_first_name: 'Demo',
+    attendee_last_name: 'User',
+    attendee_email: 'demo@example.com',
+    created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
+    confirmed_at: new Date(Date.now() - 60 * 86400000 + 60000).toISOString(),
+    refunded_at: new Date(Date.now() - 55 * 86400000).toISOString(),
+    refunded_reason: 'Event cancelled by organiser.',
+    refunded_amount: 380,
+    event: {
+      title: 'Design Indaba 2025',
+      start_time: new Date(Date.now() - 45 * 86400000).toISOString(),
+      venue_name: 'Cape Town International Convention Centre',
+      city: 'Cape Town',
+      cover_image_url: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
+      address: 'CTICC, Convention Square, 1 Lower Long St, Cape Town, 8001',
+    },
+  },
+};
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function BookingDetailScreen() {
@@ -180,6 +312,12 @@ export default function BookingDetailScreen() {
 
   useEffect(() => {
     const load = async () => {
+      // Intercept mock IDs — no API call needed
+      if (id?.startsWith('mock-')) {
+        setBooking(MOCK_DETAILS[id] ?? null);
+        setLoading(false);
+        return;
+      }
       if (!user) { setLoading(false); return; }
       try {
         const { data } = await api.get<BookingDetail>(`/v1/bookings/${id}`);
