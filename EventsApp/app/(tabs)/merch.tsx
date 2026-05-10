@@ -13,6 +13,7 @@ import {
   RefreshControl,
   StyleSheet,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -611,24 +612,18 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={async (cartItem, variant, fulfillmentMethod, deliveryAddress) => {
-            try {
-              const sid = await getCachedSessionId();
-              await addMerchToCart(
-                {
-                  item_type:              'merchandise',
-                  event_id:               cartItem.event_id,
-                  merchandise_variant_id: variant?.id,
-                  quantity:               1,
-                  fulfillment_method:     fulfillmentMethod,
-                  delivery_address:       deliveryAddress,
-                },
-                sid,
-              );
-            } catch (err: any) {
-              // Log so dev can see errors during testing; silent in prod
-              console.warn('[addMerchToCart]', err?.response?.data ?? err?.message);
-            }
+          onAddToCart={async (cartItem, variant, fulfillmentMethod) => {
+            const sid = await getCachedSessionId();
+            await addMerchToCart(
+              {
+                item_type:              'merchandise',
+                event_id:               cartItem.event_id,
+                merchandise_variant_id: variant?.id,
+                quantity:               1,
+                fulfillment_method:     fulfillmentMethod,
+              },
+              sid,
+            );
           }}
         />
       )}

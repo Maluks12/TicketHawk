@@ -16,7 +16,8 @@ const dropsMerchCols = `m.id, m.event_id, COALESCE(e.title, '') AS event_name,
        m.name, m.description, m.base_price, m.category,
        m.display_order, m.is_active, m.images::text,
        m.sale_start, m.sale_end, m.created_at, m.updated_at,
-       m.collection_id, COALESCE(mc.name, '') AS collection_name`
+       m.collection_id, COALESCE(mc.name, '') AS collection_name,
+       m.fulfillment_mode, m.pickup_location, m.delivery_fee`
 
 type DropsResponse struct {
 	Available []DropItem `json:"available"`
@@ -101,6 +102,7 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 			&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 			&m.SaleStart, &m.SaleEnd, &m.CreatedAt, &m.UpdatedAt,
 			&collectionID, &collectionName,
+			&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		); err != nil {
 			return nil, err
 		}

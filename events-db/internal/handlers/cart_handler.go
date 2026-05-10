@@ -106,14 +106,11 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				// buyer can choose either — no restriction
 			}
 
-			// Delivery requires a shipping address
-			if method == "delivery" {
-				if dto.DeliveryAddress == nil {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error": "delivery_address is required when fulfillment_method is \"delivery\"",
-					})
-					return
-				}
+			// Delivery requires a shipping address.
+			// NOTE: delivery_address is validated at checkout, not here, so
+			// the user can add a delivery item first and fill the address on
+			// the cart page before checking out.
+			if method == "delivery" && dto.DeliveryAddress != nil {
 				if dto.DeliveryAddress.Street == "" || dto.DeliveryAddress.City == "" || dto.DeliveryAddress.Province == "" {
 					c.JSON(http.StatusBadRequest, gin.H{
 						"error": "delivery_address must include street, city, and province",
@@ -122,16 +119,24 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				}
 				// Apply the delivery fee snapshot
 				deliveryFee = fi.DeliveryFee
+			} else if method == "delivery" {
+				// No address yet — still apply the fee snapshot so the total
+				// shown in the cart is accurate. Address is required at checkout.
+				deliveryFee = fi.DeliveryFee
 			}
 
 		} else if dto.TicketTypeID != nil {
 			// ── Ticket — specific tier ────────────────────────────────
+			if dto.EventID == nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "event_id is required for ticket items"})
+				return
+			}
 			tt, ttErr := repository.GetTicketTypeByID(pool, *dto.TicketTypeID)
 			if ttErr != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "ticket type not found"})
 				return
 			}
-			if tt.EventID != dto.EventID {
+			if tt.EventID != *dto.EventID {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "ticket type does not belong to this event"})
 				return
 			}
@@ -148,7 +153,11 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		} else {
 			// ── Ticket — flat priced ──────────────────────────────────
-			event, eErr := repository.GetEventByID(pool, dto.EventID, nil)
+			if dto.EventID == nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "event_id is required for ticket items"})
+				return
+			}
+			event, eErr := repository.GetEventByID(pool, *dto.EventID, nil)
 			if eErr != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 				return
@@ -184,11 +193,28 @@ func UpdateCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if err := repository.UpdateCartItemQuantity(pool, cart.ID, itemID, dto.Quantity); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+
+		// Update quantity if provided
+		if dto.Quantity != nil {
+			if err := repository.UpdateCartItemQuantity(pool, cart.ID, itemID, *dto.Quantity); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "quantity updated"})
+
+		// Update delivery address if provided
+		if dto.DeliveryAddress != nil {
+			if dto.DeliveryAddress.Street == "" || dto.DeliveryAddress.City == "" || dto.DeliveryAddress.Province == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "delivery_address must include street, city, and province"})
+				return
+			}
+			if err := repository.UpdateCartItemDeliveryAddress(pool, cart.ID, itemID, dto.DeliveryAddress); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "cart item updated"})
 	}
 }
 
@@ -245,6 +271,7 @@ func MergeCartHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 // buildCartSummary groups cart items by event and computes totals.
 // Line totals include delivery fees.
+// Standalone merch (no event_id) is grouped under the empty-string key "".
 func buildCartSummary(cart *models.Cart) models.CartSummary {
 	groups := map[string]*models.EventGroup{}
 	var total float64
@@ -253,16 +280,22 @@ func buildCartSummary(cart *models.Cart) models.CartSummary {
 		lineTotal := item.LineTotal()
 		total += lineTotal
 
-		eg, ok := groups[item.EventID]
+		// Use empty string as the map key for standalone merch (no event).
+		groupKey := ""
+		if item.EventID != nil {
+			groupKey = *item.EventID
+		}
+
+		eg, ok := groups[groupKey]
 		if !ok {
 			title := ""
 			if item.EventTitle != nil {
 				title = *item.EventTitle
 			}
-			groups[item.EventID] = &models.EventGroup{
+			groups[groupKey] = &models.EventGroup{
 				EventID: item.EventID, EventTitle: title,
 			}
-			eg = groups[item.EventID]
+			eg = groups[groupKey]
 		}
 		eg.Items = append(eg.Items, item)
 		eg.Subtotal += lineTotal

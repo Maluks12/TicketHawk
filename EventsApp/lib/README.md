@@ -417,6 +417,15 @@ export async function updateCartItem(
   await api.patch(`/v1/cart/items/${itemId}`, { quantity }, { headers });
 }
 
+export async function updateCartItemAddress(
+  itemId: string,
+  address: { street: string; suburb?: string; city: string; province: string; postal_code?: string },
+  sessionId?: string | null,
+): Promise<void> {
+  const headers = makeSessionHeaders(sessionId ?? null);
+  await api.patch(`/v1/cart/items/${itemId}`, { delivery_address: address }, { headers });
+}
+
 export async function removeCartItem(
   itemId: string,
   sessionId?: string | null,

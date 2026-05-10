@@ -9,6 +9,7 @@ import {
   Animated,
   StyleSheet,
   RefreshControl,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,6 +21,7 @@ import {
   type CartEventGroup,
   getCart,
   updateCartItem,
+  updateCartItemAddress,
   removeCartItem,
   clearCart,
   cartItemLabel,
@@ -28,14 +30,206 @@ import {
   getCachedSessionId,
 } from '../../lib/api';
 
+// ─── Delivery address state per item ─────────────────────────────────────────
+
+interface AddressForm {
+  street:      string;
+  suburb:      string;
+  city:        string;
+  province:    string;
+  postal_code: string;
+}
+
+const emptyAddress = (): AddressForm => ({
+  street: '', suburb: '', city: '', province: '', postal_code: '',
+});
+
+function parseStoredAddress(raw?: string | null): AddressForm | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw);
+    return {
+      street:      p.street      ?? '',
+      suburb:      p.suburb      ?? '',
+      city:        p.city        ?? '',
+      province:    p.province    ?? '',
+      postal_code: p.postal_code ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isAddressComplete(a: AddressForm) {
+  return a.street.trim() !== '' && a.city.trim() !== '' && a.province.trim() !== '';
+}
+
+// ─── DeliveryAddressRow ───────────────────────────────────────────────────────
+
+interface DeliveryAddressRowProps {
+  item:      CartItem;
+  sessionId: string | null;
+  colors:    any;
+  isDark:    boolean;
+  onSaved:   () => void;
+}
+
+function DeliveryAddressRow({ item, sessionId, colors, isDark, onSaved }: DeliveryAddressRowProps) {
+  const stored   = parseStoredAddress(item.delivery_address);
+  const [form,   setForm]   = useState<AddressForm>(stored ?? emptyAddress());
+  const [open,   setOpen]   = useState(!stored || !isAddressComplete(stored));
+  const [saving, setSaving] = useState(false);
+  const heightAnim = useRef(new Animated.Value(open ? 1 : 0)).current;
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    Animated.spring(heightAnim, {
+      toValue: next ? 1 : 0,
+      damping: 20, stiffness: 220, useNativeDriver: false,
+    }).start();
+  };
+
+  const handleSave = async () => {
+    if (!isAddressComplete(form)) {
+      Alert.alert('Missing fields', 'Street, city, and province are required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateCartItemAddress(item.id, {
+        street:      form.street.trim(),
+        suburb:      form.suburb.trim() || undefined,
+        city:        form.city.trim(),
+        province:    form.province.trim(),
+        postal_code: form.postal_code.trim() || undefined,
+      }, sessionId);
+      setOpen(false);
+      Animated.spring(heightAnim, { toValue: 0, damping: 20, stiffness: 220, useNativeDriver: false }).start();
+      onSaved();
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error ?? 'Could not save address.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const complete = isAddressComplete(form);
+  const cardBg   = isDark ? '#161616' : '#f9f9f9';
+  const border   = isDark ? '#2a2a2a' : '#e5e5e5';
+  const inputBg  = isDark ? '#0f0f0f' : '#fff';
+  const label    = isDark ? '#888' : '#999';
+
+  const summaryLine = stored && isAddressComplete(stored)
+    ? [stored.street, stored.suburb, stored.city, stored.province].filter(Boolean).join(', ')
+    : null;
+
+  return (
+    <View style={{ marginHorizontal: 16, marginBottom: 4 }}>
+      <TouchableOpacity
+        onPress={toggle}
+        activeOpacity={0.75}
+        style={[styles.addressHeader, { backgroundColor: cardBg, borderColor: border }]}
+      >
+        <View style={styles.addressHeaderLeft}>
+          <Text style={{ fontSize: 16 }}>📦</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.addressHeaderTitle, { color: colors.text }]}>
+              Delivery address
+            </Text>
+            {summaryLine ? (
+              <Text style={[styles.addressHeaderSub, { color: colors.subText }]} numberOfLines={1}>
+                {summaryLine}
+              </Text>
+            ) : (
+              <Text style={[styles.addressHeaderSub, { color: '#ff9500' }]}>
+                Required before checkout
+              </Text>
+            )}
+          </View>
+        </View>
+        <View style={styles.addressHeaderRight}>
+          {summaryLine && (
+            <View style={styles.savedPill}>
+              <Text style={styles.savedPillText}>✓</Text>
+            </View>
+          )}
+          <Text style={[styles.chevron, { color: colors.subText }]}>{open ? '▲' : '▼'}</Text>
+        </View>
+      </TouchableOpacity>
+
+      <Animated.View style={{
+        overflow: 'hidden',
+        maxHeight: heightAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 520] }),
+        opacity: heightAnim,
+      }}>
+        <View style={[styles.addressForm, { backgroundColor: cardBg, borderColor: border }]}>
+          {[
+            { key: 'street',      label: 'Street address *',  multi: false },
+            { key: 'suburb',      label: 'Suburb',            multi: false },
+          ].map(({ key, label: ph }) => (
+            <TextInput
+              key={key}
+              placeholder={ph}
+              placeholderTextColor={label}
+              value={(form as any)[key]}
+              onChangeText={(v) => setForm(f => ({ ...f, [key]: v }))}
+              style={[styles.input, { color: colors.text, backgroundColor: inputBg, borderColor: border }]}
+            />
+          ))}
+
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {[
+              { key: 'city',     label: 'City *' },
+              { key: 'province', label: 'Province *' },
+            ].map(({ key, label: ph }) => (
+              <TextInput
+                key={key}
+                placeholder={ph}
+                placeholderTextColor={label}
+                value={(form as any)[key]}
+                onChangeText={(v) => setForm(f => ({ ...f, [key]: v }))}
+                style={[styles.input, { flex: 1, color: colors.text, backgroundColor: inputBg, borderColor: border }]}
+              />
+            ))}
+          </View>
+
+          <TextInput
+            placeholder="Postal code"
+            placeholderTextColor={label}
+            value={form.postal_code}
+            onChangeText={(v) => setForm(f => ({ ...f, postal_code: v }))}
+            keyboardType="numeric"
+            style={[styles.input, { color: colors.text, backgroundColor: inputBg, borderColor: border }]}
+          />
+
+          <TouchableOpacity
+            onPress={handleSave}
+            disabled={saving || !complete}
+            style={[
+              styles.saveBtn,
+              { backgroundColor: complete ? '#ff2d55' : '#ff2d5530', opacity: saving ? 0.6 : 1 },
+            ]}
+          >
+            {saving
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <Text style={styles.saveBtnText}>{summaryLine ? 'Update address' : 'Save address'}</Text>
+            }
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
 // ─── CartItemRow ──────────────────────────────────────────────────────────────
 
 interface CartItemRowProps {
-  item: CartItem;
+  item:             CartItem;
   onQuantityChange: (id: string, qty: number) => void;
-  onRemove: (id: string) => void;
-  updating: boolean;
-  colors: any;
+  onRemove:         (id: string) => void;
+  updating:         boolean;
+  colors:           any;
 }
 
 function CartItemRow({ item, onQuantityChange, onRemove, updating, colors }: CartItemRowProps) {
@@ -148,11 +342,11 @@ export default function CartScreen() {
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
-  const [cart, setCart]           = useState<CartSummary | null>(null);
-  const [loading, setLoading]     = useState(true);
+  const [cart, setCart]             = useState<CartSummary | null>(null);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const sidRef = useRef<string | null>(null);
+  const sidRef                      = useRef<string | null>(null);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -217,11 +411,16 @@ export default function CartScreen() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const bg         = isDark ? '#0a0a0a' : '#f5f5f7';
+  const bg          = isDark ? '#0a0a0a' : '#f5f5f7';
   const totalItems  = cart?.total_items ?? 0;
   const totalAmount = cart?.total_amount ?? 0;
   const hasItems    = totalItems > 0;
   const allItems    = cart?.items_by_event?.flatMap(g => g.items) ?? [];
+
+  // Warn if any delivery merch item is missing an address
+  const missingAddress = allItems.some(
+    i => i.item_type === 'merchandise' && i.fulfillment_method === 'delivery' && !i.delivery_address,
+  );
 
   return (
     <View style={[styles.screen, { backgroundColor: bg, paddingBottom: insets.bottom }]}>
@@ -274,18 +473,40 @@ export default function CartScreen() {
                 </View>
                 <Text style={[styles.groupSubtotal, { color: colors.subText }]}>{fmtZAR(group.subtotal)}</Text>
               </View>
+
               {group.items.map((item: CartItem) => (
-                <CartItemRow
-                  key={item.id}
-                  item={item}
-                  onQuantityChange={handleQuantityChange}
-                  onRemove={handleRemove}
-                  updating={updatingId === item.id}
-                  colors={colors}
-                />
+                <React.Fragment key={item.id}>
+                  <CartItemRow
+                    item={item}
+                    onQuantityChange={handleQuantityChange}
+                    onRemove={handleRemove}
+                    updating={updatingId === item.id}
+                    colors={colors}
+                  />
+                  {/* Delivery address form for delivery merch items */}
+                  {item.item_type === 'merchandise' && item.fulfillment_method === 'delivery' && (
+                    <DeliveryAddressRow
+                      item={item}
+                      sessionId={sidRef.current}
+                      colors={colors}
+                      isDark={isDark}
+                      onSaved={() => fetchCart(true)}
+                    />
+                  )}
+                </React.Fragment>
               ))}
             </View>
           ))}
+
+          {/* Address-required banner */}
+          {missingAddress && (
+            <View style={[styles.warningPill, { backgroundColor: isDark ? '#2a1a00' : '#fff8ec' }]}>
+              <Text style={{ fontSize: 14 }}>⚠️</Text>
+              <Text style={[styles.warningText, { color: isDark ? '#ffb340' : '#a05000' }]}>
+                Add a delivery address above before you can check out
+              </Text>
+            </View>
+          )}
 
           {/* Order summary */}
           <View style={[styles.summaryCard, { backgroundColor: isDark ? '#111' : '#fff', borderColor: colors.dividerColor }]}>
@@ -331,7 +552,17 @@ export default function CartScreen() {
             <Text style={[styles.ctaAmountLabel, { color: colors.subText }]}>Total</Text>
             <Text style={[styles.ctaAmount, { color: colors.text }]}>{fmtZAR(totalAmount)}</Text>
           </View>
-          <TouchableOpacity style={styles.checkoutBtn} onPress={() => router.push('/cart/checkout' as any)} activeOpacity={0.88}>
+          <TouchableOpacity
+            style={[styles.checkoutBtn, missingAddress && styles.checkoutBtnDisabled]}
+            onPress={() => {
+              if (missingAddress) {
+                Alert.alert('Address required', 'Please add a delivery address for all delivery items before checking out.');
+                return;
+              }
+              router.push('/cart/checkout' as any);
+            }}
+            activeOpacity={0.88}
+          >
             <Text style={styles.checkoutBtnText}>Checkout</Text>
             <Feather name="arrow-right" size={18} color="#fff" />
           </TouchableOpacity>
@@ -368,7 +599,7 @@ const styles = StyleSheet.create({
   itemRow: {
     flexDirection: 'row', alignItems: 'flex-start',
     paddingHorizontal: 16, paddingVertical: 14,
-    marginHorizontal: 16, marginBottom: 8,
+    marginHorizontal: 16, marginBottom: 4,
     borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, gap: 12,
   },
   typeBadge:        { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
@@ -388,6 +619,48 @@ const styles = StyleSheet.create({
   stepperCountText: { fontSize: 15, fontWeight: '700' },
   lineTotal:        { fontSize: 15, fontWeight: '800', color: '#ff2d55' },
 
+  // ── Delivery address ───────────────────────────────────────────────────────
+  addressHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderRadius: 12, borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 2,
+  },
+  addressHeaderLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  addressHeaderTitle: { fontSize: 13, fontWeight: '700' },
+  addressHeaderSub:   { fontSize: 11, fontWeight: '500', marginTop: 1 },
+  addressHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  savedPill: {
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#34c759', alignItems: 'center', justifyContent: 'center',
+  },
+  savedPillText:    { fontSize: 10, fontWeight: '900', color: '#fff' },
+  chevron:          { fontSize: 10, fontWeight: '700' },
+
+  addressForm: {
+    borderRadius: 12, borderWidth: StyleSheet.hairlineWidth,
+    padding: 14, gap: 10, marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 11,
+    fontSize: 14, fontWeight: '500',
+  },
+  saveBtn: {
+    borderRadius: 8, paddingVertical: 13,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 4,
+  },
+  saveBtnText:      { fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
+
+  // ── Warning ────────────────────────────────────────────────────────────────
+  warningPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 16, marginBottom: 8, padding: 14, borderRadius: 10,
+  },
+  warningText:      { fontSize: 13, fontWeight: '600', flex: 1 },
+
+  // ── Summary ────────────────────────────────────────────────────────────────
   summaryCard: {
     marginHorizontal: 16, marginTop: 8, marginBottom: 8,
     borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 18, gap: 10,
@@ -404,16 +677,18 @@ const styles = StyleSheet.create({
   infoPill:         { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, padding: 12, borderRadius: 10, marginBottom: 8 },
   infoPillText:     { fontSize: 12, fontWeight: '500', flex: 1 },
 
+  // ── CTA bar ────────────────────────────────────────────────────────────────
   ctaBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth,
   },
-  ctaAmountWrap:    { gap: 2 },
-  ctaAmountLabel:   { fontSize: 12, fontWeight: '600' },
-  ctaAmount:        { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
-  checkoutBtn:      { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ff2d55', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
-  checkoutBtnText:  { fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: 0.2 },
+  ctaAmountWrap:       { gap: 2 },
+  ctaAmountLabel:      { fontSize: 12, fontWeight: '600' },
+  ctaAmount:           { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  checkoutBtn:         { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ff2d55', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
+  checkoutBtnDisabled: { backgroundColor: '#ff2d5570' },
+  checkoutBtnText:     { fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: 0.2 },
 
   emptyWrap:        { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 14 },
   emptyIconCircle:  { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
