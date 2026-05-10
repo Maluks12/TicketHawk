@@ -532,6 +532,44 @@ func RecordClick(pool *pgxpool.Pool, campaignID string) {
 	}
 }
 
+// InjectPreFetched weaves already-fetched sponsored events into an organic
+// slice without touching the database. Use this when the caller has already
+// called GetSponsoredForFeed once and wants to reuse the result across
+// multiple sections (e.g. GetHomeSections) to avoid redundant queries.
+//
+// Ad positions and interleaving logic are identical to InjectSponsored.
+// Impression recording is the caller's responsibility.
+func InjectPreFetched(organic []models.Event, sponsored []SponsoredEvent, maxAds int) []models.Event {
+	if len(organic) == 0 || len(sponsored) == 0 || maxAds == 0 {
+		return organic
+	}
+
+	adPositions := make([]int, 0, maxAds)
+	for i := 0; i < maxAds; i++ {
+		adPositions = append(adPositions, 2+i*4)
+	}
+
+	result := make([]models.Event, 0, len(organic)+len(sponsored))
+	orgIdx, sponIdx, posIdx := 0, 0, 0
+
+	for orgIdx < len(organic) || sponIdx < len(sponsored) {
+		if sponIdx < len(sponsored) &&
+			posIdx < len(adPositions) &&
+			len(result) == adPositions[posIdx] {
+			result = append(result, sponsored[sponIdx].Event)
+			sponIdx++
+			posIdx++
+		} else if orgIdx < len(organic) {
+			result = append(result, organic[orgIdx])
+			orgIdx++
+		} else {
+			break
+		}
+	}
+
+	return result
+}
+
 // InjectSponsored weaves sponsored event cards into an organic event slice.
 //
 // Insertion positions (0-indexed): 2, 6  (maxAds=2)

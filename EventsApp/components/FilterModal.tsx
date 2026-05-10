@@ -66,7 +66,7 @@ type Screen = 'filter' | 'location' | 'calendar';
 // On a physical device "localhost" = the phone itself, not your dev machine.
 // We fall back to the Expo debugger host (your machine's LAN IP) automatically.
 //
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   // Explicit env var always wins
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
@@ -239,14 +239,25 @@ type LocRow =
   | { type: 'city';     key: string; label: string; eventCount: number };
 
 /**
- * Build the flat list of province headers + city rows from:
- *  - the query string (used to match provinces client-side)
- *  - the backend city results (for city-level matches)
+ * Build the flat list of province headers + city rows.
+ *
+ * Empty query  → show all 9 provinces so the user can tap directly without
+ *                typing. Cities only appear once they start searching.
+ * Non-empty    → filter provinces and cities that match the query.
  */
 function buildLocationResults(query: string, backendCities: CityResult[]): LocRow[] {
-  if (!query) return [];
+  // ── No query: show all provinces ────────────────────────────────────────
+  if (!query) {
+    return Object.keys(PROVINCE_CITIES)
+      .sort()
+      .map((province) => ({
+        type: 'province' as const,
+        key:  `prov-${province}`,
+        label: province,
+      }));
+  }
 
-  const q = query.toLowerCase();
+  const q    = query.toLowerCase();
   const rows: LocRow[] = [];
 
   // 1. Province match — show province header + all cities in that province
@@ -305,17 +316,34 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const [calStep, setCalStep] = useState<'from' | 'to'>('from');
   const months = buildMonths(12);
 
+  // Sync modal's internal state from initialParams every time the modal opens.
+  // Without this, useState initialises only once (on mount) so reopening the
+  // modal after a filter change leaves stale values in the fields.
   useEffect(() => {
-    if (!visible) setTimeout(() => setScreen('filter'), 300);
+    if (!visible) {
+      setTimeout(() => setScreen('filter'), 300);
+      return;
+    }
+    setSelectedCity(initialParams?.city ?? null);
+    setSelectedProvince(initialParams?.province ?? null);
+    setNearMeCoords(
+      initialParams?.lat != null && initialParams?.lng != null
+        ? { lat: initialParams.lat, lng: initialParams.lng }
+        : undefined,
+    );
+    setDatePreset(initialParams?.date ?? 'any');
+    setDateFrom(initialParams?.date_from ?? '');
+    setDateTo(initialParams?.date_to ?? '');
   }, [visible]);
 
-  // On mount of location screen: clear state, focus input — don't pre-load city list
+  // On mount of location screen: clear query so province list is shown fresh.
+  // Don't auto-focus the keyboard — provinces are already visible so the user
+  // can tap directly without typing.
   useEffect(() => {
     if (screen !== 'location') return;
     setQuery('');
     setCities([]);
     setLocInputFocused(false);
-    setTimeout(() => inputRef.current?.focus(), 60);
   }, [screen]);
 
   useEffect(() => {
@@ -340,6 +368,13 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
     if (debounce.current) clearTimeout(debounce.current);
     if (!text.trim()) { setCities([]); return; }
     debounce.current = setTimeout(() => loadCities(text), 280);
+  }
+
+  function handleClearLocation() {
+    setSelectedCity(null);
+    setSelectedProvince(null);
+    setNearMeCoords(undefined);
+    setScreen('filter');
   }
 
   function handleCitySelect(city: string) {
@@ -408,7 +443,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   }
 
   const locationIsSet = !!selectedCity || !!selectedProvince || !!nearMeCoords;
-  const locationLabel = selectedCity ?? selectedProvince ?? (nearMeCoords ? 'Near me' : 'Near me');
+  const locationLabel = selectedCity ?? selectedProvince ?? (nearMeCoords ? 'Near me' : 'Anywhere');
   const customBtnLabel =
     datePreset === 'custom' && dateFrom && dateTo
       ? formatDateRangeLabel(dateFrom, dateTo)
@@ -522,6 +557,24 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                 keyExtractor={r => r.key}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={s.locListContent}
+                ListHeaderComponent={
+                  <>
+                    <TouchableOpacity
+                      onPress={handleClearLocation}
+                      style={s.locRow}
+                      activeOpacity={0.7}
+                    >
+                      <View style={s.locRowLeft}>
+                        <Ionicons name="earth-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
+                        <Text style={[s.locRowText, !locationIsSet && s.locRowTextSelected]}>
+                          Anywhere
+                        </Text>
+                      </View>
+                      <Text style={s.locProvinceTag}>All SA</Text>
+                    </TouchableOpacity>
+                    <View style={s.locDivider} />
+                  </>
+                }
                 renderItem={({ item }) => {
                   if (item.type === 'province') {
                     return (

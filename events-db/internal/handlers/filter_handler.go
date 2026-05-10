@@ -18,11 +18,12 @@ import (
 //	GET /events/filter
 //
 // All query parameters are optional — omitting everything returns all
-// upcoming published events across South Africa.
+// upcoming published events across South Africa, organised into sections.
 //
-// Location params (mutually exclusive — city takes precedence over lat/lng):
+// Location params (mutually exclusive — city takes precedence):
 //
 //	city=Cape+Town         filter by city name (case-insensitive)
+//	province=Gauteng       filter by all cities in that province
 //	lat=X&lng=Y            filter by proximity to coordinates
 //	radius_km=50           radius used with lat/lng (default 50 km)
 //
@@ -35,43 +36,17 @@ import (
 //	date_from=2025-08-01   ISO 8601 date (required for date=custom)
 //	date_to=2025-08-31     ISO 8601 date (required for date=custom)
 //
-// Pagination:
-//
-//	limit=20               max 50
-//	cursor=...             opaque cursor from previous response
-//
-// Response:
+// Response (same shape as /v1/home):
 //
 //	{
-//	  "data":        [ ...events... ],
-//	  "next_cursor": "...",
-//	  "filter": {
-//	    "city":        "Cape Town",
-//	    "date":        "weekend",
-//	    "total_shown": 12
-//	  }
+//	  "sections": [
+//	    { "id": "cat-music", "title": "MUSIC", "events": [...], "next_cursor": "" },
+//	    { "id": "free",      "title": "FREE EVENTS", "events": [...] }
+//	  ],
+//	  "filter": { "city": "Cape Town", "date": "weekend", "total_shown": 24 }
 //	}
 func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// ── Pagination ────────────────────────────────────────────────────────
-
-		limit := 20
-		if l := c.Query("limit"); l != "" {
-			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 50 {
-				limit = parsed
-			}
-		}
-
-		var cursor *utils.Cursor
-		if cursorStr := c.Query("cursor"); cursorStr != "" {
-			var err error
-			cursor, err = utils.DecodeCursor(cursorStr)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cursor"})
-				return
-			}
-		}
-
 		// ── Location ──────────────────────────────────────────────────────────
 
 		var filter repository.EventFilter
@@ -79,6 +54,9 @@ func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		city := strings.TrimSpace(c.Query("city"))
 		if city != "" {
 			filter.City = city
+		} else if province := strings.TrimSpace(c.Query("province")); province != "" {
+			// Province filter — maps to a set of cities in the repository layer.
+			filter.Province = province
 		} else {
 			// Only use lat/lng if no city is provided
 			if latStr := c.Query("lat"); latStr != "" {
@@ -142,20 +120,23 @@ func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		// ── Execute ───────────────────────────────────────────────────────────
 
-		events, nextCursor, err := repository.FilterEvents(pool, filter, limit, cursor)
+		sections, err := repository.FilterEventsSections(pool, filter)
 		if err != nil {
-			utils.InternalError(c, err, "filter events")
+			utils.InternalError(c, err, "filter events sections")
 			return
 		}
 
-		// Build a human-readable summary of the active filters so the client
-		// can render "Showing X events in Cape Town · This Weekend" etc.
-		filterSummary := buildFilterSummary(filter, len(events))
+		// Count total events across sections for the filter summary.
+		totalShown := 0
+		for _, sec := range sections {
+			totalShown += len(sec.Events)
+		}
+
+		filterSummary := buildFilterSummary(filter, totalShown)
 
 		c.JSON(http.StatusOK, gin.H{
-			"data":        events,
-			"next_cursor": utils.EncodeCursor(nextCursor),
-			"filter":      filterSummary,
+			"sections": sections,
+			"filter":   filterSummary,
 		})
 	}
 }
@@ -195,6 +176,7 @@ func CitiesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // so clients can render a summary of what filters are active.
 type filterSummary struct {
 	City        string `json:"city,omitempty"`
+	Province    string `json:"province,omitempty"`
 	Lat         *float64 `json:"lat,omitempty"`
 	Lng         *float64 `json:"lng,omitempty"`
 	RadiusKm    float64  `json:"radius_km,omitempty"`
@@ -207,6 +189,7 @@ type filterSummary struct {
 func buildFilterSummary(f repository.EventFilter, count int) filterSummary {
 	s := filterSummary{
 		City:       f.City,
+		Province:   f.Province,
 		Lat:        f.Lat,
 		Lng:        f.Lng,
 		RadiusKm:   f.RadiusKm,

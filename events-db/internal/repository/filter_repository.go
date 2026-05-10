@@ -5,6 +5,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/utils"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,9 +16,13 @@ import (
 // DatePreset and DateFrom/DateTo are mutually exclusive — if DatePreset is set,
 // DateFrom and DateTo are ignored.
 type EventFilter struct {
-	// Location — one of City OR (Lat+Lng), never both.
-	// If both are empty, events from all cities are returned.
+	// Location — one of City, Province, or (Lat+Lng), never more than one.
+	// If all are empty, events from all cities are returned.
 	City string
+
+	// Province — filters by all cities belonging to this SA province.
+	// Ignored when City is set.
+	Province string
 
 	// Lat/Lng — when provided, events within RadiusKm are returned.
 	// If RadiusKm is 0 the default 50 km radius is used.
@@ -33,6 +38,21 @@ type EventFilter struct {
 	// Both must be provided together.
 	DateFrom *time.Time
 	DateTo   *time.Time
+}
+
+// provinceCities maps each South African province to the cities stored in the
+// events table. This mirrors the PROVINCE_CITIES map in FilterModal.tsx so that
+// selecting a province on the client filters to the same set of cities here.
+var provinceCities = map[string][]string{
+	"Gauteng":       {"Johannesburg", "Pretoria", "Sandton", "Soweto", "Midrand", "Centurion", "Randburg", "Roodepoort", "Boksburg", "Benoni", "Germiston", "Krugersdorp"},
+	"Western Cape":  {"Cape Town", "Stellenbosch", "Paarl", "George", "Knysna", "Mossel Bay", "Hermanus", "Worcester"},
+	"KwaZulu-Natal": {"Durban", "Pietermaritzburg", "Richards Bay", "Newcastle", "Umhlanga", "Ballito"},
+	"Eastern Cape":  {"Port Elizabeth", "East London", "Mthatha", "Grahamstown", "Uitenhage"},
+	"Limpopo":       {"Polokwane", "Tzaneen", "Phalaborwa", "Louis Trichardt"},
+	"Mpumalanga":    {"Nelspruit", "Witbank", "Secunda", "Barberton"},
+	"North West":    {"Rustenburg", "Klerksdorp", "Mafikeng", "Potchefstroom"},
+	"Free State":    {"Bloemfontein", "Welkom", "Sasolburg", "Kroonstad"},
+	"Northern Cape": {"Kimberley", "Upington", "Springbok"},
 }
 
 // FilterEvents returns a cursor-paginated list of published events matching
@@ -62,8 +82,30 @@ func FilterEvents(
 	// ── Location filter ───────────────────────────────────────────────────────
 
 	if f.City != "" {
-		args = append(args, f.City)
-		clauses = append(clauses, fmt.Sprintf("e.city ILIKE $%d", len(args)))
+		args = append(args, strings.ToLower(f.City))
+		clauses = append(clauses, fmt.Sprintf("LOWER(e.city) = $%d", len(args)))
+	} else if f.Province != "" {
+		// Map province name → list of cities (case-insensitive lookup).
+		var cities []string
+		for prov, cs := range provinceCities {
+			if strings.EqualFold(prov, f.Province) {
+				cities = cs
+				break
+			}
+		}
+		if len(cities) > 0 {
+			// Build individual LOWER(e.city) = $N params — one per city.
+			// This is more reliable than ILIKE ANY(ARRAY[$2,$3,...]) because
+			// pgx/v5 can struggle with type inference on multi-param ARRAY
+			// constructors, causing the clause to silently match nothing.
+			orClauses := make([]string, len(cities))
+			for i, city := range cities {
+				args = append(args, strings.ToLower(city))
+				orClauses[i] = fmt.Sprintf("LOWER(e.city) = $%d", len(args))
+			}
+			clauses = append(clauses, "("+strings.Join(orClauses, " OR ")+")")
+		}
+		// Unrecognised province → no clause → return all events (safe fallback).
 	} else if f.Lat != nil && f.Lng != nil {
 		radiusKm := f.RadiusKm
 		if radiusKm <= 0 {
@@ -335,4 +377,127 @@ var southAfricanCities = []string{
 	"Kimberley",
 	"Upington",
 	"Springbok",
+}
+// ── Filtered Sections ─────────────────────────────────────────────────────────
+
+// FilterEventsSections runs the same filter query as FilterEvents but returns
+// results pre-organised into HomeSection rows — the same structure the home
+// feed uses — so the frontend can render them directly without any grouping.
+//
+// Netflix-style section rules:
+//   - One section per category, up to 10 events each
+//   - A section only appears when it has ≥ 3 events (no thin rows)
+//   - Sections sorted largest → smallest (most content-rich first)
+//   - A "Free Events" section is appended when ≥ 2 free events are present
+//   - If no category clears the threshold, a single "Results" fallback is used
+//
+// We fetch up to 200 matching events so the grouping is meaningful. Sections
+// are the pagination unit — the client can load more per section via the
+// existing /events/filter cursor endpoint if needed.
+func FilterEventsSections(
+	pool *pgxpool.Pool,
+	f EventFilter,
+) ([]HomeSection, error) {
+	// Pull up to 200 events — enough to fill several category rows without
+	// making the response unreasonably large.
+	events, _, err := FilterEvents(pool, f, 200, nil)
+	if err != nil {
+		return nil, fmt.Errorf("FilterEventsSections: %w", err)
+	}
+	return buildFilteredSections(events), nil
+}
+
+// buildFilteredSections groups a flat event slice into HomeSection rows.
+// It is a pure function — no DB access — so it is easy to unit-test.
+func buildFilteredSections(events []models.Event) []HomeSection {
+	type catGroup struct {
+		name   string
+		events []models.Event
+	}
+
+	// Preserve first-seen order while grouping by normalised category.
+	order := make([]string, 0)
+	groups := make(map[string]*catGroup)
+
+	for i := range events {
+		e := &events[i]
+		cat := titleCase(strings.TrimSpace(e.Category))
+		if cat == "" {
+			cat = "Other"
+		}
+		if _, ok := groups[cat]; !ok {
+			groups[cat] = &catGroup{name: cat}
+			order = append(order, cat)
+		}
+		if len(groups[cat].events) < 10 {
+			groups[cat].events = append(groups[cat].events, *e)
+		}
+	}
+
+	// Build sections — only keep categories with ≥ 3 events.
+	sections := make([]HomeSection, 0, len(order)+1)
+	for _, cat := range order {
+		g := groups[cat]
+		if len(g.events) < 3 {
+			continue
+		}
+		sections = append(sections, HomeSection{
+			ID:         "cat-" + strings.ToLower(strings.ReplaceAll(cat, " ", "-")),
+			Title:      strings.ToUpper(cat),
+			Events:     g.events,
+			NextCursor: "",
+		})
+	}
+
+	// Sort: most events first.
+	sort.Slice(sections, func(i, j int) bool {
+		return len(sections[i].Events) > len(sections[j].Events)
+	})
+
+	// Free Events — collect up to 10 and inject after category rows.
+	freeEvents := make([]models.Event, 0, 10)
+	for _, e := range events {
+		if e.Price == 0 {
+			freeEvents = append(freeEvents, e)
+			if len(freeEvents) == 10 {
+				break
+			}
+		}
+	}
+	if len(freeEvents) >= 2 {
+		sections = append(sections, HomeSection{
+			ID:         "free",
+			Title:      "FREE EVENTS",
+			Events:     freeEvents,
+			NextCursor: "",
+		})
+	}
+
+	// Absolute fallback — never return a blank screen.
+	if len(sections) == 0 && len(events) > 0 {
+		cap := 10
+		if len(events) < cap {
+			cap = len(events)
+		}
+		sections = append(sections, HomeSection{
+			ID:         "results",
+			Title:      "RESULTS",
+			Events:     events[:cap],
+			NextCursor: "",
+		})
+	}
+
+	return sections
+}
+
+// titleCase converts "music" → "Music", "tech & business" → "Tech & Business".
+func titleCase(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) == 0 {
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+	}
+	return strings.Join(words, " ")
 }

@@ -119,6 +119,15 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSec
 	results := make([]result, len(fetchers))
 	var wg sync.WaitGroup
 
+	// ── Pre-fetch sponsored events ONCE ──────────────────────────────────────
+	// GetSponsoredForFeed runs a 4-table JOIN. Previously it was called inside
+	// every goroutine, meaning up to 7 identical queries fired concurrently on
+	// every home load. Fetching once here and sharing the result cuts that to a
+	// single query regardless of how many sections are assembled.
+	sponsored, _ := GetSponsoredForFeed(pool, userID, 2)
+	// (error is non-fatal — if no sponsored events exist the slice is nil and
+	// InjectPreFetched is a no-op)
+
 	for i, f := range fetchers {
 		wg.Add(1)
 		go func(idx int, sf sectionFetcher) {
@@ -128,9 +137,8 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSec
 				results[idx] = result{err: err}
 				return
 			}
-			// Inject up to 2 sponsored cards per section.
-			// RecordImpressions is called asynchronously inside InjectSponsored.
-			events = InjectSponsored(pool, events, userID, 2)
+			// Weave the pre-fetched sponsored cards in — no extra DB round-trip.
+			events = InjectPreFetched(events, sponsored, 2)
 
 			results[idx] = result{
 				section: HomeSection{
@@ -143,6 +151,12 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSec
 		}(i, f)
 	}
 	wg.Wait()
+
+	// Record impressions once for the sponsored events that were actually shown,
+	// rather than once per section as before.
+	if len(sponsored) > 0 {
+		go RecordImpressions(pool, sponsored)
+	}
 
 	out := make([]HomeSection, 0, len(fetchers))
 	for _, r := range results {

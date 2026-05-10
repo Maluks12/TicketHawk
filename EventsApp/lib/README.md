@@ -43,17 +43,34 @@ api.interceptors.response.use(
 );
 
 // ── Session ID cache ───────────────────────────────────────────────────────
+// Reads SecureStore once and keeps the result in memory. Auto-generates a
+// UUID if no session exists so guest carts always have an X-Session-ID.
 
-let _cachedSessionId: string | null | undefined = undefined;
+let _cachedSessionId: string | undefined = undefined; // never null — always generates
 
-export async function getCachedSessionId(): Promise<string | null> {
-  if (_cachedSessionId !== undefined) return _cachedSessionId;
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+export async function getCachedSessionId(): Promise<string> {
+  if (_cachedSessionId) return _cachedSessionId;
   try {
-    _cachedSessionId = await SecureStore.getItemAsync('session_id');
+    let sid = await SecureStore.getItemAsync('session_id');
+    if (!sid) {
+      sid = generateUUID();
+      await SecureStore.setItemAsync('session_id', sid);
+    }
+    _cachedSessionId = sid;
+    return sid;
   } catch {
-    _cachedSessionId = null;
+    // SecureStore unavailable — use in-memory UUID for this session
+    if (!_cachedSessionId) _cachedSessionId = generateUUID();
+    return _cachedSessionId;
   }
-  return _cachedSessionId;
 }
 
 export function makeSessionHeaders(sid: string | null): Record<string, string> {

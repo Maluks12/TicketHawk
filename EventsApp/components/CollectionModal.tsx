@@ -758,7 +758,7 @@ const DetailOverlay = ({
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={async (cartItem, variant) => {
+          onAddToCart={async (cartItem, variant, fulfillmentMethod, deliveryAddress) => {
             try {
               const sid = await getCachedSessionId();
               await addMerchToCart(
@@ -767,6 +767,8 @@ const DetailOverlay = ({
                   event_id:               cartItem.event_id,
                   merchandise_variant_id: variant?.id,
                   quantity:               1,
+                  fulfillment_method:     fulfillmentMethod,
+                  delivery_address:       deliveryAddress,
                 },
                 sid,
               );

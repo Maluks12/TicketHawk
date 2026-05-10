@@ -28,15 +28,10 @@ import {
 } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
-import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel } from '../../components/FilterModal';
+import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl } from '../../components/FilterModal';
 import { useAppTheme } from '../../theme/colors';
 
 // ─── Cart header button ───────────────────────────────────────────────────────
-// Uses AppState so it only re-fetches when the app comes back to the foreground
-// (e.g. after the user navigates back from the cart). getCachedSessionId reads
-// SecureStore once and caches the result in memory — no repeated bridge calls
-// on every render, which was causing the input-lag after visiting the cart.
-
 function CartHeaderButton() {
   const router             = useRouter();
   const { colors }         = useAppTheme();
@@ -66,17 +61,10 @@ function CartHeaderButton() {
 
   useEffect(() => {
     isMounted.current = true;
-
-    // Initial fetch — fires after first paint so it never delays the home screen
     refreshCount();
-
-    // Re-fetch only when the app returns to foreground (covers navigating back
-    // from cart, app switcher, lock screen). No polling interval = no timer
-    // accumulation that slows JS after repeated navigation.
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') refreshCount();
     });
-
     return () => {
       isMounted.current = false;
       sub.remove();
@@ -107,7 +95,6 @@ const cartStyles = StyleSheet.create({
 });
 
 // ─── Dynamic spotlight section configs ────────────────────────────────────────
-// One of these is picked at random on every app load.
 const SPOTLIGHT_CONFIGS = [
   { title: 'SPORTS ELITE',    category: 'sports',   badge: '⚡ SPORTS',    accentColor: '#e8c14a', bgColor: '#1a1200', gradientDark: 'rgba(26,18,0,0.82)',   gradientLight: 'rgba(26,18,0,0.25)'   },
   { title: 'BEST FESTIVALS',  category: 'music',    badge: '🎪 FESTIVAL',  accentColor: '#ff3c6e', bgColor: '#1a0010', gradientDark: 'rgba(26,0,16,0.82)',   gradientLight: 'rgba(26,0,16,0.25)'   },
@@ -124,7 +111,88 @@ function formatPrice(price: number, currency: string) {
   return `R${Math.round(price).toLocaleString('en-ZA')}`;
 }
 
-// ─── Cards ────────────────────────────────────────────────────────────────────
+// Fallback: group a flat event array into category sections when the backend
+// returns the old { data: [...] } format (i.e. before it is redeployed).
+function groupEventsIntoSections(events: Event[]): HomeSection[] {
+  const order: string[] = [];
+  const groups: Record<string, Event[]> = {};
+  for (const e of events) {
+    const cat = (e.category?.trim() || 'Other')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+    if (groups[cat].length < 10) groups[cat].push(e);
+  }
+  const sections: HomeSection[] = order
+    .filter((cat) => groups[cat].length >= 3)
+    .map((cat) => ({
+      id: `cat-${cat.toLowerCase().replace(/\s+/g, '-')}`,
+      title: cat.toUpperCase(),
+      events: groups[cat],
+      next_cursor: '',
+    }))
+    .sort((a, b) => b.events.length - a.events.length);
+
+  const free = events.filter((e) => e.price === 0).slice(0, 10);
+  if (free.length >= 2) sections.push({ id: 'free', title: 'FREE EVENTS', events: free, next_cursor: '' });
+  if (!sections.length && events.length)
+    sections.push({ id: 'results', title: 'RESULTS', events: events.slice(0, 10), next_cursor: '' });
+  return sections;
+}
+
+// ─── Skeleton loader ──────────────────────────────────────────────────────────
+// Renders immediately on mount so the screen never shows a blank white/black
+// page — perceived load time drops dramatically even if actual fetch time is
+// unchanged.
+
+function SkeletonPulse({ style }: { style: any }) {
+  const anim = useRef(new Animated.Value(0.35)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1,    duration: 750, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.35, duration: 750, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [anim]);
+  return <Animated.View style={[style, { opacity: anim }]} />;
+}
+
+function SkeletonSection() {
+  const shimmer = 'rgba(255,255,255,0.08)';
+  return (
+    <View style={{ marginTop: 20 }}>
+      {/* Section title bar */}
+      <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+        <SkeletonPulse style={{ width: 140, height: 11, borderRadius: 3, backgroundColor: shimmer }} />
+      </View>
+      {/* Three skeleton cards in a row */}
+      <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 12 }}>
+        {[0, 1, 2].map((i) => (
+          <View key={i} style={{ width: 160 }}>
+            <SkeletonPulse style={{ width: 160, height: 110, borderRadius: 4, backgroundColor: shimmer, marginBottom: 8 }} />
+            <SkeletonPulse style={{ width: 80,  height: 9,   borderRadius: 3, backgroundColor: shimmer, marginBottom: 6 }} />
+            <SkeletonPulse style={{ width: 140, height: 11,  borderRadius: 3, backgroundColor: shimmer, marginBottom: 5 }} />
+            <SkeletonPulse style={{ width: 100, height: 9,   borderRadius: 3, backgroundColor: shimmer }} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function SkeletonFeed() {
+  return (
+    <>
+      {/* Hero skeleton */}
+      <SkeletonPulse style={{ width: '100%', height: 420, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+      <SkeletonSection />
+      <SkeletonSection />
+      <SkeletonSection />
+    </>
+  );
+}
+
+
 
 const fmtCardDate = (iso?: string | null) => {
   if (!iso) return '';
@@ -162,14 +230,12 @@ const Top10Card = ({ item, rank, onPress, colors }: { item: Event; rank: number;
       {item.cover_image_url && (
         <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
       )}
-      {/* Dark gradient on the left so the number is always readable */}
       <LinearGradient
         colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0.18)', 'transparent']}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.7, y: 0 }}
         style={sheet.absoluteFill}
       />
-      {/* Apple-style rank number — top-left, ON the card */}
       <Text style={sheet.top10Rank}>{rank}</Text>
       <View className={s.hCardPriceBadge}>
         <Text className={s.hCardPriceBadgeText}>{formatPrice(item.price, item.currency)}</Text>
@@ -227,7 +293,6 @@ const SectionRow = ({
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
           <Text className={s.sectionTitle} style={{ color: colors.text }}>{section.title.toUpperCase()}</Text>
-          {/* Only show "VIEW ALL" indicator when there are more pages */}
           {nextCursor ? (
             <TouchableOpacity onPress={handleLoadMore} disabled={loadingMore}>
               <Text className={s.sectionLink}>{loadingMore ? '…' : 'MORE'}</Text>
@@ -272,10 +337,12 @@ export default function Index() {
   const { colors } = useAppTheme();
 
   // ── Refs ─────────────────────────────────────────────────────────────────
-  const lastScrollY  = useRef(0);
-  const headerOffset = useRef(0);
-  const headerAnim   = useRef(new Animated.Value(0)).current;
-  const headerHeight = useRef(120);
+  const lastScrollY      = useRef(0);
+  const headerOffset     = useRef(0);
+  const headerAnim       = useRef(new Animated.Value(0)).current;
+  const headerHeight     = useRef(120);
+  const featuredIndexRef = useRef(0);
+  const fadeAnim         = useRef(new Animated.Value(1)).current;
 
   // Stable random spotlight config — picked once on mount
   const [spotlightConfig, setSpotlightConfig] = useState(
@@ -290,26 +357,85 @@ export default function Index() {
   const [filterOpen,   setFilterOpen]   = useState(false);
   const [filterParams, setFilterParams] = useState<FilterParams>({ date: 'any' });
 
+  // sections — what drives the feed. Replaced entirely on each filter apply.
   const [sections,   setSections]   = useState<HomeSection[]>([]);
+  // homeSections — set ONCE from the home endpoint, never overwritten by filters.
+  // The carousel and spotlight always derive from this so the banner stays
+  // constant regardless of what location is active.
+  const [homeSections, setHomeSections] = useState<HomeSection[]>([]);
+
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
+  const [featuredIndex, setFeaturedIndex] = useState(0);
 
-  const featuredEvent: Event | null =
-    sections.find((sec) => sec.id === 'featured')?.events?.[0] ?? null;
+  // ── isFiltered flag ───────────────────────────────────────────────────────
+  // True whenever any location or date filter is active. Used to:
+  //   • hide the hardcoded editorial sections (Free, Premium, Spotlight…)
+  //     so they don't duplicate the backend-generated category sections
+  //   • keep the carousel pointing at homeSections regardless
+  const isFiltered = !!(
+    filterParams.city     ||
+    filterParams.province ||
+    filterParams.lat      ||
+    (filterParams.date && filterParams.date !== 'any')
+  );
 
-  // All non-featured events (deduped)
+  // ── Carousel pool — always from homeSections, never from filter results ───
+  // This is the fix for the banner going blank when a location is active:
+  // we keep a permanent copy of the home featured/trending events and always
+  // show those in the carousel.
+  const rawFeatured: Event[] =
+    homeSections.find((sec) => sec.id === 'featured')?.events ?? [];
+  const trendingPool: Event[] =
+    homeSections.find((sec) => sec.id === 'trending')?.events ?? [];
+  const carouselEvents: Event[] =
+    rawFeatured.length >= 2
+      ? rawFeatured.slice(0, 6)
+      : [
+          ...rawFeatured,
+          ...trendingPool.filter((e) => !rawFeatured.some((f) => f.id === e.id)),
+        ].slice(0, 5);
+  const featuredEvent: Event | null = carouselEvents[featuredIndex] ?? null;
+
+  // All non-featured events from the ACTIVE sections (filtered or home)
   const allEvents = sections
     .filter((sec) => sec.id !== 'featured')
     .flatMap((sec) => sec.events ?? [])
     .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i);
 
-  // Keep the store in sync so the category page can filter without an extra API call.
+  // Keep store in sync so category page can filter without an extra API call
   useEffect(() => {
     if (allEvents.length > 0) setAllEvents(allEvents);
   }, [allEvents.length]);
 
-  // Derive unique categories from the loaded events — always in sync with the DB.
+  // ── Featured carousel ─────────────────────────────────────────────────────
+  const advanceTo = useCallback((nextIdx: number) => {
+    Animated.timing(fadeAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => {
+      featuredIndexRef.current = nextIdx;
+      setFeaturedIndex(nextIdx);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 380, useNativeDriver: true }).start();
+    });
+  }, [fadeAnim]);
+
+  useEffect(() => {
+    if (carouselEvents.length <= 1) return;
+    const timer = setInterval(() => {
+      const next = (featuredIndexRef.current + 1) % carouselEvents.length;
+      advanceTo(next);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [carouselEvents.length, advanceTo]);
+
+  // Only reset carousel when homeSections changes (initial load / refresh),
+  // NOT on every filter change — so the banner keeps rotating uninterrupted.
+  useEffect(() => {
+    featuredIndexRef.current = 0;
+    setFeaturedIndex(0);
+    fadeAnim.setValue(1);
+  }, [homeSections]);
+
+  // ── Category derivation ───────────────────────────────────────────────────
   const categories = useMemo(() => {
     const seen = new Set<string>();
     const cats: string[] = [];
@@ -326,14 +452,13 @@ export default function Index() {
     return ['All', ...cats];
   }, [allEvents]);
 
-  // Reset active category if it no longer exists (e.g. after a filter refresh).
   useEffect(() => {
     if (activeCategory !== 'All' && !categories.includes(activeCategory)) {
       setActiveCategory('All');
     }
   }, [categories, activeCategory]);
 
-  // If the current spotlightConfig has no matching events, switch to one that does.
+  // ── Spotlight — uses allEvents (filtered or home) ─────────────────────────
   useEffect(() => {
     if (!allEvents.length) return;
     const hasEvents = (cfg: typeof SPOTLIGHT_CONFIGS[0]) =>
@@ -345,7 +470,6 @@ export default function Index() {
     if (fallback) setSpotlightConfig(fallback);
   }, [allEvents, spotlightConfig]);
 
-  // Pick events for the spotlight section — pure computation, no hooks.
   const spotlightEvents = (() => {
     const preferred = allEvents.filter((e) =>
       e.category?.toLowerCase().includes(spotlightConfig.category)
@@ -365,15 +489,17 @@ export default function Index() {
   const sportsListEvents  = spotlightEvents.slice(1);
   const feedSections      = sections.filter((sec) => sec.id !== 'featured');
 
+  // ── Data fetching ─────────────────────────────────────────────────────────
   const fetchSections = useCallback(async () => {
     try {
       setError(null);
-      // Fetch sections and DB categories in parallel.
       const [sectionsRes, categoriesRes] = await Promise.all([
         getHomeSections(),
         getCategories().catch(() => null),
       ]);
-      setSections(sectionsRes.data.sections ?? []);
+      const loaded = sectionsRes.data.sections ?? [];
+      setSections(loaded);
+      setHomeSections(loaded); // permanent copy — never overwritten by filters
       const cats = categoriesRes?.data?.categories ?? [];
       if (cats.length > 0) setDbCategories(cats);
     } catch (err: any) {
@@ -391,12 +517,53 @@ export default function Index() {
     setRefreshing(false);
   }, [fetchSections]);
 
-  const handleSelectCategory = (cat: string) => {
-    setDropdownOpen(false);
-    if (cat === 'All') {
-      setActiveCategory('All');
+  // ── Filter apply ─────────────────────────────────────────────────────────
+  const handleFilterApply = async (params: FilterParams) => {
+    setFilterParams(params);
+    setFilterOpen(false);
+
+    headerOffset.current = 0;
+    Animated.spring(headerAnim, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 14 }).start();
+
+    const hasLocation = !!(params.city || params.province || params.lat);
+    const hasDate     = !!(params.date && params.date !== 'any');
+
+    // No active filters → restore the full editorial home feed from homeSections
+    if (!hasLocation && !hasDate) {
+      setSections(homeSections);
       return;
     }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const qs  = buildFilterQueryString(params);
+      const res = await fetch(`${getBaseUrl()}/v1/events/filter?${qs}`);
+      if (!res.ok) throw new Error(`Filter failed: ${res.status}`);
+      const data = await res.json();
+
+      // New backend: { sections: [...] }
+      if (Array.isArray(data.sections) && data.sections.length > 0) {
+        setSections(data.sections);
+      // Old backend (pre-deploy): { data: [...] } — group on the fly
+      } else if (Array.isArray(data.data) && data.data.length > 0) {
+        setSections(groupEventsIntoSections(data.data));
+      // No results for this filter — keep showing home feed rather than blank screen
+      } else {
+        setSections(homeSections);
+        setError('No events found for that filter. Showing all events.');
+      }
+    } catch (err: any) {
+      // Network/server error — fall back to home feed silently
+      setSections(homeSections);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectCategory = (cat: string) => {
+    setDropdownOpen(false);
+    if (cat === 'All') { setActiveCategory('All'); return; }
     router.push(`/category/${encodeURIComponent(cat)}`);
   };
 
@@ -405,45 +572,11 @@ export default function Index() {
     router.push(`/event/${event.id}`);
   };
 
-  // ── Filter apply ─────────────────────────────────────────────────────────
-  const handleFilterApply = async (params: FilterParams) => {
-    setFilterParams(params);
-    setFilterOpen(false);
-
-    headerOffset.current = 0;
-    Animated.spring(headerAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 0,
-      speed: 14,
-    }).start();
-
-    try {
-      setLoading(true);
-      setError(null);
-      const qs = buildFilterQueryString(params);
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
-      const res = await fetch(`${apiUrl}/v1/events/filter?${qs}`);
-      if (!res.ok) throw new Error('Filter request failed');
-      const data = await res.json();
-      if (data.data) {
-        setSections([{
-          id: 'filtered', title: 'Results', events: data.data,
-          next_cursor: ''
-        }]);
-      }
-    } catch (err: any) {
-      await fetchSections();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ── Location / date label for header ────────────────────────────────────
+  // ── Header labels ─────────────────────────────────────────────────────────
   const locationLabel =
     filterParams.city     ??
     filterParams.province ??
-    (filterParams.lat ? 'Near me' : 'Near me');
+    (filterParams.lat ? 'Near me' : 'Anywhere');
 
   const dateLabelText =
     filterParams.date === 'any'      ? 'All dates'    :
@@ -453,17 +586,11 @@ export default function Index() {
       ? formatDateRangeLabel(filterParams.date_from, filterParams.date_to)
       : 'All dates';
 
-  // ── Snap helper ──────────────────────────────────────────────────────────
+  // ── Snap helper ───────────────────────────────────────────────────────────
   const snapHeader = () => {
     const target = headerOffset.current < -(headerHeight.current / 2) ? -headerHeight.current : 0;
-    Animated.spring(headerAnim, {
-      toValue: target,
-      useNativeDriver: true,
-      bounciness: 0,
-      speed: 14,
-    }).start(() => {
-      headerOffset.current = target;
-    });
+    Animated.spring(headerAnim, { toValue: target, useNativeDriver: true, bounciness: 0, speed: 14 })
+      .start(() => { headerOffset.current = target; });
   };
 
   return (
@@ -481,10 +608,7 @@ export default function Index() {
             headerOffset.current = 0;
             headerAnim.setValue(0);
           } else {
-            headerOffset.current = Math.min(
-              0,
-              Math.max(-headerHeight.current, headerOffset.current - delta)
-            );
+            headerOffset.current = Math.min(0, Math.max(-headerHeight.current, headerOffset.current - delta));
             headerAnim.setValue(headerOffset.current);
           }
           setScrolled(currentY > 10);
@@ -495,49 +619,57 @@ export default function Index() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#000000" />
         }
       >
-        {/* Hero Banner */}
-        <TouchableOpacity
-          activeOpacity={0.95}
-          onPress={() => featuredEvent && handleEventPress(featuredEvent)}
-        >
+        {/* ── Hero Banner — always shows home featured events, filter-independent ── */}
+        <TouchableOpacity activeOpacity={0.95} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
           <View className={s.hero}>
-            {(featuredEvent?.banner_image_url ?? featuredEvent?.cover_image_url) ? (
-              <Image
-                source={{ uri: featuredEvent!.banner_image_url ?? featuredEvent!.cover_image_url! }}
+            <Animated.View style={[sheet.absoluteFill, { opacity: fadeAnim }]}>
+              {(featuredEvent?.banner_image_url ?? featuredEvent?.cover_image_url) ? (
+                <Image
+                  source={{ uri: featuredEvent!.banner_image_url ?? featuredEvent!.cover_image_url! }}
+                  style={sheet.absoluteFill}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View className={s.heroImagePlaceholder} />
+              )}
+              <LinearGradient
+                colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
+                locations={[0.3, 0.7, 1]}
                 style={sheet.absoluteFill}
-                resizeMode="cover"
               />
-            ) : (
-              <View className={s.heroImagePlaceholder} />
-            )}
-            <LinearGradient
-              colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
-              locations={[0.3, 0.7, 1]}
-              style={sheet.absoluteFill}
-            />
-            <View className={s.heroContent}>
-              <Text className={s.heroBadge}>✦ {featuredEvent?.category ?? 'Featured'}</Text>
-              <Text className={s.heroTitle} numberOfLines={2}>
-                {featuredEvent?.title.toUpperCase() ?? 'DISCOVER\nTOP EVENTS'}
-              </Text>
-              <Text className={s.heroSub} numberOfLines={3}>
-                {featuredEvent?.description ?? 'Find and book the best events happening near you.'}
-              </Text>
-              <View className={s.heroActions}>
-                <TouchableOpacity
-                  className={s.btnPrimary}
-                  onPress={() => featuredEvent && handleEventPress(featuredEvent)}
-                >
-                  <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  className={s.btnOutline}
-                  onPress={() => featuredEvent && handleEventPress(featuredEvent)}
-                >
-                  <Text className={s.btnOutlineText}>VIEW DETAILS</Text>
-                </TouchableOpacity>
+              <View className={s.heroContent}>
+                <Text className={s.heroBadge}>✦ {featuredEvent?.category ?? 'Featured'}</Text>
+                <Text className={s.heroTitle} numberOfLines={2}>
+                  {featuredEvent?.title.toUpperCase() ?? 'DISCOVER\nTOP EVENTS'}
+                </Text>
+                <Text className={s.heroSub} numberOfLines={3}>
+                  {featuredEvent?.description ?? 'Find and book the best events happening near you.'}
+                </Text>
+                <View className={s.heroActions}>
+                  <TouchableOpacity className={s.btnPrimary} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
+                    <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity className={s.btnOutline} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
+                    <Text className={s.btnOutlineText}>VIEW DETAILS</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+            </Animated.View>
+
+            {carouselEvents.length > 1 && (
+              <View style={{ position: 'absolute', bottom: 14, right: 16, flexDirection: 'row', gap: 5, zIndex: 10 }}>
+                {carouselEvents.map((_, idx) => (
+                  <TouchableOpacity key={idx} onPress={() => advanceTo(idx)} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
+                    <View style={{
+                      width: idx === featuredIndex ? 18 : 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: idx === featuredIndex ? '#FF2D55' : 'rgba(255,255,255,0.4)',
+                    }} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
         </TouchableOpacity>
 
@@ -597,29 +729,14 @@ export default function Index() {
 
         {/* Error banner */}
         {error && (
-          <View style={{
-            margin: 20,
-            backgroundColor: 'rgba(255,60,110,0.12)',
-            borderWidth: 1,
-            borderColor: colors.dividerColor,
-            borderRadius: 3,
-            padding: 14,
-          }}>
+          <View style={{ margin: 20, backgroundColor: 'rgba(255,60,110,0.12)', borderWidth: 1, borderColor: colors.dividerColor, borderRadius: 3, padding: 14 }}>
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
               ⚠ COULD NOT LOAD SECTIONS
             </Text>
             <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
             <TouchableOpacity
               onPress={onRefresh}
-              style={{
-                marginTop: 10,
-                alignSelf: 'flex-start',
-                borderWidth: 1,
-                borderColor: '#0a0a0a',
-                paddingHorizontal: 14,
-                paddingVertical: 6,
-                borderRadius: 2,
-              }}
+              style={{ marginTop: 10, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#0a0a0a', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 2 }}
             >
               <Text style={{ color: '#0a0a0a', fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
             </TouchableOpacity>
@@ -628,9 +745,7 @@ export default function Index() {
 
         {/* Dynamic Feed Sections */}
         {loading ? (
-          <View className={s.loadingRow}>
-            <ActivityIndicator size="small" color={colors.text} />
-          </View>
+          <SkeletonFeed />
         ) : (
           feedSections.map((section) => (
             <SectionRow
@@ -644,8 +759,8 @@ export default function Index() {
           ))
         )}
 
-        {/* Dynamic Spotlight Section */}
-        {!loading && sportsBannerEvent && (
+        {/* Dynamic Spotlight Section — hidden when a filter is active */}
+        {!loading && !isFiltered && sportsBannerEvent && (
           <>
             <View style={{ height: 1, backgroundColor: colors.dividerColor, marginVertical: 4 }} />
             <View className={s.sectionMt}>
@@ -654,10 +769,7 @@ export default function Index() {
                 <TouchableOpacity><Text className={s.sectionLink} style={{ color: spotlightConfig.accentColor }}>EXPLORE</Text></TouchableOpacity>
               </View>
             </View>
-            <TouchableOpacity
-              activeOpacity={0.92}
-              onPress={() => handleEventPress(sportsBannerEvent)}
-            >
+            <TouchableOpacity activeOpacity={0.92} onPress={() => handleEventPress(sportsBannerEvent)}>
               <View className={s.sportsBanner} style={{ backgroundColor: spotlightConfig.bgColor }}>
                 {(sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url) ? (
                   <Image
@@ -666,24 +778,13 @@ export default function Index() {
                     resizeMode="cover"
                   />
                 ) : null}
-                <LinearGradient
-                  colors={[spotlightConfig.gradientLight, spotlightConfig.gradientDark]}
-                  style={sheet.absoluteFill}
-                />
-                <View style={{
-                  position: 'absolute', bottom: 0, left: 0, right: 0,
-                  height: 3, backgroundColor: spotlightConfig.accentColor, opacity: 0.85,
-                }} />
+                <LinearGradient colors={[spotlightConfig.gradientLight, spotlightConfig.gradientDark]} style={sheet.absoluteFill} />
+                <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, backgroundColor: spotlightConfig.accentColor, opacity: 0.85 }} />
                 <View className={s.sportsBannerContent}>
-                  <Text className={s.sportsBadge} style={{ color: spotlightConfig.accentColor }}>
-                    {spotlightConfig.badge}
-                  </Text>
+                  <Text className={s.sportsBadge} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.badge}</Text>
                   <Text className={s.sportsTitle}>{sportsBannerEvent.title.toUpperCase()}</Text>
                   <Text className={s.sportsSub} numberOfLines={2}>{sportsBannerEvent.description}</Text>
-                  <TouchableOpacity
-                    className={s.btnOutline}
-                    onPress={() => handleEventPress(sportsBannerEvent)}
-                  >
+                  <TouchableOpacity className={s.btnOutline} onPress={() => handleEventPress(sportsBannerEvent)}>
                     <Text className={s.btnOutlineText}>VIEW TICKETS</Text>
                   </TouchableOpacity>
                 </View>
@@ -715,9 +816,13 @@ export default function Index() {
           </>
         )}
 
-        {/* ── Free Events ─────────────────────────────────────────── */}
-        {!loading && (() => {
-          const freeEvents = allEvents.filter((e) => e.price === 0);
+        {/* ── Hardcoded editorial sections — hidden when a filter is active ─── */}
+        {/* When filtered, the backend already returns category sections so   */}
+        {/* these would just duplicate events.                                */}
+
+        {/* Free Events */}
+        {!loading && !isFiltered && (() => {
+          const freeEvents = allEvents.filter((e) => e.price === 0).slice(0, 10);
           if (!freeEvents.length) return null;
           return (
             <>
@@ -729,21 +834,17 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={freeEvents}
-                keyExtractor={(e) => e.id}
+                horizontal data={freeEvents} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
-                )}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
         })()}
 
-        {/* ── Premium & Exclusive ──────────────────────────────────── */}
-        {!loading && (() => {
+        {/* Premium & Exclusive */}
+        {!loading && !isFiltered && (() => {
           const premiumEvents = allEvents.filter((e) => e.price >= 3000).slice(0, 10);
           if (!premiumEvents.length) return null;
           return (
@@ -756,28 +857,20 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={premiumEvents}
-                keyExtractor={(e) => e.id}
+                horizontal data={premiumEvents} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
-                )}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
         })()}
 
-        {/* ── Coming Up (15–45 days out) ───────────────────────────── */}
-        {!loading && (() => {
+        {/* Coming Next Month */}
+        {!loading && !isFiltered && (() => {
           const now = Date.now();
           const comingUp = allEvents
-            .filter((e) => {
-              const ms = new Date(e.start_time).getTime() - now;
-              const days = ms / 86400000;
-              return days >= 15 && days <= 45;
-            })
+            .filter((e) => { const days = (new Date(e.start_time).getTime() - now) / 86400000; return days >= 15 && days <= 45; })
             .slice(0, 10);
           if (!comingUp.length) return null;
           return (
@@ -790,23 +883,19 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={comingUp}
-                keyExtractor={(e) => e.id}
+                horizontal data={comingUp} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => (
-                 <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
-                )}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
         })()}
 
-        {/* ── Around the Country ───────────────────────────────────── */}
-        {!loading && (() => {
+        {/* Around the Country */}
+        {!loading && !isFiltered && (() => {
           const otherCities = allEvents
-            .filter((e) => !['Johannesburg','johannesburg'].includes(e.city ?? ''))
+            .filter((e) => !['Johannesburg', 'johannesburg'].includes(e.city ?? ''))
             .slice(0, 10);
           if (!otherCities.length) return null;
           return (
@@ -819,21 +908,17 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={otherCities}
-                keyExtractor={(e) => e.id}
+                horizontal data={otherCities} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => (
-                  <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
-                )}
+                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               />
             </>
           );
         })()}
 
-        {/* ── Music & Concerts ─────────────────────────────────────── */}
-        {!loading && (() => {
+        {/* Music & Concerts */}
+        {!loading && !isFiltered && (() => {
           const musicEvents = allEvents
             .filter((e) => e.category?.toLowerCase().includes('concert') || e.category?.toLowerCase().includes('music'))
             .slice(0, 10);
@@ -848,9 +933,7 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={musicEvents}
-                keyExtractor={(e) => e.id}
+                horizontal data={musicEvents} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
@@ -859,8 +942,8 @@ export default function Index() {
           );
         })()}
 
-        {/* ── Gala & Black Tie ─────────────────────────────────────── */}
-        {!loading && (() => {
+        {/* Gala & Black Tie */}
+        {!loading && !isFiltered && (() => {
           const galaEvents = allEvents
             .filter((e) => e.category?.toLowerCase().includes('gala') || e.category?.toLowerCase().includes('exclusive'))
             .slice(0, 10);
@@ -875,9 +958,7 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={galaEvents}
-                keyExtractor={(e) => e.id}
+                horizontal data={galaEvents} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
@@ -886,11 +967,9 @@ export default function Index() {
           );
         })()}
 
-        {/* ── Tech & Business ──────────────────────────────────────── */}
-        {!loading && (() => {
-          const techEvents = allEvents
-            .filter((e) => e.category?.toLowerCase().includes('tech'))
-            .slice(0, 10);
+        {/* Tech & Business */}
+        {!loading && !isFiltered && (() => {
+          const techEvents = allEvents.filter((e) => e.category?.toLowerCase().includes('tech')).slice(0, 10);
           if (!techEvents.length) return null;
           return (
             <>
@@ -902,9 +981,7 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={techEvents}
-                keyExtractor={(e) => e.id}
+                horizontal data={techEvents} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
@@ -913,11 +990,9 @@ export default function Index() {
           );
         })()}
 
-        {/* ── Food & Lifestyle ─────────────────────────────────────── */}
-        {!loading && (() => {
-          const foodEvents = allEvents
-            .filter((e) => e.category?.toLowerCase().includes('food'))
-            .slice(0, 10);
+        {/* Food & Lifestyle */}
+        {!loading && !isFiltered && (() => {
+          const foodEvents = allEvents.filter((e) => e.category?.toLowerCase().includes('food')).slice(0, 10);
           if (!foodEvents.length) return null;
           return (
             <>
@@ -929,9 +1004,7 @@ export default function Index() {
                 </View>
               </View>
               <FlatList
-                horizontal
-                data={foodEvents}
-                keyExtractor={(e) => e.id}
+                horizontal data={foodEvents} keyExtractor={(e) => e.id}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
                 renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
