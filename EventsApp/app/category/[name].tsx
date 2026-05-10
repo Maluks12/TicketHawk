@@ -43,8 +43,9 @@ function formatTime(iso?: string | null) {
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
 function CategoryEventCard({ item, onPress }: { item: Event; onPress: () => void }) {
+ const { colors, isDark } = useAppTheme();
   return (
-    <TouchableOpacity onPress={onPress} style={styles.card} activeOpacity={0.88}>
+    <TouchableOpacity onPress={onPress} style={[styles.card, { backgroundColor: colors.cardBg }]} activeOpacity={0.88}>
       <View style={styles.cardImageWrap}>
         {item.cover_image_url ? (
           <Image source={{ uri: item.cover_image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
@@ -60,12 +61,12 @@ function CategoryEventCard({ item, onPress }: { item: Event; onPress: () => void
         </View>
       </View>
       <View style={styles.cardBody}>
-        <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-        <Text style={styles.cardMeta} numberOfLines={1}>
+        <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{item.title}</Text>
+        <Text style={[styles.cardMeta, { color: colors.subText }]} numberOfLines={1}>
           {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
         </Text>
         {item.venue_name ? (
-          <Text style={styles.cardVenue} numberOfLines={1}>
+          <Text style={[styles.cardVenue, { color: colors.subText }]} numberOfLines={1}>
             {item.venue_name}{item.city ? `, ${item.city}` : ''}
           </Text>
         ) : null}
@@ -80,7 +81,7 @@ export default function CategoryScreen() {
   const { name }   = useLocalSearchParams<{ name: string }>();
   const router     = useRouter();
   const insets     = useSafeAreaInsets();
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const { dbCategories, setSelectedEvent } = useEventStore();
 
   const [events,     setEvents]     = useState<Event[]>([]);
@@ -142,7 +143,7 @@ export default function CategoryScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background }]}>
@@ -162,16 +163,16 @@ export default function CategoryScreen() {
 
       {loading ? (
         <View style={styles.centreWrap}>
-          <ActivityIndicator size="large" color="#0a0a0a" />
+          <ActivityIndicator size="large" color={colors.text} />
         </View>
       ) : error ? (
         <View style={styles.centreWrap}>
           <Text style={styles.emptyIcon}>⚠️</Text>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>Something went wrong</Text>
-          <Text style={styles.emptySub}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); fetchEvents().finally(() => setLoading(false)); }}>
-            <Text style={styles.retryText}>RETRY</Text>
-          </TouchableOpacity>
+          <Text style={[styles.emptySub, { color: colors.subText }]}>{error}</Text>
+          <TouchableOpacity style={[styles.retryBtn, { borderColor: colors.text }]} onPress={() => { setLoading(true); fetchEvents().finally(() => setLoading(false)); }}>
+             <Text style={[styles.retryText, { color: colors.text }]}>RETRY</Text>
+            </TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -185,8 +186,7 @@ export default function CategoryScreen() {
             <View style={styles.centreWrap}>
               <Text style={styles.emptyIcon}>🎟</Text>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>No events found</Text>
-              <Text style={styles.emptySub}>
-                There are no {categoryLabel.toLowerCase()} events right now. Check back soon.
+              <Text style={[styles.emptySub, { color: colors.subText }]}>There are no {categoryLabel.toLowerCase()} events right now. Check back soon.
               </Text>
             </View>
           }
@@ -245,15 +245,16 @@ const styles = StyleSheet.create({
   },
   priceBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
 
-  cardBody:  { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 14 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#0a0a0a', marginBottom: 5, lineHeight: 21 },
-  cardMeta:  { fontSize: 12, color: 'rgba(0,0,0,0.45)', fontWeight: '500', marginBottom: 2 },
-  cardVenue: { fontSize: 12, color: 'rgba(0,0,0,0.35)', fontWeight: '400' },
+  cardBody:      { borderRadius: CARD_RADIUS, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 
+  0.08,            shadowRadius: 8, elevation: 3 },
+cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 5, lineHeight: 21 },
+cardMeta:  { fontSize: 12, fontWeight: '500', marginBottom: 2 },
+cardVenue: { fontSize: 12, fontWeight: '400' },
 
   centreWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyIcon:  { fontSize: 40, marginBottom: 16 },
   emptyTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  emptySub:   { fontSize: 13, color: 'rgba(0,0,0,0.4)', textAlign: 'center', lineHeight: 19, marginBottom: 20 },
-  retryBtn:   { borderWidth: 1, borderColor: '#0a0a0a', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 2 },
-  retryText:  { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: '#0a0a0a' },
+  emptySub:  { fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 20 },
+  retryBtn:  { borderWidth: 1, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 2 },
+  retryText: { fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
 });

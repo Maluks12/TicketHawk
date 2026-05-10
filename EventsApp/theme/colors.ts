@@ -1,5 +1,7 @@
-import { useColorScheme } from 'react-native';
+import { useColorScheme, Appearance } from 'react-native';
+import { useEffect, useState } from 'react';
 import { useThemeStore } from '../store/themeStore';
+
 
 export const lightColors = {
   background: '#ffffff', text: '#0a0a0a', subText: 'rgba(0,0,0,0.4)',
@@ -17,7 +19,19 @@ export const darkColors: typeof lightColors = {
 
 export function useAppTheme() {
   const { mode } = useThemeStore();
-  const deviceScheme = useColorScheme();
-  const isDark = mode === 'dark' || (mode === 'auto' && deviceScheme === 'dark');
+  const systemScheme = useColorScheme();
+  const [scheme, setScheme] = useState(Appearance.getColorScheme());
+
+  useEffect(() => {
+    const sub = Appearance.addChangeListener(({ colorScheme }) => {
+      setScheme(colorScheme);
+    });
+    return () => sub.remove();
+  }, []);
+
+  const isDark =
+    mode === 'dark' ||
+    (mode === 'auto' && (scheme ?? systemScheme) === 'dark');
+
   return { isDark, colors: isDark ? darkColors : lightColors, mode };
 }
