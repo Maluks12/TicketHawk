@@ -43,33 +43,36 @@ function formatTime(iso?: string | null) {
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
 function CategoryEventCard({ item, onPress }: { item: Event; onPress: () => void }) {
- const { colors, isDark } = useAppTheme();
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.card, { backgroundColor: colors.cardBg }]} activeOpacity={0.88}>
+    <TouchableOpacity onPress={onPress} style={styles.card} activeOpacity={0.88}>
       <View style={styles.cardImageWrap}>
         {item.cover_image_url ? (
           <Image source={{ uri: item.cover_image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#d0d0d0' }]} />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#2a2a2a' }]} />
         )}
+        {/* Strong bottom gradient ensures text is always readable over any image */}
         <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.55)']}
-          style={styles.cardGradient}
+          colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.86)']}
+          locations={[0.3, 0.62, 1]}
+          style={StyleSheet.absoluteFillObject}
         />
+        {/* Price badge — top right */}
         <View style={styles.priceBadge}>
           <Text style={styles.priceBadgeText}>{formatPrice(item.price)}</Text>
         </View>
-      </View>
-      <View style={styles.cardBody}>
-        <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>{item.title}</Text>
-        <Text style={[styles.cardMeta, { color: colors.subText }]} numberOfLines={1}>
-          {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
-        </Text>
-        {item.venue_name ? (
-          <Text style={[styles.cardVenue, { color: colors.subText }]} numberOfLines={1}>
-            {item.venue_name}{item.city ? `, ${item.city}` : ''}
+        {/* Text overlaid at the bottom of the image */}
+        <View style={styles.cardBody}>
+          <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+          <Text style={styles.cardMeta} numberOfLines={1}>
+            {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
           </Text>
-        ) : null}
+          {item.venue_name ? (
+            <Text style={styles.cardVenue} numberOfLines={1}>
+              {item.venue_name}{item.city ? `, ${item.city}` : ''}
+            </Text>
+          ) : null}
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -218,38 +221,63 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 16, paddingTop: 16, gap: 16 },
 
   card: {
-    backgroundColor: '#ffffff',
     borderRadius: CARD_RADIUS,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 5,
   },
   cardImageWrap: {
     width: '100%',
     height: CARD_IMAGE_H,
-    backgroundColor: '#e5e5e5',
-    borderTopLeftRadius: CARD_RADIUS,
-    borderTopRightRadius: CARD_RADIUS,
+    backgroundColor: '#2a2a2a',
+    borderRadius: CARD_RADIUS,
     overflow: 'hidden',
   },
-  cardGradient: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
-    height: CARD_IMAGE_H * 0.45,
-  },
   priceBadge: {
-    position: 'absolute', bottom: 12, left: 12,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    position: 'absolute', top: 12, right: 12,
+    backgroundColor: 'rgba(0,0,0,0.60)',
     borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5,
   },
   priceBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
 
-  cardBody:      { borderRadius: CARD_RADIUS, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 
-  0.08,            shadowRadius: 8, elevation: 3 },
-cardTitle: { fontSize: 16, fontWeight: '700', marginBottom: 5, lineHeight: 21 },
-cardMeta:  { fontSize: 12, fontWeight: '500', marginBottom: 2 },
-cardVenue: { fontSize: 12, fontWeight: '400' },
+  cardBody: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 14,
+    paddingBottom: 16,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 4,
+    lineHeight: 21,
+    color: '#ffffff',
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  cardMeta: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 2,
+    color: 'rgba(255,255,255,0.82)',
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  cardVenue: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.68)',
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
 
   centreWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyIcon:  { fontSize: 40, marginBottom: 16 },
