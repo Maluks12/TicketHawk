@@ -33,25 +33,27 @@ export const s = {
   btnOutlineText:        'text-white font-bold text-[11px] tracking-[1px]',
   btnOutlineLight:       'border border-black/20 px-[22px] py-3 rounded-[2px]',
   btnOutlineLightText:   'text-black font-bold text-[11px] tracking-[1px]',
+  btnBlue:               'bg-[#1c2e61] px-[22px] py-3 rounded-[2px]',
+  btnBlueText:           'text-white font-bold text-[11px] tracking-[1px]',
 
   //  Category filter 
   filterRow:             'flex-row items-center px-5 py-3.5 gap-2.5',
   filterChipActive:      'bg-black border-black',
   filterClearBtn:        'w-[34px] h-[34px] rounded-[2px] border items-center justify-center',
   filterClearText:       'text-xs',
-  filterChip:            'flex-row items-center px-4 py-2 rounded-[2px] border',
+  filterChip:            'flex-row items-center px-4 py-2 rounded-[14px] border',
   filterChipText:        'text-[10px] font-extrabold tracking-[1.2px]',
   filterChipArrow:       'text-[11px]',
   filterChipTextActive:  'text-white',
 
 
   //  Category modal 
-  modalBackdrop:         'flex-1 bg-black/40 justify-end',
-  modalSheet:            'rounded-t-[4px] pt-5 pb-10 max-h-[80%] items-center border-t',
-  modalItem:             'py-[18px] px-10 w-full items-start',
-  modalItemText:         'text-[22px] font-normal',
+  modalBackdrop:  'flex-1 justify-end',
+  modalSheet:     'w-full flex-1 pt-16 pb-10 items-center',
+  modalItem:      'py-[18px] px-10 w-full items-start',
+  modalItemText:  'text-[26px] font-normal',
   modalItemTextActive:   'font-black tracking-[1px]',
-  modalCloseBtn:         'mt-4 w-11 h-11 rounded-[2px] items-center justify-center',
+  modalCloseBtn:  'mt-6 w-12 h-12 rounded-full items-center justify-center',
   modalCloseBtnText:     'text-base font-bold',
   //  Section header 
   section:               'px-5 mb-4',

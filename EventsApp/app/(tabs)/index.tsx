@@ -30,6 +30,7 @@ import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl } from '../../components/FilterModal';
 import { useAppTheme } from '../../theme/colors';
+import { BlurView } from 'expo-blur';
 
 // ─── Cart header button ───────────────────────────────────────────────────────
 function CartHeaderButton() {
@@ -334,7 +335,7 @@ export default function Index() {
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
   const setAllEvents     = useEventStore((state) => state.setAllEvents);
   const setDbCategories  = useEventStore((state) => state.setDbCategories);
-  const { colors } = useAppTheme();
+   const { colors, isDark } = useAppTheme();
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const lastScrollY      = useRef(0);
@@ -649,8 +650,8 @@ export default function Index() {
                   <TouchableOpacity className={s.btnPrimary} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
                     <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity className={s.btnOutline} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
-                    <Text className={s.btnOutlineText}>VIEW DETAILS</Text>
+                  <TouchableOpacity className={s.btnBlue} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
+                    <Text className={s.btnBlueText}>VIEW DETAILS</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -686,26 +687,29 @@ export default function Index() {
           )}
           <TouchableOpacity
             className={`${s.filterChip} ${activeCategory !== 'All' ? s.filterChipActive : ''}`}
-            style={activeCategory === 'All' ? { borderColor: colors.dividerColor, backgroundColor: colors.sectionCardBg } : undefined}
+           style={activeCategory === 'All'
+              ? { borderColor: colors.text, backgroundColor: 'transparent' }
+              : { borderColor: isDark ? '#ffffff' : '#000000', backgroundColor: 'transparent' }
+            }
             onPress={() => setDropdownOpen(true)}
           >
             <Text
               className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
-              style={activeCategory === 'All' ? { color: colors.subText } : undefined}
+             style={{ color: colors.text }}
             >
               {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
             </Text>
             <Text
               className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
-              style={activeCategory === 'All' ? { color: colors.subText } : undefined}
+              style={{ color: colors.text }}
             > ▾</Text>
           </TouchableOpacity>
         </View>
 
         {/* Category Dropdown Modal */}
-        <Modal visible={dropdownOpen} transparent animationType="fade" onRequestClose={() => setDropdownOpen(false)}>
-          <View className={s.modalBackdrop}>
-            <View className={s.modalSheet} style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor }}>
+        <Modal visible={dropdownOpen} transparent animationType="slide" onRequestClose={() => setDropdownOpen(false)}>
+        <View className={s.modalBackdrop}>
+          <BlurView intensity={130} tint={isDark ? 'dark' : 'light'} style={{ flex: 1, width: '100%', paddingTop: 64, paddingBottom: 40, alignItems: 'center' }}>
               <FlatList
                 data={categories}
                 keyExtractor={(item) => item}
@@ -723,7 +727,7 @@ export default function Index() {
               <TouchableOpacity className={s.modalCloseBtn} style={{ backgroundColor: colors.sectionCardBg }} onPress={() => setDropdownOpen(false)}>
                 <Text className={s.modalCloseBtnText} style={{ color: colors.text }}>✕</Text>
               </TouchableOpacity>
-            </View>
+            </BlurView>
           </View>
         </Modal>
 
