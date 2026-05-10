@@ -289,7 +289,7 @@ const SectionRow = ({
   return (
     <>
       {marginTop && (
-        <View style={{ height: 1, backgroundColor: colors.dividerColor, marginVertical: 4 }} />
+        <View style={{ height: 1, backgroundColor: 'transparent', marginVertical: 4 }} />
       )}
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
