@@ -106,14 +106,11 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				// buyer can choose either — no restriction
 			}
 
-			// Delivery requires a shipping address
-			if method == "delivery" {
-				if dto.DeliveryAddress == nil {
-					c.JSON(http.StatusBadRequest, gin.H{
-						"error": "delivery_address is required when fulfillment_method is \"delivery\"",
-					})
-					return
-				}
+			// Delivery requires a shipping address.
+			// NOTE: delivery_address is validated at checkout, not here, so
+			// the user can add a delivery item first and fill the address on
+			// the cart page before checking out.
+			if method == "delivery" && dto.DeliveryAddress != nil {
 				if dto.DeliveryAddress.Street == "" || dto.DeliveryAddress.City == "" || dto.DeliveryAddress.Province == "" {
 					c.JSON(http.StatusBadRequest, gin.H{
 						"error": "delivery_address must include street, city, and province",
@@ -121,6 +118,10 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 					return
 				}
 				// Apply the delivery fee snapshot
+				deliveryFee = fi.DeliveryFee
+			} else if method == "delivery" {
+				// No address yet — still apply the fee snapshot so the total
+				// shown in the cart is accurate. Address is required at checkout.
 				deliveryFee = fi.DeliveryFee
 			}
 
@@ -184,11 +185,28 @@ func UpdateCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if err := repository.UpdateCartItemQuantity(pool, cart.ID, itemID, dto.Quantity); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+
+		// Update quantity if provided
+		if dto.Quantity != nil {
+			if err := repository.UpdateCartItemQuantity(pool, cart.ID, itemID, *dto.Quantity); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
-		c.JSON(http.StatusOK, gin.H{"message": "quantity updated"})
+
+		// Update delivery address if provided
+		if dto.DeliveryAddress != nil {
+			if dto.DeliveryAddress.Street == "" || dto.DeliveryAddress.City == "" || dto.DeliveryAddress.Province == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "delivery_address must include street, city, and province"})
+				return
+			}
+			if err := repository.UpdateCartItemDeliveryAddress(pool, cart.ID, itemID, dto.DeliveryAddress); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "cart item updated"})
 	}
 }
 

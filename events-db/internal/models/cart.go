@@ -75,7 +75,11 @@ type AddCartItemDTO struct {
 }
 
 type UpdateCartItemDTO struct {
-	Quantity int `json:"quantity" binding:"required,min=1,max=10"`
+	// Quantity is optional — omit to leave unchanged.
+	Quantity        *int             `json:"quantity" binding:"omitempty,min=1,max=10"`
+	// DeliveryAddress can be patched independently from quantity.
+	// Provide when the user fills in their shipping address on the cart page.
+	DeliveryAddress *DeliveryAddress `json:"delivery_address"`
 }
 
 type MergeCartDTO struct {

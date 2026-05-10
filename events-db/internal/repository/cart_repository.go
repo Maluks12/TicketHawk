@@ -200,6 +200,30 @@ func UpdateCartItemQuantity(pool *pgxpool.Pool, cartID, itemID string, quantity 
 	return nil
 }
 
+// UpdateCartItemDeliveryAddress sets or replaces the delivery address for a
+// merch cart item. Called when the user fills in their address on the cart page.
+func UpdateCartItemDeliveryAddress(pool *pgxpool.Pool, cartID, itemID string, addr *models.DeliveryAddress) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	b, err := json.Marshal(addr)
+	if err != nil {
+		return fmt.Errorf("failed to encode delivery address: %w", err)
+	}
+
+	cmd, err := pool.Exec(ctx,
+		`UPDATE cart_items SET delivery_address = $1::jsonb WHERE id = $2 AND cart_id = $3`,
+		string(b), itemID, cartID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update delivery address: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return errors.New("cart item not found")
+	}
+	return nil
+}
+
 // DeleteCartItem removes a single item from the cart.
 func DeleteCartItem(pool *pgxpool.Pool, cartID, itemID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

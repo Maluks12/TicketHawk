@@ -13,6 +13,7 @@ import {
   RefreshControl,
   StyleSheet,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -611,7 +612,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={async (cartItem, variant, fulfillmentMethod, deliveryAddress) => {
+          onAddToCart={async (cartItem, variant, fulfillmentMethod) => {
             try {
               const sid = await getCachedSessionId();
               await addMerchToCart(
@@ -621,13 +622,12 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
                   merchandise_variant_id: variant?.id,
                   quantity:               1,
                   fulfillment_method:     fulfillmentMethod,
-                  delivery_address:       deliveryAddress,
                 },
                 sid,
               );
             } catch (err: any) {
-              // Log so dev can see errors during testing; silent in prod
-              console.warn('[addMerchToCart]', err?.response?.data ?? err?.message);
+              const msg = err?.response?.data?.error ?? err?.message ?? 'Something went wrong. Please try again.';
+              Alert.alert('Could not add to cart', msg);
             }
           }}
         />

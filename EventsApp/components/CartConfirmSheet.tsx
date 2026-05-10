@@ -9,32 +9,16 @@ import {
   Modal,
   StatusBar,
   Dimensions,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
-  Alert,
-  LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type MerchandiseItem } from '../lib/api';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type VariantItem = NonNullable<MerchandiseItem['variants']>[number];
-
-export interface DeliveryAddress {
-  street:      string;
-  suburb:      string;
-  city:        string;
-  province:    string;
-  postal_code: string;
-}
 
 export type FulfillmentMethod = 'pickup' | 'delivery';
 
@@ -42,11 +26,11 @@ interface CartConfirmSheetProps {
   item:            MerchandiseItem;
   selectedVariant: VariantItem | null;
   onClose:         () => void;
+  /** Delivery address is collected on the cart page — only method is passed here. */
   onAddToCart: (
     item:              MerchandiseItem,
     variant:           VariantItem | null,
     fulfillmentMethod: FulfillmentMethod,
-    deliveryAddress?:  DeliveryAddress,
   ) => void;
 }
 
@@ -93,13 +77,13 @@ function getVariantLabel(v: VariantItem): string {
 }
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
-const SHEET_HEIGHT = Math.round(SCREEN_H * 0.88);
+const SHEET_HEIGHT = Math.round(SCREEN_H * 0.72);
 
 // ─── Image carousel ───────────────────────────────────────────────────────────
 
 function ImageCarousel({ images, tc }: { images: string[]; tc: string }) {
   const [page, setPage] = useState(0);
-  const IMG_H = Math.round(SCREEN_W * 0.48);
+  const IMG_H = Math.round(SCREEN_W * 0.44);
   if (!images.length) return null;
   return (
     <View style={{ height: IMG_H }}>
@@ -123,113 +107,122 @@ function ImageCarousel({ images, tc }: { images: string[]; tc: string }) {
   );
 }
 
-// ─── Other variants ───────────────────────────────────────────────────────────
+// ─── Fulfillment dropdown ─────────────────────────────────────────────────────
 
-function OtherVariants({ item, selectedVariant, tc }: { item: MerchandiseItem; selectedVariant: VariantItem | null; tc: string }) {
-  const others = (item.variants ?? []).filter((v) => v.id !== selectedVariant?.id && v.is_active);
-  if (!others.length) return null;
-  return (
-    <View style={{ marginHorizontal: 20, marginTop: 20 }}>
-      <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 2, color: tc + '50', marginBottom: 10 }}>OTHER SIZES AVAILABLE</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        {others.map((v) => (
-          <View key={v.id} style={{ borderWidth: 1, borderColor: tc + '22', borderRadius: 3, paddingHorizontal: 14, paddingVertical: 10, marginRight: 8, opacity: v.stock_quantity === 0 ? 0.38 : 1, backgroundColor: tc + '07' }}>
-            <Text style={{ fontSize: 11, fontWeight: '700', letterSpacing: 0.5, color: tc }}>{getVariantLabel(v).toUpperCase()}</Text>
-          </View>
-        ))}
-      </ScrollView>
-    </View>
-  );
-}
-
-// ─── Fulfillment section — inline dropdown, no nested Modal ──────────────────
-
-function FulfillmentSection({
-  item, method, onMethod, address, onAddress, tc, bg,
+function FulfillmentDropdown({
+  item, method, onMethod, tc, bg,
 }: {
-  item: MerchandiseItem; method: FulfillmentMethod; onMethod: (m: FulfillmentMethod) => void;
-  address: DeliveryAddress; onAddress: (a: DeliveryAddress) => void; tc: string; bg: string;
+  item: MerchandiseItem;
+  method: FulfillmentMethod;
+  onMethod: (m: FulfillmentMethod) => void;
+  tc: string;
+  bg: string;
 }) {
   const mode       = (item.fulfillment_mode ?? 'delivery') as string;
-  const canPickup  = mode === 'pickup'   || mode === 'both';
-  const canDeliver = mode === 'delivery' || mode === 'both';
-  const canChoose  = mode === 'both';
-  const deliveryFee = item.delivery_fee ?? 0;
-  const pickupLoc   = item.pickup_location;
+  const canPickup  = mode === 'pickup'  || mode === 'both';
+  const canDeliver = mode === 'delivery'|| mode === 'both';
+  const canChoose  = canPickup && canDeliver;
 
   const [open, setOpen] = useState(false);
+  const heightAnim = useRef(new Animated.Value(0)).current;
+
+  const OPTION_H = 54;
+  const optionCount = (canPickup ? 1 : 0) + (canDeliver ? 1 : 0);
 
   const toggle = () => {
     if (!canChoose) return;
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setOpen((o) => !o);
+    const toValue = open ? 0 : OPTION_H * optionCount + 8;
+    Animated.spring(heightAnim, { toValue, damping: 20, stiffness: 260, useNativeDriver: false }).start();
+    setOpen(o => !o);
   };
 
   const pick = (m: FulfillmentMethod) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     onMethod(m);
+    Animated.spring(heightAnim, { toValue: 0, damping: 20, stiffness: 260, useNativeDriver: false }).start();
     setOpen(false);
   };
 
-  const methodLabel = method === 'pickup'
-    ? `\u{1F3EA}  Pickup${pickupLoc ? ` \u00B7 ${pickupLoc}` : ''}`
-    : `\u{1F4E6}  Delivery${deliveryFee > 0 ? ` \u00B7 ${fmtPrice(deliveryFee)}` : ' \u00B7 Free'}`;
+  const pickupSubtitle  = item.pickup_location ?? 'Collect at the event — details via email';
+  const deliveryFee     = item.delivery_fee ?? 0;
+  const deliverySubtitle = deliveryFee > 0
+    ? `${fmtPrice(deliveryFee)} delivery fee — address added in cart`
+    : 'Free delivery — address added in cart';
 
-  const inputStyle = {
-    borderWidth: 1, borderColor: tc + '30', borderRadius: 6,
-    paddingHorizontal: 12, paddingVertical: 11,
-    color: tc, fontSize: 14, fontWeight: '500' as const,
-    backgroundColor: tc + '08', marginBottom: 10,
-  };
+  const selectedEmoji = method === 'pickup' ? '🏪' : '📦';
+  const selectedLabel = method === 'pickup' ? 'Pickup' : 'Delivery';
+  const selectedSub   = method === 'pickup' ? pickupSubtitle : deliverySubtitle;
 
   return (
     <View style={{ marginHorizontal: 20, marginTop: 18 }}>
       <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 2, color: tc + '50', marginBottom: 8 }}>
-        FULFILLMENT
+        FULFILMENT
       </Text>
 
-      {/* Tappable row */}
+      {/* Selected row / trigger */}
       <TouchableOpacity
         onPress={toggle}
-        activeOpacity={canChoose ? 0.7 : 1}
+        activeOpacity={canChoose ? 0.75 : 1}
         style={{
-          borderWidth: 1, borderColor: open ? tc + '60' : tc + '25',
-          borderRadius: 8, paddingHorizontal: 14, paddingVertical: 14,
-          backgroundColor: tc + '07', flexDirection: 'row', alignItems: 'center',
+          borderWidth: 1,
+          borderColor: open ? tc + '70' : tc + '28',
+          borderRadius: 10,
+          paddingHorizontal: 14,
+          paddingVertical: 13,
+          backgroundColor: tc + '07',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
         }}
       >
-        <Text style={{ fontSize: 14, fontWeight: '600', color: tc, flex: 1 }}>{methodLabel}</Text>
+        <Text style={{ fontSize: 22 }}>{selectedEmoji}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, fontWeight: '800', color: tc }}>{selectedLabel}</Text>
+          <Text style={{ fontSize: 11, color: tc + '60', marginTop: 2 }} numberOfLines={1}>{selectedSub}</Text>
+        </View>
         {canChoose && (
-          <Text style={{ fontSize: 18, color: tc + '60', fontWeight: '300', transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
-            {'>'}
+          <Text style={{
+            fontSize: 11, fontWeight: '700', color: tc + '55', letterSpacing: 0.5,
+            transform: [{ rotate: open ? '180deg' : '0deg' }],
+          }}>
+            ▼
           </Text>
         )}
       </TouchableOpacity>
 
-      {/* Inline dropdown */}
-      {open && canChoose && (
-        <View style={{ borderWidth: 1, borderColor: tc + '20', borderRadius: 8, marginTop: 6, overflow: 'hidden', backgroundColor: tc + '05' }}>
+      {/* Animated dropdown options */}
+      <Animated.View style={{ overflow: 'hidden', height: heightAnim }}>
+        <View style={{
+          marginTop: 6,
+          borderWidth: 1,
+          borderColor: tc + '20',
+          borderRadius: 10,
+          overflow: 'hidden',
+          backgroundColor: tc + '05',
+        }}>
           {canPickup && (
             <TouchableOpacity
               onPress={() => pick('pickup')}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 12,
-                paddingVertical: 14, paddingHorizontal: 14,
-                backgroundColor: method === 'pickup' ? tc + '18' : 'transparent',
-                borderBottomWidth: canDeliver ? 1 : 0, borderBottomColor: tc + '15',
-              }}
               activeOpacity={0.7}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                paddingVertical: 14,
+                paddingHorizontal: 14,
+                backgroundColor: method === 'pickup' ? tc + '16' : 'transparent',
+                borderBottomWidth: canDeliver ? 1 : 0,
+                borderBottomColor: tc + '12',
+                height: OPTION_H,
+              }}
             >
               <Text style={{ fontSize: 20 }}>🏪</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 14, fontWeight: '800', color: tc }}>Pickup</Text>
-                <Text style={{ fontSize: 12, color: tc + '65', marginTop: 2 }}>
-                  {pickupLoc ?? 'At the event — details confirmed via email'}
-                </Text>
+                <Text style={{ fontSize: 11, color: tc + '60', marginTop: 1 }} numberOfLines={1}>{pickupSubtitle}</Text>
               </View>
               {method === 'pickup' && (
                 <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: tc, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 11, color: bg, fontWeight: '900' }}>{'✓'}</Text>
+                  <Text style={{ fontSize: 11, color: bg, fontWeight: '900' }}>✓</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -237,43 +230,31 @@ function FulfillmentSection({
           {canDeliver && (
             <TouchableOpacity
               onPress={() => pick('delivery')}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 12,
-                paddingVertical: 14, paddingHorizontal: 14,
-                backgroundColor: method === 'delivery' ? tc + '18' : 'transparent',
-              }}
               activeOpacity={0.7}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                paddingVertical: 14,
+                paddingHorizontal: 14,
+                backgroundColor: method === 'delivery' ? tc + '16' : 'transparent',
+                height: OPTION_H,
+              }}
             >
               <Text style={{ fontSize: 20 }}>📦</Text>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 14, fontWeight: '800', color: tc }}>Delivery</Text>
-                <Text style={{ fontSize: 12, color: tc + '65', marginTop: 2 }}>
-                  {deliveryFee > 0 ? `${fmtPrice(deliveryFee)} delivery fee` : 'Free delivery'}
-                </Text>
+                <Text style={{ fontSize: 11, color: tc + '60', marginTop: 1 }} numberOfLines={1}>{deliverySubtitle}</Text>
               </View>
               {method === 'delivery' && (
                 <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: tc, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 11, color: bg, fontWeight: '900' }}>{'✓'}</Text>
+                  <Text style={{ fontSize: 11, color: bg, fontWeight: '900' }}>✓</Text>
                 </View>
               )}
             </TouchableOpacity>
           )}
         </View>
-      )}
-
-      {/* Delivery address form */}
-      {method === 'delivery' && (
-        <View style={{ marginTop: 14 }}>
-          <Text style={{ fontSize: 9, fontWeight: '800', letterSpacing: 1.5, color: tc + '50', marginBottom: 10 }}>DELIVERY ADDRESS</Text>
-          <TextInput placeholder="Street address *" placeholderTextColor={tc + '45'} value={address.street} onChangeText={(v) => onAddress({ ...address, street: v })} style={inputStyle} />
-          <TextInput placeholder="Suburb" placeholderTextColor={tc + '45'} value={address.suburb} onChangeText={(v) => onAddress({ ...address, suburb: v })} style={inputStyle} />
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <TextInput placeholder="City *" placeholderTextColor={tc + '45'} value={address.city} onChangeText={(v) => onAddress({ ...address, city: v })} style={[inputStyle, { flex: 1 }]} />
-            <TextInput placeholder="Province *" placeholderTextColor={tc + '45'} value={address.province} onChangeText={(v) => onAddress({ ...address, province: v })} style={[inputStyle, { flex: 1 }]} />
-          </View>
-          <TextInput placeholder="Postal code" placeholderTextColor={tc + '45'} value={address.postal_code} onChangeText={(v) => onAddress({ ...address, postal_code: v })} keyboardType="numeric" style={inputStyle} />
-        </View>
-      )}
+      </Animated.View>
     </View>
   );
 }
@@ -289,13 +270,9 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
     selectedVariant?.price_override != null ? selectedVariant.price_override : item.effective_price;
 
   const mode = (item.fulfillment_mode ?? 'delivery') as string;
-  const defaultMethod: FulfillmentMethod =
-    mode === 'pickup' ? 'pickup' : mode === 'delivery' ? 'delivery' : 'pickup';
+  const defaultMethod: FulfillmentMethod = mode === 'pickup' ? 'pickup' : 'delivery';
 
   const [fulfillmentMethod, setFulfillmentMethod] = useState<FulfillmentMethod>(defaultMethod);
-  const [deliveryAddress,   setDeliveryAddress]   = useState<DeliveryAddress>({
-    street: '', suburb: '', city: '', province: '', postal_code: '',
-  });
 
   const translateY      = useRef(new Animated.Value(SHEET_HEIGHT)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -333,21 +310,14 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
   const btnScale              = useRef(new Animated.Value(1)).current;
 
   const handleAddToCart = useCallback(() => {
-    if (fulfillmentMethod === 'delivery') {
-      if (!deliveryAddress.street.trim() || !deliveryAddress.city.trim() || !deliveryAddress.province.trim()) {
-        Alert.alert('Address required', 'Please fill in your street, city, and province for delivery.');
-        return;
-      }
-    }
     Animated.sequence([
       Animated.timing(btnScale, { toValue: 0.94, duration: 80,  useNativeDriver: true }),
       Animated.spring(btnScale, { toValue: 1,    damping: 10,   stiffness: 300, useNativeDriver: true }),
     ]).start();
     setAdded(true);
-    onAddToCart(item, selectedVariant, fulfillmentMethod,
-      fulfillmentMethod === 'delivery' ? deliveryAddress : undefined);
+    onAddToCart(item, selectedVariant, fulfillmentMethod);
     setTimeout(dismiss, 1100);
-  }, [item, selectedVariant, fulfillmentMethod, deliveryAddress, onAddToCart, dismiss]);
+  }, [item, selectedVariant, fulfillmentMethod, onAddToCart, dismiss]);
 
   const stockLabel =
     !selectedVariant ? null :
@@ -383,7 +353,7 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: tc + '12' }}>
             <Text style={{ fontSize: 10, fontWeight: '900', letterSpacing: 2.5, color: tc + '55', flex: 1 }}>CONFIRM ORDER</Text>
             <TouchableOpacity onPress={dismiss} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-              <Text style={{ fontSize: 17, color: tc + '45' }}>{'✕'}</Text>
+              <Text style={{ fontSize: 17, color: tc + '45' }}>✕</Text>
             </TouchableOpacity>
           </View>
 
@@ -428,14 +398,14 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
               </View>
             )}
 
-            {/* Fulfillment — inline dropdown */}
-            <FulfillmentSection
-              item={item} method={fulfillmentMethod} onMethod={setFulfillmentMethod}
-              address={deliveryAddress} onAddress={setDeliveryAddress} tc={tc} bg={bg}
+            {/* Fulfillment dropdown */}
+            <FulfillmentDropdown
+              item={item}
+              method={fulfillmentMethod}
+              onMethod={setFulfillmentMethod}
+              tc={tc}
+              bg={bg}
             />
-
-            {/* Other sizes */}
-            <OtherVariants item={item} selectedVariant={selectedVariant} tc={tc} />
 
             {/* Order summary */}
             <View style={{ marginHorizontal: 20, marginTop: 22, borderTopWidth: 1, borderTopColor: tc + '12', paddingTop: 16 }}>
