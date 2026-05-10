@@ -82,7 +82,7 @@ func GetCartWithItems(pool *pgxpool.Pool, cartID string) (*models.Cart, error) {
 			tt.name                   AS ticket_type_name,
 			m.pickup_location         AS pickup_location
 		FROM cart_items ci
-		JOIN events e ON e.id = ci.event_id
+		LEFT JOIN events e ON e.id = ci.event_id
 		LEFT JOIN merchandise_variants mv ON mv.id = ci.merchandise_variant_id
 		LEFT JOIN merchandise m ON m.id = mv.merchandise_id
 		LEFT JOIN ticket_types tt ON tt.id = ci.ticket_type_id
@@ -128,16 +128,19 @@ func AddCartItem(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Enforce per-event 10-item cap across all types combined
+	// Enforce per-event 10-item cap across all types combined.
+	// For standalone merch (no event_id) we skip the cap — there's no event to cap against.
 	var existingQty int
-	pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(quantity), 0) FROM cart_items
-		 WHERE cart_id = $1 AND event_id = $2 AND item_type = $3`,
-		cartID, dto.EventID, dto.ItemType,
-	).Scan(&existingQty)
+	if dto.EventID != nil {
+		pool.QueryRow(ctx,
+			`SELECT COALESCE(SUM(quantity), 0) FROM cart_items
+			 WHERE cart_id = $1 AND event_id = $2 AND item_type = $3`,
+			cartID, *dto.EventID, dto.ItemType,
+		).Scan(&existingQty)
 
-	if existingQty+dto.Quantity > 10 {
-		return nil, fmt.Errorf("maximum 10 items per event allowed")
+		if existingQty+dto.Quantity > 10 {
+			return nil, fmt.Errorf("maximum 10 items per event allowed")
+		}
 	}
 
 	// Marshal delivery address to JSON string when provided

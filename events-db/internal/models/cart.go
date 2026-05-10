@@ -22,7 +22,8 @@ type CartItem struct {
 	ID                   string       `json:"id" db:"id"`
 	CartID               string       `json:"cart_id" db:"cart_id"`
 	ItemType             CartItemType `json:"item_type" db:"item_type"`
-	EventID              string       `json:"event_id" db:"event_id"`
+	// EventID is nil for standalone merch items not linked to a specific event.
+	EventID              *string      `json:"event_id,omitempty" db:"event_id"`
 	MerchandiseVariantID *string      `json:"merchandise_variant_id,omitempty" db:"merchandise_variant_id"`
 	// TicketTypeID is set when the buyer chose a specific pricing tier.
 	// Nil for flat-priced events or merch items.
@@ -60,7 +61,8 @@ func (ci *CartItem) LineTotal() float64 {
 
 type AddCartItemDTO struct {
 	ItemType             CartItemType `json:"item_type" binding:"required,oneof=ticket merchandise"`
-	EventID              string       `json:"event_id" binding:"required,uuid"`
+	// EventID is required for ticket items; optional for standalone merch not linked to an event.
+	EventID              *string      `json:"event_id" binding:"omitempty,uuid"`
 	MerchandiseVariantID *string      `json:"merchandise_variant_id" binding:"omitempty,uuid"`
 	// TicketTypeID selects the pricing tier. Required when the event uses ticket
 	// types; omit for flat-priced events or merch items.
@@ -96,7 +98,7 @@ type CartSummary struct {
 }
 
 type EventGroup struct {
-	EventID    string     `json:"event_id"`
+	EventID    *string    `json:"event_id,omitempty"`
 	EventTitle string     `json:"event_title"`
 	Items      []CartItem `json:"items"`
 	Subtotal   float64    `json:"subtotal"`

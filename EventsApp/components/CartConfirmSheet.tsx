@@ -307,17 +307,31 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
   ).current;
 
   const [added,   setAdded]   = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [cartError, setCartError] = useState<string | null>(null);
   const btnScale              = useRef(new Animated.Value(1)).current;
 
-  const handleAddToCart = useCallback(() => {
+  const handleAddToCart = useCallback(async () => {
+    if (loading || added) return;
+
     Animated.sequence([
       Animated.timing(btnScale, { toValue: 0.94, duration: 80,  useNativeDriver: true }),
       Animated.spring(btnScale, { toValue: 1,    damping: 10,   stiffness: 300, useNativeDriver: true }),
     ]).start();
-    setAdded(true);
-    onAddToCart(item, selectedVariant, fulfillmentMethod);
-    setTimeout(dismiss, 1100);
-  }, [item, selectedVariant, fulfillmentMethod, onAddToCart, dismiss]);
+
+    setLoading(true);
+    setCartError(null);
+    try {
+      await onAddToCart(item, selectedVariant, fulfillmentMethod);
+      setAdded(true);
+      setTimeout(dismiss, 1100);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error ?? err?.message ?? 'Something went wrong. Please try again.';
+      setCartError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [item, selectedVariant, fulfillmentMethod, onAddToCart, dismiss, loading, added]);
 
   const stockLabel =
     !selectedVariant ? null :
@@ -436,12 +450,26 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
             paddingBottom: bottom > 0 ? bottom : 24,
             backgroundColor: bg, borderTopWidth: 1, borderTopColor: tc + '12',
           }}>
+            {/* Inline error message */}
+            {cartError && (
+              <View style={{
+                backgroundColor: '#ff3c6e18',
+                borderWidth: 1, borderColor: '#ff3c6e40',
+                borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10,
+                marginBottom: 10,
+              }}>
+                <Text style={{ fontSize: 12, color: '#ff3c6e', fontWeight: '700', textAlign: 'center' }}>
+                  {cartError}
+                </Text>
+              </View>
+            )}
             <Animated.View style={{ transform: [{ scale: btnScale }] }}>
               <TouchableOpacity
-                onPress={added ? undefined : handleAddToCart}
+                onPress={handleAddToCart}
+                disabled={added || loading}
                 activeOpacity={0.85}
                 style={{
-                  backgroundColor: added ? '#34c759' : tc,
+                  backgroundColor: added ? '#34c759' : loading ? tc + 'aa' : tc,
                   borderRadius: 8, paddingVertical: 17,
                   alignItems: 'center', justifyContent: 'center',
                   flexDirection: 'row', gap: 10,
@@ -449,6 +477,8 @@ export const CartConfirmSheet = ({ item, selectedVariant, onClose, onAddToCart }
               >
                 {added
                   ? <Text style={{ fontSize: 12, fontWeight: '900', letterSpacing: 2, color: bg }}>{'✓'}  ADDED TO CART</Text>
+                  : loading
+                  ? <Text style={{ fontSize: 12, fontWeight: '900', letterSpacing: 2, color: bg }}>ADDING...</Text>
                   : <Text style={{ fontSize: 12, fontWeight: '900', letterSpacing: 2.5, color: bg }}>ADD TO CART  {'→'}</Text>
                 }
               </TouchableOpacity>

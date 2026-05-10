@@ -613,22 +613,17 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
           onAddToCart={async (cartItem, variant, fulfillmentMethod) => {
-            try {
-              const sid = await getCachedSessionId();
-              await addMerchToCart(
-                {
-                  item_type:              'merchandise',
-                  event_id:               cartItem.event_id,
-                  merchandise_variant_id: variant?.id,
-                  quantity:               1,
-                  fulfillment_method:     fulfillmentMethod,
-                },
-                sid,
-              );
-            } catch (err: any) {
-              const msg = err?.response?.data?.error ?? err?.message ?? 'Something went wrong. Please try again.';
-              Alert.alert('Could not add to cart', msg);
-            }
+            const sid = await getCachedSessionId();
+            await addMerchToCart(
+              {
+                item_type:              'merchandise',
+                event_id:               cartItem.event_id,
+                merchandise_variant_id: variant?.id,
+                quantity:               1,
+                fulfillment_method:     fulfillmentMethod,
+              },
+              sid,
+            );
           }}
         />
       )}
