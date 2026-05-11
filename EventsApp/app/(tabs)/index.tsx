@@ -256,10 +256,10 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
 
 // ─── PERF: React.memo — section rows skip re-render unless section data changes
 const SectionRow = memo(({
-  section, isTop10 = false, marginTop = false, onEventPress, colors,
+  section, isTop10 = false, marginTop = false, onEventPress, onViewAll, colors,
 }: {
   section: HomeSection; isTop10?: boolean; marginTop?: boolean;
-  onEventPress: (event: Event) => void; colors: any;
+  onEventPress: (event: Event) => void; onViewAll: (sectionId: string, title: string, events: Event[]) => void; colors: any;
 }) => {
   const [events,      setEvents]      = useState<Event[]>(section.events ?? []);
   const [nextCursor,  setNextCursor]  = useState<string>(section.next_cursor ?? '');
@@ -297,13 +297,9 @@ const SectionRow = memo(({
       <View className={marginTop ? s.sectionMt : s.section}>
         <View className={s.sectionHeader}>
           <Text className={s.sectionTitle} style={{ color: colors.text }}>{section.title.toUpperCase()}</Text>
-          {nextCursor ? (
-            <TouchableOpacity onPress={handleLoadMore} disabled={loadingMore}>
-              <Text className={s.sectionLink}>{loadingMore ? '…' : 'MORE'}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={() => onViewAll(section.id, section.title, events)}>
+            <Text className={s.sectionLink}>VIEW ALL</Text>
+          </TouchableOpacity>
         </View>
       </View>
       <FlatList
@@ -341,6 +337,7 @@ export default function Index() {
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
   const setAllEvents     = useEventStore((state) => state.setAllEvents);
   const setDbCategories  = useEventStore((state) => state.setDbCategories);
+  const setSectionMeta   = useEventStore((state) => state.setSectionMeta);
   // Subscribe to the auth user so we can re-fetch when it transitions from
   // null → known. _layout.tsx calls loadUser() on startup; if that validates
   // or refreshes the token, user becomes non-null and we need a fresh home
@@ -495,11 +492,11 @@ export default function Index() {
   }, [allEvents, spotlightConfig]);
 
   // ── Data fetching ─────────────────────────────────────────────────────────
-  const fetchSections = useCallback(async () => {
+  const fetchSections = useCallback(async (city?: string) => {
     try {
       setError(null);
       const [sectionsRes, categoriesRes] = await Promise.all([
-        getHomeSections(),
+        getHomeSections(city),
         getCategories().catch(() => null),
       ]);
       const loaded = sectionsRes.data.sections ?? [];
@@ -525,7 +522,7 @@ export default function Index() {
       prevAuthUserId.current = authUserId;
       // Don't show the skeleton again — just silently swap in the personalised
       // sections once auth is ready.
-      fetchSections();
+      fetchSections(filterParams.city);
     }
     if (authUserId === null) {
       prevAuthUserId.current = null;
@@ -534,9 +531,9 @@ export default function Index() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchSections();
+    await fetchSections(filterParams.city);
     setRefreshing(false);
-  }, [fetchSections]);
+  }, [fetchSections, filterParams.city]);
 
   // PERF: useCallback so handleFilterApply reference is stable across renders
   const handleFilterApply = useCallback(async (params: FilterParams) => {
@@ -548,6 +545,10 @@ export default function Index() {
 
     const hasLocation = !!(params.city || params.province || params.lat);
     const hasDate     = !!(params.date && params.date !== 'any');
+
+    // Re-fetch home sections with the chosen city so near_you updates dynamically
+    if (params.city) fetchSections(params.city);
+    else if (!params.city && !params.province && !params.lat) fetchSections();
 
     if (!hasLocation && !hasDate) {
       setSections(homeSections);
@@ -588,6 +589,16 @@ export default function Index() {
     setSelectedEvent(event);
     router.push(`/event/${event.id}`);
   }, [setSelectedEvent, router]);
+
+  const handleViewAll = useCallback((sectionId: string, title: string, events: Event[]) => {
+    setSectionMeta({ title, sectionId, events });
+    router.push(`/section/${encodeURIComponent(title)}`);
+  }, [setSectionMeta, router]);
+
+  const handleViewAllEditorial = useCallback((filterKey: string, title: string) => {
+    setSectionMeta({ title, filterKey });
+    router.push(`/section/${encodeURIComponent(title)}`);
+  }, [setSectionMeta, router]);
 
   const locationLabel =
     filterParams.city     ??
@@ -750,7 +761,7 @@ export default function Index() {
 
         {/* Dynamic Feed Sections */}
         {loading ? <SkeletonFeed /> : feedSections.map((section) => (
-          <SectionRow key={section.id} section={section} isTop10={section.id === 'trending'} marginTop={true} onEventPress={handleEventPress} colors={colors} />
+          <SectionRow key={section.id} section={section} isTop10={section.id === 'trending'} marginTop={true} onEventPress={handleEventPress} onViewAll={handleViewAll} colors={colors} />
         ))}
 
         {/* Spotlight Section */}
@@ -803,42 +814,42 @@ export default function Index() {
 
         {/* Editorial Sections — hidden when filtered */}
         {!loading && !isFiltered && freeEvents.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>FREE EVENTS</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>FREE EVENTS</Text><TouchableOpacity onPress={() => handleViewAllEditorial('free', 'Free Events')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={freeEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && premiumEvents.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>PREMIUM & EXCLUSIVE</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>PREMIUM & EXCLUSIVE</Text><TouchableOpacity onPress={() => handleViewAllEditorial('premium', 'Premium & Exclusive')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={premiumEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && comingUp.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>COMING NEXT MONTH</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>COMING NEXT MONTH</Text><TouchableOpacity onPress={() => handleViewAllEditorial('coming_up', 'Coming Next Month')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={comingUp} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && otherCities.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>AROUND THE COUNTRY</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>AROUND THE COUNTRY</Text><TouchableOpacity onPress={() => handleViewAllEditorial('other_cities', 'Around The Country')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={otherCities} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && musicEvents.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>MUSIC & CONCERTS</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>MUSIC & CONCERTS</Text><TouchableOpacity onPress={() => handleViewAllEditorial('music', 'Music & Concerts')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={musicEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && galaEvents.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>GALA & BLACK TIE</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>GALA & BLACK TIE</Text><TouchableOpacity onPress={() => handleViewAllEditorial('gala', 'Gala & Black Tie')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={galaEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && techEvents.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>TECH & BUSINESS</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>TECH & BUSINESS</Text><TouchableOpacity onPress={() => handleViewAllEditorial('tech', 'Tech & Business')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={techEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
         {!loading && !isFiltered && foodEvents.length > 0 && (
-          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>FOOD & LIFESTYLE</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>FOOD & LIFESTYLE</Text><TouchableOpacity onPress={() => handleViewAllEditorial('food', 'Food & Lifestyle')}><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
           <FlatList horizontal data={foodEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
         )}
 
