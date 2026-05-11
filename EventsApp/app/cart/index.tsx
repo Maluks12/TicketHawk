@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/colors';
+import { useAuthStore } from '../../store/authStore';
 import {
   type CartItem,
   type CartSummary,
@@ -335,18 +336,60 @@ function EmptyCart({ colors, onBrowse }: { colors: any; onBrowse: () => void }) 
   );
 }
 
+// ─── Guest Wall ───────────────────────────────────────────────────────────────
+
+function GuestWall({ colors, isDark, insets }: { colors: any; isDark: boolean; insets: any }) {
+  const router = useRouter();
+  const bg = isDark ? '#0a0a0a' : '#f5f5f7';
+
+  return (
+    <View style={[styles.screen, { backgroundColor: bg, paddingBottom: insets.bottom }]}>
+      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: isDark ? '#0a0a0a' : '#fff', borderBottomColor: colors.dividerColor }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Feather name="arrow-left" size={22} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Cart</Text>
+        <View style={styles.headerRight} />
+      </View>
+
+      <View style={styles.guestWrap}>
+        <View style={[styles.emptyIconCircle, { backgroundColor: colors.sectionCardBg }]}>
+          <Ionicons name="cart-outline" size={48} color={colors.subText} />
+        </View>
+        <Text style={[styles.guestTitle, { color: colors.text }]}>Sign in to view your cart</Text>
+        <Text style={[styles.guestSub, { color: colors.subText }]}>
+          Log in or create an account to add merch to your cart and check out.
+        </Text>
+        <TouchableOpacity
+          style={styles.guestBtn}
+          onPress={() => router.push('/auth/login' as any)}
+          activeOpacity={0.88}
+        >
+          <Text style={styles.guestBtnText}>Log in / Sign up</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function CartScreen() {
   const router             = useRouter();
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
+  const { user }           = useAuthStore();
 
   const [cart, setCart]             = useState<CartSummary | null>(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const sidRef                      = useRef<string | null>(null);
+
+  // ── Guest wall ─────────────────────────────────────────────────────────────
+  if (!user) {
+    return <GuestWall colors={colors} isDark={isDark} insets={insets} />;
+  }
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -696,4 +739,11 @@ const styles = StyleSheet.create({
   emptySub:         { fontSize: 14, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
   emptyBtn:         { backgroundColor: '#ff2d55', paddingHorizontal: 28, paddingVertical: 13, borderRadius: 12, marginTop: 6 },
   emptyBtnText:     { fontSize: 15, fontWeight: '800', color: '#fff' },
+
+  // ── Guest wall ─────────────────────────────────────────────────────────────
+  guestWrap:        { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 14 },
+  guestTitle:       { fontSize: 22, fontWeight: '800', letterSpacing: -0.3, textAlign: 'center' },
+  guestSub:         { fontSize: 14, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
+  guestBtn:         { backgroundColor: '#ff2d55', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 12, marginTop: 6, width: '100%', alignItems: 'center' },
+  guestBtnText:     { fontSize: 15, fontWeight: '800', color: '#fff' },
 });

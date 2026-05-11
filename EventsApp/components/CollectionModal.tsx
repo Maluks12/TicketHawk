@@ -12,6 +12,7 @@ import {
   StyleSheet,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Alert,
 } from 'react-native';
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +20,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { type MerchandiseItem, addMerchToCart, getCachedSessionId } from '../lib/api';
 import { CartConfirmSheet } from './CartConfirmSheet';
+import { useAuthStore } from '../store/authStore';
 
 // ─── Palette (mirrors merch.tsx — single source of truth for colours) ─────────
 
@@ -509,10 +511,27 @@ const DetailOverlay = ({
   const isDetailLive = item.sale_status === 'live';
   const remainSecs   = useTickingSeconds(item.seconds_remain ?? 0);
   const untilSecs    = useTickingSeconds(item.seconds_until  ?? 0);
+  const router = useRouter();
+  const { user } = useAuthStore();
 
   // ── Variant / size selection ─────────────────────────────────────────────
   const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
   const [showCart, setShowCart] = useState(false);
+
+  const handleBuyPress = () => {
+    if (!user) {
+      Alert.alert(
+        'Sign in required',
+        'Log in or sign up to add items to your cart.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log in / Sign up', onPress: () => { onClose(); router.push('/auth/login' as any); } },
+        ],
+      );
+      return;
+    }
+    setShowCart(true);
+  };
   const variantGroups = useMemo(
     () => (item.variants && item.variants.length > 0 ? groupVariantsByAttr(item.variants) : []),
     [item.variants],
@@ -734,7 +753,7 @@ const DetailOverlay = ({
 
         <TouchableOpacity
           disabled={buyDisabled}
-          onPress={isDetailLive && !buyDisabled ? () => setShowCart(true) : undefined}
+          onPress={isDetailLive && !buyDisabled ? handleBuyPress : undefined}
           style={{
             borderWidth: 1,
             borderColor: buyDisabled ? dtc + '25' : dtc + '60',
@@ -758,7 +777,7 @@ const DetailOverlay = ({
           item={item}
           selectedVariant={selectedVariant}
           onClose={() => setShowCart(false)}
-          onAddToCart={async (cartItem, variant, fulfillmentMethod, deliveryAddress) => {
+          onAddToCart={async (cartItem, variant, fulfillmentMethod) => {
             try {
               const sid = await getCachedSessionId();
               await addMerchToCart(
@@ -768,7 +787,6 @@ const DetailOverlay = ({
                   merchandise_variant_id: variant?.id,
                   quantity:               1,
                   fulfillment_method:     fulfillmentMethod,
-                  delivery_address:       deliveryAddress,
                 },
                 sid,
               );

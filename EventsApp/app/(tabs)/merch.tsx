@@ -24,6 +24,7 @@ import { s, sheet } from '../../styles/merch';
 import { CollectionModal } from '../../components/CollectionModal';
 import { CartConfirmSheet } from '../../components/CartConfirmSheet';
 import { useAppTheme } from '../../theme/colors';
+import { useAuthStore } from '../../store/authStore';
 
 // ─── Card colour palette ──────────────────────────────────────────────────────
 
@@ -464,6 +465,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
   const images = parseImages(item.images);
   const { top } = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuthStore();
   const translateY = useRef(new Animated.Value(800)).current;
   useEffect(() => {
     Animated.timing(translateY, { toValue: 0, duration: 380, useNativeDriver: true }).start();
@@ -472,6 +474,21 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
 
   const [selectedVariant, setSelectedVariant] = useState<VariantItem | null>(null);
   const [showCart, setShowCart] = useState(false);
+
+  const handleBuyPress = () => {
+    if (!user) {
+      Alert.alert(
+        'Sign in required',
+        'Log in or sign up to add items to your cart.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log in / Sign up', onPress: () => { onClose(); router.push('/auth/login' as any); } },
+        ],
+      );
+      return;
+    }
+    setShowCart(true);
+  };
   const variantGroups = useMemo(
     () => (item.variants && item.variants.length > 0 ? groupVariantsByAttr(item.variants) : []),
     [item.variants],
@@ -597,7 +614,7 @@ const DetailModal = ({ item, onClose }: { item: MerchandiseItem; onClose: () => 
             className={s.buyNowBtn}
             style={{ borderColor: buyDisabled ? tc + '25' : tc + '60', opacity: buyDisabled ? 0.45 : 1 }}
             disabled={buyDisabled}
-            onPress={isAvailable && !buyDisabled ? () => setShowCart(true) : undefined}
+            onPress={isAvailable && !buyDisabled ? handleBuyPress : undefined}
           >
             <Text className={s.buyNowText} style={{ color: tc }}>
               {isAvailable ? buyDisabled ? 'SELECT SIZE' : 'BUY' : 'ALERT'}

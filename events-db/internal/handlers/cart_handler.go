@@ -56,6 +56,13 @@ func AddCartItemHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// All cart operations require an authenticated user — guests cannot add
+		// tickets or merch to the cart.
+		if _, authed := c.Get("user_id"); !authed {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required to add items to cart"})
+			return
+		}
+
 		// ---------------------------------------------------------------
 		// Resolve unit price and delivery fee
 		// ---------------------------------------------------------------
