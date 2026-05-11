@@ -59,7 +59,7 @@ export const s = {
   section:               'px-5 mb-4',
   sectionMt:             'px-5 mb-4 mt-7',
   sectionHeader:         'flex-row items-center justify-between',
-  sectionTitle:          'text-[14px] font-black tracking-[2px]',
+  sectionTitle:          'text-[22px] font-black tracking-[0.5px]',
   sectionLink:           'text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]',
   hScrollContent:        'px-5 gap-3.5 pb-2',
 
