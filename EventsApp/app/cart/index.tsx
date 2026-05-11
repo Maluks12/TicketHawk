@@ -462,8 +462,8 @@ export default function CartScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchCart(); }} tintColor="#ff2d55" />
           }
         >
-          {cart!.items_by_event.map((group: CartEventGroup) => (
-            <View key={group.event_id} style={styles.group}>
+          {cart!.items_by_event.map((group: CartEventGroup, idx: number) => (
+            <View key={group.event_id ?? `standalone-merch-${idx}`} style={styles.group}>
               <View style={[styles.groupHeader, { backgroundColor: isDark ? '#111' : '#fff' }]}>
                 <View style={styles.groupHeaderLeft}>
                   <View style={styles.groupDot} />

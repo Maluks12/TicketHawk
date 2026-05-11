@@ -106,7 +106,7 @@ func createBookingTx(
 		return nil, fmt.Errorf("failed to commit booking: %w", err)
 	}
 
-	booking.EventID = eventID
+	booking.EventID = &eventID
 	booking.UserID = userID
 	booking.IsGuest = isGuest
 	booking.TicketQuantity = quantity
@@ -199,7 +199,7 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 			b.created_at, b.confirmed_at,
 			e.title, e.start_time, e.venue_name, e.city, e.address, e.cover_image_url
 		FROM bookings b
-		JOIN events e ON b.event_id = e.id
+		LEFT JOIN events e ON b.event_id = e.id
 		WHERE b.id = $1
 	`
 
@@ -241,7 +241,7 @@ func GetGuestBooking(pool *pgxpool.Pool, bookingNumber string, email string) (*m
 			b.created_at, b.confirmed_at,
 			e.title, e.start_time
 		FROM bookings b
-		JOIN events e ON b.event_id = e.id
+		LEFT JOIN events e ON b.event_id = e.id
 		WHERE b.booking_number = $1
 		  AND lower(b.attendee_email) = lower($2)
 		  AND b.is_guest = TRUE
@@ -293,7 +293,7 @@ func GetUserBookings(pool *pgxpool.Pool, userID string, limit int, cursor *utils
 			b.created_at, b.confirmed_at,
 			e.title, e.start_time, e.venue_name, e.city, e.cover_image_url
 		FROM bookings b
-		JOIN events e ON b.event_id = e.id
+		LEFT JOIN events e ON b.event_id = e.id
 		%s
 		ORDER BY b.created_at DESC, b.id DESC
 		LIMIT $%d
@@ -484,4 +484,52 @@ func RequestRefundWithCascade(
 	}
  
 	return notifyList, nil
+}
+// CreateMerchOnlyBooking inserts a placeholder booking row for a cart that
+// contains only merchandise items (no ticket items). The booking has a NULL
+// event_id, zero ticket quantity, and booking_type = 'merch_only' so that
+// downstream workers can distinguish it from regular ticket bookings.
+func CreateMerchOnlyBooking(
+	pool *pgxpool.Pool,
+	cartID string,
+	userID, sessionID *string,
+	total float64,
+	currency string,
+) (*models.Booking, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var booking models.Booking
+	err := pool.QueryRow(ctx, `
+		INSERT INTO bookings (
+			event_id, user_id, session_id,
+			is_guest, ticket_quantity, unit_price, subtotal,
+			platform_fee, organizer_fee, discount_amount,
+			total_amount, currency,
+			booking_status, payment_status,
+			booking_type
+		)
+		VALUES (
+			NULL,    -- no event for merch-only
+			$1, $2,
+			$3, 0, 0, 0,
+			0, 0, 0,
+			$4, $5,
+			$6, $7,
+			'merch_only'
+		)
+		RETURNING id, booking_number, created_at
+	`,
+		userID, sessionID,
+		userID == nil, // is_guest = true when there is no user_id
+		total, currency,
+		models.BookingPending, models.PaymentPending,
+	).Scan(&booking.ID, &booking.BookingNumber, &booking.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("create merch-only booking: %w", err)
+	}
+
+	booking.TotalAmount = total
+	booking.Currency = currency
+	return &booking, nil
 }

@@ -183,7 +183,7 @@ func RequestRefundHandler(
 			return
 		}
 
-		event, err := events.GetEventByID(booking.EventID, nil)
+		event, err := events.GetEventByID(func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
@@ -272,7 +272,7 @@ func VerifyQRCodeHandler(
 			return
 		}
 
-		event, err := events.GetEventByID(booking.EventID, nil)
+		event, err := events.GetEventByID(func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"valid": false,

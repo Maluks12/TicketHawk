@@ -23,9 +23,14 @@ const (
 type Booking struct {
 	ID                string        `json:"id" db:"id"`
 	BookingNumber     string        `json:"booking_number" db:"booking_number"`
-	EventID           string        `json:"event_id" db:"event_id"`
+	// EventID is nil for merch-only bookings that are not linked to any event.
+	EventID           *string       `json:"event_id,omitempty" db:"event_id"`
 	UserID            *string       `json:"user_id,omitempty" db:"user_id"`
+	// SessionID identifies guest buyers on merch-only bookings.
+	SessionID         *string       `json:"session_id,omitempty" db:"session_id"`
 	IsGuest           bool          `json:"is_guest" db:"is_guest"`
+	// BookingType distinguishes regular ticket bookings from merch-only ones.
+	BookingType       string        `json:"booking_type" db:"booking_type"`
 	// TicketTypeID links to the tier that was booked. Nil for flat-priced events.
 	TicketTypeID      *string       `json:"ticket_type_id,omitempty" db:"ticket_type_id"`
 	// TicketTypeName is a snapshot of the type name at booking time, so receipts

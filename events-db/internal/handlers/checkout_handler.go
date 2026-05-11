@@ -59,42 +59,50 @@ func CheckoutBeginHandler(
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
 			}
-			if errors.Is(err, repository.ErrNoTicketItems) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if !errors.Is(err, repository.ErrNoTicketItems) {
+				// ErrNoTicketItems is not an error — it just means a merch-only
+				// cart. Every other error is a real failure.
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create reservations"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create reservations"})
-			return
+			// Merch-only cart: treat as zero reservations and fall through.
+			created = nil
 		}
 
-		eventIDs := make([]string, 0, len(created))
-		seen := make(map[string]bool)
-		for _, r := range created {
-			if !seen[r.EventID] {
-				eventIDs = append(eventIDs, r.EventID)
-				seen[r.EventID] = true
-			}
-		}
-		eventTitles, err := events.GetEventTitlesByIDs(eventIDs)
-		if err != nil {
-			utils.InternalError(c, err, "failed to fetch event titles for checkout")
-			return
-		}
-
+		// Build reservation summaries (empty slice for merch-only carts).
 		shortest := 600
 		summaries := make([]models.ReservationSummary, 0, len(created))
-		for _, r := range created {
-			secs := r.SecondsRemaining()
-			if secs < shortest {
-				shortest = secs
+
+		if len(created) > 0 {
+			eventIDs := make([]string, 0, len(created))
+			seen := make(map[string]bool)
+			for _, r := range created {
+				if !seen[r.EventID] {
+					eventIDs = append(eventIDs, r.EventID)
+					seen[r.EventID] = true
+				}
 			}
-			summaries = append(summaries, models.ReservationSummary{
-				ReservationID: r.ID,
-				EventID:       r.EventID,
-				EventTitle:    eventTitles[r.EventID],
-				Quantity:      r.Quantity,
-				SecondsLeft:   secs,
-			})
+			eventTitles, titlesErr := events.GetEventTitlesByIDs(eventIDs)
+			if titlesErr != nil {
+				utils.InternalError(c, titlesErr, "failed to fetch event titles for checkout")
+				return
+			}
+			for _, r := range created {
+				secs := r.SecondsRemaining()
+				if secs < shortest {
+					shortest = secs
+				}
+				summaries = append(summaries, models.ReservationSummary{
+					ReservationID: r.ID,
+					EventID:       r.EventID,
+					EventTitle:    eventTitles[r.EventID],
+					Quantity:      r.Quantity,
+					SecondsLeft:   secs,
+				})
+			}
+		} else {
+			// No ticket items — merch-only cart, no countdown needed.
+			shortest = 0
 		}
 
 		cartTotal, err := carts.SumCartTotal(cart.ID)
@@ -107,7 +115,7 @@ func CheckoutBeginHandler(
 			Reservations: summaries,
 			SecondsLeft:  shortest,
 			CartTotal:    cartTotal,
-			Currency:     models.DefaultCurrency, // FIX 6: use constant
+			Currency:     models.DefaultCurrency,
 		})
 	}
 }
@@ -186,41 +194,87 @@ func CheckoutConfirmHandler(
 			}
 		}
 
-		existing, err := reservations.GetReservationsByCart(cart.ID)
-		if err != nil || len(existing) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no active reservations — please restart checkout"})
-			return
-		}
+		// ── Ticket reservations → bookings ──────────────────────────────────────
+		// For merch-only carts there are no reservations, which is fine.
+		// For ticket (or mixed) carts, reservations must still be alive.
+		existing, resErr := reservations.GetReservationsByCart(cart.ID)
+		hasTicketReservations := resErr == nil && len(existing) > 0
 
-		bookingIDs, err := reservations.ConvertReservationsToBookings(cart.ID, userID, sessionID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert reservations to bookings"})
-			return
-		}
-
-		primaryBooking, err := bookings.GetBookingByID(bookingIDs[0])
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch primary booking"})
-			return
-		}
-
-		cartTotal, err := carts.SumCartTotal(cart.ID)
-		if err != nil || cartTotal == 0 {
-			cartTotal, err = bookings.SumBookingTotalsByIDs(bookingIDs)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute cart total"})
-				return
+		// Check whether the cart actually contains ticket items.
+		allCartItems := cart.Items
+		hasTickets := false
+		for _, item := range allCartItems {
+			if item.ItemType == models.CartItemTypeTicket {
+				hasTickets = true
+				break
 			}
 		}
 
-		currency := primaryBooking.Currency
-		primaryBooking.TotalAmount = cartTotal
-		primaryBooking.Currency = currency
+		if hasTickets && !hasTicketReservations {
+			// Ticket items are present but reservations have expired or were never created.
+			c.JSON(http.StatusBadRequest, gin.H{"error": "reservations expired — please restart checkout"})
+			return
+		}
 
-		clientToken, paymentRequestID, err := paymentSvc.CreateCartPaymentIntent(
-			primaryBooking, cart.ID, cartTotal,
-		)
-		if err != nil {
+		cartTotal, cartTotalErr := carts.SumCartTotal(cart.ID)
+		if cartTotalErr != nil || cartTotal == 0 {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute cart total"})
+			return
+		}
+
+		var primaryBookingID string
+		var bookingIDs []string
+		currency := models.DefaultCurrency
+
+		if hasTickets {
+			// Convert reservations to real booking rows.
+			var convErr error
+			bookingIDs, convErr = reservations.ConvertReservationsToBookings(cart.ID, userID, sessionID)
+			if convErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to convert reservations to bookings"})
+				return
+			}
+			primaryBookingID = bookingIDs[0]
+
+			primaryBooking, fetchErr := bookings.GetBookingByID(primaryBookingID)
+			if fetchErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch primary booking"})
+				return
+			}
+			currency = primaryBooking.Currency
+
+			// Create the Stitch payment intent using the primary booking.
+			primaryBooking.TotalAmount = cartTotal
+			clientToken, paymentRequestID, payErr := paymentSvc.CreateCartPaymentIntent(primaryBooking, cart.ID, cartTotal)
+			if payErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initiate payment"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"client_token":       clientToken,
+				"payment_request_id": paymentRequestID,
+				"total_amount":       cartTotal,
+				"currency":           currency,
+				"booking_ids":        bookingIDs,
+				"primary_booking_id": primaryBookingID,
+			})
+			return
+		}
+
+		// ── Merch-only cart ───────────────────────────────────────────────────
+		// No ticket booking exists yet. Create a synthetic merch-only booking row
+		// so the payment record has something to anchor to.
+		merchBooking, mbErr := bookings.CreateMerchOnlyBooking(cart.ID, userID, sessionID, cartTotal, currency)
+		if mbErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create merch booking"})
+			return
+		}
+		primaryBookingID = merchBooking.ID
+		bookingIDs = []string{primaryBookingID}
+
+		clientToken, paymentRequestID, payErr := paymentSvc.CreateCartPaymentIntent(merchBooking, cart.ID, cartTotal)
+		if payErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initiate payment"})
 			return
 		}
@@ -231,7 +285,7 @@ func CheckoutConfirmHandler(
 			"total_amount":       cartTotal,
 			"currency":           currency,
 			"booking_ids":        bookingIDs,
-			"primary_booking_id": bookingIDs[0],
+			"primary_booking_id": primaryBookingID,
 		})
 	}
 }

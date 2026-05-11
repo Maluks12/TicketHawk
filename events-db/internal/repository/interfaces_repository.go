@@ -21,6 +21,10 @@ type BookingQuerier interface {
 	RequestRefundWithCascade(bookingID, userID, reason string) ([]CancelledAssignee, error)
 	GetUnsentConfirmedBookingIDs() ([]string, error)
 	SumBookingTotalsByIDs(ids []string) (float64, error) // FIX 3
+	// CreateMerchOnlyBooking creates a placeholder booking row for a cart that
+	// contains only merchandise (no ticket items). Needed so the payment record
+	// has a booking to anchor to.
+	CreateMerchOnlyBooking(cartID string, userID, sessionID *string, total float64, currency string) (*models.Booking, error)
 }
 
 // EventQuerier is the read/write contract for event data.
@@ -80,6 +84,9 @@ func (q *PgxBookingQuerier) GetUnsentConfirmedBookingIDs() ([]string, error) {
 // FIX 3: new delegate
 func (q *PgxBookingQuerier) SumBookingTotalsByIDs(ids []string) (float64, error) {
 	return SumBookingTotalsByIDs(q.pool, ids)
+}
+func (q *PgxBookingQuerier) CreateMerchOnlyBooking(cartID string, userID, sessionID *string, total float64, currency string) (*models.Booking, error) {
+	return CreateMerchOnlyBooking(q.pool, cartID, userID, sessionID, total, currency)
 }
 
 type PgxEventQuerier struct{ pool *pgxpool.Pool }

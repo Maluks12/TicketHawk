@@ -116,10 +116,16 @@ func processBookingJob(
 		return
 	}
 
-	event, err := repository.GetEventByID(pool, booking.EventID, nil)
+	// Merch-only bookings have no tickets or QR codes to generate — skip.
+	if booking.BookingType == "merch_only" {
+		log.Info().Str("booking_id", bookingID).Msg("booking worker: merch-only booking, nothing to send")
+		return
+	}
+
+	event, err := repository.GetEventByID(pool, func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
 	if err != nil {
 		log.Error().Err(err).
-			Str("event_id", booking.EventID).
+			Str("event_id", func() string { if booking.EventID != nil { return *booking.EventID }; return "" }()).
 			Str("booking_id", bookingID).
 			Msg("booking worker: failed to fetch event")
 		return
@@ -286,7 +292,7 @@ func retryEmailSend(
 		return markRetrySent(pool, retryID)
 	}
 
-	event, err := repository.GetEventByID(pool, booking.EventID, nil)
+	event, err := repository.GetEventByID(pool, func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
 	if err != nil {
 		return markRetryFailed(pool, retryID, fmt.Sprintf("fetch event: %v", err))
 	}

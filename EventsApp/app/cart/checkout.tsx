@@ -243,6 +243,13 @@ export default function CartCheckoutScreen() {
       if (!guestName.trim()) { Alert.alert('Name required', 'Please add your contact info before checking out.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) { Alert.alert('Valid email required', 'Please enter a valid email address.'); return; }
     }
+
+    // Merch-only carts have no seats to reserve — jump straight to confirm.
+    if (!hasTickets) {
+      handleConfirm();
+      return;
+    }
+
     setPhase('reserving');
     try {
       const data: CheckoutBeginResponse = await checkoutBegin(sidRef.current);
@@ -393,11 +400,13 @@ export default function CartCheckoutScreen() {
           {/* Order items */}
           <View style={[styles.card, { backgroundColor: isDark ? '#111' : '#fff', borderColor: colors.dividerColor }]}>
             <Text style={[styles.cardLabel, { color: colors.subText }]}>YOUR ORDER</Text>
-            {cart?.items_by_event.map(group => (
-              <View key={group.event_id}>
+            {cart?.items_by_event.map((group, idx) => (
+              <View key={group.event_id ?? `standalone-merch-${idx}`}>
                 <View style={styles.groupHeaderInCard}>
                   <View style={styles.groupDot} />
-                  <Text style={[styles.groupTitleInCard, { color: colors.text }]} numberOfLines={1}>{group.event_title}</Text>
+                  <Text style={[styles.groupTitleInCard, { color: colors.text }]} numberOfLines={1}>
+                    {group.event_title || 'Store Items'}
+                  </Text>
                 </View>
                 {group.items.map(item => <OrderLine key={item.id} item={item} colors={colors} />)}
               </View>
