@@ -16,7 +16,7 @@ import (
 
 // ── TTLs ─────────────────────────────────────────────────────────────────────
 const (
-	TTLHome          = 60 * time.Second
+	TTLHome          = 120 * time.Second // extended: bust-on-publish handles invalidation
 	TTLTrending      = 60 * time.Second
 	TTLFeatured      = 120 * time.Second
 	TTLHappeningSoon = 60 * time.Second
@@ -26,6 +26,12 @@ const (
 	TTLMerchPreview  = 300 * time.Second
 	TTLMerchFull     = 300 * time.Second
 	TTLMerchItem     = 300 * time.Second
+
+	// Filter date-preset TTLs — "tomorrow" and "weekend" change daily so 5 min
+	// is safe; "any" (no date constraint) mirrors the home feed TTL.
+	TTLFilterTomorrow = 5 * time.Minute
+	TTLFilterWeekend  = 10 * time.Minute
+	TTLFilterAny      = 120 * time.Second
 
 	// scanCount is the COUNT hint passed to Redis SCAN per iteration.
 	// Redis treats this as a hint, not a guarantee, but 100 is a reasonable
@@ -52,6 +58,9 @@ func keyThisWeekend(limit int) string   { return fmt.Sprintf("events:this_weeken
 func keyCategory(categoryID, limit int) string {
 	return fmt.Sprintf("events:category:%d:l%d", categoryID, limit)
 }
+// keyFilter is used for date-only (no location) filter results.
+// Custom date ranges are not cached because they are too varied.
+func keyFilter(datePreset string) string    { return fmt.Sprintf("filter:date:%s", datePreset) }
 func keyMerchPreview(eventID string) string { return fmt.Sprintf("merch:%s:preview", eventID) }
 func keyMerchFull(eventID string) string    { return fmt.Sprintf("merch:%s:full", eventID) }
 func keyMerchItem(merchID string) string    { return fmt.Sprintf("merch:item:%s", merchID) }
@@ -225,12 +234,33 @@ func (c *EventCache) SetMerchItem(ctx context.Context, merchID string, item *mod
 	c.set(ctx, keyMerchItem(merchID), item, TTLMerchItem)
 }
 
-// ── Bust helpers ──────────────────────────────────────────────────────────────
+// ── Filter (date-only, no location) ──────────────────────────────────────────
 
-// FIX 2: Bust helpers now use delPattern with wildcards instead of hardcoding
-// specific limit values (previously only l10 and l20 were deleted, so a client
-// that requested limit=30 would keep receiving a stale cached page). delPattern
-// is now safe to call frequently because it uses SCAN, not KEYS.
+// GetFilter returns cached sections for a date-only preset filter.
+// Only "any", "tomorrow", and "weekend" are cached; "custom" is never cached
+// because date ranges are too varied to share across requests.
+func (c *EventCache) GetFilter(ctx context.Context, datePreset string) ([]repository.HomeSection, bool) {
+	var sections []repository.HomeSection
+	return sections, c.get(ctx, keyFilter(datePreset), &sections)
+}
+
+// SetFilter stores date-only filter results with a TTL appropriate to how
+// quickly the result set changes:
+//   - "tomorrow"  → 5 min  (changes daily but content is stable within the day)
+//   - "weekend"   → 10 min (changes once a week)
+//   - "any" / "" → 2 min  (same window as the home feed)
+func (c *EventCache) SetFilter(ctx context.Context, datePreset string, sections []repository.HomeSection) {
+	var ttl time.Duration
+	switch datePreset {
+	case "tomorrow":
+		ttl = TTLFilterTomorrow
+	case "weekend":
+		ttl = TTLFilterWeekend
+	default:
+		ttl = TTLFilterAny
+	}
+	c.set(ctx, keyFilter(datePreset), sections, ttl)
+}
 
 // BustOnPublish — call when a new event is published.
 func (c *EventCache) BustOnPublish(ctx context.Context) {
@@ -239,6 +269,7 @@ func (c *EventCache) BustOnPublish(ctx context.Context) {
 	c.delPattern(ctx, "events:happening_soon:*")
 	c.delPattern(ctx, "events:recently_added:*")
 	c.delPattern(ctx, "events:this_weekend:*")
+	c.delPattern(ctx, "filter:date:*")
 }
 
 // BustOnFeaturedChange — call when is_featured changes.
@@ -257,6 +288,7 @@ func (c *EventCache) BustOnTicketSale(ctx context.Context) {
 func (c *EventCache) BustOnEventUpdate(ctx context.Context) {
 	c.del(ctx, keyHome())
 	c.delPattern(ctx, "events:*")
+	c.delPattern(ctx, "filter:date:*")
 }
 
 // BustMerch — call when merch or a variant is created/updated for an event.

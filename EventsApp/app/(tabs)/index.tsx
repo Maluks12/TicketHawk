@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   Modal,
   FlatList,
-  Image,
   ActivityIndicator,
   RefreshControl,
   Animated,
@@ -13,7 +12,8 @@ import {
   AppState,
   type AppStateStatus,
 } from 'react-native';
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Image } from 'expo-image';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +27,7 @@ import {
   type HomeSection,
 } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
+import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl } from '../../components/FilterModal';
 import { useAppTheme } from '../../theme/colors';
@@ -112,8 +113,6 @@ function formatPrice(price: number, currency: string) {
   return `R${Math.round(price).toLocaleString('en-ZA')}`;
 }
 
-// Fallback: group a flat event array into category sections when the backend
-// returns the old { data: [...] } format (i.e. before it is redeployed).
 function groupEventsIntoSections(events: Event[]): HomeSection[] {
   const order: string[] = [];
   const groups: Record<string, Event[]> = {};
@@ -132,7 +131,6 @@ function groupEventsIntoSections(events: Event[]): HomeSection[] {
       next_cursor: '',
     }))
     .sort((a, b) => b.events.length - a.events.length);
-
   const free = events.filter((e) => e.price === 0).slice(0, 10);
   if (free.length >= 2) sections.push({ id: 'free', title: 'FREE EVENTS', events: free, next_cursor: '' });
   if (!sections.length && events.length)
@@ -141,10 +139,6 @@ function groupEventsIntoSections(events: Event[]): HomeSection[] {
 }
 
 // ─── Skeleton loader ──────────────────────────────────────────────────────────
-// Renders immediately on mount so the screen never shows a blank white/black
-// page — perceived load time drops dramatically even if actual fetch time is
-// unchanged.
-
 function SkeletonPulse({ style }: { style: any }) {
   const anim = useRef(new Animated.Value(0.35)).current;
   useEffect(() => {
@@ -162,11 +156,9 @@ function SkeletonSection() {
   const shimmer = 'rgba(255,255,255,0.08)';
   return (
     <View style={{ marginTop: 20 }}>
-      {/* Section title bar */}
       <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
         <SkeletonPulse style={{ width: 140, height: 11, borderRadius: 3, backgroundColor: shimmer }} />
       </View>
-      {/* Three skeleton cards in a row */}
       <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 12 }}>
         {[0, 1, 2].map((i) => (
           <View key={i} style={{ width: 160 }}>
@@ -184,7 +176,6 @@ function SkeletonSection() {
 function SkeletonFeed() {
   return (
     <>
-      {/* Hero skeleton */}
       <SkeletonPulse style={{ width: '100%', height: 420, backgroundColor: 'rgba(255,255,255,0.06)' }} />
       <SkeletonSection />
       <SkeletonSection />
@@ -193,18 +184,24 @@ function SkeletonFeed() {
   );
 }
 
-
-
 const fmtCardDate = (iso?: string | null) => {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
+// ─── PERF: React.memo + expo-image (memory-disk cache, blur-up transition) ───
+const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea} style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
-        <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
+        <Image
+          source={{ uri: item.cover_image_url }}
+          style={sheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+          recyclingKey={item.id}
+        />
       )}
       {(item.category?.toLowerCase().includes('music') ||
         item.category?.toLowerCase().includes('concert')) && (
@@ -223,13 +220,20 @@ const EventCard = ({ item, onPress, colors }: { item: Event; onPress: () => void
       <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
   </TouchableOpacity>
-);
+));
 
-const Top10Card = ({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
+const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
-        <Image source={{ uri: item.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
+        <Image
+          source={{ uri: item.cover_image_url }}
+          style={sheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+          recyclingKey={item.id}
+        />
       )}
       <LinearGradient
         colors={['rgba(0,0,0,0.72)', 'rgba(0,0,0,0.18)', 'transparent']}
@@ -248,11 +252,10 @@ const Top10Card = ({ item, rank, onPress, colors }: { item: Event; rank: number;
       <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
   </TouchableOpacity>
-);
+));
 
-// ─── Section row (paginated) ──────────────────────────────────────────────────
-
-const SectionRow = ({
+// ─── PERF: React.memo — section rows skip re-render unless section data changes
+const SectionRow = memo(({
   section, isTop10 = false, marginTop = false, onEventPress, colors,
 }: {
   section: HomeSection; isTop10?: boolean; marginTop?: boolean;
@@ -311,6 +314,9 @@ const SectionRow = ({
         contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
         onEndReachedThreshold={0.4}
         onEndReached={handleLoadMore}
+        windowSize={5}
+        maxToRenderPerBatch={5}
+        initialNumToRender={4}
         ListFooterComponent={
           loadingMore ? (
             <View style={{ width: 56, alignItems: 'center', justifyContent: 'center' }}>
@@ -326,7 +332,7 @@ const SectionRow = ({
       />
     </>
   );
-};
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -335,9 +341,13 @@ export default function Index() {
   const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
   const setAllEvents     = useEventStore((state) => state.setAllEvents);
   const setDbCategories  = useEventStore((state) => state.setDbCategories);
-   const { colors, isDark } = useAppTheme();
+  // Subscribe to the auth user so we can re-fetch when it transitions from
+  // null → known. _layout.tsx calls loadUser() on startup; if that validates
+  // or refreshes the token, user becomes non-null and we need a fresh home
+  // fetch so the personalised "For You" section appears without a manual pull.
+  const authUserId = useAuthStore((state) => state.user?.id ?? null);
+  const { colors, isDark } = useAppTheme();
 
-  // ── Refs ─────────────────────────────────────────────────────────────────
   const lastScrollY      = useRef(0);
   const headerOffset     = useRef(0);
   const headerAnim       = useRef(new Animated.Value(0)).current;
@@ -345,36 +355,21 @@ export default function Index() {
   const featuredIndexRef = useRef(0);
   const fadeAnim         = useRef(new Animated.Value(1)).current;
 
-  // Stable random spotlight config — picked once on mount
   const [spotlightConfig, setSpotlightConfig] = useState(
     () => SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
   );
 
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen,   setDropdownOpen]   = useState(false);
-  const [scrolled,       setScrolled]       = useState(false);
+  const [filterOpen,     setFilterOpen]     = useState(false);
+  const [filterParams,   setFilterParams]   = useState<FilterParams>({ date: 'any' });
+  const [sections,       setSections]       = useState<HomeSection[]>([]);
+  const [homeSections,   setHomeSections]   = useState<HomeSection[]>([]);
+  const [loading,        setLoading]        = useState(true);
+  const [refreshing,     setRefreshing]     = useState(false);
+  const [error,          setError]          = useState<string | null>(null);
+  const [featuredIndex,  setFeaturedIndex]  = useState(0);
 
-  // ── Filter state ─────────────────────────────────────────────────────────
-  const [filterOpen,   setFilterOpen]   = useState(false);
-  const [filterParams, setFilterParams] = useState<FilterParams>({ date: 'any' });
-
-  // sections — what drives the feed. Replaced entirely on each filter apply.
-  const [sections,   setSections]   = useState<HomeSection[]>([]);
-  // homeSections — set ONCE from the home endpoint, never overwritten by filters.
-  // The carousel and spotlight always derive from this so the banner stays
-  // constant regardless of what location is active.
-  const [homeSections, setHomeSections] = useState<HomeSection[]>([]);
-
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
-  const [featuredIndex, setFeaturedIndex] = useState(0);
-
-  // ── isFiltered flag ───────────────────────────────────────────────────────
-  // True whenever any location or date filter is active. Used to:
-  //   • hide the hardcoded editorial sections (Free, Premium, Spotlight…)
-  //     so they don't duplicate the backend-generated category sections
-  //   • keep the carousel pointing at homeSections regardless
   const isFiltered = !!(
     filterParams.city     ||
     filterParams.province ||
@@ -382,33 +377,70 @@ export default function Index() {
     (filterParams.date && filterParams.date !== 'any')
   );
 
-  // ── Carousel pool — always from homeSections, never from filter results ───
-  // This is the fix for the banner going blank when a location is active:
-  // we keep a permanent copy of the home featured/trending events and always
-  // show those in the carousel.
-  const rawFeatured: Event[] =
-    homeSections.find((sec) => sec.id === 'featured')?.events ?? [];
-  const trendingPool: Event[] =
-    homeSections.find((sec) => sec.id === 'trending')?.events ?? [];
-  const carouselEvents: Event[] =
-    rawFeatured.length >= 2
+  // PERF: memoize carousel pool — only recomputes when homeSections changes
+  const carouselEvents = useMemo<Event[]>(() => {
+    const rawFeatured = homeSections.find((sec) => sec.id === 'featured')?.events ?? [];
+    const trendingPool = homeSections.find((sec) => sec.id === 'trending')?.events ?? [];
+    return rawFeatured.length >= 2
       ? rawFeatured.slice(0, 6)
       : [
           ...rawFeatured,
           ...trendingPool.filter((e) => !rawFeatured.some((f) => f.id === e.id)),
         ].slice(0, 5);
+  }, [homeSections]);
+
   const featuredEvent: Event | null = carouselEvents[featuredIndex] ?? null;
 
-  // All non-featured events from the ACTIVE sections (filtered or home)
-  const allEvents = sections
-    .filter((sec) => sec.id !== 'featured')
-    .flatMap((sec) => sec.events ?? [])
-    .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i);
+  // PERF: useMemo + O(n) Set-based dedup — was O(n²) findIndex inline every render
+  const allEvents = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Event[] = [];
+    for (const sec of sections) {
+      if (sec.id === 'featured') continue;
+      for (const e of sec.events ?? []) {
+        if (!seen.has(e.id)) { seen.add(e.id); result.push(e); }
+      }
+    }
+    return result;
+  }, [sections]);
 
-  // Keep store in sync so category page can filter without an extra API call
+  // PERF: memoize feedSections so filter() doesn't run every render
+  const feedSections = useMemo(
+    () => sections.filter((sec) => sec.id !== 'featured'),
+    [sections]
+  );
+
+  // PERF: memoize all 8 editorial section datasets
+  const freeEvents    = useMemo(() => allEvents.filter((e) => e.price === 0).slice(0, 10), [allEvents]);
+  const premiumEvents = useMemo(() => allEvents.filter((e) => e.price >= 3000).slice(0, 10), [allEvents]);
+  const comingUp      = useMemo(() => {
+    const nowMs = Date.now();
+    return allEvents.filter((e) => { const d = (new Date(e.start_time).getTime() - nowMs) / 86400000; return d >= 15 && d <= 45; }).slice(0, 10);
+  }, [allEvents]);
+  const otherCities   = useMemo(() => allEvents.filter((e) => !['Johannesburg', 'johannesburg'].includes(e.city ?? '')).slice(0, 10), [allEvents]);
+  const musicEvents   = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('concert') || e.category?.toLowerCase().includes('music')).slice(0, 10), [allEvents]);
+  const galaEvents    = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('gala') || e.category?.toLowerCase().includes('exclusive')).slice(0, 10), [allEvents]);
+  const techEvents    = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('tech')).slice(0, 10), [allEvents]);
+  const foodEvents    = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('food')).slice(0, 10), [allEvents]);
+
+  // PERF: memoize spotlight events
+  const spotlightEvents = useMemo(() => {
+    const preferred = allEvents.filter((e) => e.category?.toLowerCase().includes(spotlightConfig.category)).slice(0, 4);
+    if (preferred.length > 0) return preferred;
+    for (const cfg of SPOTLIGHT_CONFIGS) {
+      if (cfg.category === spotlightConfig.category) continue;
+      const fallback = allEvents.filter((e) => e.category?.toLowerCase().includes(cfg.category)).slice(0, 4);
+      if (fallback.length > 0) return fallback;
+    }
+    return allEvents.slice(0, 4);
+  }, [allEvents, spotlightConfig]);
+
+  const sportsBannerEvent = spotlightEvents[0] ?? null;
+  const sportsListEvents  = spotlightEvents.slice(1);
+
   useEffect(() => {
     if (allEvents.length > 0) setAllEvents(allEvents);
-  }, [allEvents.length]);
+  }, [allEvents]);
 
   // ── Featured carousel ─────────────────────────────────────────────────────
   const advanceTo = useCallback((nextIdx: number) => {
@@ -428,8 +460,6 @@ export default function Index() {
     return () => clearInterval(timer);
   }, [carouselEvents.length, advanceTo]);
 
-  // Only reset carousel when homeSections changes (initial load / refresh),
-  // NOT on every filter change — so the banner keeps rotating uninterrupted.
   useEffect(() => {
     featuredIndexRef.current = 0;
     setFeaturedIndex(0);
@@ -444,51 +474,25 @@ export default function Index() {
       const raw = event.category?.trim();
       if (!raw) continue;
       const key = raw.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        cats.push(raw.replace(/\b\w/g, (c) => c.toUpperCase()));
-      }
+      if (!seen.has(key)) { seen.add(key); cats.push(raw.replace(/\b\w/g, (c) => c.toUpperCase())); }
     }
     cats.sort((a, b) => a.localeCompare(b));
     return ['All', ...cats];
   }, [allEvents]);
 
   useEffect(() => {
-    if (activeCategory !== 'All' && !categories.includes(activeCategory)) {
-      setActiveCategory('All');
-    }
+    if (activeCategory !== 'All' && !categories.includes(activeCategory)) setActiveCategory('All');
   }, [categories, activeCategory]);
 
-  // ── Spotlight — uses allEvents (filtered or home) ─────────────────────────
+  // ── Spotlight config selection ────────────────────────────────────────────
   useEffect(() => {
     if (!allEvents.length) return;
     const hasEvents = (cfg: typeof SPOTLIGHT_CONFIGS[0]) =>
       allEvents.some((e) => e.category?.toLowerCase().includes(cfg.category));
     if (hasEvents(spotlightConfig)) return;
-    const fallback = SPOTLIGHT_CONFIGS.find(
-      (cfg) => cfg.category !== spotlightConfig.category && hasEvents(cfg)
-    );
+    const fallback = SPOTLIGHT_CONFIGS.find((cfg) => cfg.category !== spotlightConfig.category && hasEvents(cfg));
     if (fallback) setSpotlightConfig(fallback);
   }, [allEvents, spotlightConfig]);
-
-  const spotlightEvents = (() => {
-    const preferred = allEvents.filter((e) =>
-      e.category?.toLowerCase().includes(spotlightConfig.category)
-    ).slice(0, 4);
-    if (preferred.length > 0) return preferred;
-    for (const cfg of SPOTLIGHT_CONFIGS) {
-      if (cfg.category === spotlightConfig.category) continue;
-      const fallback = allEvents.filter((e) =>
-        e.category?.toLowerCase().includes(cfg.category)
-      ).slice(0, 4);
-      if (fallback.length > 0) return fallback;
-    }
-    return allEvents.slice(0, 4);
-  })();
-
-  const sportsBannerEvent = spotlightEvents[0] ?? null;
-  const sportsListEvents  = spotlightEvents.slice(1);
-  const feedSections      = sections.filter((sec) => sec.id !== 'featured');
 
   // ── Data fetching ─────────────────────────────────────────────────────────
   const fetchSections = useCallback(async () => {
@@ -500,7 +504,7 @@ export default function Index() {
       ]);
       const loaded = sectionsRes.data.sections ?? [];
       setSections(loaded);
-      setHomeSections(loaded); // permanent copy — never overwritten by filters
+      setHomeSections(loaded);
       const cats = categoriesRes?.data?.categories ?? [];
       if (cats.length > 0) setDbCategories(cats);
     } catch (err: any) {
@@ -512,14 +516,30 @@ export default function Index() {
     fetchSections().finally(() => setLoading(false));
   }, [fetchSections]);
 
+  // Re-fetch when auth transitions guest → logged-in so "For You" appears
+  // automatically. We track the previous userId in a ref so we only re-fetch
+  // on the null → non-null transition, not on unrelated re-renders.
+  const prevAuthUserId = useRef<string | null>(null);
+  useEffect(() => {
+    if (authUserId !== null && prevAuthUserId.current !== authUserId) {
+      prevAuthUserId.current = authUserId;
+      // Don't show the skeleton again — just silently swap in the personalised
+      // sections once auth is ready.
+      fetchSections();
+    }
+    if (authUserId === null) {
+      prevAuthUserId.current = null;
+    }
+  }, [authUserId, fetchSections]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchSections();
     setRefreshing(false);
   }, [fetchSections]);
 
-  // ── Filter apply ─────────────────────────────────────────────────────────
-  const handleFilterApply = async (params: FilterParams) => {
+  // PERF: useCallback so handleFilterApply reference is stable across renders
+  const handleFilterApply = useCallback(async (params: FilterParams) => {
     setFilterParams(params);
     setFilterOpen(false);
 
@@ -529,7 +549,6 @@ export default function Index() {
     const hasLocation = !!(params.city || params.province || params.lat);
     const hasDate     = !!(params.date && params.date !== 'any');
 
-    // No active filters → restore the full editorial home feed from homeSections
     if (!hasLocation && !hasDate) {
       setSections(homeSections);
       return;
@@ -543,24 +562,20 @@ export default function Index() {
       if (!res.ok) throw new Error(`Filter failed: ${res.status}`);
       const data = await res.json();
 
-      // New backend: { sections: [...] }
       if (Array.isArray(data.sections) && data.sections.length > 0) {
         setSections(data.sections);
-      // Old backend (pre-deploy): { data: [...] } — group on the fly
       } else if (Array.isArray(data.data) && data.data.length > 0) {
         setSections(groupEventsIntoSections(data.data));
-      // No results for this filter — keep showing home feed rather than blank screen
       } else {
         setSections(homeSections);
         setError('No events found for that filter. Showing all events.');
       }
-    } catch (err: any) {
-      // Network/server error — fall back to home feed silently
+    } catch {
       setSections(homeSections);
     } finally {
       setLoading(false);
     }
-  };
+  }, [homeSections, headerAnim]);
 
   const handleSelectCategory = (cat: string) => {
     setDropdownOpen(false);
@@ -568,12 +583,12 @@ export default function Index() {
     router.push(`/category/${encodeURIComponent(cat)}`);
   };
 
-  const handleEventPress = (event: Event) => {
+  // PERF: stable reference so EventCard/SectionRow don't re-render unnecessarily
+  const handleEventPress = useCallback((event: Event) => {
     setSelectedEvent(event);
     router.push(`/event/${event.id}`);
-  };
+  }, [setSelectedEvent, router]);
 
-  // ── Header labels ─────────────────────────────────────────────────────────
   const locationLabel =
     filterParams.city     ??
     filterParams.province ??
@@ -587,12 +602,12 @@ export default function Index() {
       ? formatDateRangeLabel(filterParams.date_from, filterParams.date_to)
       : 'All dates';
 
-  // ── Snap helper ───────────────────────────────────────────────────────────
-  const snapHeader = () => {
+  // PERF: useCallback so snapHeader reference is stable
+  const snapHeader = useCallback(() => {
     const target = headerOffset.current < -(headerHeight.current / 2) ? -headerHeight.current : 0;
     Animated.spring(headerAnim, { toValue: target, useNativeDriver: true, bounciness: 0, speed: 14 })
       .start(() => { headerOffset.current = target; });
-  };
+  }, [headerAnim]);
 
   return (
     <View className={s.screen} style={{ backgroundColor: colors.background }}>
@@ -612,7 +627,8 @@ export default function Index() {
             headerOffset.current = Math.min(0, Math.max(-headerHeight.current, headerOffset.current - delta));
             headerAnim.setValue(headerOffset.current);
           }
-          setScrolled(currentY > 10);
+          // PERF: removed setScrolled(currentY > 10) — state was computed but
+          // never consumed in JSX, causing a re-render every 16ms during scroll.
         }}
         onScrollEndDrag={snapHeader}
         onMomentumScrollEnd={snapHeader}
@@ -620,7 +636,7 @@ export default function Index() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#000000" />
         }
       >
-        {/* ── Hero Banner — always shows home featured events, filter-independent ── */}
+        {/* Hero Banner */}
         <TouchableOpacity activeOpacity={0.95} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
           <View className={s.hero}>
             <Animated.View style={[sheet.absoluteFill, { opacity: fadeAnim }]}>
@@ -628,7 +644,10 @@ export default function Index() {
                 <Image
                   source={{ uri: featuredEvent!.banner_image_url ?? featuredEvent!.cover_image_url! }}
                   style={sheet.absoluteFill}
-                  resizeMode="cover"
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={300}
+                  recyclingKey={featuredEvent!.id}
                 />
               ) : (
                 <View className={s.heroImagePlaceholder} />
@@ -656,7 +675,6 @@ export default function Index() {
                 </View>
               </View>
             </Animated.View>
-
             {carouselEvents.length > 1 && (
               <View style={{ position: 'absolute', bottom: 14, right: 16, flexDirection: 'row', gap: 5, zIndex: 10 }}>
                 {carouselEvents.map((_, idx) => (
@@ -677,39 +695,29 @@ export default function Index() {
         {/* Category Filter */}
         <View className={s.filterRow}>
           {activeCategory !== 'All' && (
-            <TouchableOpacity
-              className={s.filterClearBtn}
-              style={{ borderColor: colors.dividerColor }}
-              onPress={() => setActiveCategory('All')}
-            >
+            <TouchableOpacity className={s.filterClearBtn} style={{ borderColor: colors.dividerColor }} onPress={() => setActiveCategory('All')}>
               <Text className={s.filterClearText} style={{ color: colors.text }}>✕</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
             className={`${s.filterChip} ${activeCategory !== 'All' ? s.filterChipActive : ''}`}
-           style={activeCategory === 'All'
+            style={activeCategory === 'All'
               ? { borderColor: colors.text, backgroundColor: 'transparent' }
               : { borderColor: isDark ? '#ffffff' : '#000000', backgroundColor: 'transparent' }
             }
             onPress={() => setDropdownOpen(true)}
           >
-            <Text
-              className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
-             style={{ color: colors.text }}
-            >
+            <Text className={`${s.filterChipText} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`} style={{ color: colors.text }}>
               {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
             </Text>
-            <Text
-              className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`}
-              style={{ color: colors.text }}
-            > ▾</Text>
+            <Text className={`${s.filterChipArrow} ${activeCategory !== 'All' ? s.filterChipTextActive : ''}`} style={{ color: colors.text }}> ▾</Text>
           </TouchableOpacity>
         </View>
 
         {/* Category Dropdown Modal */}
         <Modal visible={dropdownOpen} transparent animationType="slide" onRequestClose={() => setDropdownOpen(false)}>
-        <View className={s.modalBackdrop}>
-          <BlurView intensity={130} tint={isDark ? 'dark' : 'light'} style={{ flex: 1, width: '100%', paddingTop: 64, paddingBottom: 40, alignItems: 'center' }}>
+          <View className={s.modalBackdrop}>
+            <BlurView intensity={130} tint={isDark ? 'dark' : 'light'} style={{ flex: 1, width: '100%', paddingTop: 64, paddingBottom: 40, alignItems: 'center' }}>
               <FlatList
                 data={categories}
                 keyExtractor={(item) => item}
@@ -718,9 +726,7 @@ export default function Index() {
                     <Text
                       className={`${s.modalItemText} ${activeCategory === item ? s.modalItemTextActive : ''}`}
                       style={{ color: activeCategory === item ? colors.text : colors.subText }}
-                    >
-                      {item}
-                    </Text>
+                    >{item}</Text>
                   </TouchableOpacity>
                 )}
               />
@@ -734,37 +740,20 @@ export default function Index() {
         {/* Error banner */}
         {error && (
           <View style={{ margin: 20, backgroundColor: 'rgba(255,60,110,0.12)', borderWidth: 1, borderColor: colors.dividerColor, borderRadius: 3, padding: 14 }}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>
-              ⚠ COULD NOT LOAD SECTIONS
-            </Text>
+            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>⚠ COULD NOT LOAD SECTIONS</Text>
             <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
-            <TouchableOpacity
-              onPress={onRefresh}
-              style={{ marginTop: 10, alignSelf: 'flex-start', borderWidth: 1,
-                borderColor: colors.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 2 }}
-            >
+            <TouchableOpacity onPress={onRefresh} style={{ marginTop: 10, alignSelf: 'flex-start', borderWidth: 1, borderColor: colors.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 2 }}>
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {/* Dynamic Feed Sections */}
-        {loading ? (
-          <SkeletonFeed />
-        ) : (
-          feedSections.map((section) => (
-            <SectionRow
-              key={section.id}
-              section={section}
-              isTop10={section.id === 'trending'}
-              marginTop={true}
-              onEventPress={handleEventPress}
-              colors={colors}
-            />
-          ))
-        )}
+        {loading ? <SkeletonFeed /> : feedSections.map((section) => (
+          <SectionRow key={section.id} section={section} isTop10={section.id === 'trending'} marginTop={true} onEventPress={handleEventPress} colors={colors} />
+        ))}
 
-        {/* Dynamic Spotlight Section — hidden when a filter is active */}
+        {/* Spotlight Section */}
         {!loading && !isFiltered && sportsBannerEvent && (
           <>
             <View className={s.sectionMt}>
@@ -776,11 +765,7 @@ export default function Index() {
             <TouchableOpacity activeOpacity={0.92} onPress={() => handleEventPress(sportsBannerEvent)}>
               <View className={s.sportsBanner} style={{ backgroundColor: spotlightConfig.bgColor }}>
                 {(sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url) ? (
-                  <Image
-                    source={{ uri: sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url! }}
-                    style={sheet.absoluteFill}
-                    resizeMode="cover"
-                  />
+                  <Image source={{ uri: sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url! }} style={sheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" recyclingKey={sportsBannerEvent.id} />
                 ) : null}
                 <LinearGradient colors={[spotlightConfig.gradientLight, spotlightConfig.gradientDark]} style={sheet.absoluteFill} />
                 <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, backgroundColor: spotlightConfig.accentColor, opacity: 0.85 }} />
@@ -797,14 +782,10 @@ export default function Index() {
             {sportsListEvents.length > 0 && (
               <View className={s.sportsListContainer}>
                 {sportsListEvents.map((sport, index) => (
-                  <TouchableOpacity
-                    key={sport.id}
-                    className={index === sportsListEvents.length - 1 ? s.sportRowLast : s.sportRow}
-                    onPress={() => handleEventPress(sport)}
-                  >
+                  <TouchableOpacity key={sport.id} className={index === sportsListEvents.length - 1 ? s.sportRowLast : s.sportRow} onPress={() => handleEventPress(sport)}>
                     <View className={s.sportThumb}>
                       {sport.cover_image_url && (
-                        <Image source={{ uri: sport.cover_image_url }} style={sheet.absoluteFill} resizeMode="cover" />
+                        <Image source={{ uri: sport.cover_image_url }} style={sheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" recyclingKey={sport.id} />
                       )}
                     </View>
                     <View className={s.sportInfo}>
@@ -820,195 +801,46 @@ export default function Index() {
           </>
         )}
 
-        {/* ── Hardcoded editorial sections — hidden when a filter is active ─── */}
-        {/* When filtered, the backend already returns category sections so   */}
-        {/* these would just duplicate events.                                */}
+        {/* Editorial Sections — hidden when filtered */}
+        {!loading && !isFiltered && freeEvents.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>FREE EVENTS</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={freeEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Free Events */}
-        {!loading && !isFiltered && (() => {
-          const freeEvents = allEvents.filter((e) => e.price === 0).slice(0, 10);
-          if (!freeEvents.length) return null;
-          return (
-            <>
-              
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>FREE EVENTS</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={freeEvents} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && premiumEvents.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>PREMIUM & EXCLUSIVE</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={premiumEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Premium & Exclusive */}
-        {!loading && !isFiltered && (() => {
-          const premiumEvents = allEvents.filter((e) => e.price >= 3000).slice(0, 10);
-          if (!premiumEvents.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>PREMIUM & EXCLUSIVE</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={premiumEvents} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && comingUp.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>COMING NEXT MONTH</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={comingUp} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Coming Next Month */}
-        {!loading && !isFiltered && (() => {
-          const now = Date.now();
-          const comingUp = allEvents
-            .filter((e) => { const days = (new Date(e.start_time).getTime() - now) / 86400000; return days >= 15 && days <= 45; })
-            .slice(0, 10);
-          if (!comingUp.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>COMING NEXT MONTH</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={comingUp} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && otherCities.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>AROUND THE COUNTRY</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={otherCities} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Around the Country */}
-        {!loading && !isFiltered && (() => {
-          const otherCities = allEvents
-            .filter((e) => !['Johannesburg', 'johannesburg'].includes(e.city ?? ''))
-            .slice(0, 10);
-          if (!otherCities.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>AROUND THE COUNTRY</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={otherCities} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && musicEvents.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>MUSIC & CONCERTS</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={musicEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Music & Concerts */}
-        {!loading && !isFiltered && (() => {
-          const musicEvents = allEvents
-            .filter((e) => e.category?.toLowerCase().includes('concert') || e.category?.toLowerCase().includes('music'))
-            .slice(0, 10);
-          if (!musicEvents.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>MUSIC & CONCERTS</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={musicEvents} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && galaEvents.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>GALA & BLACK TIE</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={galaEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Gala & Black Tie */}
-        {!loading && !isFiltered && (() => {
-          const galaEvents = allEvents
-            .filter((e) => e.category?.toLowerCase().includes('gala') || e.category?.toLowerCase().includes('exclusive'))
-            .slice(0, 10);
-          if (!galaEvents.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>GALA & BLACK TIE</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={galaEvents} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && techEvents.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>TECH & BUSINESS</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={techEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
-        {/* Tech & Business */}
-        {!loading && !isFiltered && (() => {
-          const techEvents = allEvents.filter((e) => e.category?.toLowerCase().includes('tech')).slice(0, 10);
-          if (!techEvents.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>TECH & BUSINESS</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={techEvents} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
-
-        {/* Food & Lifestyle */}
-        {!loading && !isFiltered && (() => {
-          const foodEvents = allEvents.filter((e) => e.category?.toLowerCase().includes('food')).slice(0, 10);
-          if (!foodEvents.length) return null;
-          return (
-            <>
-              <View className={s.sectionMt}>
-                <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>FOOD & LIFESTYLE</Text>
-                  <TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity>
-                </View>
-              </View>
-              <FlatList
-                horizontal data={foodEvents} keyExtractor={(e) => e.id}
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
-                renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              />
-            </>
-          );
-        })()}
+        {!loading && !isFiltered && foodEvents.length > 0 && (
+          <><View className={s.sectionMt}><View className={s.sectionHeader}><Text className={s.sectionTitle} style={{ color: colors.text }}>FOOD & LIFESTYLE</Text><TouchableOpacity><Text className={s.sectionLink}>VIEW ALL</Text></TouchableOpacity></View></View>
+          <FlatList horizontal data={foodEvents} keyExtractor={(e) => e.id} showsHorizontalScrollIndicator={false} windowSize={5} maxToRenderPerBatch={5} initialNumToRender={4} contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }} renderItem={({ item }) => <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />} /></>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -1027,12 +859,7 @@ export default function Index() {
       </Animated.View>
 
       {/* Filter bottom sheet */}
-      <FilterModal
-        visible={filterOpen}
-        onClose={() => setFilterOpen(false)}
-        initialParams={filterParams}
-        onApply={handleFilterApply}
-      />
+      <FilterModal visible={filterOpen} onClose={() => setFilterOpen(false)} initialParams={filterParams} onApply={handleFilterApply} />
     </View>
   );
 }

@@ -2,10 +2,22 @@ import '../global.css';
 import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { useThemeStore } from '../store/themeStore';
+import { useAuthStore } from '../store/authStore';
 
 export default function RootLayout() {
   const loadMode = useThemeStore((s) => s.loadMode);
-  useEffect(() => { loadMode(); }, []);
+  const loadUser = useAuthStore((s) => s.loadUser);
+
+  useEffect(() => {
+    loadMode();
+    // Validate the stored access token on every app start.
+    // If it has expired, loadUser calls GET /v1/user/me → 401 → axios
+    // interceptor refreshes the token automatically.
+    // Without this, an expired token is silently ignored by OptionalAuth
+    // on /v1/home (no 401 returned), so "For You" never appears and the
+    // token is never refreshed until the user manually logs in again.
+    loadUser();
+  }, []);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"events-db/internal/cache"
 	"events-db/internal/repository"
 	"events-db/internal/utils"
 
@@ -45,7 +46,7 @@ import (
 //	  ],
 //	  "filter": { "city": "Cape Town", "date": "weekend", "total_shown": 24 }
 //	}
-func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func FilterEventsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── Location ──────────────────────────────────────────────────────────
 
@@ -55,10 +56,8 @@ func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if city != "" {
 			filter.City = city
 		} else if province := strings.TrimSpace(c.Query("province")); province != "" {
-			// Province filter — maps to a set of cities in the repository layer.
 			filter.Province = province
 		} else {
-			// Only use lat/lng if no city is provided
 			if latStr := c.Query("lat"); latStr != "" {
 				if v, err := strconv.ParseFloat(latStr, 64); err == nil {
 					filter.Lat = &v
@@ -74,7 +73,6 @@ func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 					filter.RadiusKm = v
 				}
 			}
-			// lat without lng (or vice versa) — ignore both
 			if filter.Lat != nil && filter.Lng == nil {
 				filter.Lat = nil
 			}
@@ -118,6 +116,27 @@ func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
+		// ── Cache (date-only, no location) ────────────────────────────────────
+		// Location-scoped results are user/session-specific and must not be
+		// shared. But date-only presets (tomorrow, weekend, any) are global and
+		// identical for every anonymous request — cache them to avoid hitting
+		// the DB on every date change in the filter modal.
+		hasLocation := filter.City != "" || filter.Province != "" || filter.Lat != nil
+
+		if !hasLocation && ec != nil && datePreset != "custom" {
+			if cached, ok := ec.GetFilter(c.Request.Context(), datePreset); ok {
+				totalShown := 0
+				for _, sec := range cached {
+					totalShown += len(sec.Events)
+				}
+				c.JSON(http.StatusOK, gin.H{
+					"sections": cached,
+					"filter":   buildFilterSummary(filter, totalShown),
+				})
+				return
+			}
+		}
+
 		// ── Execute ───────────────────────────────────────────────────────────
 
 		sections, err := repository.FilterEventsSections(pool, filter)
@@ -126,7 +145,11 @@ func FilterEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		// Count total events across sections for the filter summary.
+		// Store date-only results in cache for subsequent requests
+		if !hasLocation && ec != nil && datePreset != "custom" {
+			ec.SetFilter(c.Request.Context(), datePreset, sections)
+		}
+
 		totalShown := 0
 		for _, sec := range sections {
 			totalShown += len(sec.Events)
@@ -175,15 +198,15 @@ func CitiesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // filterSummary is the JSON shape returned in the "filter" key of the response
 // so clients can render a summary of what filters are active.
 type filterSummary struct {
-	City        string `json:"city,omitempty"`
-	Province    string `json:"province,omitempty"`
-	Lat         *float64 `json:"lat,omitempty"`
-	Lng         *float64 `json:"lng,omitempty"`
-	RadiusKm    float64  `json:"radius_km,omitempty"`
-	Date        string `json:"date,omitempty"`
-	DateFrom    string `json:"date_from,omitempty"`
-	DateTo      string `json:"date_to,omitempty"`
-	TotalShown  int    `json:"total_shown"`
+	City       string   `json:"city,omitempty"`
+	Province   string   `json:"province,omitempty"`
+	Lat        *float64 `json:"lat,omitempty"`
+	Lng        *float64 `json:"lng,omitempty"`
+	RadiusKm   float64  `json:"radius_km,omitempty"`
+	Date       string   `json:"date,omitempty"`
+	DateFrom   string   `json:"date_from,omitempty"`
+	DateTo     string   `json:"date_to,omitempty"`
+	TotalShown int      `json:"total_shown"`
 }
 
 func buildFilterSummary(f repository.EventFilter, count int) filterSummary {

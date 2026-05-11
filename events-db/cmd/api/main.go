@@ -256,7 +256,7 @@ func main() {
 		public.GET("/active",            handlers.ActiveEventsHandler(pool, eventCache))
 		public.GET("/search",            handlers.SearchEventsHandler(pool))
 		public.GET("/category/:id",      handlers.GetEventCategoryHandler(pool, eventCache))
-		public.GET("/filter",            handlers.FilterEventsHandler(pool))
+		public.GET("/filter",            handlers.FilterEventsHandler(pool, eventCache))
 		public.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 		// Ticket types — visible tiers for the event detail page

@@ -46,7 +46,7 @@ api.interceptors.response.use(
 // Reads SecureStore once and keeps the result in memory. Auto-generates a
 // UUID if no session exists so guest carts always have an X-Session-ID.
 
-let _cachedSessionId: string | undefined = undefined; // never null — always generates
+let _cachedSessionId: string | undefined = undefined;
 
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -67,7 +67,6 @@ export async function getCachedSessionId(): Promise<string> {
     _cachedSessionId = sid;
     return sid;
   } catch {
-    // SecureStore unavailable — use in-memory UUID for this session
     if (!_cachedSessionId) _cachedSessionId = generateUUID();
     return _cachedSessionId;
   }
@@ -147,10 +146,26 @@ export const getActiveEvents     = (limit = 10)                     => api.get<E
 export const getEventsByCategory = (categoryId: number, limit = 5)  => api.get<EventPage>(`/v1/events/category/${categoryId}?limit=${limit}`);
 export const filterEvents        = (params: Record<string, string>) => api.get<EventPage>(`/v1/events/filter`, { params });
 
+// ── Section endpoint map ───────────────────────────────────────────────────
+// Maps home-section IDs (returned by /v1/home) to their pageable REST
+// endpoints. Only sections that the backend actually paginates (i.e. those
+// that return a non-empty next_cursor) need an entry here.
+//
+// Section IDs from the backend and their status:
+//   for_you        — personalised, no cursor (ForYou doesn't paginate)
+//   trending        → /v1/events/trending      ✓
+//   happening_soon  → /v1/events/active        ✓
+//   this_weekend    → /v1/events/active        (no standalone weekend endpoint)
+//   recently_added  → /v1/events              ✓ (GetAllEventsHandler, same sort)
+//   featured        → /v1/events/featured      ✓
+//   near_you       — city-filtered, no cursor  (NearYou doesn't paginate)
+//   cat-*          — filter sections, no cursor
 const SECTION_ENDPOINT: Record<string, string> = {
   trending:        '/v1/events/trending',
   featured:        '/v1/events/featured',
   happening_soon:  '/v1/events/active',
+  this_weekend:    '/v1/events/active',  // no dedicated weekend endpoint; active is closest
+  recently_added:  '/v1/events',         // sorted by created_at DESC — matches section order
 };
 
 export async function loadMoreSectionEvents(
@@ -159,6 +174,7 @@ export async function loadMoreSectionEvents(
   limit = 10,
 ): Promise<{ data: Event[]; next_cursor: string } | null> {
   const endpoint = SECTION_ENDPOINT[sectionId];
+  // No endpoint registered or no cursor — section doesn't support pagination
   if (!endpoint || !cursor) return null;
   try {
     const res = await api.get<EventPage>(endpoint, { params: { cursor, limit } });
@@ -204,7 +220,6 @@ export interface MerchandiseItem {
   seconds_until?: number;
   seconds_remain?: number;
   effective_price: number;
-  // ── Fulfillment — returned by backend, required when adding to cart ──────
   fulfillment_mode?:  'delivery' | 'pickup' | 'both';
   pickup_location?:   string | null;
   delivery_fee?:      number;
@@ -372,9 +387,7 @@ export interface AddMerchToCartDTO {
   event_id: string;
   merchandise_variant_id?: string;
   quantity: number;
-  // Required by the backend — must always be sent
   fulfillment_method: 'pickup' | 'delivery';
-  // Required when fulfillment_method === 'delivery'
   delivery_address?: {
     street:       string;
     suburb?:      string;
