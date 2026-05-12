@@ -31,9 +31,10 @@ func NewImageService(cfg *config.Config) *ImageService {
 type ImageType string
 
 const (
-	ImageTypeCover   ImageType = "covers"
-	ImageTypeBanner  ImageType = "banners"
-	ImageTypeGallery ImageType = "gallery" // fixed typo: was "galllery"
+	ImageTypeCover          ImageType = "covers"
+	ImageTypeBanner         ImageType = "banners"
+	ImageTypeGallery        ImageType = "gallery" // fixed typo: was "galllery"
+	ImageTypeCollectionCover ImageType = "collection-covers"
 )
 
 type VideoType string
@@ -116,6 +117,46 @@ func (s *ImageService) UploadEventImage(
 	filename := fmt.Sprintf("events/%s/%s/%s%s", eventID, string(imgType), uuid.New().String(), ext)
 	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
 }
+
+// ── Collection cover upload ───────────────────────────────────────────────────
+
+// UploadCollectionImage validates and uploads a cover image for a merch collection.
+// Files are stored at collections/{collectionID}/cover/{uuid}.ext
+func (s *ImageService) UploadCollectionImage(
+	file multipart.File,
+	header *multipart.FileHeader,
+	collectionID string,
+) (string, error) {
+	contentType := header.Header.Get("Content-Type")
+	ext, ok := allowedImageMIMETypes[contentType]
+	if !ok {
+		ext = strings.ToLower(filepath.Ext(header.Filename))
+		switch ext {
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+			ext = ".jpg"
+		case ".png":
+			contentType = "image/png"
+		case ".webp":
+			contentType = "image/webp"
+		default:
+			return "", fmt.Errorf("unsupported file type: only JPEG, PNG, and WebP are allowed")
+		}
+	}
+
+	if header.Size > maxBannerSize {
+		return "", fmt.Errorf("file too large: maximum size is %d MB", maxBannerSize/1024/1024)
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	filename := fmt.Sprintf("collections/%s/cover/%s%s", collectionID, uuid.New().String(), ext)
+	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
+}
+
 
 // ── Video upload ─────────────────────────────────────────────────────────────
 

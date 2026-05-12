@@ -142,6 +142,7 @@ interface CollectionEntry {
   items: MerchandiseItem[];
   isCollection: boolean;
   collectionName?: string;
+  collectionCoverImageUrl?: string;
 }
 
 function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
@@ -164,10 +165,11 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
   collectionMap.forEach((group) => {
     const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
     entries.push({
-      representativeItem: sorted[0],
-      items:              sorted,
-      isCollection:       true,
-      collectionName:     sorted[0].collection_name || undefined,
+      representativeItem:     sorted[0],
+      items:                  sorted,
+      isCollection:           true,
+      collectionName:         sorted[0].collection_name || undefined,
+      collectionCoverImageUrl: sorted[0].collection_cover_image_url || undefined,
     });
   });
 
@@ -296,7 +298,11 @@ const CollectionBadge = ({ count, tc }: { count: number; tc: string }) => (
 const AvailableCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () => void }) => {
   const { item, isCollection } = { item: entry.representativeItem, isCollection: entry.isCollection };
   const { bg, text: tc } = paletteFor(item);
-  const images = parseImages(item.images);
+  // Collections: use the dedicated cover image if set, else fall back to first product image
+  const rawImages = parseImages(item.images);
+  const images = isCollection
+    ? (entry.collectionCoverImageUrl ? [entry.collectionCoverImageUrl] : rawImages.slice(0, 1))
+    : rawImages;
   const remainSecs = useTickingSeconds(item.seconds_remain ?? 0);
   const hasExpiry = !!item.sale_end;
   const urgent = hasExpiry && remainSecs < 86400;
@@ -344,7 +350,11 @@ const AvailableCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: ()
 const UpcomingCard = ({ entry, onPress }: { entry: CollectionEntry; onPress: () => void }) => {
   const { item, isCollection } = { item: entry.representativeItem, isCollection: entry.isCollection };
   const { bg, text: tc } = paletteFor(item);
-  const images = parseImages(item.images);
+  // Collections: use the dedicated cover image if set, else fall back to first product image
+  const rawImages = parseImages(item.images);
+  const images = isCollection
+    ? (entry.collectionCoverImageUrl ? [entry.collectionCoverImageUrl] : rawImages.slice(0, 1))
+    : rawImages;
   const untilSecs = useTickingSeconds(item.seconds_until ?? 0);
 
   const title = isCollection

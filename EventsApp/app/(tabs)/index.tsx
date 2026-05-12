@@ -10,6 +10,7 @@ import {
   Animated,
   StyleSheet,
   AppState,
+  useWindowDimensions,
   type AppStateStatus,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -344,13 +345,15 @@ export default function Index() {
   // fetch so the personalised "For You" section appears without a manual pull.
   const authUserId = useAuthStore((state) => state.user?.id ?? null);
   const { colors, isDark } = useAppTheme();
+  const { width: screenWidth } = useWindowDimensions();
+  const heroWidth = screenWidth - 32; // hero has mx-4 (16px each side)
 
   const lastScrollY      = useRef(0);
   const headerOffset     = useRef(0);
   const headerAnim       = useRef(new Animated.Value(0)).current;
   const headerHeight     = useRef(120);
   const featuredIndexRef = useRef(0);
-  const fadeAnim         = useRef(new Animated.Value(1)).current;
+  const heroBannerRef    = useRef<FlatList<Event>>(null);
 
   const [spotlightConfig, setSpotlightConfig] = useState(
     () => SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
@@ -439,14 +442,24 @@ export default function Index() {
     if (allEvents.length > 0) setAllEvents(allEvents);
   }, [allEvents]);
 
-  // ── Featured carousel ─────────────────────────────────────────────────────
+  // ── Featured carousel (FlatList-based, no fade-race glitch) ──────────────
   const advanceTo = useCallback((nextIdx: number) => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => {
-      featuredIndexRef.current = nextIdx;
-      setFeaturedIndex(nextIdx);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 380, useNativeDriver: true }).start();
-    });
-  }, [fadeAnim]);
+    featuredIndexRef.current = nextIdx;
+    setFeaturedIndex(nextIdx);
+    // Guard: scrollToIndex crashes if list is empty or index out of range
+    try {
+      heroBannerRef.current?.scrollToIndex({ index: nextIdx, animated: true });
+    } catch {}
+  }, []);
+
+  const heroViewabilityConfig = useRef({ viewAreaCoveragePercentThreshold: 50 });
+  const onHeroViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+    if (viewableItems[0] && viewableItems[0].index != null) {
+      const idx = viewableItems[0].index;
+      featuredIndexRef.current = idx;
+      setFeaturedIndex(idx);
+    }
+  });
 
   useEffect(() => {
     if (carouselEvents.length <= 1) return;
@@ -460,7 +473,10 @@ export default function Index() {
   useEffect(() => {
     featuredIndexRef.current = 0;
     setFeaturedIndex(0);
-    fadeAnim.setValue(1);
+    // Only scroll if the list already has items — scrollToIndex throws when length is 0
+    if ((heroBannerRef.current as any)?._listRef?._getItemCount?.() > 0) {
+      heroBannerRef.current?.scrollToIndex({ index: 0, animated: false });
+    }
   }, [homeSections]);
 
   // ── Category derivation ───────────────────────────────────────────────────
@@ -647,61 +663,93 @@ export default function Index() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#000000" />
         }
       >
-        {/* Hero Banner */}
-        <TouchableOpacity activeOpacity={0.95} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
-          <View className={s.hero}>
-            <Animated.View style={[sheet.absoluteFill, { opacity: fadeAnim }]}>
-              {(featuredEvent?.banner_image_url ?? featuredEvent?.cover_image_url) ? (
-                <Image
-                  source={{ uri: featuredEvent!.banner_image_url ?? featuredEvent!.cover_image_url! }}
-                  style={sheet.absoluteFill}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={300}
-                  recyclingKey={featuredEvent!.id}
-                />
-              ) : (
+        {/* Hero Banner — horizontal FlatList swiper (no fade-race glitch, swipe-enabled) */}
+        <View className={s.hero}>
+          <FlatList
+            ref={heroBannerRef}
+            data={carouselEvents}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={
+              <View style={{ width: heroWidth, height: 380 }}>
                 <View className={s.heroImagePlaceholder} />
-              )}
-              <LinearGradient
-                colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
-                locations={[0.3, 0.7, 1]}
-                style={sheet.absoluteFill}
-              />
-              <View className={s.heroContent}>
-                <Text className={s.heroBadge}>✦ {featuredEvent?.category ?? 'Featured'}</Text>
-                <Text className={s.heroTitle} numberOfLines={2}>
-                  {featuredEvent?.title.toUpperCase() ?? 'DISCOVER\nTOP EVENTS'}
-                </Text>
-                <Text className={s.heroSub} numberOfLines={3}>
-                  {featuredEvent?.description ?? 'Find and book the best events happening near you.'}
-                </Text>
-                <View className={s.heroActions}>
-                  <TouchableOpacity className={s.btnPrimary} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
-                    <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity className={s.btnBlue} onPress={() => featuredEvent && handleEventPress(featuredEvent)}>
-                    <Text className={s.btnBlueText}>VIEW DETAILS</Text>
-                  </TouchableOpacity>
+                <LinearGradient
+                  colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
+                  locations={[0.3, 0.7, 1]}
+                  style={sheet.absoluteFill}
+                />
+                <View className={s.heroContent}>
+                  <Text className={s.heroBadge}>✦ Featured</Text>
+                  <Text className={s.heroTitle}>{'DISCOVER\nTOP EVENTS'}</Text>
+                  <Text className={s.heroSub}>{'Find and book the best events happening near you.'}</Text>
                 </View>
               </View>
-            </Animated.View>
-            {carouselEvents.length > 1 && (
-              <View style={{ position: 'absolute', bottom: 14, right: 16, flexDirection: 'row', gap: 5, zIndex: 10 }}>
-                {carouselEvents.map((_, idx) => (
-                  <TouchableOpacity key={idx} onPress={() => advanceTo(idx)} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
-                    <View style={{
-                      width: idx === featuredIndex ? 18 : 6,
-                      height: 6,
-                      borderRadius: 3,
-                      backgroundColor: idx === featuredIndex ? '#FF2D55' : 'rgba(255,255,255,0.4)',
-                    }} />
-                  </TouchableOpacity>
-                ))}
-              </View>
+            }
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={carouselEvents.length > 1}
+            onViewableItemsChanged={onHeroViewableItemsChanged.current}
+            viewabilityConfig={heroViewabilityConfig.current}
+            getItemLayout={(_data, index) => ({ length: heroWidth, offset: heroWidth * index, index })}
+            style={{ width: heroWidth, height: 380 }}
+            renderItem={({ item: evt }) => (
+              <TouchableOpacity
+                activeOpacity={0.95}
+                onPress={() => evt && handleEventPress(evt)}
+                style={{ width: heroWidth, height: 380 }}
+              >
+                {(evt?.banner_image_url ?? evt?.cover_image_url) ? (
+                  <Image
+                    source={{ uri: evt!.banner_image_url ?? evt!.cover_image_url! }}
+                    style={sheet.absoluteFill}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    recyclingKey={evt!.id}
+                  />
+                ) : (
+                  <View className={s.heroImagePlaceholder} />
+                )}
+                <LinearGradient
+                  colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
+                  locations={[0.3, 0.7, 1]}
+                  style={sheet.absoluteFill}
+                />
+                <View className={s.heroContent}>
+                  <Text className={s.heroBadge}>✦ {evt?.category ?? 'Featured'}</Text>
+                  <Text className={s.heroTitle} numberOfLines={2}>
+                    {evt?.title.toUpperCase() ?? 'DISCOVER\nTOP EVENTS'}
+                  </Text>
+                  <Text className={s.heroSub} numberOfLines={3}>
+                    {evt?.description ?? 'Find and book the best events happening near you.'}
+                  </Text>
+                  <View className={s.heroActions}>
+                    <TouchableOpacity className={s.btnPrimary} onPress={() => evt && handleEventPress(evt)}>
+                      <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity className={s.btnBlue} onPress={() => evt && handleEventPress(evt)}>
+                      <Text className={s.btnBlueText}>VIEW DETAILS</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
             )}
-          </View>
-        </TouchableOpacity>
+          />
+          {/* Dot indicators — tap to jump, auto-updates on swipe */}
+          {carouselEvents.length > 1 && (
+            <View style={{ position: 'absolute', bottom: 14, right: 16, flexDirection: 'row', gap: 5, zIndex: 10 }}>
+              {carouselEvents.map((_, idx) => (
+                <TouchableOpacity key={idx} onPress={() => advanceTo(idx)} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
+                  <View style={{
+                    width: idx === featuredIndex ? 18 : 6,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: idx === featuredIndex ? '#FF2D55' : 'rgba(255,255,255,0.4)',
+                  }} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
 
         {/* Category Filter */}
         <View className={s.filterRow}>

@@ -204,6 +204,7 @@ export interface MerchandiseItem {
   event_name: string;
   collection_id?: string;
   collection_name?: string;
+  collection_cover_image_url?: string;
   name: string;
   description?: string;
   base_price: number;

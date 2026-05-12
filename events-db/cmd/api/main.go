@@ -489,6 +489,7 @@ func main() {
 		admin.GET("/collections",         handlers.AdminGetCollectionsHandler(pool))
 		admin.PUT("/collections/:id",     handlers.AdminUpdateCollectionHandler(pool))
 		admin.DELETE("/collections/:id",  handlers.AdminDeactivateCollectionHandler(pool))
+		admin.POST("/collections/:id/image", handlers.UploadCollectionCoverImageHandler(pool, imgService, true))
 		admin.GET("/users",               controllers.GetAllUsersHandler(pool))
 		admin.PUT("/users/promote/:id",   controllers.PromoteUserHandler(pool))
 		admin.PUT("/users/demote/:id",    controllers.DemoteUserHandler(pool))
@@ -542,6 +543,7 @@ func main() {
 		orgRoutes.GET("/collections",         handlers.OrgGetCollectionsHandler(pool))
 		orgRoutes.PUT("/collections/:id",     handlers.OrgUpdateCollectionHandler(pool))
 		orgRoutes.DELETE("/collections/:id",  handlers.OrgDeactivateCollectionHandler(pool))
+		orgRoutes.POST("/collections/:id/image", handlers.UploadCollectionCoverImageHandler(pool, imgService, false))
 
 		// Ticket Types
 		orgRoutes.GET("/events/:id/ticket-types",  handlers.OrgGetTicketTypesHandler(pool))

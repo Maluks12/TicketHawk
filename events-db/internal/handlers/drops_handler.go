@@ -17,6 +17,7 @@ const dropsMerchCols = `m.id, m.event_id, COALESCE(e.title, '') AS event_name,
        m.display_order, m.is_active, m.images::text,
        m.sale_start, m.sale_end, m.created_at, m.updated_at,
        m.collection_id, COALESCE(mc.name, '') AS collection_name,
+       mc.cover_image_url AS collection_cover_image_url,
        m.fulfillment_mode, m.pickup_location, m.delivery_fee`
 
 type DropsResponse struct {
@@ -26,13 +27,14 @@ type DropsResponse struct {
 
 type DropItem struct {
 	models.Merchandise
-	EventName      string  `json:"event_name"`
-	CollectionID   *string `json:"collection_id"`
-	CollectionName string  `json:"collection_name"`
-	SaleStatus     string  `json:"sale_status"`
-	SecondsUntil   *int64  `json:"seconds_until"`
-	SecondsRemain  *int64  `json:"seconds_remain"`
-	EffectivePrice float64 `json:"effective_price"`
+	EventName            string  `json:"event_name"`
+	CollectionID         *string `json:"collection_id"`
+	CollectionName       string  `json:"collection_name"`
+	CollectionCoverImage *string `json:"collection_cover_image_url,omitempty"`
+	SaleStatus           string  `json:"sale_status"`
+	SecondsUntil         *int64  `json:"seconds_until"`
+	SecondsRemain        *int64  `json:"seconds_remain"`
+	EffectivePrice       float64 `json:"effective_price"`
 }
 
 func GetDropsFeedHandler(pool *pgxpool.Pool) gin.HandlerFunc {
@@ -83,10 +85,11 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 	defer rows.Close()
 
 	type rowData struct {
-		merch          models.Merchandise
-		eventName      string
-		collectionID   *string
-		collectionName string
+		merch                models.Merchandise
+		eventName            string
+		collectionID         *string
+		collectionName       string
+		collectionCoverImage *string
 	}
 	var rowsData []rowData
 	var ids []string
@@ -95,13 +98,14 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 		var m models.Merchandise
 		var eventName, collectionName string
 		var collectionID *string
+		var collectionCoverImage *string
 
 		if err := rows.Scan(
 			&m.ID, &m.EventID, &eventName,
 			&m.Name, &m.Description, &m.BasePrice,
 			&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 			&m.SaleStart, &m.SaleEnd, &m.CreatedAt, &m.UpdatedAt,
-			&collectionID, &collectionName,
+			&collectionID, &collectionName, &collectionCoverImage,
 			&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		); err != nil {
 			return nil, err
@@ -109,6 +113,7 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 		rowsData = append(rowsData, rowData{
 			merch: m, eventName: eventName,
 			collectionID: collectionID, collectionName: collectionName,
+			collectionCoverImage: collectionCoverImage,
 		})
 		ids = append(ids, m.ID)
 	}
@@ -147,12 +152,13 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 		m.Variants = variantMap[m.ID]
 
 		di := DropItem{
-			Merchandise:    m,
-			EventName:      rd.eventName,
-			CollectionID:   rd.collectionID,
-			CollectionName: rd.collectionName,
-			SaleStatus:     m.SaleStatus(),
-			EffectivePrice: m.BasePrice,
+			Merchandise:          m,
+			EventName:            rd.eventName,
+			CollectionID:         rd.collectionID,
+			CollectionName:       rd.collectionName,
+			CollectionCoverImage: rd.collectionCoverImage,
+			SaleStatus:           m.SaleStatus(),
+			EffectivePrice:       m.BasePrice,
 		}
 
 		if m.SaleStart != nil && m.SaleStart.After(now) {

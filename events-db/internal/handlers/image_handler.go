@@ -280,3 +280,54 @@ func UploadGalleryImageHandler(pool *pgxpool.Pool, imgService *services.ImageSer
 		})
 	}
 }
+
+// ── Collection cover image ────────────────────────────────────────────────────
+
+// UploadCollectionCoverImageHandler handles POST /admin/collections/:id/image
+// and POST /organiser/collections/:id/image.
+// It uploads the image to R2 and writes the URL into merch_collections.cover_image_url.
+// For organiser routes, middleware sets "user_id" so ownership is enforced;
+// for admin routes, organizerID is left nil to skip the ownership check.
+func UploadCollectionCoverImageHandler(pool *pgxpool.Pool, imgService *services.ImageService, isAdmin bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		collectionID := c.Param("id")
+		if _, err := uuid.Parse(collectionID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection ID"})
+			return
+		}
+
+		var organizerID *string
+		if !isAdmin {
+			uid, _ := c.Get("user_id")
+			s := uid.(string)
+			organizerID = &s
+		}
+
+		file, header, err := c.Request.FormFile("image")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required (field name: image)"})
+			return
+		}
+		defer file.Close()
+
+		url, err := imgService.UploadCollectionImage(file, header, collectionID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := repository.UpdateCollectionCoverImage(pool, collectionID, organizerID, url); err != nil {
+			if errors.Is(err, repository.ErrCollectionNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "collection not found or access denied"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save image URL"})
+			}
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":           "Collection cover image uploaded successfully",
+			"cover_image_url":   url,
+		})
+	}
+}

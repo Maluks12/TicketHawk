@@ -13,13 +13,13 @@ import (
 
 var ErrCollectionNotFound = errors.New("collection not found")
 
-const collectionSelectCols = `id, organizer_id, name, description, display_order, is_active, created_at, updated_at`
+const collectionSelectCols = `id, organizer_id, name, description, cover_image_url, display_order, is_active, created_at, updated_at`
 
 func scanCollection(row interface {
 	Scan(...any) error
 }, c *models.MerchCollection) error {
 	return row.Scan(
-		&c.ID, &c.OrganizerID, &c.Name, &c.Description,
+		&c.ID, &c.OrganizerID, &c.Name, &c.Description, &c.CoverImageURL,
 		&c.DisplayOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
 	)
 }
@@ -40,7 +40,7 @@ func CreateCollection(pool *pgxpool.Pool, organizerID *string, dto *models.Creat
     `, collectionSelectCols),
 		organizerID, dto.Name, dto.Description, dto.DisplayOrder,
 	).Scan(
-		&c.ID, &c.OrganizerID, &c.Name, &c.Description,
+		&c.ID, &c.OrganizerID, &c.Name, &c.Description, &c.CoverImageURL,
 		&c.DisplayOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -68,6 +68,11 @@ func UpdateCollection(pool *pgxpool.Pool, collectionID string, organizerID *stri
 	if dto.Description != nil {
 		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argIdx))
 		args = append(args, *dto.Description)
+		argIdx++
+	}
+	if dto.CoverImageURL != nil {
+		setClauses = append(setClauses, fmt.Sprintf("cover_image_url = $%d", argIdx))
+		args = append(args, *dto.CoverImageURL)
 		argIdx++
 	}
 	if dto.DisplayOrder != nil {
@@ -103,7 +108,7 @@ func UpdateCollection(pool *pgxpool.Pool, collectionID string, organizerID *stri
 
 	var c models.MerchCollection
 	err := pool.QueryRow(ctx, q, args...).Scan(
-		&c.ID, &c.OrganizerID, &c.Name, &c.Description,
+		&c.ID, &c.OrganizerID, &c.Name, &c.Description, &c.CoverImageURL,
 		&c.DisplayOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -219,7 +224,7 @@ func GetCollectionByID(pool *pgxpool.Pool, collectionID string) (*models.MerchCo
 	err := pool.QueryRow(ctx, fmt.Sprintf(`
         SELECT %s FROM merch_collections WHERE id = $1 AND is_active = TRUE
     `, collectionSelectCols), collectionID).Scan(
-		&c.ID, &c.OrganizerID, &c.Name, &c.Description,
+		&c.ID, &c.OrganizerID, &c.Name, &c.Description, &c.CoverImageURL,
 		&c.DisplayOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -355,6 +360,31 @@ func getMerchByCollection(ctx context.Context, pool *pgxpool.Pool, collectionID 
 	}
 	return items, nil
 }
+
+// UpdateCollectionCoverImage sets the cover_image_url on a collection.
+// Pass nil organizerID for admin calls (no ownership check).
+func UpdateCollectionCoverImage(pool *pgxpool.Pool, collectionID string, organizerID *string, url string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	q := `UPDATE merch_collections SET cover_image_url = $1, updated_at = NOW() WHERE id = $2`
+	args := []any{url, collectionID}
+
+	if organizerID != nil {
+		q = `UPDATE merch_collections SET cover_image_url = $1, updated_at = NOW() WHERE id = $2 AND organizer_id = $3`
+		args = append(args, *organizerID)
+	}
+
+	tag, err := pool.Exec(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("update collection cover image: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrCollectionNotFound
+	}
+	return nil
+}
+
 
 // joinClauses joins SET clause fragments with ", ".
 func joinClauses(parts []string) string {
