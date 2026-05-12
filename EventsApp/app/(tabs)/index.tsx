@@ -417,12 +417,13 @@ export default function Index() {
   // Recently viewed -- resolved instantly from the in-memory/persisted cache.
   // No API call needed: the cache is populated when the user opens an event.
   const recentlyViewedEvents = useMemo<Event[]>(() => {
-    if (!authUserId || !recentlyViewedIds.length) return [];
-    return recentlyViewedIds.flatMap((id) => {
-      const e = recentlyViewedCache[id];
-      return e ? [e] : [];
-    });
-  }, [recentlyViewedIds, recentlyViewedCache, authUserId]);
+  if (!authUserId || !recentlyViewedIds.length) return [];
+  const allEventsMap = new Map(allEvents.map((e) => [e.id, e]));
+  return recentlyViewedIds.flatMap((id) => {
+    const e = recentlyViewedCache[id] ?? allEventsMap.get(id);
+    return e ? [e] : [];
+  });
+}, [recentlyViewedIds, recentlyViewedCache, allEvents, authUserId]);
 
   // PERF: memoize all 8 editorial section datasets
   const freeEvents    = useMemo(() => allEvents.filter((e) => e.price === 0).slice(0, 10), [allEvents]);

@@ -15,13 +15,6 @@ function recentlyViewedKey(userId: string) {
   return `recently_viewed_${userId}`;
 }
 
-// Stored shape -- ids (ordered, most-recent-first) + a cache of full event
-// objects so the home screen can render them instantly without an API call.
-interface StoredRecentlyViewed {
-  ids:   string[];
-  cache: Record<string, Event>;
-}
-
 interface EventStore {
   selectedEvent: Event | null;
   setSelectedEvent: (event: Event) => void;
@@ -32,11 +25,14 @@ interface EventStore {
   sectionMeta: SectionMeta | null;
   setSectionMeta: (meta: SectionMeta | null) => void;
   // Recently viewed -- logged-in users only, persisted per user ID.
-  // The cache holds the full Event shape so no round-trip is needed on load.
+  // Only IDs are written to SecureStore (stays well under the 2048-byte limit).
+  // The full Event objects live in recentlyViewedCache (in-memory only) and are
+  // rebuilt as the user opens events; on cold start the home screen falls back
+  // to resolving ids against allEvents.
   recentlyViewedIds:   string[];
   recentlyViewedCache: Record<string, Event>;
   loadRecentlyViewed:  (userId: string) => Promise<void>;
-  addRecentlyViewed:   (event: Event,  userId: string) => Promise<void>;
+  addRecentlyViewed:   (event: Event, userId: string) => Promise<void>;
   clearRecentlyViewed: () => void;
 }
 
@@ -50,7 +46,7 @@ export const useEventStore = create<EventStore>((set, get) => ({
   sectionMeta:      null,
   setSectionMeta:   (meta) => set({ sectionMeta: meta }),
 
-  // Recently Viewed
+  // ── Recently Viewed ────────────────────────────────────────────────────────
   recentlyViewedIds:   [],
   recentlyViewedCache: {},
 
@@ -61,11 +57,13 @@ export const useEventStore = create<EventStore>((set, get) => ({
         set({ recentlyViewedIds: [], recentlyViewedCache: {} });
         return;
       }
-      const stored: StoredRecentlyViewed = JSON.parse(raw);
-      set({
-        recentlyViewedIds:   stored.ids   ?? [],
-        recentlyViewedCache: stored.cache ?? {},
-      });
+      const parsed = JSON.parse(raw);
+      // Handle old format { ids, cache } and new format (plain string[])
+      const ids: string[] = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.ids) ? parsed.ids : [];
+      // Cache starts empty on load -- rebuilt as events are opened
+      set({ recentlyViewedIds: ids, recentlyViewedCache: {} });
     } catch {
       set({ recentlyViewedIds: [], recentlyViewedCache: {} });
     }
@@ -74,13 +72,16 @@ export const useEventStore = create<EventStore>((set, get) => ({
   addRecentlyViewed: async (event: Event, userId: string) => {
     const { recentlyViewedIds: prev, recentlyViewedCache: prevCache } = get();
 
+    // Safety guard -- prev must be an array (handles corrupt/migrated state)
+    const safeIds = Array.isArray(prev) ? prev : [];
+
     // Move to front, deduplicate, cap at max
-    const ids = [event.id, ...prev.filter((id) => id !== event.id)].slice(
+    const ids = [event.id, ...safeIds.filter((id) => id !== event.id)].slice(
       0,
       RECENTLY_VIEWED_MAX,
     );
 
-    // Update cache -- trim stale entries that are no longer in the ID list
+    // Keep in-memory cache up to date -- trim stale entries
     const idSet = new Set(ids);
     const cache: Record<string, Event> = { ...prevCache };
     for (const key of Object.keys(cache)) {
@@ -91,8 +92,8 @@ export const useEventStore = create<EventStore>((set, get) => ({
     set({ recentlyViewedIds: ids, recentlyViewedCache: cache });
 
     try {
-      const stored: StoredRecentlyViewed = { ids, cache };
-      await SecureStore.setItemAsync(recentlyViewedKey(userId), JSON.stringify(stored));
+      // Persist only the IDs -- well under the 2048-byte SecureStore limit
+      await SecureStore.setItemAsync(recentlyViewedKey(userId), JSON.stringify(ids));
     } catch { /* non-critical -- in-memory state already updated */ }
   },
 

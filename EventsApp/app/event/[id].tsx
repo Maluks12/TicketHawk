@@ -8,6 +8,7 @@ import {
   Linking,
   Platform,
   Animated,
+  InteractionManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -68,12 +69,18 @@ export default function EventDetail() {
   const addRecentlyViewed  = useEventStore((state) => state.addRecentlyViewed);
   const authUser           = useAuthStore((state) => state.user);
 
-  // Track this event as recently viewed for logged-in users
+  // Defer until after the navigation animation completes so the Zustand state
+  // update to recentlyViewedIds doesn't trigger a home-screen re-render
+  // mid-transition (which was causing the visible tap delay).
   useEffect(() => {
     if (event?.id && authUser?.id) {
-      addRecentlyViewed(event, authUser.id);
+      const task = InteractionManager.runAfterInteractions(() => {
+        addRecentlyViewed(event!, authUser!.id);
+      });
+      return () => task.cancel();
     }
   }, [event?.id, authUser?.id]);
+
   const [expanded, setExpanded] = useState(false);
   const { colors, isDark } = useAppTheme();
 
