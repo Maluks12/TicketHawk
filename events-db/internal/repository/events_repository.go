@@ -1053,3 +1053,73 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 	}
 	return events, nil
 }
+// GetEventsByIDs fetches full event details for an arbitrary slice of event
+// IDs. Order is preserved to match the caller's ID ordering (e.g. most-recent-
+// first from a recently-viewed list). Up to 20 IDs are accepted; the slice is
+// silently truncated beyond that.
+//
+// Used by GET /v1/events/by-ids (recently-viewed, client-driven lists).
+func GetEventsByIDs(pool *pgxpool.Pool, ids []string) ([]models.Event, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	if len(ids) > 20 {
+		ids = ids[:20]
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Validate that every element is a proper UUID before passing to Postgres.
+	for _, id := range ids {
+		if _, err := uuid.Parse(id); err != nil {
+			return nil, fmt.Errorf("invalid event ID %q: %w", id, err)
+		}
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT
+			ev.id, ev.title, ev.description, ev.cover_image_url,
+			ev.start_time, ev.end_time, ev.price, ev.currency,
+			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
+			ev.is_featured, ev.status, ev.views, ev.created_at,
+			c.name AS category
+		FROM   events     ev
+		JOIN   categories c ON c.id = ev.category_id
+		WHERE  ev.id = ANY($1)
+		  AND  ev.status = 'published'
+	`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("GetEventsByIDs: %w", err)
+	}
+	defer rows.Close()
+
+	// Build a map first so we can restore caller-requested ordering.
+	byID := make(map[string]models.Event, len(ids))
+	for rows.Next() {
+		var e models.Event
+		if err := rows.Scan(
+			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
+			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
+			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
+			&e.Category,
+		); err != nil {
+			return nil, fmt.Errorf("GetEventsByIDs scan: %w", err)
+		}
+		e.ComputeAvailableTickets()
+		byID[e.ID] = e
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Return events in the same order as the input IDs (most-recent-first).
+	out := make([]models.Event, 0, len(ids))
+	for _, id := range ids {
+		if e, ok := byID[id]; ok {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}

@@ -23,6 +23,21 @@ func (c *EventCache) IncrementView(ctx context.Context, eventID string) {
 	}
 }
 
+// GetPendingViewCount returns the number of views buffered in Redis for a
+// single event that have not yet been flushed to Postgres. Returns 0 if Redis
+// is unavailable or the key does not exist yet.
+func (c *EventCache) GetPendingViewCount(ctx context.Context, eventID string) int64 {
+	if c.rdb == nil {
+		return 0
+	}
+	count, err := c.rdb.Get(ctx, viewKey(eventID)).Int64()
+	if err != nil {
+		// redis.Nil means key doesn't exist (no pending views) — not an error.
+		return 0
+	}
+	return count
+}
+
 // FlushViews reads all pending view counts from Redis and returns them as a
 // map[eventID]count. The caller is responsible for writing the totals to
 // Postgres; each key is atomically consumed via GETDEL so counts are not

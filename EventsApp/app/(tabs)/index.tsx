@@ -335,10 +335,14 @@ const SectionRow = memo(({
 
 export default function Index() {
   const router = useRouter();
-  const setSelectedEvent = useEventStore((state) => state.setSelectedEvent);
-  const setAllEvents     = useEventStore((state) => state.setAllEvents);
-  const setDbCategories  = useEventStore((state) => state.setDbCategories);
-  const setSectionMeta   = useEventStore((state) => state.setSectionMeta);
+  const setSelectedEvent     = useEventStore((state) => state.setSelectedEvent);
+  const setAllEvents         = useEventStore((state) => state.setAllEvents);
+  const setDbCategories      = useEventStore((state) => state.setDbCategories);
+  const setSectionMeta       = useEventStore((state) => state.setSectionMeta);
+  const recentlyViewedIds    = useEventStore((state) => state.recentlyViewedIds);
+  const recentlyViewedCache  = useEventStore((state) => state.recentlyViewedCache);
+  const loadRecentlyViewed   = useEventStore((state) => state.loadRecentlyViewed);
+  const clearRecentlyViewed  = useEventStore((state) => state.clearRecentlyViewed);
   // Subscribe to the auth user so we can re-fetch when it transitions from
   // null → known. _layout.tsx calls loadUser() on startup; if that validates
   // or refreshes the token, user becomes non-null and we need a fresh home
@@ -409,6 +413,16 @@ export default function Index() {
     () => sections.filter((sec) => sec.id !== 'featured'),
     [sections]
   );
+
+  // Recently viewed -- resolved instantly from the in-memory/persisted cache.
+  // No API call needed: the cache is populated when the user opens an event.
+  const recentlyViewedEvents = useMemo<Event[]>(() => {
+    if (!authUserId || !recentlyViewedIds.length) return [];
+    return recentlyViewedIds.flatMap((id) => {
+      const e = recentlyViewedCache[id];
+      return e ? [e] : [];
+    });
+  }, [recentlyViewedIds, recentlyViewedCache, authUserId]);
 
   // PERF: memoize all 8 editorial section datasets
   const freeEvents    = useMemo(() => allEvents.filter((e) => e.price === 0).slice(0, 10), [allEvents]);
@@ -536,14 +550,17 @@ export default function Index() {
   useEffect(() => {
     if (authUserId !== null && prevAuthUserId.current !== authUserId) {
       prevAuthUserId.current = authUserId;
+      // Load this user's recently viewed history from persistent storage
+      loadRecentlyViewed(authUserId);
       // Don't show the skeleton again — just silently swap in the personalised
       // sections once auth is ready.
       fetchSections(filterParams.city);
     }
     if (authUserId === null) {
       prevAuthUserId.current = null;
+      clearRecentlyViewed();
     }
-  }, [authUserId, fetchSections]);
+  }, [authUserId, fetchSections, loadRecentlyViewed, clearRecentlyViewed]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -670,7 +687,7 @@ export default function Index() {
             data={carouselEvents}
             keyExtractor={(item) => item.id}
             ListEmptyComponent={
-              <View style={{ width: heroWidth, height: 380 }}>
+              <View style={{ width: heroWidth, height: 380, borderRadius: 14, overflow: 'hidden' }}>
                 <View className={s.heroImagePlaceholder} />
                 <LinearGradient
                   colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']}
@@ -696,7 +713,7 @@ export default function Index() {
               <TouchableOpacity
                 activeOpacity={0.95}
                 onPress={() => evt && handleEventPress(evt)}
-                style={{ width: heroWidth, height: 380 }}
+                style={{ width: heroWidth, height: 380, borderRadius: 14, overflow: 'hidden' }}
               >
                 {(evt?.banner_image_url ?? evt?.cover_image_url) ? (
                   <Image
@@ -805,6 +822,30 @@ export default function Index() {
               <Text style={{ color: colors.text, fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* ===== RECENTLY VIEWED - logged-in users only, always the first section ===== */}
+        {authUserId && recentlyViewedEvents.length > 0 && (
+          <>
+            <View className={s.sectionMt}>
+              <View className={s.sectionHeader}>
+                <Text className={s.sectionTitle} style={{ color: colors.text }}>RECENTLY VIEWED</Text>
+              </View>
+            </View>
+            <FlatList
+              horizontal
+              data={recentlyViewedEvents}
+              keyExtractor={(e) => e.id}
+              showsHorizontalScrollIndicator={false}
+              windowSize={5}
+              maxToRenderPerBatch={5}
+              initialNumToRender={4}
+              contentContainerStyle={{ paddingHorizontal: 16, gap: 12, paddingBottom: 4 }}
+              renderItem={({ item }) => (
+                <EventCard item={item} onPress={() => handleEventPress(item)} colors={colors} />
+              )}
+            />
+          </>
         )}
 
         {/* Dynamic Feed Sections */}

@@ -577,3 +577,41 @@ func GetCategoriesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"categories": cats})
 	}
 }
+// GetEventsByIDsHandler returns full event details for a comma-separated list
+// of event IDs supplied by the client (e.g. from a locally-stored recently-
+// viewed list). At most 20 IDs are accepted per request.
+//
+//	GET /v1/events/by-ids?ids=<uuid1>,<uuid2>,...
+func GetEventsByIDsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := strings.TrimSpace(c.Query("ids"))
+		if raw == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ids query parameter is required"})
+			return
+		}
+
+		parts := strings.Split(raw, ",")
+		ids := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				ids = append(ids, p)
+			}
+		}
+		if len(ids) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no valid IDs provided"})
+			return
+		}
+		if len(ids) > 20 {
+			ids = ids[:20]
+		}
+
+		events, err := repository.GetEventsByIDs(pool, ids)
+		if err != nil {
+			utils.InternalError(c, err, "failed to fetch events by IDs")
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": events})
+	}
+}

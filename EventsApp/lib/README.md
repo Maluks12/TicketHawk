@@ -140,6 +140,16 @@ export const getCategories = () => api.get<{ categories: Category[] }>('/v1/cate
 // ── API functions ──────────────────────────────────────────────────────────
 
 export const getHomeSections     = (city?: string)                  => api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);
+
+// Fetches full event details for a list of IDs (e.g. recently-viewed, stored
+// locally per user). Order is preserved (most-recent-first). Max 20 IDs.
+export async function getEventsByIds(ids: string[]): Promise<Event[]> {
+  if (!ids.length) return [];
+  const res = await api.get<{ data: Event[] }>('/v1/events/by-ids', {
+    params: { ids: ids.join(',') },
+  });
+  return res.data.data ?? [];
+}
 export const getFeaturedEvents   = (limit = 1)                      => api.get<EventPage>(`/v1/events/featured?limit=${limit}`);
 export const getTrendingEvents   = (limit = 10)                     => api.get<EventPage>(`/v1/events/trending?limit=${limit}`);
 export const getActiveEvents     = (limit = 10)                     => api.get<EventPage>(`/v1/events/active?limit=${limit}`);

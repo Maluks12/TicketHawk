@@ -11,8 +11,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useEventStore } from '../../store/eventStore';
+import { useAuthStore } from '../../store/authStore';
 import { s, sheet, HERO_H } from '../../styles/eventDetail';
 import { useAppTheme } from '../../theme/colors';
 
@@ -62,8 +63,17 @@ function MetaItem({ icon, label, value }: { icon: string; label: string; value: 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function EventDetail() {
-  const router = useRouter();
-  const event  = useEventStore((state) => state.selectedEvent);
+  const router             = useRouter();
+  const event              = useEventStore((state) => state.selectedEvent);
+  const addRecentlyViewed  = useEventStore((state) => state.addRecentlyViewed);
+  const authUser           = useAuthStore((state) => state.user);
+
+  // Track this event as recently viewed for logged-in users
+  useEffect(() => {
+    if (event?.id && authUser?.id) {
+      addRecentlyViewed(event, authUser.id);
+    }
+  }, [event?.id, authUser?.id]);
   const [expanded, setExpanded] = useState(false);
   const { colors, isDark } = useAppTheme();
 

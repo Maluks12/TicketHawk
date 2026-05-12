@@ -254,6 +254,7 @@ func main() {
 		public.GET("",                   handlers.GetAllEventsHandler(pool, eventCache))
 		public.GET("/featured",          handlers.FeaturedEventsHandler(pool, eventCache))
 		public.GET("/active",            handlers.ActiveEventsHandler(pool, eventCache))
+		public.GET("/by-ids",            handlers.GetEventsByIDsHandler(pool))
 		public.GET("/search",            handlers.SearchEventsHandler(pool))
 		public.GET("/category/:id",      handlers.GetEventCategoryHandler(pool, eventCache))
 		public.GET("/filter",            handlers.FilterEventsHandler(pool, eventCache))
