@@ -26,9 +26,10 @@ type MerchCollection struct {
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 type CreateCollectionDTO struct {
-	Name         string  `json:"name"         binding:"required,min=1,max=255"`
-	Description  *string `json:"description"`
-	DisplayOrder int     `json:"display_order"`
+	Name          string  `json:"name"          binding:"required,min=1,max=255"`
+	Description   *string `json:"description"`
+	CoverImageURL *string `json:"cover_image_url"`
+	DisplayOrder  int     `json:"display_order"`
 }
 
 type UpdateCollectionDTO struct {

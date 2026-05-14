@@ -274,6 +274,13 @@ func GetFollowsNeedingReminder(pool *pgxpool.Pool) ([]ReminderCandidate, error) 
 		if c.DaysUntil == 0 {
 			continue // neither CASE branch matched — shouldn't happen given WHERE, but guard
 		}
+		// Derive the column name from DaysUntil so callers don't need a switch.
+		switch c.DaysUntil {
+		case 7:
+			c.ReminderField = "reminded_7_days"
+		case 1:
+			c.ReminderField = "reminded_1_day"
+		}
 		candidates = append(candidates, c)
 	}
 	return candidates, rows.Err()
@@ -299,4 +306,115 @@ func MarkReminderSent(pool *pgxpool.Pool, followID, field string) error {
 		return fmt.Errorf("MarkReminderSent: %w", err)
 	}
 	return nil
+}
+
+// ── Sell-out notification helpers (used by the sell-out worker) ───────────────
+
+// SellOutCandidate describes a published event that has crossed a capacity
+// threshold and whose followers have not yet been notified.
+type SellOutCandidate struct {
+	EventID        string
+	EventTitle     string
+	EventSlug      string
+	TicketsSold    int
+	MaxCapacity    int
+	Notify80Pct    bool // true → send "selling fast" notifications
+	NotifySoldOut  bool // true → send "sold out" notifications
+}
+
+// GetSellOutCandidates returns published events with a finite capacity that
+// have crossed the 80 % or 100 % sold threshold without a notification having
+// been dispatched yet.
+//
+// It only returns events where at least one threshold is newly crossed so the
+// worker does no work when there is nothing to do.
+func GetSellOutCandidates(pool *pgxpool.Pool) ([]SellOutCandidate, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT
+			id,
+			title,
+			COALESCE(slug, ''),
+			tickets_sold,
+			max_capacity,
+			-- 80 % threshold: not yet notified AND sold >= 80 % of capacity
+			(NOT notified_80pct AND tickets_sold::float / max_capacity >= 0.8)  AS notify_80pct,
+			-- Sold-out threshold: not yet notified AND sold >= capacity
+			(NOT notified_sold_out AND tickets_sold >= max_capacity)             AS notify_sold_out
+		FROM events
+		WHERE status        = 'published'
+		  AND max_capacity  IS NOT NULL
+		  AND (
+		        (NOT notified_80pct    AND tickets_sold::float / max_capacity >= 0.8)
+		     OR (NOT notified_sold_out AND tickets_sold >= max_capacity)
+		      )
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("GetSellOutCandidates: %w", err)
+	}
+	defer rows.Close()
+
+	var candidates []SellOutCandidate
+	for rows.Next() {
+		var c SellOutCandidate
+		if err := rows.Scan(
+			&c.EventID, &c.EventTitle, &c.EventSlug,
+			&c.TicketsSold, &c.MaxCapacity,
+			&c.Notify80Pct, &c.NotifySoldOut,
+		); err != nil {
+			return nil, fmt.Errorf("GetSellOutCandidates scan: %w", err)
+		}
+		candidates = append(candidates, c)
+	}
+	return candidates, rows.Err()
+}
+
+// GetEventFollowerIDs returns the user IDs of everyone currently following
+// eventID. Used by the sell-out worker to fan out notifications.
+func GetEventFollowerIDs(pool *pgxpool.Pool, eventID string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx,
+		`SELECT user_id FROM event_follows WHERE event_id = $1`, eventID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("GetEventFollowerIDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("GetEventFollowerIDs scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// MarkEvent80PctNotified sets notified_80pct = TRUE for the given event so the
+// worker never sends a second "selling fast" alert for the same event.
+func MarkEvent80PctNotified(pool *pgxpool.Pool, eventID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := pool.Exec(ctx,
+		`UPDATE events SET notified_80pct = TRUE WHERE id = $1`, eventID,
+	)
+	return err
+}
+
+// MarkEventSoldOutNotified sets notified_sold_out = TRUE for the given event.
+func MarkEventSoldOutNotified(pool *pgxpool.Pool, eventID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := pool.Exec(ctx,
+		`UPDATE events SET notified_sold_out = TRUE WHERE id = $1`, eventID,
+	)
+	return err
 }

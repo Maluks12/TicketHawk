@@ -804,6 +804,7 @@ const DetailOverlay = ({
 
 interface CollectionModalProps {
   collectionName: string;
+  description?: string;
   items: MerchandiseItem[];
   onSelectItem: (item: MerchandiseItem) => void;
   onClose: () => void;
@@ -811,6 +812,7 @@ interface CollectionModalProps {
 
 export const CollectionModal = ({
   collectionName,
+  description,
   items,
   onSelectItem,
   onClose,
@@ -932,44 +934,77 @@ export const CollectionModal = ({
           <View style={{ width: '100%', height: 1, backgroundColor: tc + '15' }} />
         </View>
 
-        {/* ── Carousel ─────────────────────────────────────────────────── */}
-        <View style={{ flex: 1, justifyContent: 'center', paddingTop: 8 }}>
-          <Animated.ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={SNAP_W}
-            decelerationRate="fast"
-            contentContainerStyle={{
-              paddingHorizontal: SIDE_PAD - CARD_GAP / 2,
-              alignItems: 'center',
-            }}
-            onScroll={Animated.event(
-              [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-              { useNativeDriver: false }
-            )}
-            scrollEventThrottle={16}
-            onMomentumScrollEnd={onMomentumScrollEnd}
-          >
-            {items.map((item, index) => (
-              <CarouselCard
-                key={item.id}
-                item={item}
-                index={index}
-                scrollX={scrollX}
-                onPress={() => openDetail(item)}
-              />
-            ))}
-          </Animated.ScrollView>
+        {/* ── Carousel + description (scrollable) ──────────────────── */}
+        <ScrollView
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingTop: 8, paddingBottom: 16 }}
+          bounces={description ? true : false}
+          scrollEnabled={!!description}
+        >
+          {/* Carousel */}
+          <View style={{ justifyContent: 'center' }}>
+            <Animated.ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={SNAP_W}
+              decelerationRate="fast"
+              contentContainerStyle={{
+                paddingHorizontal: SIDE_PAD - CARD_GAP / 2,
+                alignItems: 'center',
+              }}
+              onScroll={Animated.event(
+                [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                { useNativeDriver: false }
+              )}
+              scrollEventThrottle={16}
+              onMomentumScrollEnd={onMomentumScrollEnd}
+            >
+              {items.map((item, index) => (
+                <CarouselCard
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  scrollX={scrollX}
+                  onPress={() => openDetail(item)}
+                />
+              ))}
+            </Animated.ScrollView>
 
-          <PaginationDots count={items.length} scrollX={scrollX} tc={tc} />
+            <PaginationDots count={items.length} scrollX={scrollX} tc={tc} />
 
-          <Text style={{
-            textAlign: 'center', marginTop: 10,
-            fontSize: 8, letterSpacing: 2.5, color: tc + '30', fontWeight: '700',
-          }}>
-            SWIPE TO EXPLORE
-          </Text>
-        </View>
+            <Text style={{
+              textAlign: 'center', marginTop: 10,
+              fontSize: 8, letterSpacing: 2.5, color: tc + '30', fontWeight: '700',
+            }}>
+              SWIPE TO EXPLORE
+            </Text>
+          </View>
+
+          {/* Description — only rendered when present */}
+          {!!description && (
+            <View style={{
+              marginHorizontal: 20,
+              marginTop: 28,
+              paddingTop: 20,
+              borderTopWidth: 1,
+              borderTopColor: tc + '18',
+            }}>
+              <Text style={{
+                fontSize: 9, fontWeight: '800', letterSpacing: 2,
+                color: tc + '45', marginBottom: 10,
+              }}>
+                ABOUT THIS COLLECTION
+              </Text>
+              <Text style={{
+                fontSize: 15, lineHeight: 24,
+                color: tc + 'cc', fontWeight: '400',
+              }}>
+                {description}
+              </Text>
+            </View>
+          )}
+        </ScrollView>
 
         {/* ── Bottom action bar ─────────────────────────────────────────── */}
         {activeItem && (

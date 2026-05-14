@@ -8,16 +8,14 @@ import { ConfirmProvider } from '../../lib/confirm';
 
 const NAV = [
   { section: 'Overview' },
-  { href: '/dashboard', label: 'Dashboard', icon: '▦' },
+  { href: '/dashboard', label: 'Dashboard',           icon: '▦' },
   { section: 'Content' },
-  { href: '/events',      label: 'Events',         icon: '◈' },
-  { href: '/merch',       label: 'Merchandise',    icon: '◇' },
-  { href: '/collections', label: 'Collections',    icon: '⬡' },
+  { href: '/events',    label: 'Events',               icon: '◈' },
+  { href: '/merch',     label: 'Merch & Collections',  icon: '◇' },
   { section: 'Users' },
-  { href: '/users',       label: 'All Users',      icon: '◉' },
-  { href: '/allmerch',    label: 'All Merchandise', icon: '◈' },
+  { href: '/users',     label: 'All Users',            icon: '◉' },
   { section: 'Alerts' },
-  { href: '/oversold',    label: 'Oversold Orders', icon: '⚠', badge: true },
+  { href: '/oversold',  label: 'Oversold Orders',      icon: '⚠', badge: true },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -29,7 +27,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => { if (!isLoading && !user) router.replace('/login'); }, [user, isLoading, router]);
 
-  // Poll oversold badge
   useEffect(() => {
     if (!user) return;
     const token = localStorage.getItem('evt_token');
@@ -47,14 +44,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   function handleLogout() { logout(); router.replace('/login'); }
-
   const initials = user.email.slice(0, 2).toUpperCase();
 
   return (
     <ToastProvider>
       <ConfirmProvider>
         <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', height: '100vh', overflow: 'hidden' }}>
-          {/* Sidebar */}
           <aside style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ padding: '1.25rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '.95rem', fontWeight: 600, color: 'var(--accent)', borderBottom: '1px solid var(--border)', letterSpacing: '.04em', flexShrink: 0 }}>
               ⬡ events
@@ -107,7 +102,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </aside>
 
-          {/* Content */}
           <main style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             {children}
           </main>

@@ -143,6 +143,7 @@ interface CollectionEntry {
   isCollection: boolean;
   collectionName?: string;
   collectionCoverImageUrl?: string;
+  collectionDescription?: string;
 }
 
 function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
@@ -165,11 +166,12 @@ function buildCollections(items: MerchandiseItem[]): CollectionEntry[] {
   collectionMap.forEach((group) => {
     const sorted = [...group].sort((a, b) => a.display_order - b.display_order);
     entries.push({
-      representativeItem:     sorted[0],
-      items:                  sorted,
-      isCollection:           true,
-      collectionName:         sorted[0].collection_name || undefined,
+      representativeItem:      sorted[0],
+      items:                   sorted,
+      isCollection:            true,
+      collectionName:          sorted[0].collection_name || undefined,
       collectionCoverImageUrl: sorted[0].collection_cover_image_url || undefined,
+      collectionDescription:   (sorted[0] as any).collection_description || undefined,
     });
   });
 
@@ -682,6 +684,7 @@ type Tab = 'available' | 'upcoming';
 interface ActiveCollection {
   name: string;
   items: MerchandiseItem[];
+  description?: string;
 }
 
 export default function Merch() {
@@ -762,8 +765,9 @@ export default function Merch() {
   const handleEntryPress = useCallback((entry: CollectionEntry) => {
     if (entry.isCollection) {
       setActiveCollection({
-        name:  entry.collectionName || entry.representativeItem.event_name || entry.representativeItem.name,
-        items: entry.items,
+        name:        entry.collectionName || entry.representativeItem.event_name || entry.representativeItem.name,
+        items:       entry.items,
+        description: entry.collectionDescription,
       });
     } else {
       setSelected(entry.representativeItem);
@@ -871,6 +875,7 @@ export default function Merch() {
       {activeCollection && (
         <CollectionModal
           collectionName={activeCollection.name}
+          description={activeCollection.description}
           items={activeCollection.items}
           onSelectItem={(item) => {
             // handled internally by CollectionModal

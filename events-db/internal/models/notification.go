@@ -8,10 +8,21 @@ import (
 type NotificationType string
 
 const (
+	// ── Booking / payment ─────────────────────────────────────────────────────
 	NotifBookingConfirmed NotificationType = "booking_confirmed"
 	NotifEventCancelled   NotificationType = "event_cancelled"
 	NotifRefundProcessed  NotificationType = "refund_processed"
-	NotifEventReminder    NotificationType = "event_reminder"
+
+	// ── Event reminders (follow system) ───────────────────────────────────────
+	// Both the 7-day and 1-day reminders share this type; they are distinguished
+	// by the "days_until" integer in the notification Data payload.
+	NotifEventReminder NotificationType = "event_reminder"
+
+	// ── Ticket availability alerts (follow system) ────────────────────────────
+	// Sent to all followers when an event crosses the 80 % sold threshold.
+	NotifTicketsSellingFast NotificationType = "tickets_selling_fast"
+	// Sent to all followers when an event becomes fully sold out.
+	NotifEventSoldOut NotificationType = "event_sold_out"
 )
 
 type Notification struct {

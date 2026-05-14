@@ -108,6 +108,12 @@ func main() {
 	workers.StartAdWorker(pool, ctx)
 	log.Info().Msg("ad worker started")
 
+	workers.StartReminderWorker(pool, ctx)
+	log.Info().Msg("reminder worker started")
+
+	workers.StartSellOutWorker(pool, ctx)
+	log.Info().Msg("sell-out worker started")
+
 	bookingRepo    := repository.NewPgxBookingQuerier(pool)
 	eventRepo      := repository.NewPgxEventQuerier(pool)
 	cartQuerier    := repository.NewPgxCartQuerier(pool)
@@ -261,7 +267,11 @@ func main() {
 		public.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 		// Ticket types — visible tiers for the event detail page
+		// Ticket types — visible tiers for the event detail page
 		public.GET("/:id/ticket-types",  handlers.GetTicketTypesHandler(pool))
+		// Frontend calls this once when the user opens the event detail screen.
+		// Keeps view counts accurate — only real user opens are counted.
+		public.POST("/:id/view",         handlers.TrackEventViewHandler(pool, eventCache))
 		// Must be last — catches both UUIDs and slugs
 		public.GET("/:id",               handlers.GetEventBySlugHandler(pool, eventCache))
 	}
@@ -438,8 +448,27 @@ func main() {
 	{
 		user.GET("/me",           handlers.GetMyProfileHandler(pool))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
+		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
 	}
 	categoriesGroup := v1.Group("/categories")
+
+	// ==========================================
+	// Event Follow Routes (authenticated)
+	// POST /events/:id/follow  — toggle follow on/off
+	// GET  /events/:id/follow  — check follow status + count
+	// GET  /user/following     — registered above under the user group
+	// ==========================================
+	eventFollowGroup := v1.Group("/events")
+	eventFollowGroup.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		eventFollowGroup.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"event-follow"))
+	}
+	{
+		eventFollowGroup.POST("/:id/follow", handlers.ToggleFollowHandler(pool))
+		eventFollowGroup.GET("/:id/follow",  handlers.GetFollowStatusHandler(pool))
+	}
 		if rateLimitManager != nil {
 			categoriesGroup.Use(middleware.RateLimitByIP(rateLimitManager,
 				ratelimit.BucketConfig{Capacity: 60, RefillRate: 1.0, TTL: 15 * time.Minute},

@@ -187,6 +187,12 @@ func GetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			return
 		}
 
+		// Add Redis-buffered views not yet flushed to Postgres so the client
+		// always sees an up-to-date count without waiting 60s for the flush.
+		if ec != nil {
+			event.Views += int(ec.GetPendingViewCount(c.Request.Context(), eventID))
+		}
+
 		c.JSON(http.StatusOK, event)
 	}
 }
@@ -222,13 +228,48 @@ func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			return
 		}
 
+		// Add any Redis-buffered (not yet flushed) views so the client always
+		// sees an up-to-date count without waiting 60s for the flush.
+		if ec != nil {
+			event.Views += int(ec.GetPendingViewCount(c.Request.Context(), event.ID))
+		}
+
+		c.JSON(http.StatusOK, event)
+	}
+}
+
+// TrackEventViewHandler is the single place where a view is counted.
+// Called by the frontend once when the user opens the event detail screen.
+// Separating this from GetEventBySlugHandler means background fetches, admin
+// checks, and ticket lookups no longer inflate the view count.
+//
+//	POST /v1/events/:id/view
+func TrackEventViewHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slug := c.Param("id")
+		if slug == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "event id or slug is required"})
+			return
+		}
+
+		// Resolve slug → UUID so views are always stored against the stable ID.
+		event, err := repository.GetEventBySlug(pool, slug)
+		if err != nil {
+			if errors.Is(err, repository.ErrEventNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to resolve event")
+			return
+		}
+
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), event.ID)
 		} else {
 			_ = repository.IncrementViews(pool, event.ID)
 		}
 
-		c.JSON(http.StatusOK, event)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }
 
@@ -564,6 +605,7 @@ func GetOrganizerEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		})
 	}
 }
+
 // GetCategoriesHandler returns all active categories ordered by display_order.
 //
 //	GET /v1/categories
@@ -577,6 +619,7 @@ func GetCategoriesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"categories": cats})
 	}
 }
+
 // GetEventsByIDsHandler returns full event details for a comma-separated list
 // of event IDs supplied by the client (e.g. from a locally-stored recently-
 // viewed list). At most 20 IDs are accepted per request.

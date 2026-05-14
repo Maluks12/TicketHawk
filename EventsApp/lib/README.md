@@ -43,9 +43,6 @@ api.interceptors.response.use(
 );
 
 // ── Session ID cache ───────────────────────────────────────────────────────
-// Reads SecureStore once and keeps the result in memory. Auto-generates a
-// UUID if no session exists so guest carts always have an X-Session-ID.
-
 let _cachedSessionId: string | undefined = undefined;
 
 function generateUUID(): string {
@@ -139,10 +136,9 @@ export const getCategories = () => api.get<{ categories: Category[] }>('/v1/cate
 
 // ── API functions ──────────────────────────────────────────────────────────
 
-export const getHomeSections     = (city?: string)                  => api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);
+export const getHomeSections = (city?: string) =>
+  api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);
 
-// Fetches full event details for a list of IDs (e.g. recently-viewed, stored
-// locally per user). Order is preserved (most-recent-first). Max 20 IDs.
 export async function getEventsByIds(ids: string[]): Promise<Event[]> {
   if (!ids.length) return [];
   const res = await api.get<{ data: Event[] }>('/v1/events/by-ids', {
@@ -150,32 +146,19 @@ export async function getEventsByIds(ids: string[]): Promise<Event[]> {
   });
   return res.data.data ?? [];
 }
+
 export const getFeaturedEvents   = (limit = 1)                      => api.get<EventPage>(`/v1/events/featured?limit=${limit}`);
 export const getTrendingEvents   = (limit = 10)                     => api.get<EventPage>(`/v1/events/trending?limit=${limit}`);
 export const getActiveEvents     = (limit = 10)                     => api.get<EventPage>(`/v1/events/active?limit=${limit}`);
 export const getEventsByCategory = (categoryId: number, limit = 5)  => api.get<EventPage>(`/v1/events/category/${categoryId}?limit=${limit}`);
 export const filterEvents        = (params: Record<string, string>) => api.get<EventPage>(`/v1/events/filter`, { params });
 
-// ── Section endpoint map ───────────────────────────────────────────────────
-// Maps home-section IDs (returned by /v1/home) to their pageable REST
-// endpoints. Only sections that the backend actually paginates (i.e. those
-// that return a non-empty next_cursor) need an entry here.
-//
-// Section IDs from the backend and their status:
-//   for_you        — personalised, no cursor (ForYou doesn't paginate)
-//   trending        → /v1/events/trending      ✓
-//   happening_soon  → /v1/events/active        ✓
-//   this_weekend    → /v1/events/active        (no standalone weekend endpoint)
-//   recently_added  → /v1/events              ✓ (GetAllEventsHandler, same sort)
-//   featured        → /v1/events/featured      ✓
-//   near_you       — city-filtered, no cursor  (NearYou doesn't paginate)
-//   cat-*          — filter sections, no cursor
 const SECTION_ENDPOINT: Record<string, string> = {
   trending:        '/v1/events/trending',
   featured:        '/v1/events/featured',
   happening_soon:  '/v1/events/active',
-  this_weekend:    '/v1/events/active',  // no dedicated weekend endpoint; active is closest
-  recently_added:  '/v1/events',         // sorted by created_at DESC — matches section order
+  this_weekend:    '/v1/events/active',
+  recently_added:  '/v1/events',
 };
 
 export async function loadMoreSectionEvents(
@@ -184,7 +167,6 @@ export async function loadMoreSectionEvents(
   limit = 10,
 ): Promise<{ data: Event[]; next_cursor: string } | null> {
   const endpoint = SECTION_ENDPOINT[sectionId];
-  // No endpoint registered or no cursor — section doesn't support pagination
   if (!endpoint || !cursor) return null;
   try {
     const res = await api.get<EventPage>(endpoint, { params: { cursor, limit } });
@@ -238,7 +220,7 @@ export interface MerchandiseItem {
 
 export interface DropsResponse {
   available: MerchandiseItem[];
-  upcoming: MerchandiseItem[];
+  upcoming:  MerchandiseItem[];
 }
 
 export const getDropsFeed = () => api.get<DropsResponse>('/v1/drops');
@@ -602,4 +584,83 @@ export async function pollPaymentStatus(
     await new Promise(r => setTimeout(r, intervalMs));
   }
   throw new Error('Payment confirmation timed out');
+}
+
+// ── Event Follow ───────────────────────────────────────────────────────────
+// Types shared between the profile screen and any future event detail screen
+// follow button. Helpers kept here so formatting is consistent across the app.
+
+export interface FollowedEvent {
+  /** UUID of the event_follows row — used as FlatList key */
+  follow_id:        string;
+  followed_at:      string;
+  /** Event fields */
+  id:               string;
+  slug:             string;
+  title:            string;
+  cover_image_url?: string | null;
+  start_time:       string;
+  end_time:         string;
+  venue_name:       string;
+  city:             string;
+  price:            number;
+  currency:         string;
+  status:           string;
+  category:         string;
+  tickets_sold:     number;
+  max_capacity?:    number | null;
+  /** Computed by the backend repository */
+  is_sold_out:      boolean;
+  available_tickets: number;
+}
+
+export interface FollowingResponse {
+  data:        FollowedEvent[];
+  next_cursor: string | null;
+}
+
+export interface FollowStatusResponse {
+  following:    boolean;
+  follow_count: number;
+  event_id:     string;
+}
+
+/** Format a UTC ISO date string for display on event cards (e.g. "Sat, 14 Jun") */
+export function fmtFollowDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-ZA', {
+    weekday: 'short',
+    day:     'numeric',
+    month:   'short',
+  });
+}
+
+/** Format a price in ZAR, or "Free" for zero-price events */
+export function fmtFollowPrice(price: number): string {
+  return price === 0
+    ? 'Free'
+    : `R${Math.round(price).toLocaleString('en-ZA')}`;
+}
+
+/**
+ * Returns the percentage of tickets sold (0–100), or null if the event has
+ * no capacity cap. Used to show "Selling Fast" pill at ≥ 80 %.
+ */
+export function followAvailPct(
+  sold: number,
+  max: number | null | undefined,
+): number | null {
+  if (!max) return null;
+  return Math.round((sold / max) * 100);
+}
+
+/** Toggle follow on an event. Returns the new follow state + count. */
+export async function toggleFollow(eventId: string): Promise<FollowStatusResponse> {
+  const res = await api.post<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
+  return res.data;
+}
+
+/** Check whether the current user is following an event. */
+export async function getFollowStatus(eventId: string): Promise<FollowStatusResponse> {
+  const res = await api.get<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
+  return res.data;
 }

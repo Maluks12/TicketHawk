@@ -9,14 +9,17 @@ import {
   Platform,
   Animated,
   InteractionManager,
+  Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet, HERO_H } from '../../styles/eventDetail';
 import { useAppTheme } from '../../theme/colors';
+import { getBaseUrl } from '../../components/FilterModal';
+import { toggleFollow, getFollowStatus } from '../../lib/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,13 +68,45 @@ function MetaItem({ icon, label, value }: { icon: string; label: string; value: 
 
 export default function EventDetail() {
   const router             = useRouter();
+  const { id }             = useLocalSearchParams<{ id: string }>();
   const event              = useEventStore((state) => state.selectedEvent);
+  const setSelectedEvent   = useEventStore((state) => state.setSelectedEvent);
   const addRecentlyViewed  = useEventStore((state) => state.addRecentlyViewed);
   const authUser           = useAuthStore((state) => state.user);
 
-  // Defer until after the navigation animation completes so the Zustand state
-  // update to recentlyViewedIds doesn't trigger a home-screen re-render
-  // mid-transition (which was causing the visible tap delay).
+  // ── Follow state ──────────────────────────────────────────────────────────
+  const [isFollowing,   setIsFollowing]   = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+
+  const { colors, isDark } = useAppTheme();
+  const [expanded, setExpanded] = useState(false);
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  // ── View tracking + fresh data fetch ──────────────────────────────────────
+  // Fires once when the user opens this screen (after the nav animation).
+  // 1. POST /view  — tells the backend a real user opened the screen.
+  // 2. GET event   — fetches fresh data so the view count shown is up-to-date.
+  useEffect(() => {
+    const eventId = id ?? event?.id ?? event?.slug;
+    if (!eventId) return;
+
+    const base = getBaseUrl();
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      // 1. Track the view — fire-and-forget, never blocks the UI.
+      fetch(`${base}/v1/events/${eventId}/view`, { method: 'POST' }).catch(() => {});
+
+      // 2. Fetch fresh event data so views (and anything else) reflect reality.
+      fetch(`${base}/v1/events/${eventId}`)
+        .then((res) => { if (!res.ok) return; return res.json(); })
+        .then((fresh) => { if (fresh) setSelectedEvent(fresh); })
+        .catch(() => {});
+    });
+
+    return () => task.cancel();
+  }, [id, event?.id]);
+
+  // ── Recently viewed (deferred, same pattern as before) ────────────────────
   useEffect(() => {
     if (event?.id && authUser?.id) {
       const task = InteractionManager.runAfterInteractions(() => {
@@ -81,10 +116,52 @@ export default function EventDetail() {
     }
   }, [event?.id, authUser?.id]);
 
-  const [expanded, setExpanded] = useState(false);
-  const { colors, isDark } = useAppTheme();
+  // ── Fetch current follow status on mount ──────────────────────────────────
+  // Only runs when a logged-in user opens the screen so the button always
+  // reflects reality (e.g. if they followed on another device).
+  useEffect(() => {
+    if (!event?.id || !authUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getFollowStatus(event.id);
+        if (!cancelled) setIsFollowing(res.following);
+      } catch { /* default to not-following — no disruption to the UI */ }
+    })();
+    return () => { cancelled = true; };
+  }, [event?.id, authUser]);
 
-  const scrollY = useRef(new Animated.Value(0)).current;
+  // ── Toggle follow ─────────────────────────────────────────────────────────
+  const handleFollow = useCallback(async () => {
+    if (!authUser) {
+      Alert.alert(
+        'Sign in required',
+        'Log in or sign up to follow events and get reminders.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log in / Sign up', onPress: () => router.push('/auth/login' as any) },
+        ],
+      );
+      return;
+    }
+    if (!event?.id || followLoading) return;
+
+    // Optimistic update so the button snaps immediately
+    setIsFollowing(prev => !prev);
+    setFollowLoading(true);
+
+    try {
+      const res = await toggleFollow(event.id);
+      // Reconcile with the authoritative server response
+      setIsFollowing(res.following);
+    } catch {
+      // Roll back the optimistic update on failure
+      setIsFollowing(prev => !prev);
+      Alert.alert('Error', 'Could not update follow status. Please try again.');
+    } finally {
+      setFollowLoading(false);
+    }
+  }, [authUser, event?.id, followLoading, router]);
 
   if (!event) {
     return (
@@ -229,7 +306,7 @@ export default function EventDetail() {
         </View>
 
         {/* ── Floating action card ─────────────────────────────────── */}
-       <View style={[sheet.actionCard, { backgroundColor: colors.cardBg }]}>
+        <View style={[sheet.actionCard, { backgroundColor: colors.cardBg }]}>
           <MetaItem icon="📅" label="DATE"     value={formatDateShort(event.start_time)} />
           <MetaItem icon="🕐" label="TIME"     value={formatTime(event.start_time)} />
           <MetaItem icon="📍" label="VENUE"    value={`${event.venue_name}, ${event.city}`} />
@@ -249,10 +326,28 @@ export default function EventDetail() {
               </TouchableOpacity>
             )}
             <View className={s.actionRow}>
-              <TouchableOpacity className={s.btnOutline} activeOpacity={0.85}>
-                <Text className={s.btnOutlineIcon}>🔔</Text>
-                <Text className={s.btnOutlineText}>TRACK EVENT</Text>
+
+              {/* ── Follow button ──────────────────────────────────────────── */}
+              <TouchableOpacity
+                className={s.btnOutline}
+                onPress={handleFollow}
+                activeOpacity={0.85}
+                disabled={followLoading}
+                style={isFollowing
+                  ? { backgroundColor: '#2d1c3a', borderColor: '#b57bee' }
+                  : undefined}
+              >
+                <Text className={s.btnOutlineIcon}>
+                  {isFollowing ? '💜' : '🤍'}
+                </Text>
+                <Text
+                  className={s.btnOutlineText}
+                  style={isFollowing ? { color: '#b57bee' } : undefined}
+                >
+                  {followLoading ? '...' : isFollowing ? 'FOLLOWING' : 'FOLLOW'}
+                </Text>
               </TouchableOpacity>
+
               <TouchableOpacity className={s.btnOutline} onPress={handleShare} activeOpacity={0.85}>
                 <Text className={s.btnOutlineIcon}>↑</Text>
                 <Text className={s.btnOutlineText}>SHARE</Text>
@@ -269,7 +364,7 @@ export default function EventDetail() {
             <View className={s.sectionHeader}>
               <Text className={s.sectionTitle} style={{ color: colors.text }}>About This Event</Text>
             </View>
-           <Text className={s.descText} style={{ color: colors.subText }}>{displayDesc}</Text>
+            <Text className={s.descText} style={{ color: colors.subText }}>{displayDesc}</Text>
             {hasMore && (
               <TouchableOpacity onPress={() => setExpanded(v => !v)} activeOpacity={0.7}>
                 <Text className={s.descReadMore} style={{ color: colors.text, borderBottomColor: colors.text }}>
@@ -279,8 +374,7 @@ export default function EventDetail() {
             )}
           </View>
 
-            <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-          
+          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Bento */}
           <View style={{ marginBottom: 8 }}>
@@ -300,34 +394,34 @@ export default function EventDetail() {
             </View>
           </View>
 
-           <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Teams */}
           {isASport && teams.length > 0 && (
-  <>
-    <View style={{ marginBottom: 8 }}>
-      <View className={s.sectionHeader}>
-        <Text className={s.sectionTitle} style={{ color: colors.text }}>TEAMS</Text>
-      </View>
-      {teams.map((team, i) => (
-        <View key={i} className={i < teams.length - 1 ? s.participantRow : s.participantRowLast}
-          style={i < teams.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
-          <View className={s.participantAvatar}
-            style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-            <Text className={s.participantAvatarText} style={{ color: colors.text }}>
-              {team.trim().charAt(0).toUpperCase()}
-            </Text>
-          </View>
-          <Text className={s.participantName} style={{ color: colors.text }}>{team}</Text>
-          <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
-        </View>
-      ))}
-    </View>
-    <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-  </>
-)}
+            <>
+              <View style={{ marginBottom: 8 }}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>TEAMS</Text>
+                </View>
+                {teams.map((team, i) => (
+                  <View key={i} className={i < teams.length - 1 ? s.participantRow : s.participantRowLast}
+                    style={i < teams.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
+                    <View className={s.participantAvatar}
+                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+                      <Text className={s.participantAvatarText} style={{ color: colors.text }}>
+                        {team.trim().charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text className={s.participantName} style={{ color: colors.text }}>{team}</Text>
+                    <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+                  </View>
+                ))}
+              </View>
+              <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+            </>
+          )}
 
-    <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Performers */}
           {!isASport && performers.length > 0 && (
@@ -337,20 +431,19 @@ export default function EventDetail() {
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>PERFORMERS</Text>
                 </View>
                 {performers.map((performer, i) => (
-              <View key={i} className={i < performers.length - 1 ? s.participantRow : s.participantRowLast}
-                style={i < performers.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
-                <View className={s.participantAvatar}
-                  style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                  <Text className={s.participantAvatarText} style={{ color: colors.text }}>
-                    {performer.trim().charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <Text className={s.participantName} style={{ color: colors.text }}>{performer}</Text>
-                <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+                  <View key={i} className={i < performers.length - 1 ? s.participantRow : s.participantRowLast}
+                    style={i < performers.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
+                    <View className={s.participantAvatar}
+                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+                      <Text className={s.participantAvatarText} style={{ color: colors.text }}>
+                        {performer.trim().charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text className={s.participantName} style={{ color: colors.text }}>{performer}</Text>
+                    <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-              </View>
-             
             </>
           )}
 
@@ -404,26 +497,27 @@ export default function EventDetail() {
           <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Organizer */}
-     <View className={s.organizerCard}
-        style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor, marginBottom: 8 }}>
-        <View className={s.organizerLeft}>
-          <View className={s.organizerAvatar}
-            style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-            {ev.organizer_avatar ? (
-              <Image source={{ uri: ev.organizer_avatar }} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
-            ) : (
-              <Text className={s.organizerAvatarText} style={{ color: colors.text }}>{organizerInitial}</Text>
-            )}
+          <View className={s.organizerCard}
+            style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor, marginBottom: 8 }}>
+            <View className={s.organizerLeft}>
+              <View className={s.organizerAvatar}
+                style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+                {ev.organizer_avatar ? (
+                  <Image source={{ uri: ev.organizer_avatar }} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
+                ) : (
+                  <Text className={s.organizerAvatarText} style={{ color: colors.text }}>{organizerInitial}</Text>
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text className={s.organizerByLabel} style={{ color: colors.subText }}>Organized by</Text>
+                <Text className={s.organizerName} style={{ color: colors.text }} numberOfLines={2}>{organizerName}</Text>
+              </View>
+            </View>
+            <TouchableOpacity style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+              <Text style={{ fontSize: 22 }}>💬</Text>
+            </TouchableOpacity>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text className={s.organizerByLabel} style={{ color: colors.subText }}>Organized by</Text>
-            <Text className={s.organizerName} style={{ color: colors.text }} numberOfLines={2}>{organizerName}</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-          <Text style={{ fontSize: 22 }}>💬</Text>
-        </TouchableOpacity>
-      </View>
+
           <View className={s.bottomPad} />
         </View>
       </Animated.ScrollView>

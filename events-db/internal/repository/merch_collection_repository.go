@@ -34,11 +34,11 @@ func CreateCollection(pool *pgxpool.Pool, organizerID *string, dto *models.Creat
 
 	var c models.MerchCollection
 	err := pool.QueryRow(ctx, fmt.Sprintf(`
-        INSERT INTO merch_collections (organizer_id, name, description, display_order)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO merch_collections (organizer_id, name, description, cover_image_url, display_order)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING %s
     `, collectionSelectCols),
-		organizerID, dto.Name, dto.Description, dto.DisplayOrder,
+		organizerID, dto.Name, dto.Description, dto.CoverImageURL, dto.DisplayOrder,
 	).Scan(
 		&c.ID, &c.OrganizerID, &c.Name, &c.Description, &c.CoverImageURL,
 		&c.DisplayOrder, &c.IsActive, &c.CreatedAt, &c.UpdatedAt,
