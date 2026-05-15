@@ -21,10 +21,16 @@ const saleWindowClause = `
 
 // merchSelectCols is the canonical column list used in every merch SELECT.
 // Keeping it in one place prevents drift when columns are added.
+// approvedMerchClause is appended to every buyer-facing merch query.
+// Buyers never see merch that has not been approved by an admin.
+const approvedMerchClause = `
+    AND approval_status = 'approved'`
+
 const merchSelectCols = `id, event_id, name, description, base_price, category,
        display_order, is_active, images::text,
        fulfillment_mode, pickup_location, delivery_fee,
        sale_start, sale_end,
+       approval_status, rejection_reason,
        created_at, updated_at`
 
 // scanMerch scans a merchandise row.
@@ -37,6 +43,7 @@ func scanMerch(row interface {
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
+		&m.ApprovalStatus, &m.RejectionReason,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
 }
@@ -50,9 +57,9 @@ func GetMerchandiseByEvent(pool *pgxpool.Pool, eventID string, limit int) ([]mod
 	q := fmt.Sprintf(`
         SELECT %s
         FROM merchandise
-        WHERE event_id = $1 AND is_active = TRUE %s
+        WHERE event_id = $1 AND is_active = TRUE %s %s
         ORDER BY display_order ASC, created_at ASC`,
-		merchSelectCols, saleWindowClause)
+		merchSelectCols, saleWindowClause, approvedMerchClause)
 	if limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -121,7 +128,9 @@ func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, err
         SELECT m.id, m.event_id, m.name, m.description, m.base_price, m.category,
                m.display_order, m.is_active, m.images::text,
                m.fulfillment_mode, m.pickup_location, m.delivery_fee,
-               m.sale_start, m.sale_end, m.created_at, m.updated_at,
+               m.sale_start, m.sale_end,
+               m.approval_status, m.rejection_reason,
+               m.created_at, m.updated_at,
                COALESCE(e.title, '') as event_title
         FROM merchandise m
         LEFT JOIN events e ON e.id = m.event_id
@@ -144,7 +153,9 @@ func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, err
 			&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 			&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 			&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
-			&m.SaleStart, &m.SaleEnd, &m.CreatedAt, &m.UpdatedAt,
+			&m.SaleStart, &m.SaleEnd,
+			&m.ApprovalStatus, &m.RejectionReason,
+			&m.CreatedAt, &m.UpdatedAt,
 			&m.EventTitle,
 		); err != nil {
 			return nil, err
@@ -273,8 +284,8 @@ func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMe
         INSERT INTO merchandise
           (event_id, name, description, base_price, category, display_order, images,
            fulfillment_mode, pickup_location, delivery_fee,
-           sale_start, sale_end)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12)
+           sale_start, sale_end, approval_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, 'pending_review')
         RETURNING %s
     `, merchSelectCols),
 		eventID, dto.Name, dto.Description, dto.BasePrice,
@@ -286,6 +297,7 @@ func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMe
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
+		&m.ApprovalStatus, &m.RejectionReason,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
@@ -332,6 +344,7 @@ func DecrementVariantStock(pool *pgxpool.Pool, variantID string, qty int) error 
           AND mv.merchandise_id = m.id
           AND mv.stock_quantity >= $1
           AND m.is_active = TRUE %s
+          AND m.approval_status = 'approved'
     `, saleWindowClause), qty, variantID)
 	if err != nil {
 		return fmt.Errorf("stock decrement failed: %w", err)
@@ -354,6 +367,7 @@ func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.Merchandise
         SELECT %s
         FROM merchandise
         WHERE id = $1 AND is_active = TRUE %s
+          AND approval_status = 'approved'
     `, merchSelectCols, saleWindowClause), merchID).Scan(
 		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
@@ -390,7 +404,7 @@ func GetMerchandiseByEventFiltered(
 	defer cancel()
 
 	args := []any{eventID}
-	where := fmt.Sprintf("WHERE event_id = $1 AND is_active = TRUE %s", saleWindowClause)
+	where := fmt.Sprintf("WHERE event_id = $1 AND is_active = TRUE %s %s", saleWindowClause, approvedMerchClause)
 
 	if category != nil && *category != "" {
 		args = append(args, *category)
@@ -505,7 +519,8 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 		}
 	}
 
-	sets := []string{"updated_at = NOW()"}
+	// Any content edit puts the item back in the admin review queue.
+	sets := []string{"updated_at = NOW()", "approval_status = 'pending_review'", "rejection_reason = NULL"}
 	args := []any{}
 
 	if dto.Name != nil {
@@ -837,6 +852,121 @@ func AdminUpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.Upda
     }
     return &m, nil
 }
+// ── Admin merch approval ──────────────────────────────────────────────────────
+
+// AdminGetPendingMerch returns all merch items in pending_review, oldest first.
+func AdminGetPendingMerch(pool *pgxpool.Pool) ([]models.Merchandise, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT m.id, m.event_id, m.name, m.description, m.base_price, m.category,
+		       m.display_order, m.is_active, m.images::text,
+		       m.fulfillment_mode, m.pickup_location, m.delivery_fee,
+		       m.sale_start, m.sale_end,
+		       m.approval_status, m.rejection_reason,
+		       m.created_at, m.updated_at,
+		       COALESCE(e.title, '') AS event_title
+		FROM merchandise m
+		LEFT JOIN events e ON e.id = m.event_id
+		WHERE m.approval_status = 'pending_review'
+		ORDER BY m.created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("AdminGetPendingMerch: %w", err)
+	}
+	defer rows.Close()
+
+	var items []models.Merchandise
+	for rows.Next() {
+		var m models.Merchandise
+		if err := rows.Scan(
+			&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice, &m.Category,
+			&m.DisplayOrder, &m.IsActive, &m.Images,
+			&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
+			&m.SaleStart, &m.SaleEnd,
+			&m.ApprovalStatus, &m.RejectionReason,
+			&m.CreatedAt, &m.UpdatedAt,
+			&m.EventTitle,
+		); err != nil {
+			return nil, fmt.Errorf("AdminGetPendingMerch scan: %w", err)
+		}
+		items = append(items, m)
+	}
+	if items == nil {
+		items = []models.Merchandise{}
+	}
+	return items, rows.Err()
+}
+
+// AdminApproveMerch approves a pending_review merch item.
+// The item becomes visible to buyers immediately.
+func AdminApproveMerch(pool *pgxpool.Pool, merchID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE merchandise
+		SET    approval_status = 'approved', rejection_reason = NULL
+		WHERE  id = $1 AND approval_status = 'pending_review'
+	`, merchID)
+	if err != nil {
+		return fmt.Errorf("AdminApproveMerch: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrMerchNotFound
+	}
+	return nil
+}
+
+// AdminRejectMerch rejects a pending_review merch item with a reason.
+// The organiser can edit the item and resubmit via OrgResubmitMerch.
+func AdminRejectMerch(pool *pgxpool.Pool, merchID string, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE merchandise
+		SET    approval_status = 'rejected', rejection_reason = $1
+		WHERE  id = $2 AND approval_status = 'pending_review'
+	`, reason, merchID)
+	if err != nil {
+		return fmt.Errorf("AdminRejectMerch: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrMerchNotFound
+	}
+	return nil
+}
+
+// OrgResubmitMerch resets a rejected merch item back to pending_review.
+// Only the organiser who owns the linked event can resubmit.
+// The organiser should first edit the item (UpdateMerchandise auto-resets status),
+// then call this if they want to resubmit without making further edits.
+func OrgResubmitMerch(pool *pgxpool.Pool, merchID string, organizerID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE merchandise m
+		SET    approval_status  = 'pending_review',
+		       rejection_reason = NULL,
+		       updated_at       = NOW()
+		FROM   events e
+		WHERE  m.id              = $1
+		  AND  m.approval_status = 'rejected'
+		  AND  e.id              = m.event_id
+		  AND  e.organizer_id    = $2
+	`, merchID, organizerID)
+	if err != nil {
+		return fmt.Errorf("OrgResubmitMerch: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrMerchNotFound
+	}
+	return nil
+}
+
 // AdminUpdateVariant updates stock, price override, or active status on any
 // variant — no organizer ownership check. Admin dashboard use only.
 func AdminUpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO) (*models.MerchandiseVariant, error) {

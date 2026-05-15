@@ -496,7 +496,7 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		err := repository.PublishEvent(pool, eventID, userID.(string))
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotPublishable) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Event not found or already published"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Event not found or not in a submittable state (must be draft or rejected)"})
 				return
 			}
 			utils.InternalError(c, err, "failed to publish event")
@@ -508,7 +508,7 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Event published successfully",
+			"message": "Event submitted for admin review. It will go live once an admin approves it.",
 			"note":    "Event is now visible to all users",
 		})
 	}

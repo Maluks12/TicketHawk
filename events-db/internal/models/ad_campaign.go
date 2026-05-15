@@ -7,59 +7,48 @@ import "time"
 type CampaignStatus string
 
 const (
-	CampaignDraft     CampaignStatus = "draft"      // created, wallet too low to activate
-	CampaignActive    CampaignStatus = "active"      // running and serving impressions
-	CampaignPaused    CampaignStatus = "paused"      // manually paused by organiser
-	CampaignExhausted CampaignStatus = "exhausted"   // daily budget hit; auto-resumes at midnight
-	CampaignEnded     CampaignStatus = "ended"       // end_date passed or manually ended
+	CampaignActive        CampaignStatus = "active"         // running and serving impressions
+	CampaignPaused        CampaignStatus = "paused"         // manually paused by organiser
+	CampaignExhausted     CampaignStatus = "exhausted"      // daily budget hit; auto-resumes at midnight
+	CampaignPaymentFailed CampaignStatus = "payment_failed" // end-of-day billing failed; paused until resolved
+	CampaignEnded         CampaignStatus = "ended"          // end_date passed or manually ended
 )
 
-// ── Top-up status ─────────────────────────────────────────────────────────────
+// ── Billing ───────────────────────────────────────────────────────────────────
+// Post-pay model: campaigns run freely during the day; at midnight the nightly
+// worker sums each organiser's spend and debits via their stored Stitch mandate.
 
-type TopupStatus string
+type BillingStatus string
 
 const (
-	TopupPending   TopupStatus = "pending"
-	TopupCompleted TopupStatus = "completed"
-	TopupFailed    TopupStatus = "failed"
+	BillingPending   BillingStatus = "pending"
+	BillingCompleted BillingStatus = "completed"
+	BillingFailed    BillingStatus = "failed"
+	BillingWaived    BillingStatus = "waived" // admin can waive micro-charges (e.g. < R1)
 )
 
-// ── Ad Wallet ─────────────────────────────────────────────────────────────────
-// One wallet per organiser. All campaigns for that organiser draw from the
-// same balance.
-
-type AdWallet struct {
-	ID          string    `json:"id" db:"id"`
-	OrganizerID string    `json:"organizer_id" db:"organizer_id"`
-	Balance     float64   `json:"balance" db:"balance"`            // current spendable ZAR
-	TotalTopups float64   `json:"total_topups" db:"total_topups"`  // lifetime deposits
-	TotalSpent  float64   `json:"total_spent" db:"total_spent"`    // lifetime spend
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
-}
-
-// ── Wallet Top-up ─────────────────────────────────────────────────────────────
-
-type AdWalletTopup struct {
-	ID                     string      `json:"id" db:"id"`
-	OrganizerID            string      `json:"organizer_id" db:"organizer_id"`
-	Amount                 float64     `json:"amount" db:"amount"`
-	StitchPaymentRequestID *string     `json:"stitch_payment_request_id,omitempty" db:"stitch_payment_request_id"`
-	ReferenceNumber        string      `json:"reference_number" db:"reference_number"` // e.g. TUP-00042
-	Status                 TopupStatus `json:"status" db:"status"`
-	CreatedAt              time.Time   `json:"created_at" db:"created_at"`
-	CompletedAt            *time.Time  `json:"completed_at,omitempty" db:"completed_at"`
+// AdBillingRecord is one end-of-day charge per organiser.
+type AdBillingRecord struct {
+	ID                     string        `json:"id" db:"id"`
+	OrganizerID            string        `json:"organizer_id" db:"organizer_id"`
+	BillingDate            time.Time     `json:"billing_date" db:"billing_date"`
+	Amount                 float64       `json:"amount" db:"amount"`
+	StitchPaymentRequestID *string       `json:"stitch_payment_request_id,omitempty" db:"stitch_payment_request_id"`
+	Status                 BillingStatus `json:"status" db:"status"`
+	FailureReason          *string       `json:"failure_reason,omitempty" db:"failure_reason"`
+	CreatedAt              time.Time     `json:"created_at" db:"created_at"`
+	CompletedAt            *time.Time    `json:"completed_at,omitempty" db:"completed_at"`
 }
 
 // ── Ad Campaign ───────────────────────────────────────────────────────────────
 
 type AdCampaign struct {
-	ID          string         `json:"id" db:"id"`
-	EventID     string         `json:"event_id" db:"event_id"`
-	OrganizerID string         `json:"organizer_id" db:"organizer_id"`
+	ID          string `json:"id" db:"id"`
+	EventID     string `json:"event_id" db:"event_id"`
+	OrganizerID string `json:"organizer_id" db:"organizer_id"`
 
 	// Spending controls
-	DailyBudget float64 `json:"daily_budget" db:"daily_budget"` // ZAR cap per calendar day (min R50)
+	DailyBudget float64 `json:"daily_budget" db:"daily_budget"` // ZAR cap per calendar day (min R200)
 	CPMRate     float64 `json:"cpm_rate" db:"cpm_rate"`         // ZAR per 1 000 impressions
 
 	// Lifetime totals — updated incrementally on each impression
@@ -67,8 +56,7 @@ type AdCampaign struct {
 	TotalImpressions int64   `json:"total_impressions" db:"total_impressions"`
 	TotalClicks      int64   `json:"total_clicks" db:"total_clicks"`
 
-	// Today's numbers — joined from ad_daily_spend at query time, not stored on
-	// the campaigns row itself, so db:"-" is correct here.
+	// Today's numbers — joined from ad_daily_spend at query time, never stored on the campaigns row.
 	TodaySpent       float64 `json:"today_spent" db:"-"`
 	TodayImpressions int64   `json:"today_impressions" db:"-"`
 	TodayClicks      int64   `json:"today_clicks" db:"-"`
@@ -101,20 +89,26 @@ func (c *AdCampaign) DailyImpressionCap() int64 {
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
 type CreateCampaignDTO struct {
-	// Minimum R50/day. Higher budget = higher ad rank = more impressions per day.
-	DailyBudget float64    `json:"daily_budget" binding:"required,min=50"`
-	StartDate   *time.Time `json:"start_date"`  // defaults to today if nil
-	EndDate     *time.Time `json:"end_date"`    // nil = run until wallet is empty
+	// Minimum R200/day. Higher budget = higher ad rank = more impressions per day.
+	// Billed automatically at end of each day — no top-up or pre-loading required.
+	DailyBudget float64    `json:"daily_budget" binding:"required,min=200"`
+	StartDate   *time.Time `json:"start_date"` // defaults to today if nil
+	EndDate     *time.Time `json:"end_date"`   // nil = runs until manually ended
 }
 
 type UpdateCampaignDTO struct {
-	DailyBudget *float64        `json:"daily_budget" binding:"omitempty,min=50"`
-	EndDate     *time.Time      `json:"end_date"`
-	// Allowed transitions: active ↔ paused only. exhausted → active is automatic at midnight.
-	Status      *CampaignStatus `json:"status"`
+	DailyBudget *float64 `json:"daily_budget" binding:"omitempty,min=200"`
+	EndDate     *time.Time `json:"end_date"`
+	// Allowed organiser transitions: active <-> paused only.
+	// exhausted -> active happens automatically at midnight.
+	// payment_failed -> active happens automatically after billing succeeds.
+	Status *CampaignStatus `json:"status"`
 }
 
-type TopupWalletDTO struct {
-	// Minimum R50 top-up.
-	Amount float64 `json:"amount" binding:"required,min=50"`
+// RegisterPaymentMethodDTO stores the organiser's Stitch debit mandate.
+// Obtained by the frontend via the Stitch mandate OAuth flow, then sent here once.
+// All future end-of-day ad bills are debited against this mandate automatically.
+type RegisterPaymentMethodDTO struct {
+	StitchMandateID string `json:"stitch_mandate_id" binding:"required"`
+	Email           string `json:"email" binding:"required,email"`
 }

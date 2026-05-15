@@ -199,12 +199,42 @@ export default function MerchPage() {
       images:           '',
     });
 
-    // Parse existing images into the uploader
+    // Parse existing images — only keep valid HTTP(S) URLs,
+    // and recover from double-encoded arrays or quoted strings
     try {
       const raw = item.images as unknown;
       if (!raw) { setUploadedImages([]); return; }
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      setUploadedImages(Array.isArray(parsed) ? (parsed as string[]).filter(Boolean) : []);
+
+      const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!Array.isArray(parsed)) { setUploadedImages([]); return; }
+
+      const isURL = (s: unknown): s is string =>
+        typeof s === 'string' && /^https?:\/\/.+/.test(s.trim());
+
+      const urls = (parsed as unknown[]).flatMap((entry): string[] => {
+        if (typeof entry !== 'string' || !entry.trim()) return [];
+
+        // Case 1: inner JSON array — e.g. entry = '["https://..."]'
+        if (entry.startsWith('[')) {
+          try {
+            const inner = JSON.parse(entry);
+            if (Array.isArray(inner)) return (inner as unknown[]).filter(isURL) as string[];
+          } catch {}
+        }
+
+        // Case 2: quoted string — e.g. entry = '"https://..."'
+        if (entry.startsWith('"') && entry.endsWith('"')) {
+          try {
+            const unquoted = JSON.parse(entry) as unknown;
+            if (isURL(unquoted)) return [unquoted];
+          } catch {}
+        }
+
+        // Case 3: plain valid URL
+        return isURL(entry) ? [entry.trim()] : [];
+      });
+
+      setUploadedImages(urls);
     } catch { setUploadedImages([]); }
   }
 
@@ -291,11 +321,41 @@ export default function MerchPage() {
     try {
       const fd = new FormData();
       fd.append('image', file);
-      const { data } = await api.post<{ image_url: string }>('/admin/upload', fd);
-      if (data?.image_url) setUploadedImages(prev => [...prev, data.image_url]);
-      else toast('Upload succeeded but no URL returned', 'error');
-    } catch { toast('Image upload failed', 'error'); }
-    finally { setImgUploading(false); }
+      const token   = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
+      const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+      let imageUrl: string | null = null;
+
+      // ── 1. Try R2 via the Go backend ────────────────────────────────────
+      try {
+        const res = await fetch(`${baseURL}/admin/upload`, { method: 'POST', headers, body: fd });
+        if (res.ok) {
+          const json = await res.json() as { image_url?: string };
+          imageUrl = json.image_url ?? null;
+        } else {
+          const json = await res.json().catch(() => null) as { error?: string } | null;
+          throw new Error(json?.error ?? `Backend returned HTTP ${res.status}`);
+        }
+      } catch {
+        // ── 2. R2 unavailable (local dev) — fall back to Next.js local storage
+        const fd2   = new FormData();
+        fd2.append('image', file);
+        const local = await fetch('/api/upload', { method: 'POST', body: fd2 });
+        const json  = await local.json() as { image_url?: string; error?: string };
+        if (!local.ok) throw new Error(json.error ?? 'Local upload failed');
+        imageUrl = json.image_url ?? null;
+      }
+
+      if (imageUrl) {
+        setUploadedImages(prev => [...prev, imageUrl!]);
+        toast('Image uploaded', 'success');
+      } else {
+        toast('Upload succeeded but no URL was returned', 'error');
+      }
+    } catch (e: unknown) {
+      toast((e instanceof Error ? e.message : null) ?? 'Image upload failed', 'error');
+    } finally { setImgUploading(false); }
   }
 
   function openEditVariant(v: Variant) {

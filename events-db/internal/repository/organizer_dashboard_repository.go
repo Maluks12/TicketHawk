@@ -17,10 +17,12 @@ import (
 // All figures are scoped to events owned by the organiser.
 type OrganizerStats struct {
 	// Event counts
-	TotalEvents     int `json:"total_events"`
-	PublishedEvents int `json:"published_events"`
-	DraftEvents     int `json:"draft_events"`
-	CancelledEvents int `json:"cancelled_events"`
+	TotalEvents         int `json:"total_events"`
+	PublishedEvents     int `json:"published_events"`
+	PendingReviewEvents int `json:"pending_review_events"` // awaiting admin approval
+	RejectedEvents      int `json:"rejected_events"`       // admin rejected; can be revised
+	DraftEvents         int `json:"draft_events"`
+	CancelledEvents     int `json:"cancelled_events"`
 
 	// Ticket sales
 	TotalBookings     int     `json:"total_bookings"`      // confirmed only
@@ -53,14 +55,18 @@ func GetOrganizerStats(pool *pgxpool.Pool, organizerID string) (*OrganizerStats,
 	// Event counts
 	err := pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*)                                            AS total_events,
-			COUNT(*) FILTER (WHERE status = 'published')       AS published_events,
-			COUNT(*) FILTER (WHERE status = 'draft')           AS draft_events,
-			COUNT(*) FILTER (WHERE status = 'cancelled')       AS cancelled_events
+			COUNT(*)                                                  AS total_events,
+			COUNT(*) FILTER (WHERE status = 'published')             AS published_events,
+			COUNT(*) FILTER (WHERE status = 'pending_review')        AS pending_review_events,
+			COUNT(*) FILTER (WHERE status = 'rejected')              AS rejected_events,
+			COUNT(*) FILTER (WHERE status = 'draft')                 AS draft_events,
+			COUNT(*) FILTER (WHERE status = 'cancelled')             AS cancelled_events
 		FROM events
 		WHERE organizer_id = $1
 	`, organizerID).Scan(
-		&s.TotalEvents, &s.PublishedEvents, &s.DraftEvents, &s.CancelledEvents,
+		&s.TotalEvents, &s.PublishedEvents,
+		&s.PendingReviewEvents, &s.RejectedEvents,
+		&s.DraftEvents, &s.CancelledEvents,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("OrganizerStats events: %w", err)

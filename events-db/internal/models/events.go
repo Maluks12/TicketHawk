@@ -11,10 +11,12 @@ import (
 type EventStatus string
 
 const (
-	EventDraft     EventStatus = "draft"
-	EventPublished EventStatus = "published"
-	EventCancelled EventStatus = "cancelled"
-	EventCompleted EventStatus = "completed"
+	EventDraft         EventStatus = "draft"
+	EventPendingReview EventStatus = "pending_review" // submitted by organiser; awaiting admin approval
+	EventPublished     EventStatus = "published"      // admin approved; visible to buyers
+	EventRejected      EventStatus = "rejected"       // admin rejected; organiser can revise and resubmit
+	EventCancelled     EventStatus = "cancelled"
+	EventCompleted     EventStatus = "completed"
 )
 
 type Event struct {
@@ -51,7 +53,8 @@ type Event struct {
 	IsFeatured     bool        `json:"is_featured" db:"is_featured"`
 	FeaturedUntil  *time.Time  `json:"featured_until,omitempty" db:"featured_until"`
 	Status         EventStatus `json:"status" db:"status"`
-	PublishedAt    *time.Time  `json:"published_at,omitempty" db:"published_at"`
+	PublishedAt      *time.Time  `json:"published_at,omitempty" db:"published_at"`
+	RejectionReason  *string     `json:"rejection_reason,omitempty" db:"rejection_reason"`
 	CancelledAt    *time.Time  `json:"cancelled_at,omitempty" db:"cancelled_at"`
 	CancellationReason *string `json:"cancellation_reason,omitempty" db:"cancellation_reason"`
 	RefundPolicy       *string `json:"refund_policy,omitempty" db:"refund_policy"`

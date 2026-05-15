@@ -105,9 +105,6 @@ func main() {
 	}
 	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
 
-	workers.StartAdWorker(pool, ctx)
-	log.Info().Msg("ad worker started")
-
 	workers.StartReminderWorker(pool, ctx)
 	log.Info().Msg("reminder worker started")
 
@@ -125,6 +122,9 @@ func main() {
 	emailService   := services.NewEmailService(cfg)
 	qrService      := services.NewQRService(pool, cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
+
+	workers.StartAdWorker(pool, paymentService, ctx)
+	log.Info().Msg("ad worker started (post-pay billing)")
 	imgService     := services.NewImageService(cfg)
 
 	// ==========================================
@@ -196,7 +196,7 @@ func main() {
 	}
 	{
 		webhooks.POST("/stitch",     handlers.StitchWebhookHandler(paymentService, cfg.StitchWebhookSecret))
-		webhooks.POST("/stitch-ads", handlers.AdTopupWebhookHandler(pool, cfg.StitchWebhookSecret))
+		webhooks.POST("/stitch-ads", handlers.AdBillingWebhookHandler(pool, cfg.StitchWebhookSecret))
 	}
 
 	// ==========================================
@@ -527,6 +527,20 @@ func main() {
 		admin.PUT("/users/demote/:id",    controllers.DemoteUserHandler(pool))
 		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
 		admin.GET("/campaigns",           handlers.AdminGetCampaignsHandler(pool))
+
+		// Event approval queue
+		admin.GET("/events/pending",      handlers.AdminGetPendingEventsHandler(pool))
+		admin.PUT("/events/:id/approve",  handlers.AdminApproveEventHandler(pool, eventCache))
+		admin.PUT("/events/:id/reject",   handlers.AdminRejectEventHandler(pool))
+
+		// Merch approval queue
+		admin.GET("/merch/pending",       handlers.AdminGetPendingMerchHandler(pool))
+		admin.PUT("/merch/:id/approve",   handlers.AdminApproveMerchHandler(pool))
+		admin.PUT("/merch/:id/reject",    handlers.AdminRejectMerchHandler(pool))
+
+		// Organiser account management (suspend/ban - no approval queue)
+		admin.GET("/organizers",             handlers.AdminGetOrganizersHandler(pool))
+		admin.PUT("/organizers/:id/status",  handlers.AdminUpdateOrganizerStatusHandler(pool))
 	}
 
 	// ==========================================
@@ -584,8 +598,11 @@ func main() {
 		orgRoutes.PATCH("/ticket-types/:typeId",   handlers.OrgUpdateTicketTypeHandler(pool))
 		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool))
 
-		orgRoutes.GET("/ad-wallet",             handlers.GetWalletHandler(pool))
-		orgRoutes.POST("/ad-wallet/topup",      handlers.TopupWalletHandler(pool, paymentService))
+		// Payment method - set once, billed automatically each day
+		orgRoutes.POST("/ad-payment-method",    handlers.RegisterPaymentMethodHandler(pool))
+		orgRoutes.GET("/ad-payment-method",     handlers.GetPaymentMethodStatusHandler(pool))
+		orgRoutes.GET("/ad-billing",            handlers.GetBillingHistoryHandler(pool))
+		// Ad campaigns
 		orgRoutes.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
 		orgRoutes.GET("/campaigns",             handlers.GetMyCampaignsHandler(pool))
 		orgRoutes.GET("/campaigns/:id",         handlers.GetCampaignHandler(pool))
@@ -597,6 +614,9 @@ func main() {
 		orgRoutes.GET("/dashboard/events/:id/stats",     handlers.GetOrganizerEventStatsHandler(pool))
 		orgRoutes.GET("/dashboard/events/:id/bookings",  handlers.GetOrganizerEventBookingsHandler(pool))
 		orgRoutes.GET("/dashboard/events/:id/merch",     handlers.GetOrganizerEventMerchHandler(pool))
+
+		// Resubmit rejected merch for review
+		orgRoutes.POST("/merch/:id/resubmit",                handlers.OrgResubmitMerchHandler(pool))
 		orgRoutes.GET("/dashboard/payouts",              handlers.GetOrganizerPayoutSummaryHandler(pool))
 	}
 
@@ -623,6 +643,17 @@ func main() {
 	// Protected Test Route
 	// ==========================================
 	v1.GET("/protected-test", middleware.AuthMiddleware(cfg), handlers.TestProtectedHandler())
+
+	// Organiser self-registration (no admin approval gate)
+	v1.POST("/register-organizer",
+		middleware.AuthMiddleware(cfg),
+		handlers.RegisterAsOrganizerHandler(pool),
+	)
+	v1.GET("/organiser/profile",
+		middleware.AuthMiddleware(cfg),
+		middleware.OrganizerOnlyMiddleware(),
+		handlers.GetOrganizerProfileHandler(pool),
+	)
 
 	// ==========================================
 	// Start Server — Graceful shutdown

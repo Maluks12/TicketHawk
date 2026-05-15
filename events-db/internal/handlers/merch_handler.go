@@ -143,7 +143,10 @@ func OrgCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			ec.BustMerch(c.Request.Context(), eventID)
 		}
 
-		c.JSON(http.StatusCreated, item)
+		c.JSON(http.StatusCreated, gin.H{
+			"merch":   item,
+			"message": "Merch item created and submitted for admin review. It will be visible to buyers once approved.",
+		})
 	}
 }
 
@@ -165,7 +168,10 @@ func OrgCreateStandaloneMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) g
 			return
 		}
 
-		c.JSON(http.StatusCreated, item)
+		c.JSON(http.StatusCreated, gin.H{
+			"merch":   item,
+			"message": "Merch item created and submitted for admin review. It will be visible to buyers once approved.",
+		})
 	}
 }
 
@@ -385,6 +391,32 @@ func AdminUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
         c.JSON(http.StatusOK, gin.H{"message": "Merchandise updated", "item": item})
     }
 }
+// OrgResubmitMerchHandler lets an organiser resubmit a rejected merch item
+// for admin review after editing it (or without changes if they believe the
+// rejection was in error).
+//
+//	POST /organiser/merch/:id/resubmit
+func OrgResubmitMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		merchID := c.Param("id")
+		organizerID := c.GetString("organizer_id")
+
+		if err := repository.OrgResubmitMerch(pool, merchID, organizerID); err != nil {
+			if err == repository.ErrMerchNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Merch item not found or not in rejected state"})
+				return
+			}
+			utils.InternalError(c, err, "resubmit merch")
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "Merch item resubmitted for admin review",
+			"merch_id": merchID,
+		})
+	}
+}
+
 // AdminUpdateVariantHandler updates stock, price override, or active status
 // on any variant without organizer ownership checks. Admin dashboard only.
 func AdminUpdateVariantHandler(pool *pgxpool.Pool) gin.HandlerFunc {

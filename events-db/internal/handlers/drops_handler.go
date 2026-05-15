@@ -62,10 +62,12 @@ func queryDrops(ctx context.Context, pool *pgxpool.Pool, scheduled bool) ([]Drop
 	var where string
 	if scheduled {
 		where = `WHERE m.is_active = TRUE
+		           AND m.approval_status = 'approved'
 		           AND m.sale_start IS NOT NULL
 		           AND m.sale_start > NOW()`
 	} else {
 		where = `WHERE m.is_active = TRUE
+		           AND m.approval_status = 'approved'
 		           AND (m.sale_start IS NULL OR m.sale_start <= NOW())
 		           AND (m.sale_end   IS NULL OR m.sale_end   >  NOW())`
 	}

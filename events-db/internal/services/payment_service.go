@@ -727,3 +727,69 @@ func stitchMethodToInternal(s string) models.PaymentMethod {
 		return models.PaymentCreditCard
 	}
 }
+// InitiateDebitMandate initiates a Stitch debit mandate payment to bill an
+// organiser for their end-of-day ad spend.
+//
+// This replaces the old CreateAdTopupIntent flow. Instead of the organiser
+// manually topping up a wallet, the platform automatically debits them each
+// morning for the previous day's actual spend via their stored mandate.
+//
+// The requestID returned should be stored in ad_billing_records.stitch_payment_request_id
+// so the /webhooks/stitch-ads handler can match the incoming confirmation.
+func (s *PaymentService) InitiateDebitMandate(mandateID string, amount float64, reference string, email string) (requestID string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	amountCents := int64(amount * 100)
+
+	mutation := `
+		mutation InitiateDebitOrder($input: DebitOrderInitiateInput!) {
+			debitOrderInitiate(input: $input) {
+				debitOrder {
+					id
+					status
+				}
+			}
+		}
+	`
+
+	variables := map[string]interface{}{
+		"input": map[string]interface{}{
+			"mandate": map[string]interface{}{
+				"id": mandateID,
+			},
+			"amount": map[string]interface{}{
+				"quantity": amountCents,
+				"currency": models.DefaultCurrency,
+			},
+			"payerReference":    "EventsPlatform Ad Billing",
+			"merchantReference": reference,
+			"externalReference": reference,
+			"beneficiary": map[string]interface{}{
+				"bankAccount": map[string]interface{}{
+					"name": "Events Platform Ad Revenue",
+				},
+			},
+		},
+	}
+
+	var result struct {
+		DebitOrderInitiate struct {
+			DebitOrder struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"debitOrder"`
+		} `json:"debitOrderInitiate"`
+	}
+
+	if err := s.graphQL(ctx, mutation, variables, &result); err != nil {
+		return "", fmt.Errorf("InitiateDebitMandate: %w", err)
+	}
+
+	id := result.DebitOrderInitiate.DebitOrder.ID
+	if id == "" {
+		return "", errors.New("stitch returned empty debit order ID")
+	}
+
+	return id, nil
+}

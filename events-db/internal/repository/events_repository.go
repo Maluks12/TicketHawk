@@ -17,7 +17,7 @@ import (
 
 var ErrEventNotFound = errors.New("event not found")
 var ErrEventSoldOut = errors.New("event is sold out")
-var ErrEventNotPublishable = errors.New("event not found or already published")
+var ErrEventNotPublishable = errors.New("event not found or not in a submittable state")
 var ErrEventNotCancellable = errors.New("event not found or cannot be cancelled")
 
 type OrganizerEventSummary struct {
@@ -82,22 +82,99 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 	return &event, nil
 }
 
+// PublishEvent submits a draft or rejected event for admin review.
+// Status moves to pending_review; event goes live only after AdminApproveEvent.
 func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
- 
+
 	cmd, err := pool.Exec(ctx, `
 		UPDATE events
-		SET status = $1, published_at = CURRENT_TIMESTAMP
-		WHERE id = $2 AND organizer_id = $3 AND status = $4
-	`, models.EventPublished, eventID, organizerID, models.EventDraft)
+		SET status = $1, rejection_reason = NULL
+		WHERE id = $2 AND organizer_id = $3 AND status IN ($4, $5)
+	`, models.EventPendingReview, eventID, organizerID, models.EventDraft, models.EventRejected)
 	if err != nil {
-		return fmt.Errorf("failed to publish event: %w", err)
+		return fmt.Errorf("failed to submit event for review: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
 		return ErrEventNotPublishable
 	}
 	return nil
+}
+
+// AdminApproveEvent approves a pending_review event, making it publicly visible.
+func AdminApproveEvent(pool *pgxpool.Pool, eventID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE events
+		SET status = $1, published_at = CURRENT_TIMESTAMP, rejection_reason = NULL
+		WHERE id = $2 AND status = $3
+	`, models.EventPublished, eventID, models.EventPendingReview)
+	if err != nil {
+		return fmt.Errorf("failed to approve event: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrEventNotPublishable
+	}
+	return nil
+}
+
+// AdminRejectEvent rejects a pending_review event with a reason.
+// The organiser can revise and resubmit (calls PublishEvent again).
+func AdminRejectEvent(pool *pgxpool.Pool, eventID string, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE events
+		SET status = $1, rejection_reason = $2
+		WHERE id = $3 AND status = $4
+	`, models.EventRejected, reason, eventID, models.EventPendingReview)
+	if err != nil {
+		return fmt.Errorf("failed to reject event: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrEventNotPublishable
+	}
+	return nil
+}
+
+// AdminGetPendingEvents returns all events awaiting admin review, oldest first.
+func AdminGetPendingEvents(pool *pgxpool.Pool) ([]models.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT e.id, e.slug, e.title, e.description, e.status,
+		       e.start_time, e.end_time, e.price, e.currency,
+		       e.venue_name, e.city, e.organizer_id, e.created_at
+		FROM events e
+		WHERE e.status = $1
+		ORDER BY e.created_at ASC
+	`, models.EventPendingReview)
+	if err != nil {
+		return nil, fmt.Errorf("AdminGetPendingEvents: %w", err)
+	}
+	defer rows.Close()
+
+	var events []models.Event
+	for rows.Next() {
+		var ev models.Event
+		if err := rows.Scan(
+			&ev.ID, &ev.Slug, &ev.Title, &ev.Description, &ev.Status,
+			&ev.StartTime, &ev.EndTime, &ev.Price, &ev.Currency,
+			&ev.VenueName, &ev.City, &ev.OrganizerID, &ev.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("AdminGetPendingEvents scan: %w", err)
+		}
+		events = append(events, ev)
+	}
+	if events == nil {
+		events = []models.Event{}
+	}
+	return events, rows.Err()
 }
 
 func CheckAvailability(pool *pgxpool.Pool, eventID string, quantity int) (bool, error) {

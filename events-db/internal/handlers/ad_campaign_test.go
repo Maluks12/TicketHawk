@@ -301,7 +301,7 @@ func buildAdCampaignRouter(pool *pgxpool.Pool) *gin.Engine {
 	org := r.Group("/organiser")
 	org.Use(middleware.AuthMiddleware(cfg))
 	{
-		org.GET("/ad-wallet", handlers.GetWalletHandler(pool))
+		//org.GET("/ad-wallet", handlers.GetWalletHandler(pool))
 		org.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
 		org.GET("/campaigns", handlers.GetMyCampaignsHandler(pool))
 		org.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))

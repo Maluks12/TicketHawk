@@ -25,6 +25,9 @@ import (
 type AdminStats struct {
 	TotalEvents        int     `json:"total_events"`
 	ActiveEvents       int     `json:"active_events"`
+	// Approval queue badge counts
+	PendingEvents      int     `json:"pending_events"` // events awaiting review
+	PendingMerch       int     `json:"pending_merch"`  // merch items awaiting review
 	TotalUsers         int     `json:"total_users"`
 	TotalBookings      int     `json:"total_bookings"`
 	ConfirmedBookings  int     `json:"confirmed_bookings"`
@@ -54,6 +57,8 @@ func GetAdminStats(pool *pgxpool.Pool) (*AdminStats, error) {
 			(SELECT COUNT(*) FROM events)                                                AS total_events,
 			(SELECT COUNT(*) FROM events
 			   WHERE status = 'published' AND start_time > NOW())                       AS active_events,
+			(SELECT COUNT(*) FROM events WHERE status = 'pending_review')               AS pending_events,
+			(SELECT COUNT(*) FROM merchandise WHERE approval_status = 'pending_review') AS pending_merch,
 			(SELECT COUNT(*) FROM users)                                                 AS total_users,
 			(SELECT COUNT(*) FROM bookings)                                              AS total_bookings,
 			(SELECT COUNT(*) FROM bookings WHERE booking_status = 'confirmed')           AS confirmed_bookings,
@@ -64,7 +69,9 @@ func GetAdminStats(pool *pgxpool.Pool) (*AdminStats, error) {
 			   WHERE booking_status = 'confirmed'
 			     AND created_at >= CURRENT_DATE)                                        AS ticket_revenue_today
 	`).Scan(
-		&s.TotalEvents, &s.ActiveEvents, &s.TotalUsers,
+		&s.TotalEvents, &s.ActiveEvents,
+		&s.PendingEvents, &s.PendingMerch,
+		&s.TotalUsers,
 		&s.TotalBookings, &s.ConfirmedBookings,
 		&s.TicketRevenue, &s.TicketsToday, &s.TicketRevenueToday,
 	)

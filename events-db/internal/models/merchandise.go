@@ -2,6 +2,16 @@ package models
 
 import "time"
 
+// MerchApprovalStatus is the admin-review state for a merchandise item.
+// New merch starts as pending_review and is invisible to buyers until approved.
+type MerchApprovalStatus string
+
+const (
+	MerchPendingReview MerchApprovalStatus = "pending_review"
+	MerchApproved      MerchApprovalStatus = "approved"
+	MerchRejected      MerchApprovalStatus = "rejected"
+)
+
 // FulfillmentMode describes what delivery options an organiser makes available
 // for a merchandise item.
 type FulfillmentMode string
@@ -55,8 +65,13 @@ type Merchandise struct {
 
 	SaleStart *time.Time `json:"sale_start,omitempty" db:"sale_start"`
 	SaleEnd   *time.Time `json:"sale_end,omitempty" db:"sale_end"`
-	CreatedAt time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+
+	// Admin approval gate. Buyers cannot see merch unless approval_status = approved.
+	ApprovalStatus  MerchApprovalStatus `json:"approval_status" db:"approval_status"`
+	RejectionReason *string             `json:"rejection_reason,omitempty" db:"rejection_reason"`
+
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 
 	// Joined — populated by GetMerchandiseByEvent / GetAllMerchandise, not a stored column.
 	Variants   []MerchandiseVariant `json:"variants,omitempty" db:"-"`
