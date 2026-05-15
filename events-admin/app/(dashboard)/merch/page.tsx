@@ -91,6 +91,18 @@ export default function MerchPage() {
   const [globalPrice,     setGlobalPrice]     = useState('');
   const [skuPrefix,       setSkuPrefix]       = useState('');
 
+  // edit variant modal
+  const [editVariantModal, setEditVariantModal] = useState(false);
+  const [editVariant,      setEditVariant]      = useState<Variant | null>(null);
+  const [evStock,          setEvStock]          = useState('');
+  const [evPrice,          setEvPrice]          = useState('');
+  const [evActive,         setEvActive]         = useState(true);
+  const [evSubmitting,     setEvSubmitting]     = useState(false);
+
+  // image uploader
+  const [uploadedImages,   setUploadedImages]   = useState<string[]>([]);
+  const [imgUploading,     setImgUploading]     = useState(false);
+
   // ── Collections tab state ────────────────────────────────────────────────
   const [collSearch,   setCollSearch]  = useState('');
   const [collFilter,   setCollFilter]  = useState<'all' | 'active' | 'inactive'>('all');
@@ -154,6 +166,7 @@ export default function MerchPage() {
   function openCreateMerch() {
     setEditingMerchId(null);
     setMFormState({ ...EMPTY_MERCH });
+    setUploadedImages([]);
     setPlacement('standalone');
     setPlEventId('');
     setPlCollectionId('');
@@ -163,27 +176,36 @@ export default function MerchPage() {
     setMerchModal(true);
   }
 
-  async function openEditMerch(item: MerchItem) {
+  function openEditMerch(item: MerchItem) {
     setEditingMerchId(item.id);
     setMerchModal(true);
-    // Infer current placement
-    if (item.event_id)        { setPlacement('event');      setPlEventId(item.event_id);        setPlCollectionId(''); }
+    if (item.event_id)           { setPlacement('event');      setPlEventId(item.event_id);          setPlCollectionId(''); }
     else if (item.collection_id) { setPlacement('collection'); setPlCollectionId(item.collection_id); setPlEventId('');   }
-    else                      { setPlacement('standalone'); setPlEventId('');                   setPlCollectionId(''); }
+    else                         { setPlacement('standalone'); setPlEventId('');                      setPlCollectionId(''); }
     setShowNewCollInline(false);
+
+    // All data is already in the item passed from the list — no extra API call needed
+    setMFormState({
+      name:             item.name             || '',
+      description:      item.description      || '',
+      base_price:       String(item.base_price ?? ''),
+      category:         item.category         || '',
+      display_order:    String(item.display_order ?? 0),
+      fulfillment_mode: item.fulfillment_mode  || 'delivery',
+      pickup_location:  item.pickup_location   || '',
+      delivery_fee:     String(item.delivery_fee ?? 0),
+      sale_start:       toLocalInput(item.sale_start),
+      sale_end:         toLocalInput(item.sale_end),
+      images:           '',
+    });
+
+    // Parse existing images into the uploader
     try {
-      const { data: m } = await api.get<MerchItem>(`/merch/${item.id}`);
-      setMFormState({
-        name: m.name || '', description: m.description || '',
-        base_price: String(m.base_price || ''), category: m.category || '',
-        display_order: String(m.display_order || 0),
-        fulfillment_mode: m.fulfillment_mode || 'delivery',
-        pickup_location: m.pickup_location || '',
-        delivery_fee: String(m.delivery_fee || 0),
-        sale_start: toLocalInput(m.sale_start), sale_end: toLocalInput(m.sale_end),
-        images: m.images || '',
-      });
-    } catch { toast('Failed to load item', 'error'); }
+      const raw = item.images as unknown;
+      if (!raw) { setUploadedImages([]); return; }
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      setUploadedImages(Array.isArray(parsed) ? (parsed as string[]).filter(Boolean) : []);
+    } catch { setUploadedImages([]); }
   }
 
   // ── Inline collection creation ───────────────────────────────────────────
@@ -228,10 +250,7 @@ export default function MerchPage() {
       if (mForm.pickup_location) body.pickup_location = mForm.pickup_location;
       if (mForm.sale_start)     body.sale_start     = toISO(mForm.sale_start);
       if (mForm.sale_end)       body.sale_end       = toISO(mForm.sale_end);
-      if (mForm.images) {
-        const urls = mForm.images.split(',').map(u => u.trim()).filter(Boolean);
-        body.images = JSON.stringify(urls);
-      }
+      if (uploadedImages.length > 0) body.images = JSON.stringify(uploadedImages);
 
       let savedId = editingMerchId;
 
@@ -265,6 +284,43 @@ export default function MerchPage() {
     } catch (e: unknown) {
       toast((e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Save failed', 'error');
     } finally { setMSubmitting(false); }
+  }
+
+  async function uploadImage(file: File) {
+    setImgUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const { data } = await api.post<{ image_url: string }>('/admin/upload', fd);
+      if (data?.image_url) setUploadedImages(prev => [...prev, data.image_url]);
+      else toast('Upload succeeded but no URL returned', 'error');
+    } catch { toast('Image upload failed', 'error'); }
+    finally { setImgUploading(false); }
+  }
+
+  function openEditVariant(v: Variant) {
+    setEditVariant(v);
+    setEvStock(String(v.stock_quantity));
+    setEvPrice(v.price_override != null ? String(v.price_override) : '');
+    setEvActive(v.is_active);
+    setEditVariantModal(true);
+  }
+
+  async function submitEditVariant() {
+    if (!editVariant) return;
+    setEvSubmitting(true);
+    try {
+      const body: Record<string, unknown> = { is_active: evActive };
+      const stock = parseInt(evStock);
+      if (!isNaN(stock) && stock >= 0) body.stock_quantity = stock;
+      if (evPrice.trim()) body.price_override = parseFloat(evPrice);
+      await api.put(`/admin/merch/variants/${editVariant.id}`, body);
+      toast('Variant updated', 'success');
+      setEditVariantModal(false);
+      loadAllMerch();
+    } catch (e: unknown) {
+      toast((e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Update failed', 'error');
+    } finally { setEvSubmitting(false); }
   }
 
   function deactivateMerch(id: string, name: string) {
@@ -490,11 +546,13 @@ export default function MerchPage() {
                     {m.variants?.length > 0 && (
                       <div style={{ marginTop: '.6rem', display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
                         {m.variants.map(v => (
-                          <div key={v.id} className="variant-item">
+                          <div key={v.id} className="variant-item" style={{ cursor: 'pointer' }} onClick={() => openEditVariant(v)}>
                             <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)', flexShrink: 0 }}>{v.sku}</span>
                             <span style={{ color: 'var(--text-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatAttrs(v.attributes)}</span>
                             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.78rem', flexShrink: 0 }}>{v.stock_quantity}×</span>
                             {v.price_override != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.72rem', color: 'var(--accent)' }}>{fmtMoney(v.price_override)}</span>}
+                            {!v.is_active && <span style={{ fontSize: '.68rem', color: 'var(--danger)' }}>off</span>}
+                            <span style={{ fontSize: '.68rem', color: 'var(--text-3)', flexShrink: 0 }}>✎</span>
                           </div>
                         ))}
                       </div>
@@ -729,7 +787,33 @@ export default function MerchPage() {
                 <div className="field"><label>Sale Start</label><input type="datetime-local" value={mForm.sale_start} onChange={e => setMF({ sale_start: e.target.value })} /></div>
                 <div className="field"><label>Sale End</label><input type="datetime-local" value={mForm.sale_end} onChange={e => setMF({ sale_end: e.target.value })} /></div>
               </div>
-              <div className="field"><label>Images <small style={{ color: 'var(--text-3)' }}>(URL or comma-separated URLs)</small></label><input type="text" value={mForm.images} onChange={e => setMF({ images: e.target.value })} placeholder="https://example.com/img.jpg" /></div>
+              {/* ── Images ── */}
+              <div className="field">
+                <label>Images</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.4rem' }}>
+                  {uploadedImages.map((url, i) => (
+                    <div key={i} style={{ position: 'relative', width: '76px', height: '76px', flexShrink: 0 }}>
+                      <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
+                        onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
+                      <button
+                        onClick={() => setUploadedImages(prev => prev.filter((_, j) => j !== i))}
+                        style={{ position: 'absolute', top: '-5px', right: '-5px', width: '18px', height: '18px', borderRadius: '50%', background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  {/* Upload button */}
+                  <label style={{ width: '76px', height: '76px', border: '1px dashed var(--border)', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: imgUploading ? 'wait' : 'pointer', color: 'var(--text-3)', fontSize: '.68rem', gap: '.2rem', background: 'var(--surface-2)', flexShrink: 0 }}>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={imgUploading}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) { uploadImage(f); e.target.value = ''; } }} />
+                    {imgUploading
+                      ? <div className="spinner" style={{ width: '18px', height: '18px' }} />
+                      : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload</span></>
+                    }
+                  </label>
+                </div>
+                <small style={{ color: 'var(--text-3)', fontSize: '.72rem' }}>JPEG · PNG · WebP · Max 10 MB each</small>
+              </div>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setMerchModal(false)}>Cancel</button>
@@ -1010,6 +1094,55 @@ export default function MerchPage() {
             <div className="modal-footer" style={{ flexShrink: 0 }}>
               <span style={{ fontSize: '.75rem', color: 'var(--text-3)' }}>{collItemsCurrent.length} item{collItemsCurrent.length !== 1 ? 's' : ''} in collection</span>
               <button className="btn" onClick={() => setManageModal(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editVariantModal && editVariant && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setEditVariantModal(false); }}>
+          <div className="modal modal-sm">
+            <div className="modal-header">
+              <div>
+                <div className="modal-title">Edit Variant</div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '.74rem', color: 'var(--accent)', marginTop: '.1rem' }}>{editVariant.sku}</div>
+              </div>
+              <button className="modal-close" onClick={() => setEditVariantModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {/* Read-only attributes */}
+              <div className="field">
+                <label>Attributes <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(read-only)</small></label>
+                <div style={{ padding: '.45rem .65rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r)', fontFamily: 'var(--font-mono)', fontSize: '.82rem', color: 'var(--text-2)' }}>
+                  {formatAttrs(editVariant.attributes)}
+                </div>
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Stock Quantity</label>
+                  <input type="number" min="0" value={evStock} onChange={e => setEvStock(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Price Override <small style={{ color: 'var(--text-3)' }}>(opt.)</small></label>
+                  <input type="number" min="0.01" step="0.01" value={evPrice} onChange={e => setEvPrice(e.target.value)} placeholder="Use base price" />
+                </div>
+              </div>
+              <div className="field">
+                <label>Status</label>
+                <div style={{ display: 'flex', gap: '.5rem' }}>
+                  {[true, false].map(val => (
+                    <button key={String(val)} onClick={() => setEvActive(val)}
+                      style={{ flex: 1, padding: '.4rem', borderRadius: 'var(--r)', border: `1px solid ${evActive === val ? (val ? 'var(--accent)' : 'var(--danger)') : 'var(--border)'}`, background: evActive === val ? (val ? 'var(--accent-d)' : 'rgba(255,59,48,.15)') : 'var(--surface-2)', color: evActive === val ? (val ? 'var(--accent)' : 'var(--danger)') : 'var(--text-2)', cursor: 'pointer', fontSize: '.82rem', fontWeight: evActive === val ? 600 : 400 }}>
+                      {val ? 'Active' : 'Inactive'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setEditVariantModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={submitEditVariant} disabled={evSubmitting}>
+                {evSubmitting ? 'Saving…' : 'Save Changes'}
+              </button>
             </div>
           </div>
         </div>

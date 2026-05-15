@@ -267,3 +267,40 @@ func (s *ImageService) DeleteEventImage(publicURL string) error {
 	})
 	return err
 }
+// UploadGenericImage stores an image under uploads/misc/{uuid}.ext and returns
+// the public URL. No DB write — caller associates the URL wherever needed.
+// Used by the admin dashboard for merch images during both create and edit flows.
+func (s *ImageService) UploadGenericImage(
+	file multipart.File,
+	header *multipart.FileHeader,
+) (string, error) {
+	contentType := header.Header.Get("Content-Type")
+	ext, ok := allowedImageMIMETypes[contentType]
+	if !ok {
+		ext = strings.ToLower(filepath.Ext(header.Filename))
+		switch ext {
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+			ext = ".jpg"
+		case ".png":
+			contentType = "image/png"
+		case ".webp":
+			contentType = "image/webp"
+		default:
+			return "", fmt.Errorf("unsupported file type: only JPEG, PNG, and WebP are allowed")
+		}
+	}
+
+	const maxSize int64 = 10 * 1024 * 1024 // 10 MB
+	if header.Size > maxSize {
+		return "", fmt.Errorf("file too large: maximum size is 10 MB")
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	filename := fmt.Sprintf("uploads/misc/%s%s", uuid.New().String(), ext)
+	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
+}

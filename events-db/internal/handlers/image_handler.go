@@ -331,3 +331,24 @@ func UploadCollectionCoverImageHandler(pool *pgxpool.Pool, imgService *services.
 		})
 	}
 }
+// UploadAdminImageHandler handles POST /admin/upload.
+// A generic image upload that stores to R2 and returns the public URL.
+// No DB write — the caller (admin dashboard) associates the URL with an entity.
+func UploadAdminImageHandler(imgService *services.ImageService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("image")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required (field name: image)"})
+			return
+		}
+		defer file.Close()
+
+		url, err := imgService.UploadGenericImage(file, header)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"image_url": url})
+	}
+}

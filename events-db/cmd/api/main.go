@@ -513,7 +513,9 @@ func main() {
 		// Create standalone merch (not linked to any event) — admin
 		admin.POST("/merch",         handlers.AdminCreateMerchHandler(pool, eventCache))
 		// Assign / un-assign any merch item to any collection — admin
-		admin.PUT("/merch/:id/collection", handlers.AdminAssignMerchToCollectionHandler(pool))
+		admin.PUT("/merch/variants/:id",     handlers.AdminUpdateVariantHandler(pool))
+		admin.POST("/upload",                handlers.UploadAdminImageHandler(imgService))
+		admin.PUT("/merch/:id/collection",   handlers.AdminAssignMerchToCollectionHandler(pool))
 		// Collection CRUD — admin has full access, no ownership checks
 		admin.POST("/collections",        handlers.AdminCreateCollectionHandler(pool))
 		admin.GET("/collections",         handlers.AdminGetCollectionsHandler(pool))

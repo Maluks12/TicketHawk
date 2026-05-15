@@ -385,3 +385,32 @@ func AdminUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
         c.JSON(http.StatusOK, gin.H{"message": "Merchandise updated", "item": item})
     }
 }
+// AdminUpdateVariantHandler updates stock, price override, or active status
+// on any variant without organizer ownership checks. Admin dashboard only.
+func AdminUpdateVariantHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		variantID := c.Param("id")
+
+		var dto models.UpdateVariantDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		variant, err := repository.AdminUpdateVariant(pool, variantID, &dto)
+		if err != nil {
+			if err == repository.ErrMerchNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Variant not found"})
+				return
+			}
+			if err.Error() == "no fields to update" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "No fields provided to update"})
+				return
+			}
+			utils.InternalError(c, err, "admin update variant")
+			return
+		}
+
+		c.JSON(http.StatusOK, variant)
+	}
+}

@@ -837,3 +837,47 @@ func AdminUpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.Upda
     }
     return &m, nil
 }
+// AdminUpdateVariant updates stock, price override, or active status on any
+// variant — no organizer ownership check. Admin dashboard use only.
+func AdminUpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO) (*models.MerchandiseVariant, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sets := []string{"updated_at = NOW()"}
+	args := []any{}
+
+	if dto.StockQuantity != nil {
+		args = append(args, *dto.StockQuantity)
+		sets = append(sets, fmt.Sprintf("stock_quantity = $%d", len(args)))
+	}
+	if dto.PriceOverride != nil {
+		args = append(args, *dto.PriceOverride)
+		sets = append(sets, fmt.Sprintf("price_override = $%d", len(args)))
+	}
+	if dto.IsActive != nil {
+		args = append(args, *dto.IsActive)
+		sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
+	}
+
+	if len(args) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
+
+	args = append(args, variantID)
+	var v models.MerchandiseVariant
+	err := pool.QueryRow(ctx, fmt.Sprintf(`
+        UPDATE merchandise_variants
+        SET %s
+        WHERE id = $%d
+        RETURNING id, merchandise_id, sku, attributes::text,
+                  stock_quantity, price_override, is_active, created_at, updated_at
+    `, joinSets(sets), len(args)), args...).Scan(
+		&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+		&v.StockQuantity, &v.PriceOverride, &v.IsActive,
+		&v.CreatedAt, &v.UpdatedAt,
+	)
+	if err != nil {
+		return nil, ErrMerchNotFound
+	}
+	return &v, nil
+}
