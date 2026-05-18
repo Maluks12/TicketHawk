@@ -12,17 +12,10 @@ import (
 
 var ErrMerchNotFound = errors.New("merchandise not found")
 
-// saleWindowClause is the SQL condition that enforces the sale window.
-// Appended to every active-merch read query.
-// Items with no sale_start / sale_end set pass through unchanged (existing behaviour).
 const saleWindowClause = `
     AND (sale_start IS NULL OR sale_start <= NOW())
     AND (sale_end   IS NULL OR sale_end   >  NOW())`
 
-// merchSelectCols is the canonical column list used in every merch SELECT.
-// Keeping it in one place prevents drift when columns are added.
-// approvedMerchClause is appended to every buyer-facing merch query.
-// Buyers never see merch that has not been approved by an admin.
 const approvedMerchClause = `
     AND approval_status = 'approved'`
 
@@ -33,8 +26,8 @@ const merchSelectCols = `id, event_id, name, description, base_price, category,
        approval_status, rejection_reason,
        created_at, updated_at`
 
-// scanMerch scans a merchandise row.
-// Column order must match every SELECT that calls this helper.
+// scanMerch scans a merchandise row into m.
+// Column order must match every SELECT that uses merchSelectCols.
 func scanMerch(row interface {
 	Scan(...any) error
 }, m *models.Merchandise) error {
@@ -48,8 +41,6 @@ func scanMerch(row interface {
 	)
 }
 
-// GetMerchandiseByEvent returns merch with variants in 2 queries (not N+1).
-// Only items that are active AND within their sale window are returned.
 func GetMerchandiseByEvent(pool *pgxpool.Pool, eventID string, limit int) ([]models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -80,7 +71,6 @@ func GetMerchandiseByEvent(pool *pgxpool.Pool, eventID string, limit int) ([]mod
 		items = append(items, m)
 		ids = append(ids, m.ID)
 	}
-
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -93,33 +83,26 @@ func GetMerchandiseByEvent(pool *pgxpool.Pool, eventID string, limit int) ([]mod
         ORDER BY created_at ASC
     `, ids)
 	if err != nil {
-		return items, nil // variants failing shouldn't break merch display
+		return items, nil
 	}
 	defer varRows.Close()
 
 	variantMap := make(map[string][]models.MerchandiseVariant)
 	for varRows.Next() {
 		var v models.MerchandiseVariant
-		if err := varRows.Scan(
-			&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
-			&v.StockQuantity, &v.PriceOverride, &v.IsActive,
-			&v.CreatedAt, &v.UpdatedAt,
+		if err := varRows.Scan(&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+			&v.StockQuantity, &v.PriceOverride, &v.IsActive, &v.CreatedAt, &v.UpdatedAt,
 		); err != nil {
 			continue
 		}
 		variantMap[v.MerchandiseID] = append(variantMap[v.MerchandiseID], v)
 	}
-
 	for i, item := range items {
 		items[i].Variants = variantMap[item.ID]
 	}
-
 	return items, nil
 }
 
-// GetAllMerchandise returns all merch across all events for the admin dashboard.
-// Uses LEFT JOIN so standalone merch (no event) is included.
-// Includes inactive items and items outside their sale window.
 func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -163,7 +146,6 @@ func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, err
 		items = append(items, m)
 		ids = append(ids, m.ID)
 	}
-
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -183,10 +165,8 @@ func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, err
 	variantMap := make(map[string][]models.MerchandiseVariant)
 	for varRows.Next() {
 		var v models.MerchandiseVariant
-		if err := varRows.Scan(
-			&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
-			&v.StockQuantity, &v.PriceOverride, &v.IsActive,
-			&v.CreatedAt, &v.UpdatedAt,
+		if err := varRows.Scan(&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+			&v.StockQuantity, &v.PriceOverride, &v.IsActive, &v.CreatedAt, &v.UpdatedAt,
 		); err != nil {
 			continue
 		}
@@ -198,7 +178,6 @@ func GetAllMerchandise(pool *pgxpool.Pool, limit int) ([]models.Merchandise, err
 	return items, nil
 }
 
-// GetVariantsByMerchandise returns all active variants for a merchandise item.
 func GetVariantsByMerchandise(pool *pgxpool.Pool, merchID string) ([]models.MerchandiseVariant, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -218,10 +197,8 @@ func GetVariantsByMerchandise(pool *pgxpool.Pool, merchID string) ([]models.Merc
 	var variants []models.MerchandiseVariant
 	for rows.Next() {
 		var v models.MerchandiseVariant
-		if err := rows.Scan(
-			&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
-			&v.StockQuantity, &v.PriceOverride, &v.IsActive,
-			&v.CreatedAt, &v.UpdatedAt,
+		if err := rows.Scan(&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+			&v.StockQuantity, &v.PriceOverride, &v.IsActive, &v.CreatedAt, &v.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -230,13 +207,7 @@ func GetVariantsByMerchandise(pool *pgxpool.Pool, merchID string) ([]models.Merc
 	return variants, nil
 }
 
-// GetVariantByID fetches a single variant with its parent merchandise, including
-// fulfillment configuration. Also enforces the parent's sale window.
-// Returns the variant, base price, fulfillment info, and any error.
-func GetVariantByID(
-	pool *pgxpool.Pool,
-	variantID string,
-) (*models.MerchandiseVariant, float64, *models.MerchFulfillmentInfo, error) {
+func GetVariantByID(pool *pgxpool.Pool, variantID string) (*models.MerchandiseVariant, float64, *models.MerchFulfillmentInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -267,13 +238,10 @@ func GetVariantByID(
 	return &v, basePrice, &fi, nil
 }
 
-// CreateMerchandise inserts a new merch item.
-// eventID is optional — pass nil to create standalone merch not tied to any event.
 func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMerchandiseDTO) (*models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Default fulfillment_mode to 'delivery' when omitted
 	mode := dto.FulfillmentMode
 	if mode == "" {
 		mode = string(models.FulfillmentModeDelivery)
@@ -306,7 +274,45 @@ func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMe
 	return &m, nil
 }
 
-// CreateVariant inserts a new variant for a merchandise item.
+// AdminCreateMerchandise inserts a new merch item pre-approved.
+// Admin-created items bypass the organiser review queue and are
+// visible to buyers immediately (subject to is_active and sale window).
+func AdminCreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMerchandiseDTO) (*models.Merchandise, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mode := dto.FulfillmentMode
+	if mode == "" {
+		mode = string(models.FulfillmentModeDelivery)
+	}
+
+	var m models.Merchandise
+	err := pool.QueryRow(ctx, fmt.Sprintf(`
+        INSERT INTO merchandise
+          (event_id, name, description, base_price, category, display_order, images,
+           fulfillment_mode, pickup_location, delivery_fee,
+           sale_start, sale_end, approval_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, 'approved')
+        RETURNING %s
+    `, merchSelectCols),
+		eventID, dto.Name, dto.Description, dto.BasePrice,
+		dto.Category, dto.DisplayOrder, dto.Images,
+		mode, dto.PickupLocation, dto.DeliveryFee,
+		dto.SaleStart, dto.SaleEnd,
+	).Scan(
+		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
+		&m.SaleStart, &m.SaleEnd,
+		&m.ApprovalStatus, &m.RejectionReason,
+		&m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create merchandise: %w", err)
+	}
+	return &m, nil
+}
+
 func CreateVariant(pool *pgxpool.Pool, merchID string, dto *models.CreateVariantDTO) (*models.MerchandiseVariant, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -330,8 +336,6 @@ func CreateVariant(pool *pgxpool.Pool, merchID string, dto *models.CreateVariant
 	return &v, nil
 }
 
-// DecrementVariantStock atomically decrements stock. Returns error if insufficient.
-// Also enforces the parent's sale window — can't decrement stock for an expired item.
 func DecrementVariantStock(pool *pgxpool.Pool, variantID string, qty int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -355,9 +359,8 @@ func DecrementVariantStock(pool *pgxpool.Pool, variantID string, qty int) error 
 	return nil
 }
 
-// GetMerchandiseByID returns a single merch item with all its variants.
-// Returns ErrMerchNotFound if the item doesn't exist, is inactive, or outside
-// its sale window.
+// GetMerchandiseByID — FIX: Scan now includes ApprovalStatus + RejectionReason
+// to match the 18-column merchSelectCols (previously only scanned 16).
 func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.MerchandiseDetail, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -373,6 +376,7 @@ func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.Merchandise
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
+		&m.ApprovalStatus, &m.RejectionReason,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
@@ -390,16 +394,7 @@ func GetMerchandiseByID(pool *pgxpool.Pool, merchID string) (*models.Merchandise
 	return detail, nil
 }
 
-// GetMerchandiseByEventFiltered returns merch for an event with optional
-// category and attribute filters. Sale window is always enforced.
-func GetMerchandiseByEventFiltered(
-	pool *pgxpool.Pool,
-	eventID string,
-	limit int,
-	category *string,
-	filterKey *string,
-	filterValue *string,
-) ([]models.Merchandise, error) {
+func GetMerchandiseByEventFiltered(pool *pgxpool.Pool, eventID string, limit int, category *string, filterKey *string, filterValue *string) ([]models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -429,11 +424,8 @@ func GetMerchandiseByEventFiltered(
 	}
 
 	q := fmt.Sprintf(`
-        SELECT %s
-        FROM merchandise
-        %s %s
-        ORDER BY display_order ASC, created_at ASC
-        %s
+        SELECT %s FROM merchandise %s %s
+        ORDER BY display_order ASC, created_at ASC %s
     `, merchSelectCols, where, variantJoin, limitClause)
 
 	rows, err := pool.Query(ctx, q, args...)
@@ -452,7 +444,6 @@ func GetMerchandiseByEventFiltered(
 		items = append(items, m)
 		ids = append(ids, m.ID)
 	}
-
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -472,41 +463,31 @@ func GetMerchandiseByEventFiltered(
 	variantMap := make(map[string][]models.MerchandiseVariant)
 	for varRows.Next() {
 		var v models.MerchandiseVariant
-		if err := varRows.Scan(
-			&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
-			&v.StockQuantity, &v.PriceOverride, &v.IsActive,
-			&v.CreatedAt, &v.UpdatedAt,
+		if err := varRows.Scan(&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
+			&v.StockQuantity, &v.PriceOverride, &v.IsActive, &v.CreatedAt, &v.UpdatedAt,
 		); err != nil {
 			continue
 		}
 		variantMap[v.MerchandiseID] = append(variantMap[v.MerchandiseID], v)
 	}
-
 	for i, item := range items {
 		items[i].Variants = variantMap[item.ID]
 	}
-
 	return items, nil
 }
 
-// UpdateMerchandise updates allowed fields on a merch item.
-// For event-linked merch, verifies the item belongs to an event owned by organizerID.
-// For standalone merch (no event_id), any organizer or admin may update it.
+// UpdateMerchandise — FIX: Scan now includes ApprovalStatus + RejectionReason
+// to match the 18-column mechSelectCols (previously only scanned 16).
 func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMerchandiseDTO, organizerID string) (*models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Check the item exists and get its event_id
 	var eventID *string
-	err := pool.QueryRow(ctx,
-		`SELECT event_id FROM merchandise WHERE id = $1 AND is_active = TRUE`,
-		merchID,
-	).Scan(&eventID)
+	err := pool.QueryRow(ctx, `SELECT event_id FROM merchandise WHERE id = $1 AND is_active = TRUE`, merchID).Scan(&eventID)
 	if err != nil {
 		return nil, ErrMerchNotFound
 	}
 
-	// If linked to an event, verify organizer owns that event
 	if eventID != nil {
 		var verifyID string
 		err = pool.QueryRow(ctx, `
@@ -519,76 +500,36 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 		}
 	}
 
-	// Any content edit puts the item back in the admin review queue.
 	sets := []string{"updated_at = NOW()", "approval_status = 'pending_review'", "rejection_reason = NULL"}
 	args := []any{}
 
-	if dto.Name != nil {
-		args = append(args, *dto.Name)
-		sets = append(sets, fmt.Sprintf("name = $%d", len(args)))
-	}
-	if dto.Description != nil {
-		args = append(args, *dto.Description)
-		sets = append(sets, fmt.Sprintf("description = $%d", len(args)))
-	}
-	if dto.BasePrice != nil {
-		args = append(args, *dto.BasePrice)
-		sets = append(sets, fmt.Sprintf("base_price = $%d", len(args)))
-	}
-	if dto.Category != nil {
-		args = append(args, *dto.Category)
-		sets = append(sets, fmt.Sprintf("category = $%d", len(args)))
-	}
-	if dto.DisplayOrder != nil {
-		args = append(args, *dto.DisplayOrder)
-		sets = append(sets, fmt.Sprintf("display_order = $%d", len(args)))
-	}
-	if dto.IsActive != nil {
-		args = append(args, *dto.IsActive)
-		sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
-	}
-	if dto.Images != nil {
-		args = append(args, *dto.Images)
-		sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args)))
-	}
-	if dto.FulfillmentMode != nil {
-		args = append(args, *dto.FulfillmentMode)
-		sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args)))
-	}
-	if dto.PickupLocation != nil {
-		args = append(args, *dto.PickupLocation)
-		sets = append(sets, fmt.Sprintf("pickup_location = $%d", len(args)))
-	}
-	if dto.DeliveryFee != nil {
-		args = append(args, *dto.DeliveryFee)
-		sets = append(sets, fmt.Sprintf("delivery_fee = $%d", len(args)))
-	}
-	if dto.SaleStart != nil {
-		args = append(args, *dto.SaleStart)
-		sets = append(sets, fmt.Sprintf("sale_start = $%d", len(args)))
-	}
-	if dto.SaleEnd != nil {
-		args = append(args, *dto.SaleEnd)
-		sets = append(sets, fmt.Sprintf("sale_end = $%d", len(args)))
-	}
+	if dto.Name != nil { args = append(args, *dto.Name); sets = append(sets, fmt.Sprintf("name = $%d", len(args))) }
+	if dto.Description != nil { args = append(args, *dto.Description); sets = append(sets, fmt.Sprintf("description = $%d", len(args))) }
+	if dto.BasePrice != nil { args = append(args, *dto.BasePrice); sets = append(sets, fmt.Sprintf("base_price = $%d", len(args))) }
+	if dto.Category != nil { args = append(args, *dto.Category); sets = append(sets, fmt.Sprintf("category = $%d", len(args))) }
+	if dto.DisplayOrder != nil { args = append(args, *dto.DisplayOrder); sets = append(sets, fmt.Sprintf("display_order = $%d", len(args))) }
+	if dto.IsActive != nil { args = append(args, *dto.IsActive); sets = append(sets, fmt.Sprintf("is_active = $%d", len(args))) }
+	if dto.Images != nil { args = append(args, *dto.Images); sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args))) }
+	if dto.FulfillmentMode != nil { args = append(args, *dto.FulfillmentMode); sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args))) }
+	if dto.PickupLocation != nil { args = append(args, *dto.PickupLocation); sets = append(sets, fmt.Sprintf("pickup_location = $%d", len(args))) }
+	if dto.DeliveryFee != nil { args = append(args, *dto.DeliveryFee); sets = append(sets, fmt.Sprintf("delivery_fee = $%d", len(args))) }
+	if dto.SaleStart != nil { args = append(args, *dto.SaleStart); sets = append(sets, fmt.Sprintf("sale_start = $%d", len(args))) }
+	if dto.SaleEnd != nil { args = append(args, *dto.SaleEnd); sets = append(sets, fmt.Sprintf("sale_end = $%d", len(args))) }
 
 	if len(args) == 0 {
 		return nil, fmt.Errorf("no fields to update")
 	}
 
 	args = append(args, merchID)
-	query := fmt.Sprintf(`
-        UPDATE merchandise SET %s
-        WHERE id = $%d
-        RETURNING %s
-    `, joinSets(sets), len(args), merchSelectCols)
-
 	var m models.Merchandise
-	err = pool.QueryRow(ctx, query, args...).Scan(
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+        UPDATE merchandise SET %s WHERE id = $%d RETURNING %s
+    `, joinSets(sets), len(args), merchSelectCols), args...).Scan(
 		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
 		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
 		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
 		&m.SaleStart, &m.SaleEnd,
+		&m.ApprovalStatus, &m.RejectionReason,
 		&m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
@@ -597,77 +538,45 @@ func UpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMer
 	return &m, nil
 }
 
-// DeactivateMerchandise soft-deletes a merch item (sets is_active = false).
-// For event-linked merch, verifies organiser ownership before deactivating.
-// For standalone merch (no event_id), any organizer may deactivate.
 func DeactivateMerchandise(pool *pgxpool.Pool, merchID string, organizerID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Check event_id to determine ownership verification path
 	var eventID *string
-	err := pool.QueryRow(ctx,
-		`SELECT event_id FROM merchandise WHERE id = $1 AND is_active = TRUE`,
-		merchID,
-	).Scan(&eventID)
+	err := pool.QueryRow(ctx, `SELECT event_id FROM merchandise WHERE id = $1 AND is_active = TRUE`, merchID).Scan(&eventID)
 	if err != nil {
 		return ErrMerchNotFound
 	}
 
 	if eventID != nil {
-		// Event-linked: verify organizer owns the event
 		cmd, err := pool.Exec(ctx, `
-            UPDATE merchandise m
-            SET is_active = FALSE, updated_at = NOW()
-            FROM events e
-            WHERE m.event_id = e.id
-            AND m.id = $1
-            AND e.organizer_id = $2
-            AND m.is_active = TRUE
+            UPDATE merchandise m SET is_active = FALSE, updated_at = NOW()
+            FROM events e WHERE m.event_id = e.id AND m.id = $1
+            AND e.organizer_id = $2 AND m.is_active = TRUE
         `, merchID, organizerID)
-		if err != nil {
-			return fmt.Errorf("failed to deactivate merchandise: %w", err)
-		}
-		if cmd.RowsAffected() == 0 {
-			return ErrMerchNotFound
-		}
+		if err != nil { return fmt.Errorf("failed to deactivate merchandise: %w", err) }
+		if cmd.RowsAffected() == 0 { return ErrMerchNotFound }
 	} else {
-		// Standalone merch: no ownership check needed
-		cmd, err := pool.Exec(ctx, `
-            UPDATE merchandise SET is_active = FALSE, updated_at = NOW()
-            WHERE id = $1 AND is_active = TRUE
-        `, merchID)
-		if err != nil {
-			return fmt.Errorf("failed to deactivate merchandise: %w", err)
-		}
-		if cmd.RowsAffected() == 0 {
-			return ErrMerchNotFound
-		}
+		cmd, err := pool.Exec(ctx, `UPDATE merchandise SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND is_active = TRUE`, merchID)
+		if err != nil { return fmt.Errorf("failed to deactivate merchandise: %w", err) }
+		if cmd.RowsAffected() == 0 { return ErrMerchNotFound }
 	}
-
 	return nil
 }
 
-// UpdateVariant updates stock quantity, price override, or active status.
-// For event-linked merch, verifies organiser ownership through the merchandise → event chain.
-// For standalone merch, any organizer may update variants.
-// Returns the updated variant, the event ID (nil for standalone merch), and any error.
 func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO, organizerID string) (*models.MerchandiseVariant, *string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Get the event_id through the variant → merchandise chain
 	var eventID *string
 	err := pool.QueryRow(ctx, `
         SELECT m.event_id FROM merchandise_variants mv
-        JOIN merchandise m ON m.id = mv.merchandise_id
-        WHERE mv.id = $1
+        JOIN merchandise m ON m.id = mv.merchandise_id WHERE mv.id = $1
     `, variantID).Scan(&eventID)
 	if err != nil {
 		return nil, nil, ErrMerchNotFound
 	}
 
-	// Only verify organizer ownership if the merch is linked to an event
 	if eventID != nil {
 		var verifyID string
 		err = pool.QueryRow(ctx, `
@@ -676,62 +585,34 @@ func UpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVaria
             JOIN events e ON e.id = m.event_id
             WHERE mv.id = $1 AND e.organizer_id = $2
         `, variantID, organizerID).Scan(&verifyID)
-		if err != nil {
-			return nil, nil, ErrMerchNotFound
-		}
+		if err != nil { return nil, nil, ErrMerchNotFound }
 	}
 
 	sets := []string{"updated_at = NOW()"}
 	args := []any{}
-
-	if dto.StockQuantity != nil {
-		args = append(args, *dto.StockQuantity)
-		sets = append(sets, fmt.Sprintf("stock_quantity = $%d", len(args)))
-	}
-	if dto.PriceOverride != nil {
-		args = append(args, *dto.PriceOverride)
-		sets = append(sets, fmt.Sprintf("price_override = $%d", len(args)))
-	}
-	if dto.IsActive != nil {
-		args = append(args, *dto.IsActive)
-		sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
-	}
-
-	if len(args) == 0 {
-		return nil, nil, fmt.Errorf("no fields to update")
-	}
+	if dto.StockQuantity != nil { args = append(args, *dto.StockQuantity); sets = append(sets, fmt.Sprintf("stock_quantity = $%d", len(args))) }
+	if dto.PriceOverride != nil { args = append(args, *dto.PriceOverride); sets = append(sets, fmt.Sprintf("price_override = $%d", len(args))) }
+	if dto.IsActive != nil { args = append(args, *dto.IsActive); sets = append(sets, fmt.Sprintf("is_active = $%d", len(args))) }
+	if len(args) == 0 { return nil, nil, fmt.Errorf("no fields to update") }
 
 	args = append(args, variantID)
-	query := fmt.Sprintf(`
-        UPDATE merchandise_variants SET %s
-        WHERE id = $%d
+	var v models.MerchandiseVariant
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+        UPDATE merchandise_variants SET %s WHERE id = $%d
         RETURNING id, merchandise_id, sku, attributes::text,
                   stock_quantity, price_override, is_active, created_at, updated_at
-    `, joinSets(sets), len(args))
-
-	var v models.MerchandiseVariant
-	err = pool.QueryRow(ctx, query, args...).Scan(
+    `, joinSets(sets), len(args)), args...).Scan(
 		&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
-		&v.StockQuantity, &v.PriceOverride, &v.IsActive,
-		&v.CreatedAt, &v.UpdatedAt,
+		&v.StockQuantity, &v.PriceOverride, &v.IsActive, &v.CreatedAt, &v.UpdatedAt,
 	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to update variant: %w", err)
-	}
+	if err != nil { return nil, nil, fmt.Errorf("failed to update variant: %w", err) }
 	return &v, eventID, nil
 }
 
-// ExpireMerchListings deactivates merchandise items whose sale window has closed.
-// Returns the IDs of affected events so callers can bust the merch cache.
-// Standalone merch (NULL event_id) is expired but not returned in eventIDs.
-// Called by the expiry worker on every tick.
 func ExpireMerchListings(pool *pgxpool.Pool, ctx context.Context) ([]string, error) {
 	rows, err := pool.Query(ctx, `
-        UPDATE merchandise
-        SET is_active = FALSE, updated_at = NOW()
-        WHERE is_active = TRUE
-          AND sale_end IS NOT NULL
-          AND sale_end < NOW()
+        UPDATE merchandise SET is_active = FALSE, updated_at = NOW()
+        WHERE is_active = TRUE AND sale_end IS NOT NULL AND sale_end < NOW()
         RETURNING event_id
     `)
 	if err != nil {
@@ -743,13 +624,8 @@ func ExpireMerchListings(pool *pgxpool.Pool, ctx context.Context) ([]string, err
 	var eventIDs []string
 	for rows.Next() {
 		var eid *string
-		if err := rows.Scan(&eid); err != nil {
-			continue
-		}
-		// Skip standalone merch (no event to bust cache for)
-		if eid == nil {
-			continue
-		}
+		if err := rows.Scan(&eid); err != nil { continue }
+		if eid == nil { continue }
 		if _, ok := seen[*eid]; !ok {
 			seen[*eid] = struct{}{}
 			eventIDs = append(eventIDs, *eid)
@@ -758,103 +634,86 @@ func ExpireMerchListings(pool *pgxpool.Pool, ctx context.Context) ([]string, err
 	return eventIDs, nil
 }
 
-// joinSets is a small helper to comma-join SET clauses.
 func joinSets(sets []string) string {
 	result := ""
 	for i, s := range sets {
-		if i > 0 {
-			result += ", "
-		}
+		if i > 0 { result += ", " }
 		result += s
 	}
 	return result
 }
 
-// AdminUpdateMerchandise updates a merch item with no ownership check.
-// Used by admin endpoints — works on both active and inactive items.
+// AdminUpdateMerchandise — uses UPDATE then SELECT (not RETURNING) so it stays
+// correct even if merchSelectCols grows in future. No ownership check.
 func AdminUpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.UpdateMerchandiseDTO) (*models.Merchandise, error) {
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-    sets := []string{"updated_at = NOW()"}
-    args := []any{}
+	sets := []string{"updated_at = NOW()"}
+	args := []any{}
 
-    if dto.Name != nil {
-        args = append(args, *dto.Name)
-        sets = append(sets, fmt.Sprintf("name = $%d", len(args)))
-    }
-    if dto.Description != nil {
-        args = append(args, *dto.Description)
-        sets = append(sets, fmt.Sprintf("description = $%d", len(args)))
-    }
-    if dto.BasePrice != nil {
-        args = append(args, *dto.BasePrice)
-        sets = append(sets, fmt.Sprintf("base_price = $%d", len(args)))
-    }
-    if dto.Category != nil {
-        args = append(args, *dto.Category)
-        sets = append(sets, fmt.Sprintf("category = $%d", len(args)))
-    }
-    if dto.DisplayOrder != nil {
-        args = append(args, *dto.DisplayOrder)
-        sets = append(sets, fmt.Sprintf("display_order = $%d", len(args)))
-    }
-    if dto.IsActive != nil {
-        args = append(args, *dto.IsActive)
-        sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
-    }
-    if dto.Images != nil {
-        args = append(args, *dto.Images)
-        sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args)))
-    }
-    if dto.FulfillmentMode != nil {
-        args = append(args, *dto.FulfillmentMode)
-        sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args)))
-    }
-    if dto.PickupLocation != nil {
-        args = append(args, *dto.PickupLocation)
-        sets = append(sets, fmt.Sprintf("pickup_location = $%d", len(args)))
-    }
-    if dto.DeliveryFee != nil {
-        args = append(args, *dto.DeliveryFee)
-        sets = append(sets, fmt.Sprintf("delivery_fee = $%d", len(args)))
-    }
-    if dto.SaleStart != nil {
-        args = append(args, *dto.SaleStart)
-        sets = append(sets, fmt.Sprintf("sale_start = $%d", len(args)))
-    }
-    if dto.SaleEnd != nil {
-        args = append(args, *dto.SaleEnd)
-        sets = append(sets, fmt.Sprintf("sale_end = $%d", len(args)))
-    }
+	if dto.Name != nil { args = append(args, *dto.Name); sets = append(sets, fmt.Sprintf("name = $%d", len(args))) }
+	if dto.Description != nil { args = append(args, *dto.Description); sets = append(sets, fmt.Sprintf("description = $%d", len(args))) }
+	if dto.BasePrice != nil { args = append(args, *dto.BasePrice); sets = append(sets, fmt.Sprintf("base_price = $%d", len(args))) }
+	if dto.Category != nil { args = append(args, *dto.Category); sets = append(sets, fmt.Sprintf("category = $%d", len(args))) }
+	if dto.DisplayOrder != nil { args = append(args, *dto.DisplayOrder); sets = append(sets, fmt.Sprintf("display_order = $%d", len(args))) }
+	if dto.IsActive != nil {
+		args = append(args, *dto.IsActive)
+		sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
+		// Admin is the approval authority: activating also approves,
+		// making the item visible in buyer-facing drops/collections.
+		if *dto.IsActive {
+			sets = append(sets, "approval_status = 'approved'", "rejection_reason = NULL")
+		}
+	}
+	if dto.Images != nil { args = append(args, *dto.Images); sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args))) }
+	if dto.FulfillmentMode != nil { args = append(args, *dto.FulfillmentMode); sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args))) }
+	if dto.PickupLocation != nil { args = append(args, *dto.PickupLocation); sets = append(sets, fmt.Sprintf("pickup_location = $%d", len(args))) }
+	if dto.DeliveryFee != nil { args = append(args, *dto.DeliveryFee); sets = append(sets, fmt.Sprintf("delivery_fee = $%d", len(args))) }
+	if dto.SaleStart != nil { args = append(args, *dto.SaleStart); sets = append(sets, fmt.Sprintf("sale_start = $%d", len(args))) }
+	if dto.SaleEnd != nil { args = append(args, *dto.SaleEnd); sets = append(sets, fmt.Sprintf("sale_end = $%d", len(args))) }
 
-    if len(args) == 0 {
-        return nil, fmt.Errorf("no fields to update")
-    }
+	if len(args) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
 
-    args = append(args, merchID)
-    query := fmt.Sprintf(`
-        UPDATE merchandise SET %s
-        WHERE id = $%d
-        RETURNING %s
-    `, joinSets(sets), len(args), merchSelectCols)
+	args = append(args, merchID)
+	res, err := pool.Exec(ctx,
+		fmt.Sprintf("UPDATE merchandise SET %s WHERE id = $%d", joinSets(sets), len(args)),
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update merchandise: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		return nil, ErrMerchNotFound
+	}
 
-    var m models.Merchandise
-    err := pool.QueryRow(ctx, query, args...).Scan(
-        &m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
-        &m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
-        &m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
-        &m.SaleStart, &m.SaleEnd,
-        &m.CreatedAt, &m.UpdatedAt,
-    )
-    if err != nil {
-        return nil, fmt.Errorf("failed to update merchandise: %w", err)
-    }
-    return &m, nil
+	var m models.Merchandise
+	err = pool.QueryRow(ctx, `
+		SELECT id, event_id, name, description, base_price, category,
+		       display_order, is_active, images::text,
+		       fulfillment_mode, pickup_location, delivery_fee,
+		       sale_start, sale_end,
+		       approval_status, rejection_reason,
+		       created_at, updated_at
+		FROM merchandise WHERE id = $1
+	`, merchID).Scan(
+		&m.ID, &m.EventID, &m.Name, &m.Description, &m.BasePrice,
+		&m.Category, &m.DisplayOrder, &m.IsActive, &m.Images,
+		&m.FulfillmentMode, &m.PickupLocation, &m.DeliveryFee,
+		&m.SaleStart, &m.SaleEnd,
+		&m.ApprovalStatus, &m.RejectionReason,
+		&m.CreatedAt, &m.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch updated merchandise: %w", err)
+	}
+	return &m, nil
 }
+
 // ── Admin merch approval ──────────────────────────────────────────────────────
 
-// AdminGetPendingMerch returns all merch items in pending_review, oldest first.
 func AdminGetPendingMerch(pool *pgxpool.Pool) ([]models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -893,121 +752,70 @@ func AdminGetPendingMerch(pool *pgxpool.Pool) ([]models.Merchandise, error) {
 		}
 		items = append(items, m)
 	}
-	if items == nil {
-		items = []models.Merchandise{}
-	}
+	if items == nil { items = []models.Merchandise{} }
 	return items, rows.Err()
 }
 
-// AdminApproveMerch approves a pending_review merch item.
-// The item becomes visible to buyers immediately.
 func AdminApproveMerch(pool *pgxpool.Pool, merchID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	cmd, err := pool.Exec(ctx, `
-		UPDATE merchandise
-		SET    approval_status = 'approved', rejection_reason = NULL
-		WHERE  id = $1 AND approval_status = 'pending_review'
+		UPDATE merchandise SET approval_status = 'approved', rejection_reason = NULL
+		WHERE id = $1 AND approval_status = 'pending_review'
 	`, merchID)
-	if err != nil {
-		return fmt.Errorf("AdminApproveMerch: %w", err)
-	}
-	if cmd.RowsAffected() == 0 {
-		return ErrMerchNotFound
-	}
+	if err != nil { return fmt.Errorf("AdminApproveMerch: %w", err) }
+	if cmd.RowsAffected() == 0 { return ErrMerchNotFound }
 	return nil
 }
 
-// AdminRejectMerch rejects a pending_review merch item with a reason.
-// The organiser can edit the item and resubmit via OrgResubmitMerch.
 func AdminRejectMerch(pool *pgxpool.Pool, merchID string, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	cmd, err := pool.Exec(ctx, `
-		UPDATE merchandise
-		SET    approval_status = 'rejected', rejection_reason = $1
-		WHERE  id = $2 AND approval_status = 'pending_review'
+		UPDATE merchandise SET approval_status = 'rejected', rejection_reason = $1
+		WHERE id = $2 AND approval_status = 'pending_review'
 	`, reason, merchID)
-	if err != nil {
-		return fmt.Errorf("AdminRejectMerch: %w", err)
-	}
-	if cmd.RowsAffected() == 0 {
-		return ErrMerchNotFound
-	}
+	if err != nil { return fmt.Errorf("AdminRejectMerch: %w", err) }
+	if cmd.RowsAffected() == 0 { return ErrMerchNotFound }
 	return nil
 }
 
-// OrgResubmitMerch resets a rejected merch item back to pending_review.
-// Only the organiser who owns the linked event can resubmit.
-// The organiser should first edit the item (UpdateMerchandise auto-resets status),
-// then call this if they want to resubmit without making further edits.
 func OrgResubmitMerch(pool *pgxpool.Pool, merchID string, organizerID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	cmd, err := pool.Exec(ctx, `
 		UPDATE merchandise m
-		SET    approval_status  = 'pending_review',
-		       rejection_reason = NULL,
-		       updated_at       = NOW()
+		SET    approval_status = 'pending_review', rejection_reason = NULL, updated_at = NOW()
 		FROM   events e
-		WHERE  m.id              = $1
-		  AND  m.approval_status = 'rejected'
-		  AND  e.id              = m.event_id
-		  AND  e.organizer_id    = $2
+		WHERE  m.id = $1 AND m.approval_status = 'rejected'
+		  AND  e.id = m.event_id AND e.organizer_id = $2
 	`, merchID, organizerID)
-	if err != nil {
-		return fmt.Errorf("OrgResubmitMerch: %w", err)
-	}
-	if cmd.RowsAffected() == 0 {
-		return ErrMerchNotFound
-	}
+	if err != nil { return fmt.Errorf("OrgResubmitMerch: %w", err) }
+	if cmd.RowsAffected() == 0 { return ErrMerchNotFound }
 	return nil
 }
 
-// AdminUpdateVariant updates stock, price override, or active status on any
-// variant — no organizer ownership check. Admin dashboard use only.
 func AdminUpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.UpdateVariantDTO) (*models.MerchandiseVariant, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	sets := []string{"updated_at = NOW()"}
 	args := []any{}
-
-	if dto.StockQuantity != nil {
-		args = append(args, *dto.StockQuantity)
-		sets = append(sets, fmt.Sprintf("stock_quantity = $%d", len(args)))
-	}
-	if dto.PriceOverride != nil {
-		args = append(args, *dto.PriceOverride)
-		sets = append(sets, fmt.Sprintf("price_override = $%d", len(args)))
-	}
-	if dto.IsActive != nil {
-		args = append(args, *dto.IsActive)
-		sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
-	}
-
-	if len(args) == 0 {
-		return nil, fmt.Errorf("no fields to update")
-	}
+	if dto.StockQuantity != nil { args = append(args, *dto.StockQuantity); sets = append(sets, fmt.Sprintf("stock_quantity = $%d", len(args))) }
+	if dto.PriceOverride != nil { args = append(args, *dto.PriceOverride); sets = append(sets, fmt.Sprintf("price_override = $%d", len(args))) }
+	if dto.IsActive != nil { args = append(args, *dto.IsActive); sets = append(sets, fmt.Sprintf("is_active = $%d", len(args))) }
+	if len(args) == 0 { return nil, fmt.Errorf("no fields to update") }
 
 	args = append(args, variantID)
 	var v models.MerchandiseVariant
 	err := pool.QueryRow(ctx, fmt.Sprintf(`
-        UPDATE merchandise_variants
-        SET %s
-        WHERE id = $%d
+        UPDATE merchandise_variants SET %s WHERE id = $%d
         RETURNING id, merchandise_id, sku, attributes::text,
                   stock_quantity, price_override, is_active, created_at, updated_at
     `, joinSets(sets), len(args)), args...).Scan(
 		&v.ID, &v.MerchandiseID, &v.SKU, &v.Attributes,
-		&v.StockQuantity, &v.PriceOverride, &v.IsActive,
-		&v.CreatedAt, &v.UpdatedAt,
+		&v.StockQuantity, &v.PriceOverride, &v.IsActive, &v.CreatedAt, &v.UpdatedAt,
 	)
-	if err != nil {
-		return nil, ErrMerchNotFound
-	}
+	if err != nil { return nil, ErrMerchNotFound }
 	return &v, nil
 }

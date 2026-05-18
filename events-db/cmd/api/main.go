@@ -267,7 +267,6 @@ func main() {
 		public.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 		// Ticket types — visible tiers for the event detail page
-		// Ticket types — visible tiers for the event detail page
 		public.GET("/:id/ticket-types",  handlers.GetTicketTypesHandler(pool))
 		// Frontend calls this once when the user opens the event detail screen.
 		// Keeps view counts accurate — only real user opens are counted.
@@ -511,7 +510,8 @@ func main() {
 		admin.GET("/merch",          handlers.GetAllMerchHandler(pool))
 		admin.PUT("/merch/:id",      handlers.AdminUpdateMerchHandler(pool, eventCache))
 		// Create standalone merch (not linked to any event) — admin
-		admin.POST("/merch",         handlers.AdminCreateMerchHandler(pool, eventCache))
+		admin.POST("/merch",                handlers.AdminCreateMerchHandler(pool, eventCache))
+		admin.POST("/events/:id/merch",     handlers.AdminCreateEventMerchHandler(pool, eventCache))
 		// Assign / un-assign any merch item to any collection — admin
 		admin.PUT("/merch/variants/:id",     handlers.AdminUpdateVariantHandler(pool))
 		admin.POST("/upload",                handlers.UploadAdminImageHandler(imgService))

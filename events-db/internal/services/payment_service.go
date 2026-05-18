@@ -66,46 +66,77 @@ type refundPaymentResponse struct {
 
 var ErrPaymentServiceUnavailable = errors.New("payment service temporarily unavailable")
 
+// clientError wraps a 4xx response from Stitch. The circuit breaker's
+// IsSuccessful callback treats these as successes so they don't count toward
+// tripping the breaker — a bad request is a client bug, not an outage.
+type clientError struct{ err error }
+
+func (e *clientError) Error() string { return e.err.Error() }
+func (e *clientError) Unwrap() error { return e.err }
+
 type PaymentService struct {
-	pool        *pgxpool.Pool
-	cfg         *config.Config
-	httpClient  *http.Client
-	tokenMu     sync.Mutex
-	cachedToken *stitchToken
-	jobChan     chan<- string
-	breaker     *gobreaker.CircuitBreaker
+	pool         *pgxpool.Pool
+	cfg          *config.Config
+	httpClient   *http.Client
+	tokenMu      sync.Mutex
+	cachedToken  *stitchToken
+	jobChan      chan<- string
+	breaker      *gobreaker.CircuitBreaker // guards GraphQL calls
+	tokenBreaker *gobreaker.CircuitBreaker // guards OAuth token endpoint
 }
 
 func NewPaymentService(pool *pgxpool.Pool, cfg *config.Config, jobChan chan<- string) *PaymentService {
-	// Trip after 5 consecutive failures.
-	// Wait 30 seconds before trying a single probe request (half-open).
-	// Close again once 2 consecutive probes succeed.
-	breakerSettings := gobreaker.Settings{
-		Name:        "stitch",
-		MaxRequests: 2,
-		Interval:    60 * time.Second,
-		Timeout:     30 * time.Second,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			return counts.ConsecutiveFailures >= 5
-		},
-		OnStateChange: func(name string, from, to gobreaker.State) {
-			log.Warn().
-				Str("breaker", name).
-				Str("from", from.String()).
-				Str("to", to.String()).
-				Msg("payment circuit breaker state changed")
-		},
+	// isSuccessful returns true for clientErrors (4xx responses) so they don't
+	// count as failures toward tripping the breaker. A bad request is a client
+	// bug; a 5xx or network error is an infrastructure problem.
+	isSuccessful := func(err error) bool {
+		var ce *clientError
+		return err == nil || errors.As(err, &ce)
 	}
- 
+
+	// GraphQL breaker — trips after 5 consecutive infrastructure failures.
+	// Waits 30 s before allowing a single probe request (half-open).
+	// Closes again once 2 consecutive probes succeed.
+	graphQLBreaker := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:          "stitch-graphql",
+		MaxRequests:   2,
+		Interval:      60 * time.Second,
+		Timeout:       30 * time.Second,
+		IsSuccessful:  isSuccessful,
+		ReadyToTrip:   func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= 5 },
+		OnStateChange: logBreakerStateChange,
+	})
+
+	// Token breaker — separate so a token-endpoint outage doesn't conflate
+	// with GraphQL failures, and vice versa. Slightly more lenient (3 failures)
+	// because token fetches are less frequent than GraphQL calls.
+	tokenBreaker := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:          "stitch-token",
+		MaxRequests:   1,
+		Interval:      60 * time.Second,
+		Timeout:       30 * time.Second,
+		ReadyToTrip:   func(c gobreaker.Counts) bool { return c.ConsecutiveFailures >= 3 },
+		OnStateChange: logBreakerStateChange,
+	})
+
 	return &PaymentService{
 		pool: pool,
 		cfg:  cfg,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		jobChan: jobChan,
-		breaker: gobreaker.NewCircuitBreaker(breakerSettings),
+		jobChan:      jobChan,
+		breaker:      graphQLBreaker,
+		tokenBreaker: tokenBreaker,
 	}
+}
+
+func logBreakerStateChange(name string, from, to gobreaker.State) {
+	log.Warn().
+		Str("breaker", name).
+		Str("from", from.String()).
+		Str("to", to.String()).
+		Msg("payment circuit breaker state changed")
 }
 
 func (s *PaymentService) getAccessToken(ctx context.Context) (string, error) {
@@ -123,30 +154,41 @@ func (s *PaymentService) getAccessToken(ctx context.Context) (string, error) {
 	formData.Set("audience", stitchTokenAudience)
 	formData.Set("scope", "client_paymentrequest")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, stitchTokenURL, strings.NewReader(formData.Encode()))
+	result, err := s.tokenBreaker.Execute(func() (interface{}, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, stitchTokenURL, strings.NewReader(formData.Encode()))
+		if err != nil {
+			return nil, fmt.Errorf("creating token request: %w", err)
+		}
+		req.Header.Set("Content-type", "application/x-www-form-urlencoded")
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("fetching stitch token: %w", err)
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("stitch token endpoint returned %d: %s", resp.StatusCode, string(body))
+		}
+
+		var tok stitchToken
+		if err := json.Unmarshal(body, &tok); err != nil {
+			return nil, fmt.Errorf("decoding token response: %w", err)
+		}
+		return &tok, nil
+	})
+
 	if err != nil {
-		return "", fmt.Errorf("creating token request: %w", err)
-	}
-	req.Header.Set("Content-type", "application/x-www-form-urlencoded")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetching stitch token: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("stitch token endpoint returned %d: %s", resp.StatusCode, string(body))
+		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+			return "", ErrPaymentServiceUnavailable
+		}
+		return "", err
 	}
 
-	var tok stitchToken
-	if err := json.Unmarshal(body, &tok); err != nil {
-		return "", fmt.Errorf("decoding token response: %w", err)
-	}
-
+	tok := result.(*stitchToken)
 	tok.ExpiresAt = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second)
-	s.cachedToken = &tok
+	s.cachedToken = tok
 	return tok.AccessToken, nil
 }
 
@@ -181,13 +223,17 @@ func (s *PaymentService) graphQL(ctx context.Context, query string, variables ma
 		respBody, _ := io.ReadAll(resp.Body)
  
 		// 5xx responses are transient Stitch failures — count toward tripping.
-		// 4xx responses are client errors (bad input) — don't count as failures.
 		if resp.StatusCode >= 500 {
 			return nil, fmt.Errorf("stitch graphql returned %d: %s", resp.StatusCode, string(respBody))
 		}
+
+		// 4xx responses are client errors (bad input, auth) — wrap in
+		// clientError so IsSuccessful treats them as non-failures and the
+		// breaker doesn't count them. Surface the real error to the caller.
 		if resp.StatusCode != http.StatusOK {
-			// 4xx: return the error but wrap it so the breaker ignores it.
-			return nil, gobreaker.ErrOpenState // reuse sentinel to skip count
+			return nil, &clientError{
+				err: fmt.Errorf("stitch graphql returned %d: %s", resp.StatusCode, string(respBody)),
+			}
 		}
  
 		var gqlResp graphQLResponse
@@ -201,7 +247,9 @@ func (s *PaymentService) graphQL(ctx context.Context, query string, variables ma
 				msgs[i] = e.Message
 			}
 			// GraphQL application errors are not infrastructure failures.
-			return &gqlResp, fmt.Errorf("graphql errors: %s", strings.Join(msgs, "; "))
+			return &gqlResp, &clientError{
+				err: fmt.Errorf("graphql errors: %s", strings.Join(msgs, "; ")),
+			}
 		}
  
 		return &gqlResp, nil
@@ -210,6 +258,11 @@ func (s *PaymentService) graphQL(ctx context.Context, query string, variables ma
 	if err != nil {
 		if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
 			return ErrPaymentServiceUnavailable
+		}
+		// Unwrap clientError so the caller sees the underlying error, not the wrapper.
+		var ce *clientError
+		if errors.As(err, &ce) {
+			return ce.err
 		}
 		return err
 	}

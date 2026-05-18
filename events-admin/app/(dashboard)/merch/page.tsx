@@ -8,7 +8,7 @@ import { useConfirm } from '../../../lib/confirm';
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface EventOption  { id: string; title: string; status: string; }
 interface Collection   { id: string; name: string; description?: string; cover_image?: string; display_order: number; is_active: boolean; organizer_id?: string; created_at: string; updated_at: string; }
-interface MerchItem    { id: string; name: string; description?: string; base_price: number; event_id?: string; event_title?: string; category?: string; collection_id?: string; is_active: boolean; fulfillment_mode: string; pickup_location?: string; delivery_fee?: number; sale_start?: string; sale_end?: string; images?: string; display_order: number; variants: Variant[]; }
+interface MerchItem    { id: string; name: string; description?: string; base_price: number; event_id?: string; event_title?: string; category?: string; collection_id?: string; is_active: boolean; approval_status?: string; fulfillment_mode: string; pickup_location?: string; delivery_fee?: number; sale_start?: string; sale_end?: string; images?: string; display_order: number; variants: Variant[]; }
 interface Variant      { id: string; sku: string; attributes: string; stock_quantity: number; price_override?: number; is_active: boolean; }
 
 type Placement = 'standalone' | 'event' | 'collection';
@@ -102,6 +102,7 @@ export default function MerchPage() {
   // image uploader
   const [uploadedImages,   setUploadedImages]   = useState<string[]>([]);
   const [imgUploading,     setImgUploading]     = useState(false);
+  const [editIsActive,     setEditIsActive]     = useState(true);
 
   // ── Collections tab state ────────────────────────────────────────────────
   const [collSearch,   setCollSearch]  = useState('');
@@ -183,6 +184,7 @@ export default function MerchPage() {
     else if (item.collection_id) { setPlacement('collection'); setPlCollectionId(item.collection_id); setPlEventId('');   }
     else                         { setPlacement('standalone'); setPlEventId('');                      setPlCollectionId(''); }
     setShowNewCollInline(false);
+    setEditIsActive(item.is_active);
 
     // All data is already in the item passed from the list — no extra API call needed
     setMFormState({
@@ -280,7 +282,8 @@ export default function MerchPage() {
       if (mForm.pickup_location) body.pickup_location = mForm.pickup_location;
       if (mForm.sale_start)     body.sale_start     = toISO(mForm.sale_start);
       if (mForm.sale_end)       body.sale_end       = toISO(mForm.sale_end);
-      if (uploadedImages.length > 0) body.images = JSON.stringify(uploadedImages);
+      if (uploadedImages.length > 0) body.images = uploadedImages;   // array, not JSON string
+      if (editingMerchId) body.is_active = editIsActive;              // allow reactivation
 
       let savedId = editingMerchId;
 
@@ -290,7 +293,7 @@ export default function MerchPage() {
       } else {
         let res;
         if (placement === 'event' && plEventId) {
-          res = await api.post<{ id: string }>(`/organiser/events/${plEventId}/merch`, body);
+          res = await api.post<{ id: string }>(`/admin/events/${plEventId}/merch`, body);
         } else {
           res = await api.post<{ id: string }>('/admin/merch', body);
         }
@@ -847,6 +850,28 @@ export default function MerchPage() {
                 <div className="field"><label>Sale Start</label><input type="datetime-local" value={mForm.sale_start} onChange={e => setMF({ sale_start: e.target.value })} /></div>
                 <div className="field"><label>Sale End</label><input type="datetime-local" value={mForm.sale_end} onChange={e => setMF({ sale_end: e.target.value })} /></div>
               </div>
+              {/* ── Status (edit only) ── */}
+              {editingMerchId && (
+                <>
+                  <div className="section-sep">Status</div>
+                  <div style={{ display: 'flex', gap: '.5rem', marginBottom: '.5rem' }}>
+                    {([true, false] as const).map(val => (
+                      <button key={String(val)} onClick={() => setEditIsActive(val)}
+                        style={{
+                          flex: 1, padding: '.45rem', borderRadius: 'var(--r)', fontSize: '.83rem',
+                          fontWeight: editIsActive === val ? 600 : 400, cursor: 'pointer',
+                          border: `1px solid ${editIsActive === val ? (val ? 'var(--accent)' : 'var(--danger)') : 'var(--border)'}`,
+                          background: editIsActive === val ? (val ? 'var(--accent-d)' : 'rgba(255,59,48,.15)') : 'var(--surface-2)',
+                          color: editIsActive === val ? (val ? 'var(--accent)' : 'var(--danger)') : 'var(--text-2)',
+                        }}>
+                        {val ? '● Active' : '○ Inactive'}
+                      </button>
+                    ))}
+                  </div>
+                  {!editIsActive && <small style={{ color: 'var(--text-3)', fontSize: '.74rem' }}>Setting to Active will make this item visible in the app again.</small>}
+                </>
+              )}
+
               {/* ── Images ── */}
               <div className="field">
                 <label>Images</label>

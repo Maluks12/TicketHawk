@@ -14,15 +14,11 @@ import (
 
 // ── Public read handlers ───────────────────────────────────────────────────────
 
-// GetEventMerchHandler returns the full merch catalogue for an event.
-// Supports optional ?category= and ?attribute[key]=value filters.
-// Filters bypass the cache since they produce user-specific subsets.
 func GetEventMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		eventID := c.Param("id")
 		ctx := c.Request.Context()
 
-		// Check for filters — filtered requests skip cache
 		categoryFilter := c.Query("category")
 		attrKey := c.Query("attribute_key")
 		attrVal := c.Query("attribute_value")
@@ -40,13 +36,8 @@ func GetEventMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 
 		if hasFilters {
 			var catPtr, keyPtr, valPtr *string
-			if categoryFilter != "" {
-				catPtr = &categoryFilter
-			}
-			if attrKey != "" {
-				keyPtr = &attrKey
-				valPtr = &attrVal
-			}
+			if categoryFilter != "" { catPtr = &categoryFilter }
+			if attrKey != "" { keyPtr = &attrKey; valPtr = &attrVal }
 			items, err = repository.GetMerchandiseByEventFiltered(pool, eventID, 0, catPtr, keyPtr, valPtr)
 		} else {
 			items, err = repository.GetMerchandiseByEvent(pool, eventID, 0)
@@ -65,7 +56,6 @@ func GetEventMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerF
 	}
 }
 
-// GetEventMerchPreviewHandler returns the first 4 items for the event detail page.
 func GetEventMerchPreviewHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		eventID := c.Param("id")
@@ -92,8 +82,6 @@ func GetEventMerchPreviewHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.H
 	}
 }
 
-// GetMerchByIDHandler returns a single merch item with full variant detail
-// and a stock summary. This powers the dedicated merch item page.
 func GetMerchByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		merchID := c.Param("id")
@@ -122,8 +110,6 @@ func GetMerchByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 
 // ── Organiser write handlers ───────────────────────────────────────────────────
 
-// OrgCreateMerchHandler creates a new merch item linked to a specific event.
-// Route: POST /organiser/events/:id/merch
 func OrgCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		eventID := c.Param("id")
@@ -150,9 +136,6 @@ func OrgCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 	}
 }
 
-// OrgCreateStandaloneMerchHandler creates a merch item NOT linked to any event.
-// Organizers can use this for general store merchandise.
-// Route: POST /organiser/merch
 func OrgCreateStandaloneMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dto models.CreateMerchandiseDTO
@@ -161,7 +144,6 @@ func OrgCreateStandaloneMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) g
 			return
 		}
 
-		// Pass nil for eventID — creates standalone merch
 		item, err := repository.CreateMerchandise(pool, nil, &dto)
 		if err != nil {
 			utils.InternalError(c, err, "create standalone merchandise")
@@ -175,9 +157,6 @@ func OrgCreateStandaloneMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) g
 	}
 }
 
-// OrgUpdateMerchHandler updates an existing merch item.
-// Only fields provided in the request body are updated.
-// Works for both event-linked and standalone merch.
 func OrgUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID := c.GetString("user_id")
@@ -203,27 +182,19 @@ func OrgUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			return
 		}
 
-		// Only bust cache if linked to an event
 		if ec != nil && item.EventID != nil {
 			ec.BustMerch(c.Request.Context(), *item.EventID, merchID)
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Merchandise updated successfully",
-			"item":    item,
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "Merchandise updated successfully", "item": item})
 	}
 }
 
-// OrgDeactivateMerchHandler soft-deletes a merch item (sets is_active = false).
-// Does not delete the record — keeps order history intact.
-// Works for both event-linked and standalone merch.
 func OrgDeactivateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID := c.GetString("user_id")
 		merchID := c.Param("id")
 
-		// Need eventID before deactivating for cache bust
 		var eventID string
 		if item, err := repository.GetMerchandiseByID(pool, merchID); err == nil {
 			if item.EventID != nil {
@@ -252,8 +223,6 @@ func OrgDeactivateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Han
 	}
 }
 
-// OrgCreateVariantHandler adds a new size/colour variant to a merch item.
-// Works for both event-linked and standalone merch.
 func OrgCreateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		merchID := c.Param("id")
@@ -269,7 +238,6 @@ func OrgCreateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 			return
 		}
 
-		// Bust cache only if the merch is linked to an event
 		if ec != nil {
 			var eventID *string
 			pool.QueryRow(c.Request.Context(),
@@ -284,8 +252,6 @@ func OrgCreateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 	}
 }
 
-// OrgUpdateVariantHandler updates stock, price override, or active status
-// on a specific variant. This is how organisers restock or reprice SKUs.
 func OrgUpdateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID := c.GetString("user_id")
@@ -311,8 +277,6 @@ func OrgUpdateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 			return
 		}
 
-		// Bust both the event merch list and the specific item cache
-		// Only if the merch is linked to an event
 		if ec != nil && eventID != nil {
 			ec.BustMerch(c.Request.Context(), *eventID, variant.MerchandiseID)
 		}
@@ -327,8 +291,9 @@ func OrgUpdateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 
 // ── Admin handlers ─────────────────────────────────────────────────────────────
 
-// AdminCreateMerchHandler creates a standalone merch item not linked to any event.
+// AdminCreateMerchHandler creates a standalone merch item, pre-approved.
 // Admin-only. Route: POST /admin/merch
+// Admin-created items bypass the organiser review queue and are visible immediately.
 func AdminCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var dto models.CreateMerchandiseDTO
@@ -337,8 +302,7 @@ func AdminCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 			return
 		}
 
-		// Pass nil for eventID — creates standalone merch
-		item, err := repository.CreateMerchandise(pool, nil, &dto)
+		item, err := repository.AdminCreateMerchandise(pool, nil, &dto)
 		if err != nil {
 			utils.InternalError(c, err, "admin create standalone merchandise")
 			return
@@ -348,9 +312,31 @@ func AdminCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 	}
 }
 
-// GetAllMerchHandler returns all merch across all events for the admin dashboard.
-// Includes standalone merch (no event), inactive items, and expired sale windows.
-// Admin-only. Route: GET /admin/merch
+// AdminCreateEventMerchHandler creates event-linked merch, pre-approved.
+// Admin-only. Route: POST /admin/events/:id/merch
+func AdminCreateEventMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventID := c.Param("id")
+		var dto models.CreateMerchandiseDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		item, err := repository.AdminCreateMerchandise(pool, &eventID, &dto)
+		if err != nil {
+			utils.InternalError(c, err, "admin create event merchandise")
+			return
+		}
+
+		if ec != nil && item.EventID != nil {
+			ec.BustMerch(c.Request.Context(), *item.EventID, item.ID)
+		}
+
+		c.JSON(http.StatusCreated, item)
+	}
+}
+
 func GetAllMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		items, err := repository.GetAllMerchandise(pool, 500)
@@ -365,37 +351,30 @@ func GetAllMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-// AdminUpdateMerchHandler updates any merch item without ownership checks.
-// Works on both active and inactive items. Admin-only.
-// Route: PUT /admin/merch/:id
 func AdminUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        merchID := c.Param("id")
-        var dto models.UpdateMerchandiseDTO
-        if err := c.ShouldBindJSON(&dto); err != nil {
-            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-            return
-        }
-        item, err := repository.AdminUpdateMerchandise(pool, merchID, &dto)
-        if err != nil {
-            if err.Error() == "no fields to update" {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "No fields provided to update"})
-                return
-            }
-            utils.InternalError(c, err, "admin update merchandise")
-            return
-        }
-        if ec != nil && item.EventID != nil {
-            ec.BustMerch(c.Request.Context(), *item.EventID, merchID)
-        }
-        c.JSON(http.StatusOK, gin.H{"message": "Merchandise updated", "item": item})
-    }
+	return func(c *gin.Context) {
+		merchID := c.Param("id")
+		var dto models.UpdateMerchandiseDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		item, err := repository.AdminUpdateMerchandise(pool, merchID, &dto)
+		if err != nil {
+			if err.Error() == "no fields to update" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "No fields provided to update"})
+				return
+			}
+			utils.InternalError(c, err, "admin update merchandise")
+			return
+		}
+		if ec != nil && item.EventID != nil {
+			ec.BustMerch(c.Request.Context(), *item.EventID, merchID)
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Merchandise updated", "item": item})
+	}
 }
-// OrgResubmitMerchHandler lets an organiser resubmit a rejected merch item
-// for admin review after editing it (or without changes if they believe the
-// rejection was in error).
-//
-//	POST /organiser/merch/:id/resubmit
+
 func OrgResubmitMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		merchID := c.Param("id")
@@ -410,15 +389,10 @@ func OrgResubmitMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"message":  "Merch item resubmitted for admin review",
-			"merch_id": merchID,
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "Merch item resubmitted for admin review", "merch_id": merchID})
 	}
 }
 
-// AdminUpdateVariantHandler updates stock, price override, or active status
-// on any variant without organizer ownership checks. Admin dashboard only.
 func AdminUpdateVariantHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		variantID := c.Param("id")

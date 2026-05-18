@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // MerchApprovalStatus is the admin-review state for a merchandise item.
 // New merch starts as pending_review and is invisible to buyers until approved.
@@ -147,7 +150,7 @@ type CreateMerchandiseDTO struct {
 	BasePrice    float64    `json:"base_price" binding:"required,gt=0"`
 	Category     *string    `json:"category"`
 	DisplayOrder int        `json:"display_order"`
-	Images       *string    `json:"images"`
+	Images       *json.RawMessage `json:"images"`
 
 	// Fulfillment — defaults to "delivery" if omitted.
 	// Set fulfillment_mode to "pickup" or "both" to enable collection.
@@ -168,7 +171,7 @@ type UpdateMerchandiseDTO struct {
 	Category     *string  `json:"category"`
 	DisplayOrder *int     `json:"display_order"`
 	IsActive     *bool    `json:"is_active"`
-	Images       *string  `json:"images"`
+	Images       *json.RawMessage `json:"images"`
 
 	// Fulfillment updates — all optional.
 	FulfillmentMode *string  `json:"fulfillment_mode" binding:"omitempty,oneof=delivery pickup both"`
