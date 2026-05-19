@@ -649,7 +649,9 @@ func AdminUpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.Upda
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sets := []string{"updated_at = NOW()"}
+	// Admin is the approval authority — any admin save auto-approves the item
+	// so it becomes visible in buyer-facing drops/collections immediately.
+	sets := []string{"updated_at = NOW()", "approval_status = 'approved'", "rejection_reason = NULL"}
 	args := []any{}
 
 	if dto.Name != nil { args = append(args, *dto.Name); sets = append(sets, fmt.Sprintf("name = $%d", len(args))) }
@@ -660,11 +662,6 @@ func AdminUpdateMerchandise(pool *pgxpool.Pool, merchID string, dto *models.Upda
 	if dto.IsActive != nil {
 		args = append(args, *dto.IsActive)
 		sets = append(sets, fmt.Sprintf("is_active = $%d", len(args)))
-		// Admin is the approval authority: activating also approves,
-		// making the item visible in buyer-facing drops/collections.
-		if *dto.IsActive {
-			sets = append(sets, "approval_status = 'approved'", "rejection_reason = NULL")
-		}
 	}
 	if dto.Images != nil { args = append(args, *dto.Images); sets = append(sets, fmt.Sprintf("images = $%d::jsonb", len(args))) }
 	if dto.FulfillmentMode != nil { args = append(args, *dto.FulfillmentMode); sets = append(sets, fmt.Sprintf("fulfillment_mode = $%d", len(args))) }

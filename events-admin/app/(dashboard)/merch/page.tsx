@@ -386,6 +386,14 @@ export default function MerchPage() {
     } finally { setEvSubmitting(false); }
   }
 
+  async function approveMerch(id: string, name: string) {
+    try {
+      await api.put(`/admin/merch/${id}/approve`, {});
+      toast(`"${name}" approved — now visible in the app`, 'success');
+      loadAllMerch();
+    } catch { toast('Approval failed', 'error'); }
+  }
+
   function deactivateMerch(id: string, name: string) {
     confirm('Deactivate Merchandise', `"${name}" will be hidden from all listings. Existing orders are not affected.`, async () => {
       await api.delete(`/organiser/merch/${id}`);
@@ -586,6 +594,11 @@ export default function MerchPage() {
                       <Badge status={m.is_active ? 'active' : 'inactive'} />
                       <Badge status={m.fulfillment_mode} />
                       {m.category && <span className="badge badge-draft">{m.category}</span>}
+                      {m.approval_status && m.approval_status !== 'approved' && (
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.65rem', padding: '1px 6px', borderRadius: '99px', background: 'rgba(255,165,0,.15)', color: '#ffa500', border: '1px solid rgba(255,165,0,.25)' }}>
+                          ⏳ {m.approval_status === 'rejected' ? 'rejected' : 'pending'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Placement indicators */}
@@ -624,6 +637,9 @@ export default function MerchPage() {
                   <div style={{ padding: '.65rem 1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
                     <button className="btn btn-sm" onClick={() => openEditMerch(m)}>✎ Edit</button>
                     <button className="btn btn-sm" onClick={() => openVariant(m)}>+ Variant</button>
+                    {m.approval_status && m.approval_status !== 'approved' && (
+                      <button className="btn btn-sm" style={{ color: '#ffa500', borderColor: 'rgba(255,165,0,.4)' }} onClick={() => approveMerch(m.id, m.name)}>✓ Approve</button>
+                    )}
                     {m.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivateMerch(m.id, m.name)}>Deactivate</button>}
                     <span style={{ fontSize: '.74rem', color: 'var(--text-3)', marginLeft: 'auto' }}>{m.variants?.length || 0} variants</span>
                   </div>

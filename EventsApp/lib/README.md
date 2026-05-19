@@ -1,7 +1,28 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
 
-export const API_BASE_URL = 'http://192.168.1.129:8080';
+function getApiBaseUrl(): string {
+  // 1. Explicit env var wins (set EXPO_PUBLIC_API_URL for prod / staging)
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  // 2. In Expo Go / dev builds, derive the IP from the Expo debugger host
+  //    (hostUri looks like "192.168.x.x:8081" — strip the port, use 8080)
+  const debuggerHost =
+    Constants.expoConfig?.hostUri ??
+    (Constants as any).manifest?.debuggerHost ??
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
+
+  if (debuggerHost) {
+    const ip = debuggerHost.split(':')[0];
+    return `http://${ip}:8080`;
+  }
+  // 3. Fallback for local simulators / web
+  return 'http://localhost:8080';
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

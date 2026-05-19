@@ -16,7 +16,13 @@ const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 /**
  * Local-dev image upload fallback.
  * Stores files under /public/uploads/ and returns an absolute URL.
- * In production the backend R2 handler is used instead.
+ *
+ * IMPORTANT: Set NEXT_PUBLIC_APP_URL in .env.local to your network IP so
+ * images work on mobile devices, e.g.:
+ *   NEXT_PUBLIC_APP_URL=http://192.168.1.129:3000
+ *
+ * Without it, stored URLs use localhost which only works in the browser,
+ * not on mobile. In production the backend R2 handler is used instead.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -49,10 +55,13 @@ export async function POST(request: NextRequest) {
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, filename), buffer);
 
-    // Build an absolute URL so it works cross-device on the same network
-    const host     = request.headers.get('host') ?? 'localhost:3000';
-    const protocol = host.startsWith('localhost') || host.match(/^\d+\.\d+\.\d+\.\d+/) ? 'http' : 'https';
-    const imageUrl = `${protocol}://${host}/uploads/${filename}`;
+    // Prefer NEXT_PUBLIC_APP_URL (network-accessible) over the request host.
+    // This ensures the stored URL works on mobile devices that can't reach localhost.
+    const appUrl  = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '');
+    const host    = request.headers.get('host') ?? 'localhost:3000';
+    const proto   = host.startsWith('localhost') || /^\d+\.\d+\.\d+\.\d+/.test(host) ? 'http' : 'https';
+    const baseUrl = appUrl || `${proto}://${host}`;
+    const imageUrl = `${baseUrl}/uploads/${filename}`;
 
     return NextResponse.json({ image_url: imageUrl });
   } catch (err) {
