@@ -499,6 +499,16 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Event not found or not in a submittable state (must be draft or rejected)"})
 				return
 			}
+			if errors.Is(err, repository.ErrListingFeeRequired) {
+				c.JSON(http.StatusPaymentRequired, gin.H{
+					"error": "Listing fee required. This is a free event with 20+ ticket capacity. " +
+						"As the organiser you must pay R5 per ticket upfront (ticket holders are not charged). " +
+						"Starting at R100 for 20 tickets, going up with capacity.",
+					"hint": "Call GET /organiser/events/:id/listing-fee to see the exact amount, " +
+						"then POST /organiser/events/:id/listing-fee/initiate to pay.",
+				})
+				return
+			}
 			utils.InternalError(c, err, "failed to publish event")
 			return
 		}

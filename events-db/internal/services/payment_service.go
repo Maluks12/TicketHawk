@@ -451,6 +451,52 @@ func (s *PaymentService) CreateAdTopupIntent(organizerID string, amount float64)
 	return pi.ClientToken, pi.ID, nil
 }
 
+// CreateListingFeeIntent creates a Stitch card payment intent for the platform
+// listing fee. The externalReference embeds the eventID so the webhook can
+// resolve it even if the listing_fee_payment_request_id lookup fails.
+func (s *PaymentService) CreateListingFeeIntent(eventID, organizerID string, amount float64) (clientToken string, requestID string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	amountCents := int64(amount * 100)
+	externalRef := "listing_fee_" + eventID
+
+	mutation := `
+		mutation InitiateCardPayment($input: ClientCardPaymentInitiateInput!) {
+			clientCardPaymentInitiate(input: $input) {
+				paymentInitiation {
+					id
+					clientToken
+				}
+			}
+		}
+	`
+
+	variables := map[string]interface{}{
+		"input": map[string]interface{}{
+			"amount": map[string]interface{}{
+				"quantity": amountCents,
+				"currency": models.DefaultCurrency,
+			},
+			"payerReference":       "Platform Listing Fee",
+			"merchantReference":    externalRef,
+			"beneficiaryReference": externalRef,
+			"externalReference":    externalRef,
+		},
+	}
+
+	var result secureFieldsPaymentResponse
+	if err := s.graphQL(ctx, mutation, variables, &result); err != nil {
+		return "", "", fmt.Errorf("CreateListingFeeIntent: %w", err)
+	}
+
+	pi := result.ClientCardPaymentInitiate.PaymentInitiation
+	if pi.ID == "" || pi.ClientToken == "" {
+		return "", "", errors.New("stitch returned empty payment ID for listing fee")
+	}
+	return pi.ClientToken, pi.ID, nil
+}
+
 func (s *PaymentService) ProcessRefund(bookingID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -561,6 +607,21 @@ func (s *PaymentService) handlePaymentUpdate(ctx context.Context, data json.RawM
 		txID := pr.Transactions[0].ID
 		transactionID = &txID
 	}
+
+	// ── Listing fee shortcut ──────────────────────────────────────────────
+	// Check if this request ID belongs to a listing fee payment. If it does,
+	// mark the event paid and return — it is not a booking payment.
+	if internalStatus == models.PaymentCompleted {
+		eventID, matched, lfErr := repository.ConfirmListingFeeByPaymentRequest(s.pool, pr.ID)
+		if lfErr != nil {
+			log.Warn().Err(lfErr).Str("stitch_id", pr.ID).Msg("webhook: listing fee confirmation failed")
+		} else if matched {
+			log.Info().Str("stitch_id", pr.ID).Str("event_id", eventID).
+				Msg("stitch webhook: listing fee confirmed, event will now surface in home feed")
+			return nil
+		}
+	}
+	// ─────────────────────────────────────────────────────────────────────
 
 	var currentStatus string
 	var bookingID string
