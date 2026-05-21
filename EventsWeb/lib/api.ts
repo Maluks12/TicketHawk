@@ -5,7 +5,7 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-// ── Token helpers ────────────────────────────────────────────────────────────
+// ── Token helpers ─────────────────────────────────────────────────────────────
 export function getAccessToken() {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('access_token');
@@ -19,14 +19,30 @@ export function clearTokens() {
   localStorage.removeItem('refresh_token');
 }
 
-// ── Request interceptor — attach Bearer token ────────────────────────────────
+// ── Session ID ────────────────────────────────────────────────────────────────
+let _cachedSessionId: string | undefined;
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+export async function getCachedSessionId(): Promise<string> {
+  if (_cachedSessionId) return _cachedSessionId;
+  let sid = localStorage.getItem('session_id');
+  if (!sid) { sid = generateUUID(); localStorage.setItem('session_id', sid); }
+  _cachedSessionId = sid;
+  return sid;
+}
+
+// ── Request interceptor ───────────────────────────────────────────────────────
 api.interceptors.request.use((config) => {
   const token = getAccessToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
-// ── Response interceptor — handle 401 ───────────────────────────────────────
+// ── Response interceptor ──────────────────────────────────────────────────────
 api.interceptors.response.use(
   (res) => res,
   (error) => {
@@ -38,7 +54,7 @@ api.interceptors.response.use(
   }
 );
 
-// ── Types (keep in sync with EventsApp/lib/api) ──────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
   id: string;
   email: string;
@@ -54,26 +70,55 @@ export interface RegisterDTO {
 
 export interface Event {
   id: string;
-  title: string;
   slug: string;
-  description?: string;
-  image_url?: string;
-  date: string;
-  venue?: string;
-  city?: string;
-  category?: string;
-  price?: number;
-  is_free?: boolean;
+  title: string;
+  description: string;
+  category: string;
+  venue_name: string;
+  city: string;
+  address?: string;
+  cover_image_url?: string;
+  banner_image_url?: string;
+  is_featured: boolean;
+  is_sponsored?: boolean;
+  status: string;
+  start_time: string;
+  end_time: string;
+  price: number;
+  currency: string;
+  views: number;
+  is_sold_out?: boolean;
+  available_tickets?: number;
+  tickets_sold?: number;
+  teams?: string[];
+  performers?: string[];
+  max_capacity?: number;
+}
+
+export interface HomeSection {
+  id: string;
+  title: string;
+  events: Event[];
+  next_cursor: string;
+}
+
+export interface HomeResponse {
+  sections: HomeSection[];
 }
 
 export interface Category {
-  id: string;
+  id: number;
   name: string;
-  slug: string;
-  image_url?: string;
+  slug?: string;
 }
 
-// ── Auth endpoints ────────────────────────────────────────────────────────────
+export interface CartSummary {
+  total_items: number;
+  total_price: number;
+  items: any[];
+}
+
+// ── Auth endpoints ─────────────────────────────────────────────────────────────
 export const authLogin = (email: string, password: string) =>
   api.post<{ access_token: string; refresh_token: string }>('/auth/login', { email, password });
 
@@ -85,3 +130,41 @@ export const authLogout = () =>
 
 export const getMe = () =>
   api.get<AuthUser>('/users/me');
+
+// ── Event endpoints ────────────────────────────────────────────────────────────
+export const getHomeSections = (city?: string) =>
+  api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);
+
+export const getCategories = () =>
+  api.get<{ categories: Category[] }>('/v1/categories');
+
+const SECTION_ENDPOINT: Record<string, string> = {
+  trending:       '/v1/events/trending',
+  featured:       '/v1/events/featured',
+  happening_soon: '/v1/events/active',
+  this_weekend:   '/v1/events/active',
+  recently_added: '/v1/events',
+};
+
+export async function loadMoreSectionEvents(
+  sectionId: string,
+  cursor: string,
+  limit = 10,
+): Promise<{ data: Event[]; next_cursor: string } | null> {
+  const endpoint = SECTION_ENDPOINT[sectionId];
+  if (!endpoint || !cursor) return null;
+  try {
+    const res = await api.get<{ data: Event[]; next_cursor: string }>(endpoint, {
+      params: { cursor, limit },
+    });
+    return { data: res.data.data ?? [], next_cursor: res.data.next_cursor ?? '' };
+  } catch {
+    return null;
+  }
+}
+
+export async function getCart(sessionId?: string | null): Promise<CartSummary> {
+  const params = sessionId ? { session_id: sessionId } : {};
+  const res = await api.get<CartSummary>('/v1/cart', { params });
+  return res.data;
+}
