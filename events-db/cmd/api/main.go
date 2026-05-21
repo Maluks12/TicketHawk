@@ -573,6 +573,10 @@ func main() {
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 
+		// Listing fee — required for events with 20+ ticket capacity
+		orgRoutes.GET("/events/:id/listing-fee",          handlers.GetListingFeeHandler(pool))
+		orgRoutes.POST("/events/:id/listing-fee/initiate", handlers.InitiateListingFeePaymentHandler(pool, paymentService))
+
 		// Merch linked to an event
 		orgRoutes.POST("/events/:id/merch",   handlers.OrgCreateMerchHandler(pool, eventCache))
 		orgRoutes.PUT("/merch/:id",           handlers.OrgUpdateMerchHandler(pool, eventCache))

@@ -88,6 +88,34 @@ func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string) error 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Guard: free events (price = 0) with capacity >= 20 must pay the listing
+	// fee before submitting for review. Paid-ticket events are never blocked.
+	var (
+		eventPrice  float64
+		maxCap      *int
+		feePaid     bool
+		ttCapSum    *int
+	)
+	err := pool.QueryRow(ctx, `
+		SELECT e.price, e.max_capacity, e.listing_fee_paid,
+		       (SELECT SUM(t.capacity)
+		        FROM   ticket_types t
+		        WHERE  t.event_id = e.id AND t.is_visible = TRUE) AS tt_cap_sum
+		FROM   events e
+		WHERE  e.id = $1 AND e.organizer_id = $2
+	`, eventID, organizerID).Scan(&eventPrice, &maxCap, &feePaid, &ttCapSum)
+	if err != nil {
+		return ErrEventNotPublishable
+	}
+
+	// Only free events are subject to the listing fee
+	if eventPrice == 0 {
+		effectiveCapacity := computeEffectiveCapacity(maxCap, ttCapSum)
+		if effectiveCapacity >= ListingFeeThreshold && !feePaid {
+			return ErrListingFeeRequired
+		}
+	}
+
 	cmd, err := pool.Exec(ctx, `
 		UPDATE events
 		SET status = $1, rejection_reason = NULL
@@ -732,6 +760,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 	args := []interface{}{models.EventPublished, true, time.Now()}
 	where := `
 	WHERE e.status = $1
+	AND (e.price > 0 OR e.listing_fee_paid = TRUE)
 	AND e.is_featured = $2
 	AND e.featured_until > $3
 	`

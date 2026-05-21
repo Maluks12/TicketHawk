@@ -63,6 +63,15 @@ type Event struct {
 	Performers     TagArray    `json:"performers,omitempty" db:"performers"`
 	Teams          TagArray    `json:"teams,omitempty" db:"teams"`
 	Views          int         `json:"views" db:"views"`
+	// ListingFeePaid is true once the organizer has settled the platform
+	// listing fee (R5 × capacity). Only events with this set appear in the
+	// home-feed algorithm. Events with capacity < 20 have a fee of 0 and are
+	// published for free — but are also excluded from the home feed until the
+	// organizer chooses to pay the listing fee or run an ad campaign.
+	ListingFeePaid              bool    `json:"listing_fee_paid" db:"listing_fee_paid"`
+	ListingFeeAmount            float64 `json:"listing_fee_amount" db:"listing_fee_amount"`
+	ListingFeePaymentRequestID  *string `json:"-" db:"listing_fee_payment_request_id"`
+
 	// IsSponsored is set at feed assembly time — never stored in DB.
 	IsSponsored    bool        `json:"is_sponsored,omitempty" db:"-"`
 	Organizer      *Organizer  `json:"organizer,omitempty" db:"-"`

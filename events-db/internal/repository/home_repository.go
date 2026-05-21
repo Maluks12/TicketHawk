@@ -201,7 +201,8 @@ func ForYou(pool *pgxpool.Pool, userID string, limit int) ([]models.Event, error
 		FROM   events     ev
 		JOIN   categories c   ON c.id  = ev.category_id
 		LEFT JOIN user_cats uc ON uc.category_id = ev.category_id
-		WHERE  ev.status     = 'published'
+		WHERE  ev.status          = 'published'
+		  AND  (ev.price > 0 OR ev.listing_fee_paid = TRUE)
 		  AND  ev.start_time > NOW()
 		  AND NOT EXISTS (
 			  SELECT 1 FROM bookings b2
@@ -263,7 +264,8 @@ func NearYou(pool *pgxpool.Pool, city string, limit int) ([]models.Event, error)
 			c.name AS category
 		FROM events ev
 		JOIN categories c ON c.id = ev.category_id
-		WHERE ev.status     = 'published'
+		WHERE ev.status          = 'published'
+		  AND (ev.price > 0 OR ev.listing_fee_paid = TRUE)
 		  AND ev.start_time > NOW()
 		  AND LOWER(ev.city) = ANY($1)
 		ORDER BY ev.start_time ASC, ev.views DESC
@@ -337,7 +339,8 @@ func TrendingNow(pool *pgxpool.Pool, limit int) ([]models.Event, *utils.Cursor, 
 			c.name AS category
 		FROM   events     e
 		JOIN   categories c ON c.id = e.category_id
-		WHERE  e.status     = 'published'
+		WHERE  e.status          = 'published'
+		  AND  (e.price > 0 OR e.listing_fee_paid = TRUE)
 		  AND  e.start_time > NOW()
 		ORDER BY (
 			e.views::float
@@ -379,7 +382,7 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	defer cancel()
 
 	args := []interface{}{models.EventPublished}
-	where := "WHERE e.status = $1"
+	where := "WHERE e.status = $1 AND (e.price > 0 OR e.listing_fee_paid = TRUE)"
 
 	if cursor != nil {
 		where += ` AND (e.created_at < $2 OR (e.created_at = $2 AND e.id < $3))`
@@ -444,7 +447,7 @@ func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	defer cancel()
 
 	args := []interface{}{models.EventPublished, time.Now()}
-	where := `WHERE e.status = $1 AND e.start_time > $2`
+	where := `WHERE e.status = $1 AND (e.price > 0 OR e.listing_fee_paid = TRUE) AND e.start_time > $2`
 
 	if cursor != nil {
 		where += ` AND (e.start_time > $3 OR (e.start_time = $3 AND e.id > $4))`
@@ -531,7 +534,8 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 
 	args := []interface{}{models.EventPublished, weekendStart, weekendEnd}
 	where := `
-		WHERE e.status     = $1
+		WHERE e.status          = $1
+		  AND (e.price > 0 OR e.listing_fee_paid = TRUE)
 		  AND e.start_time >= $2
 		  AND e.start_time <  $3
 	`
