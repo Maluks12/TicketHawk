@@ -8,6 +8,8 @@
 //   - Remove SafeAreaView — NavBar handles top spacing
 'use client';
 
+export { default } from '../website/page';
+
 export default function HomePage() {
   return (
     <div>

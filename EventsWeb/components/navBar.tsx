@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
-import { useAppTheme } from '@/theme/colors';
+import { useAppTheme } from '@/themes/colors'; 
 
 export default function NavBar() {
   const router = useRouter();

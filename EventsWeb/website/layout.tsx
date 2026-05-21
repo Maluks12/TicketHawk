@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: 'Discover and book events near you',
 };
 
+export { default, metadata } from '../website/layout';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
