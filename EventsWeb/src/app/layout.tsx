@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import './global.css';
 import NavBar from '@/components/navBar';
 
@@ -7,7 +8,7 @@ export const metadata: Metadata = {
   description: 'Discover and book events near you',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>

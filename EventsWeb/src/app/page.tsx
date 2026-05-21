@@ -6,13 +6,13 @@ import { ShoppingCart } from 'lucide-react';
 import {
   getHomeSections, loadMoreSectionEvents, getCategories, getCart, getCachedSessionId,
   type Event, type HomeSection,
-} from '../lib/api';
-import { useEventStore } from '../store/eventsStore';
-import { useAuthStore } from '../store/authStore';
+} from '@/lib/api';
+import { useEventStore } from '@/store/eventsStore';
+import { useAuthStore } from '@/store/authStore';
 import FilterModal, {
   type FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl,
-} from '../components/FilterModal';
-import { useAppTheme } from '../themes/colors';
+} from '@/components/filterModal';
+import { useAppTheme } from '@/themes/colors';
 
 // ── Spotlight configs ─────────────────────────────────────────────────────────
 const SPOTLIGHT_CONFIGS = [
