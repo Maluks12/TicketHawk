@@ -2,7 +2,6 @@
 
 /* FIX: Tailwind v4 — replaced @tailwind base/components/utilities with a single @import */
 @import "tailwindcss";
-@import '../website/global.css';
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

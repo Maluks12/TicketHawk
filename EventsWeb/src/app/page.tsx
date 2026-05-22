@@ -435,26 +435,30 @@ export default function HomePage() {
         ) : (
           <>
             {carouselEvents.map((evt, idx) => (
-              <button
+              <div
                 key={evt.id}
-                onClick={() => handleEventPress(evt)}
                 className="absolute inset-0 w-full h-full text-left transition-opacity duration-500"
                 style={{ opacity: idx === featuredIndex ? 1 : 0, pointerEvents: idx === featuredIndex ? 'auto' : 'none' }}
               >
                 {(evt.banner_image_url ?? evt.cover_image_url) && (
                   <img src={evt.banner_image_url ?? evt.cover_image_url!} alt={evt.title} className="absolute inset-0 w-full h-full object-cover" />
                 )}
-                <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.85) 30%, transparent 70%)' }} />
-                <div className="absolute bottom-0 left-0 right-0 p-5 pb-8">
+                {/* Clickable overlay behind the content — not a button, so no nesting issue */}
+                <div
+                  className="absolute inset-0 cursor-pointer"
+                  onClick={() => handleEventPress(evt)}
+                  style={{ background: 'linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.85) 30%, transparent 70%)' }}
+                />
+                <div className="absolute bottom-0 left-0 right-0 p-5 pb-8 pointer-events-none">
                   <p className="text-[11px] font-bold text-white/70 tracking-[2px] uppercase mb-2.5">✦ {evt.category ?? 'Featured'}</p>
                   <h1 className="text-[42px] font-black text-white tracking-[2px] leading-[42px] mb-3 line-clamp-2">{evt.title.toUpperCase()}</h1>
                   <p className="text-[13px] text-white/80 leading-5 mb-5 max-w-[300px] line-clamp-3">{evt.description}</p>
-                  <div className="flex gap-3">
-                    <button className="bg-[#FF2D55] px-[22px] py-3 rounded-sm text-white font-extrabold text-[11px] tracking-[1.5px]">🎟 GET TICKETS</button>
-                    <button className="bg-[#1c2e61] px-[22px] py-3 rounded-sm text-white font-bold text-[11px] tracking-[1px]">VIEW DETAILS</button>
+                  <div className="flex gap-3 pointer-events-auto">
+                    <button onClick={() => handleEventPress(evt)} className="bg-[#FF2D55] px-[22px] py-3 rounded-sm text-white font-extrabold text-[11px] tracking-[1.5px]">🎟 GET TICKETS</button>
+                    <button onClick={() => handleEventPress(evt)} className="bg-[#1c2e61] px-[22px] py-3 rounded-sm text-white font-bold text-[11px] tracking-[1px]">VIEW DETAILS</button>
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
             {carouselEvents.length > 1 && (
               <div className="absolute bottom-3.5 right-4 flex gap-1.5 z-10">
