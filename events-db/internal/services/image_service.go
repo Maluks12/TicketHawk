@@ -231,7 +231,14 @@ func (s *ImageService) uploadToR2(filename, contentType string, body io.Reader, 
 		return "", fmt.Errorf("failed to upload to R2: %w", err)
 	}
 
-	return fmt.Sprintf("%s/%s/%s", s.cfg.R2URL, s.cfg.R2Bucket, filename), nil
+	// Use R2_PUBLIC_URL (e.g. https://pub-xxx.r2.dev) for the returned URL.
+	// This is the public CDN endpoint — distinct from the S3 API endpoint.
+	// Falls back to the S3 path-style URL if R2_PUBLIC_URL is not set.
+	base := strings.TrimRight(s.cfg.R2PublicURL, "/")
+	if base == "" {
+		base = fmt.Sprintf("%s/%s", strings.TrimRight(s.cfg.R2URL, "/"), s.cfg.R2Bucket)
+	}
+	return fmt.Sprintf("%s/%s", base, filename), nil
 }
 
 // DeleteEventImage removes any event media file (image or video) from R2 by

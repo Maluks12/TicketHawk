@@ -378,7 +378,7 @@ func AdminUpdateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 func OrgResubmitMerchHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		merchID := c.Param("id")
-		organizerID := c.GetString("organizer_id")
+		organizerID := c.GetString("user_id")
 
 		if err := repository.OrgResubmitMerch(pool, merchID, organizerID); err != nil {
 			if err == repository.ErrMerchNotFound {
