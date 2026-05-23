@@ -42,7 +42,7 @@ export default function NavBar() {
             <span className="text-sm" style={{ color: colors.subText }}>{user.name}</span>
             <button
               onClick={handleLogout}
-              className="px-5 py-2 rounded-md text-sm font-bold"
+              className="px-5 py-2 rounded-[2px] text-sm font-bold"
               style={{ backgroundColor: colors.ctaBg, color: colors.ctaText }}
             >
               Sign out
@@ -51,7 +51,7 @@ export default function NavBar() {
         ) : (
           <Link
             href="/auth/login"
-            className="px-5 py-2 rounded-md text-sm font-bold"
+            className="px-5 py-2 rounded-[2px] text-sm font-bold"
             style={{ backgroundColor: colors.text, color: colors.background }}
           >
             Sign in
