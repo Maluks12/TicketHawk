@@ -24,12 +24,17 @@ import (
 	"events-db/internal/ratelimit"
 	"events-db/internal/repository"
 	"events-db/internal/services"
+	"events-db/internal/utils"
 	"events-db/internal/workers"
 
 	"github.com/gin-contrib/cors"
 )
 
 func main() {
+
+	// Register custom binding validators (strong_password, etc.) before any
+	// handler is wired up so that binding tags work across the whole app.
+	utils.RegisterCustomValidators()
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 

@@ -22,11 +22,12 @@ type Config struct {
 
     QREncryptionKey string
 
-    R2AccountID string
-    R2AccessKey string
-    R2SecretKey string
-    R2Bucket    string
-    R2URL       string
+    R2AccountID  string
+    R2AccessKey  string
+    R2SecretKey  string
+    R2Bucket     string
+    R2URL        string  // S3-compatible API endpoint: https://<account-id>.r2.cloudflarestorage.com
+    R2PublicURL  string  // Public serving URL: https://pub-xxx.r2.dev or https://cdn.yourdomain.com
 
     FrontendURLs []string
 
@@ -64,6 +65,7 @@ func Load() (*Config, error) {
 		R2SecretKey: os.Getenv("R2_SECRET_KEY"),
 		R2Bucket:    os.Getenv("R2_BUCKET"),
 		R2URL:       os.Getenv("R2_URL"),
+		R2PublicURL: os.Getenv("R2_PUBLIC_URL"),
 
 		FrontendURLs: strings.Split(os.Getenv("FRONTEND_URLS"), ","),
 
