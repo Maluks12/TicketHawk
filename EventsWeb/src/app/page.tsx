@@ -89,7 +89,7 @@ function CartHeaderButton() {
 function SkeletonCard() {
   return (
     <div className="w-[200px] shrink-0 animate-pulse">
-      <div className="w-full h-[130px] rounded-xl bg-white/10 mb-2" />
+      <div className="w-full h-[130px] rounded-[14px] bg-white/10 mb-2" />
       <div className="h-2 w-20 rounded bg-white/10 mb-1.5" />
       <div className="h-3 w-36 rounded bg-white/10 mb-1.5" />
       <div className="h-2 w-24 rounded bg-white/10" />
@@ -118,17 +118,17 @@ function SkeletonFeed() {
 // ── Event Card ────────────────────────────────────────────────────────────────
 const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <button onClick={onPress} className="w-[200px] shrink-0 text-left">
-    <div className="relative w-full h-[130px] rounded-xl overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
+    <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
         <img src={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       {(item.category?.toLowerCase().includes('music') || item.category?.toLowerCase().includes('concert')) && (
-        <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-md px-2.5 py-1 flex items-center gap-1">
+       <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 py-1 flex items-center gap-1">
           <div className="w-1.5 h-1.5 rounded-full bg-white" />
           <span className="text-white text-[9px] font-extrabold tracking-[1.2px]">LIVE</span>
         </div>
       )}
-      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-md px-2.5 py-1">
+      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
         <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
       </div>
     </div>
@@ -143,13 +143,13 @@ EventCard.displayName = 'EventCard';
 
 const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
   <button onClick={onPress} className="w-[200px] shrink-0 text-left">
-    <div className="relative w-full h-[130px] rounded-xl overflow-hidden">
+    <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden">
       {item.cover_image_url && (
         <img src={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.72), rgba(0,0,0,0.18), transparent)' }} />
       <span className="absolute top-1.5 left-2.5 text-[52px] font-black text-white leading-none" style={{ textShadow: '0 2px 6px rgba(0,0,0,0.4)', letterSpacing: -2 }}>{rank}</span>
-      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-md px-2.5 py-1">
+      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
         <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
       </div>
     </div>
@@ -476,11 +476,11 @@ export default function HomePage() {
       {/* Category filter */}
       <div className="flex items-center px-5 py-3.5 gap-2.5">
         {activeCategory !== 'All' && (
-          <button onClick={() => setActiveCategory('All')} className="w-[34px] h-[34px] rounded-sm border flex items-center justify-center text-xs" style={{ borderColor: colors.dividerColor, color: colors.text }}>✕</button>
+          <button onClick={() => setActiveCategory('All')} className="w-[34px] h-[34px] rounded-[2px] border flex items-center justify-center text-xs" style={{ borderColor: colors.dividerColor, color: colors.text }}>✕</button>
         )}
         <button
           onClick={() => setDropdownOpen(true)}
-          className="flex items-center px-4 py-2 rounded-full border"
+          className="flex items-center px-4 py-2 rounded-[14px] border"
           style={{ borderColor: colors.text }}
         >
           <span className="text-[10px] font-extrabold tracking-[1.2px]" style={{ color: colors.text }}>{activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}</span>
@@ -554,7 +554,7 @@ export default function HomePage() {
             <div className="mt-4 px-5">
               {sportsListEvents.map((sport) => (
                 <button key={sport.id} onClick={() => handleEventPress(sport)} className="flex items-center gap-3.5 py-3.5 w-full border-b last:border-0" style={{ borderColor: colors.dividerColor }}>
-                  <div className="relative w-32 h-16 rounded-lg shrink-0 overflow-hidden bg-gray-200">
+                  <div className="relative w-32 h-16 rounded-[8px] shrink-0 overflow-hidden bg-gray-200">
                     {sport.cover_image_url && <img src={sport.cover_image_url} alt={sport.title} className="absolute inset-0 w-full h-full object-cover" />}
                   </div>
                   <div className="flex-1 text-left">
