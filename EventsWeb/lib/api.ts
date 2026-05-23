@@ -5,6 +5,8 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
+
 // ── Token helpers ─────────────────────────────────────────────────────────────
 export function getAccessToken() {
   if (typeof window === 'undefined') return null;
@@ -265,26 +267,6 @@ export async function loadMoreSectionEvents(
   }
 }
 
-// ── Follow endpoints ───────────────────────────────────────────────────────────
-export const toggleFollow = async (eventId: string): Promise<{ following: boolean }> => {
-  const res = await api.post<{ following: boolean }>(`/v1/events/${eventId}/follow`);
-  return res.data;
-};
-
-export const getFollowStatus = async (eventId: string): Promise<{ following: boolean }> => {
-  const res = await api.get<{ following: boolean }>(`/v1/events/${eventId}/follow`);
-  return res.data;
-};
-
-export const getFollowedEvents = async (): Promise<Event[]> => {
-  try {
-    const res = await api.get<{ data: Event[] }>('/v1/events/following');
-    return res.data.data ?? [];
-  } catch {
-    return [];
-  }
-};
-
 // ── Ticket types & booking ─────────────────────────────────────────────────────
 export const getTicketTypes = async (eventId: string): Promise<TicketType[]> => {
   const res = await api.get<{ data: TicketType[] }>(`/v1/events/${eventId}/ticket-types`);
@@ -347,7 +329,7 @@ export const clearCart = async (sessionId?: string | null) => {
 // ── Merch/Drops endpoints ──────────────────────────────────────────────────────
 export const getDropsFeed = async (): Promise<{ data: { available: MerchandiseItem[]; upcoming: MerchandiseItem[] } }> => {
   const res = await api.get<{ data: { available: MerchandiseItem[]; upcoming: MerchandiseItem[] } }>('/v1/merchandise/drops');
-  return res;
+  return res.data;
 };
 
 // ── Cart helpers ───────────────────────────────────────────────────────────────
@@ -377,3 +359,88 @@ export function cartItemSubtitle(item: CartItem): string {
   }
   return item.fulfillment_method === 'delivery' ? 'Delivery' : 'Collection';
 }
+
+// ── Payments ────────────────────────────────────────────────────────────────
+export interface PaymentStatusResponse {
+  payment_status: 'pending' | 'completed' | 'failed';
+  booking_id: string;
+}
+
+export async function pollPaymentStatus(
+  bookingId: string,
+  intervalMs = 2000,
+  timeoutMs = 60000,
+): Promise<PaymentStatusResponse> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const res = await api.get<PaymentStatusResponse>(`/v1/payments/${bookingId}/status`);
+    if (res.data.payment_status !== 'pending') return res.data;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error('Payment polling timed out');
+}
+
+// ── Ticket Flow ────────────────────────────────────────────────────────────────
+export interface AddTicketToCartDTO {
+  item_type: 'ticket';
+  event_id: string;
+  ticket_type_id: string;
+  quantity: number;
+}
+
+export async function addTicketToCart(
+  payload: AddTicketToCartDTO,
+  sessionId?: string | null,
+): Promise<void> {
+  const params = sessionId ? { session_id: sessionId } : {};
+  await api.post('/v1/cart/items', payload, { params });
+}
+
+// ── Checkout ────────────────────────────────────────────────────────────────
+export async function checkoutBegin(sessionId?: string | null) {
+  const params = sessionId ? { session_id: sessionId } : {};
+  const res = await api.post<{ reservation_id: string; expires_at: string; items: CartItem[] }>('/v1/cart/checkout/begin', {}, { params });
+  return res.data;
+}
+
+export async function checkoutConfirm(sessionId?: string | null) {
+  const params = sessionId ? { session_id: sessionId } : {};
+  const res = await api.post<{ booking_ids: string[] }>('/v1/cart/checkout/confirm', {}, { params });
+  return res.data;
+}
+
+export async function checkoutHeartbeat(sessionId?: string | null) {
+  const params = sessionId ? { session_id: sessionId } : {};
+  await api.post('/v1/cart/checkout/heartbeat', {}, { params });
+}
+
+export async function checkoutAbandon(sessionId?: string | null) {
+  const params = sessionId ? { session_id: sessionId } : {};
+  await api.post('/v1/cart/checkout/abandon', {}, { params });
+}
+
+// ── follow endpoints ────────────────────────────────────────────────────────────────
+export interface FollowStatusResponse {
+  following: boolean;
+  followers_count?: number;
+  notify_on_sale?: boolean;
+}
+
+export const toggleFollow = async (eventId: string): Promise<FollowStatusResponse> => {
+  const res = await api.post<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
+  return res.data;
+};
+
+export const getFollowStatus = async (eventId: string): Promise<FollowStatusResponse> => {
+  const res = await api.get<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
+  return res.data;
+};
+
+export const getFollowedEvents = async (): Promise<Event[]> => {
+  try {
+    const res = await api.get<{ data: Event[] }>('/v1/events/following');
+    return res.data.data ?? [];
+  } catch {
+    return [];
+  }
+};
