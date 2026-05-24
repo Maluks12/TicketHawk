@@ -24,11 +24,11 @@ var (
 // R20 CPM: R200/day → 10 000 impressions; R500/day → 25 000 impressions.
 const DefaultCPMRate = 20.00
 
-// ── Payment method ────────────────────────────────────────────────────────────
+// ── Payment method (organizer-level — kept for backward compat) ───────────────
 
-// RegisterPaymentMethod stores the organiser's Stitch debit mandate ID.
-// Called once after the organiser completes the Stitch mandate OAuth flow.
-// All future end-of-day ad bills are automatically debited against this mandate.
+// RegisterPaymentMethod stores the organiser's Stitch debit mandate ID at the
+// organizer level. Kept for backward compat — new code should use
+// RegisterAdAccountPaymentMethod in ad_account_repository.go instead.
 func RegisterPaymentMethod(pool *pgxpool.Pool, organizerID string, dto *models.RegisterPaymentMethodDTO) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -81,8 +81,8 @@ func GetPaymentMethodStatus(pool *pgxpool.Pool, organizerID string) (string, err
 // CreateCampaign creates a new boost campaign for an event.
 //
 // Post-pay model: campaign starts as 'active' immediately — no wallet balance check.
-// Two prerequisites:
-//  1. The organiser must have a Stitch debit mandate registered.
+// Prerequisites:
+//  1. The ad account must belong to the organizer, be active, and have a Stitch mandate.
 //  2. The event must be published (admin-approved) — can't boost a draft.
 func CreateCampaign(pool *pgxpool.Pool, eventID, organizerID string, dto *models.CreateCampaignDTO) (*models.AdCampaign, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -105,11 +105,19 @@ func CreateCampaign(pool *pgxpool.Pool, eventID, organizerID string, dto *models
 		return nil, fmt.Errorf("ad campaigns can only be created for published events")
 	}
 
-	// Require a payment method before accepting a campaign.
-	var mandateStatus string
-	tx.QueryRow(ctx, `
-		SELECT COALESCE(stitch_mandate_status, 'none') FROM organizers WHERE id = $1
-	`, organizerID).Scan(&mandateStatus)
+	// Verify the ad account belongs to this organizer and has a payment method.
+	var accountOrgID, mandateStatus, accountStatus string
+	err = tx.QueryRow(ctx, `
+		SELECT organizer_id, stitch_mandate_status, status
+		FROM   ad_accounts
+		WHERE  id = $1
+	`, dto.AdAccountID).Scan(&accountOrgID, &mandateStatus, &accountStatus)
+	if err != nil || accountOrgID != organizerID {
+		return nil, ErrAdAccountUnauthorized
+	}
+	if accountStatus != string(models.AdAccountActive) {
+		return nil, fmt.Errorf("ad account is disabled — re-enable it before creating campaigns")
+	}
 	if mandateStatus != "active" {
 		return nil, ErrNoPaymentMethod
 	}
@@ -133,15 +141,15 @@ func CreateCampaign(pool *pgxpool.Pool, eventID, organizerID string, dto *models
 	var c models.AdCampaign
 	err = tx.QueryRow(ctx, `
 		INSERT INTO ad_campaigns
-		    (event_id, organizer_id, daily_budget, cpm_rate, start_date, end_date, status)
-		VALUES ($1, $2, $3, $4, $5, $6, 'active')
-		RETURNING id, event_id, organizer_id, daily_budget, cpm_rate,
+		    (event_id, organizer_id, ad_account_id, daily_budget, cpm_rate, start_date, end_date, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
+		RETURNING id, event_id, organizer_id, ad_account_id, daily_budget, cpm_rate,
 		          total_spent, total_impressions, total_clicks,
 		          start_date, end_date, status, created_at, updated_at
-	`, eventID, organizerID, dto.DailyBudget, DefaultCPMRate,
+	`, eventID, organizerID, dto.AdAccountID, dto.DailyBudget, DefaultCPMRate,
 		startDate.Format("2006-01-02"), dto.EndDate,
 	).Scan(
-		&c.ID, &c.EventID, &c.OrganizerID, &c.DailyBudget, &c.CPMRate,
+		&c.ID, &c.EventID, &c.OrganizerID, &c.AdAccountID, &c.DailyBudget, &c.CPMRate,
 		&c.TotalSpent, &c.TotalImpressions, &c.TotalClicks,
 		&c.StartDate, &c.EndDate, &c.Status, &c.CreatedAt, &c.UpdatedAt,
 	)
@@ -523,36 +531,45 @@ func InjectSponsored(pool *pgxpool.Pool, organic []models.Event, userID *string,
 
 // ── Nightly billing ───────────────────────────────────────────────────────────
 
-// OrganizerDaySpend is one row per organiser for nightly billing.
-type OrganizerDaySpend struct {
+// AdAccountDaySpend is one billing row per ad account for the nightly worker.
+// Billing is now per account (each has its own Stitch mandate) rather than per
+// organizer. An organizer with multiple accounts gets one debit per account.
+type AdAccountDaySpend struct {
+	AdAccountID  string
 	OrganizerID  string
 	MandateID    string
 	PaymentEmail string
 	TotalSpend   float64
 }
 
-// GetUnbilledDailySpend returns each organiser's total unbilled spend for the
-// given date. Called by the nightly billing worker.
-// Only returns rows where spend >= R1.00 and a mandate exists.
-func GetUnbilledDailySpend(pool *pgxpool.Pool, forDate time.Time) ([]OrganizerDaySpend, error) {
+// OrganizerDaySpend is kept as a type alias so any code still referencing the
+// old type continues to compile. Remove after fully cutting over.
+type OrganizerDaySpend = AdAccountDaySpend
+
+// GetUnbilledDailySpend returns each ad account's total unbilled spend for the
+// given date. Groups by ad_account_id — each account has its own mandate and
+// gets its own nightly billing debit. Called by the nightly billing worker.
+func GetUnbilledDailySpend(pool *pgxpool.Pool, forDate time.Time) ([]AdAccountDaySpend, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	rows, err := pool.Query(ctx, `
 		SELECT
-		    o.id                             AS organizer_id,
-		    o.stitch_mandate_id              AS mandate_id,
-		    COALESCE(o.ad_payment_email, '') AS payment_email,
-		    SUM(ds.amount_spent)             AS total_spend
+		    aa.id                              AS ad_account_id,
+		    aa.organizer_id,
+		    aa.stitch_mandate_id              AS mandate_id,
+		    COALESCE(aa.ad_payment_email, '') AS payment_email,
+		    SUM(ds.amount_spent)              AS total_spend
 		FROM   ad_daily_spend ds
-		JOIN   ad_campaigns ac ON ac.id = ds.campaign_id
-		JOIN   organizers   o  ON o.id  = ac.organizer_id
+		JOIN   ad_campaigns ac ON ac.id         = ds.campaign_id
+		JOIN   ad_accounts  aa ON aa.id         = ac.ad_account_id
 		WHERE  ds.spend_date = $1
 		  AND  ds.billed     = FALSE
 		  AND  ds.amount_spent > 0
-		  AND  o.stitch_mandate_id IS NOT NULL
-		  AND  o.stitch_mandate_status = 'active'
-		GROUP BY o.id, o.stitch_mandate_id, o.ad_payment_email
+		  AND  aa.stitch_mandate_id IS NOT NULL
+		  AND  aa.stitch_mandate_status = 'active'
+		  AND  aa.status = 'active'
+		GROUP BY aa.id, aa.organizer_id, aa.stitch_mandate_id, aa.ad_payment_email
 		HAVING SUM(ds.amount_spent) >= 1.00
 	`, forDate.Format("2006-01-02"))
 	if err != nil {
@@ -560,10 +577,10 @@ func GetUnbilledDailySpend(pool *pgxpool.Pool, forDate time.Time) ([]OrganizerDa
 	}
 	defer rows.Close()
 
-	var out []OrganizerDaySpend
+	var out []AdAccountDaySpend
 	for rows.Next() {
-		var s OrganizerDaySpend
-		if err := rows.Scan(&s.OrganizerID, &s.MandateID, &s.PaymentEmail, &s.TotalSpend); err != nil {
+		var s AdAccountDaySpend
+		if err := rows.Scan(&s.AdAccountID, &s.OrganizerID, &s.MandateID, &s.PaymentEmail, &s.TotalSpend); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -571,23 +588,24 @@ func GetUnbilledDailySpend(pool *pgxpool.Pool, forDate time.Time) ([]OrganizerDa
 	return out, rows.Err()
 }
 
-// CreateBillingRecord inserts a pending billing record for an organiser's daily spend.
-func CreateBillingRecord(pool *pgxpool.Pool, organizerID string, billingDate time.Time, amount float64, stitchRequestID string) (*models.AdBillingRecord, error) {
+// CreateBillingRecord inserts a pending billing record for an ad account's daily spend.
+// adAccountID can be empty for legacy organizer-level billing rows.
+func CreateBillingRecord(pool *pgxpool.Pool, organizerID string, billingDate time.Time, amount float64, stitchRequestID string, adAccountID string) (*models.AdBillingRecord, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	var r models.AdBillingRecord
 	err := pool.QueryRow(ctx, `
 		INSERT INTO ad_billing_records
-		    (organizer_id, billing_date, amount, stitch_payment_request_id, status)
-		VALUES ($1, $2, $3, NULLIF($4,''), 'pending')
-		ON CONFLICT (organizer_id, billing_date) DO UPDATE
+		    (organizer_id, ad_account_id, billing_date, amount, stitch_payment_request_id, status)
+		VALUES ($1, NULLIF($2,'')::uuid, $3, $4, NULLIF($5,''), 'pending')
+		ON CONFLICT (ad_account_id, billing_date) DO UPDATE
 		    SET amount = EXCLUDED.amount,
 		        stitch_payment_request_id = EXCLUDED.stitch_payment_request_id,
 		        status = 'pending'
 		RETURNING id, organizer_id, billing_date, amount,
 		          stitch_payment_request_id, status, created_at, completed_at
-	`, organizerID, billingDate.Format("2006-01-02"), amount, stitchRequestID).Scan(
+	`, organizerID, adAccountID, billingDate.Format("2006-01-02"), amount, stitchRequestID).Scan(
 		&r.ID, &r.OrganizerID, &r.BillingDate, &r.Amount,
 		&r.StitchPaymentRequestID, &r.Status, &r.CreatedAt, &r.CompletedAt,
 	)
@@ -598,8 +616,8 @@ func CreateBillingRecord(pool *pgxpool.Pool, organizerID string, billingDate tim
 }
 
 // ConfirmBilling is called by the Stitch webhook when a daily debit succeeds.
-// Atomically marks the billing record completed and flags all spend rows as billed.
-// Re-activates any payment_failed campaigns for this organiser.
+// Atomically marks the billing record completed, flags all spend rows as billed,
+// and re-activates payment_failed campaigns under the ad account.
 func ConfirmBilling(pool *pgxpool.Pool, stitchRequestID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -610,45 +628,45 @@ func ConfirmBilling(pool *pgxpool.Pool, stitchRequestID string) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var organizerID string
+	// Resolve the ad_account_id and billing_date from the billing record.
+	var adAccountID string
 	var billingDate time.Time
 	err = tx.QueryRow(ctx, `
 		UPDATE ad_billing_records
 		SET    status = 'completed', completed_at = NOW()
 		WHERE  stitch_payment_request_id = $1 AND status = 'pending'
-		RETURNING organizer_id, billing_date
-	`, stitchRequestID).Scan(&organizerID, &billingDate)
+		RETURNING COALESCE(ad_account_id::text, ''), billing_date
+	`, stitchRequestID).Scan(&adAccountID, &billingDate)
 	if err != nil {
 		return fmt.Errorf("ConfirmBilling: record not found or already processed: %w", err)
 	}
 
-	// Mark all daily spend rows for this organiser on this date as billed.
+	// Mark all daily spend rows for this account on this date as billed.
 	if _, err = tx.Exec(ctx, `
 		UPDATE ad_daily_spend ds
 		SET    billed = TRUE
 		FROM   ad_campaigns ac
-		WHERE  ds.campaign_id  = ac.id
-		  AND  ac.organizer_id = $1
-		  AND  ds.spend_date   = $2
-	`, organizerID, billingDate.Format("2006-01-02")); err != nil {
+		WHERE  ds.campaign_id   = ac.id
+		  AND  ac.ad_account_id = $1::uuid
+		  AND  ds.spend_date    = $2
+	`, adAccountID, billingDate.Format("2006-01-02")); err != nil {
 		return fmt.Errorf("ConfirmBilling: mark billed: %w", err)
 	}
 
-	// Re-activate campaigns that were paused due to payment failure.
+	// Re-activate campaigns paused due to payment failure under this account.
 	_, _ = tx.Exec(ctx, `
 		UPDATE ad_campaigns
 		SET    status = 'active', updated_at = NOW()
-		WHERE  organizer_id = $1
+		WHERE  ad_account_id = $1::uuid
 		  AND  status = 'payment_failed'
 		  AND  (end_date IS NULL OR end_date >= CURRENT_DATE)
-	`, organizerID)
+	`, adAccountID)
 
 	return tx.Commit(ctx)
 }
 
-// FailBilling marks a billing record as failed and pauses the organiser's campaigns.
-// Called by the nightly worker or Stitch webhook when a debit is declined.
-// Campaigns are paused with status 'payment_failed' until the mandate is fixed.
+// FailBilling marks a billing record as failed and pauses campaigns under the
+// ad account. Called by the nightly worker or Stitch webhook when a debit is declined.
 func FailBilling(pool *pgxpool.Pool, stitchRequestID string, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -659,28 +677,48 @@ func FailBilling(pool *pgxpool.Pool, stitchRequestID string, reason string) erro
 	}
 	defer tx.Rollback(ctx)
 
-	var organizerID string
+	var adAccountID string
 	err = tx.QueryRow(ctx, `
 		UPDATE ad_billing_records
 		SET    status = 'failed', failure_reason = $2
 		WHERE  stitch_payment_request_id = $1 AND status = 'pending'
-		RETURNING organizer_id
-	`, stitchRequestID, reason).Scan(&organizerID)
+		RETURNING COALESCE(ad_account_id::text, '')
+	`, stitchRequestID, reason).Scan(&adAccountID)
 	if err != nil {
 		return fmt.Errorf("FailBilling: record not found: %w", err)
 	}
 
-	// Pause all active/exhausted campaigns until organiser fixes their payment method.
-	if _, err = tx.Exec(ctx, `
-		UPDATE ad_campaigns
-		SET    status = 'payment_failed', updated_at = NOW()
-		WHERE  organizer_id = $1
-		  AND  status IN ('active','exhausted')
-	`, organizerID); err != nil {
-		return fmt.Errorf("FailBilling: pause campaigns: %w", err)
+	if adAccountID != "" {
+		if _, err = tx.Exec(ctx, `
+			UPDATE ad_campaigns
+			SET    status = 'payment_failed', updated_at = NOW()
+			WHERE  ad_account_id = $1::uuid
+			  AND  status IN ('active','exhausted')
+		`, adAccountID); err != nil {
+			return fmt.Errorf("FailBilling: pause campaigns: %w", err)
+		}
 	}
 
 	return tx.Commit(ctx)
+}
+
+// PauseCampaignsForAdAccount pauses all active/exhausted campaigns under a
+// specific ad account when billing couldn't even be initiated.
+// Called directly by the nightly worker.
+func PauseCampaignsForAdAccount(pool *pgxpool.Pool, adAccountID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := pool.Exec(ctx, `
+		UPDATE ad_campaigns
+		SET    status = 'payment_failed', updated_at = NOW()
+		WHERE  ad_account_id = $1::uuid
+		  AND  status IN ('active', 'exhausted')
+	`, adAccountID)
+	if err != nil {
+		log.Error().Err(err).Str("ad_account_id", adAccountID).
+			Msg("ad worker: failed to pause campaigns after billing error")
+	}
 }
 
 // GetBillingHistory returns billing records for an organiser, newest first.

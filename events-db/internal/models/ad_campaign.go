@@ -43,32 +43,29 @@ type AdBillingRecord struct {
 // ── Ad Campaign ───────────────────────────────────────────────────────────────
 
 type AdCampaign struct {
-	ID          string `json:"id" db:"id"`
-	EventID     string `json:"event_id" db:"event_id"`
-	OrganizerID string `json:"organizer_id" db:"organizer_id"`
-
-	// Spending controls
-	DailyBudget float64 `json:"daily_budget" db:"daily_budget"` // ZAR cap per calendar day (min R200)
-	CPMRate     float64 `json:"cpm_rate" db:"cpm_rate"`         // ZAR per 1 000 impressions
-
-	// Lifetime totals — updated incrementally on each impression
-	TotalSpent       float64 `json:"total_spent" db:"total_spent"`
-	TotalImpressions int64   `json:"total_impressions" db:"total_impressions"`
-	TotalClicks      int64   `json:"total_clicks" db:"total_clicks"`
-
-	// Today's numbers — joined from ad_daily_spend at query time, never stored on the campaigns row.
-	TodaySpent       float64 `json:"today_spent" db:"-"`
-	TodayImpressions int64   `json:"today_impressions" db:"-"`
-	TodayClicks      int64   `json:"today_clicks" db:"-"`
-
-	StartDate time.Time  `json:"start_date" db:"start_date"`
+	ID          string  `json:"id"           db:"id"`
+	EventID     string  `json:"event_id"     db:"event_id"`
+	OrganizerID string  `json:"organizer_id" db:"organizer_id"`
+	AdAccountID *string `json:"ad_account_id,omitempty" db:"ad_account_id"` // NEW
+ 
+	DailyBudget float64 `json:"daily_budget" db:"daily_budget"`
+	CPMRate     float64 `json:"cpm_rate"     db:"cpm_rate"`
+ 
+	TotalSpent       float64 `json:"total_spent"        db:"total_spent"`
+	TotalImpressions int64   `json:"total_impressions"  db:"total_impressions"`
+	TotalClicks      int64   `json:"total_clicks"       db:"total_clicks"`
+ 
+	TodaySpent       float64 `json:"today_spent"        db:"-"`
+	TodayImpressions int64   `json:"today_impressions"  db:"-"`
+	TodayClicks      int64   `json:"today_clicks"       db:"-"`
+ 
+	StartDate time.Time  `json:"start_date"         db:"start_date"`
 	EndDate   *time.Time `json:"end_date,omitempty" db:"end_date"`
-
-	Status    CampaignStatus `json:"status" db:"status"`
+ 
+	Status    CampaignStatus `json:"status"     db:"status"`
 	CreatedAt time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at" db:"updated_at"`
-
-	// Populated on demand via JOIN — never a stored column.
+ 
 	Event *Event `json:"event,omitempty" db:"-"`
 }
 
@@ -89,11 +86,10 @@ func (c *AdCampaign) DailyImpressionCap() int64 {
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
 type CreateCampaignDTO struct {
-	// Minimum R200/day. Higher budget = higher ad rank = more impressions per day.
-	// Billed automatically at end of each day — no top-up or pre-loading required.
-	DailyBudget float64    `json:"daily_budget" binding:"required,min=200"`
-	StartDate   *time.Time `json:"start_date"` // defaults to today if nil
-	EndDate     *time.Time `json:"end_date"`   // nil = runs until manually ended
+	AdAccountID string     `json:"ad_account_id" binding:"required"` // NEW — which account to bill
+	DailyBudget float64    `json:"daily_budget"  binding:"required,min=200"`
+	StartDate   *time.Time `json:"start_date"`
+	EndDate     *time.Time `json:"end_date"`
 }
 
 type UpdateCampaignDTO struct {
