@@ -218,6 +218,7 @@ func (s *ImageService) uploadToR2(filename, contentType string, body io.Reader, 
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(s.cfg.R2URL)
+		o.UsePathStyle = true
 	})
 
 	_, err = client.PutObject(ctx, &s3.PutObjectInput{
@@ -266,6 +267,7 @@ func (s *ImageService) DeleteEventImage(publicURL string) error {
 
 	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.BaseEndpoint = aws.String(s.cfg.R2URL)
+		o.UsePathStyle = true
 	})
 
 	_, err = client.DeleteObject(ctx, &s3.DeleteObjectInput{

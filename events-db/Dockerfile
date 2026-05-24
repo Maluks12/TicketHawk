@@ -14,7 +14,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/api/main.go
 
 # ─── Stage 2: Download golang-migrate ────────────────────────────────────────
-FROM alpine:3.19 AS migrate-dl
+FROM alpine:3.21 AS migrate-dl
 
 RUN apk add --no-cache curl tar
 
@@ -23,9 +23,9 @@ RUN curl -L \
     | tar -xz -C /usr/local/bin migrate
 
 # ─── Stage 3: Runtime image ───────────────────────────────────────────────────
-FROM alpine:3.19
+FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata openssl && update-ca-certificates
 
 WORKDIR /app
 
