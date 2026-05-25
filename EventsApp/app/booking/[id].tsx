@@ -1,55 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  ActivityIndicator, TextInput, Modal, Dimensions, Animated,
+  ActivityIndicator, TextInput, Modal, Animated,
+  KeyboardAvoidingView, Platform, Alert, StyleSheet,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet } from 'react-native';
-import { api } from '../../lib/api';
+import {
+  BookingDetail,
+  TicketAssignment,
+  getBookingDetail,
+  getTicketAssignments,
+  assignTicket,
+  revokeAssignment,
+  api,
+} from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/booking';
 
 const { width: SW } = Dimensions.get('window');
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface BookingDetail {
-  id: string;
-  booking_number: string;
-  event_id: string;
-  ticket_quantity: number;
-  unit_price?: number;
-  subtotal?: number;
-  platform_fee?: number;
-  organizer_fee?: number;
-  total_amount: number;
-  discount_amount?: number;
-  currency: string;
-  booking_status: string;
-  payment_status: string;
-  qr_code_url?: string | null;
-  tickets_sent?: boolean;
-  ticket_type_name?: string | null;
-  attendee_first_name?: string | null;
-  attendee_last_name?: string | null;
-  attendee_email?: string | null;
-  created_at: string;
-  confirmed_at?: string | null;
-  refunded_at?: string | null;
-  refunded_reason?: string | null;
-  refunded_amount?: number | null;
-  event?: {
-    title: string;
-    start_time: string;
-    venue_name: string;
-    city: string;
-    cover_image_url?: string | null;
-    address?: string;
-  };
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -297,6 +269,139 @@ const MOCK_DETAILS: Record<string, BookingDetail> = {
   },
 };
 
+// ─── Assign Sheet ─────────────────────────────────────────────────────────────
+// Bottom sheet allowing the buyer to assign an unassigned slot to someone else.
+// The backend sends that person a claim-link email on success.
+
+interface AssignSheetProps {
+  visible: boolean;
+  bookingId: string;
+  assignment: TicketAssignment | null;
+  totalTickets: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, onSuccess }: AssignSheetProps) => {
+  const insets = useSafeAreaInsets();
+  const [name, setName]       = useState('');
+  const [email, setEmail]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+
+  // Reset fields whenever the sheet opens for a (possibly different) slot.
+  useEffect(() => {
+    if (visible) { setName(''); setEmail(''); setError(''); }
+  }, [visible, assignment?.id]);
+
+  const submit = async () => {
+    if (!assignment) return;
+    if (!name.trim())  { setError('Please enter the recipient\'s name.');  return; }
+    if (!email.trim()) { setError('Please enter the recipient\'s email.'); return; }
+    // Basic email shape check — the backend validates properly.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    setLoading(true); setError('');
+    try {
+      await assignTicket(bookingId, assignment.id, name.trim(), email.trim().toLowerCase());
+      onSuccess();
+      onClose();
+    } catch (e: any) {
+      const msg = e?.response?.data?.error ?? e?.response?.data?.details ?? 'Failed to send invite. Please try again.';
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <View style={[sheet.assignSheet, { paddingBottom: insets.bottom + 16 }]}>
+          {/* Handle */}
+          <View style={sheet.sheetHandle} />
+
+          <Text style={sheet.sheetTitle}>Send ticket to someone</Text>
+          {assignment && totalTickets > 1 && (
+            <Text style={sheet.sheetSub}>
+              Ticket {assignment.slot_number} of {totalTickets} · They'll receive a claim link by email.
+            </Text>
+          )}
+          {!assignment || totalTickets === 1 ? (
+            <Text style={sheet.sheetSub}>
+              They'll receive a claim link by email and can pick it up at the door.
+            </Text>
+          ) : null}
+
+          {/* Name */}
+          <Text style={sheet.fieldLabel}>RECIPIENT NAME</Text>
+          <TextInput
+            style={[sheet.sheetInput, error && !email ? sheet.sheetInputError : undefined]}
+            value={name}
+            onChangeText={v => { setName(v); setError(''); }}
+            placeholder="e.g. Jane Smith"
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            autoCapitalize="words"
+            autoCorrect={false}
+            returnKeyType="next"
+          />
+
+          {/* Email */}
+          <Text style={[sheet.fieldLabel, { marginTop: 12 }]}>RECIPIENT EMAIL</Text>
+          <TextInput
+            style={[sheet.sheetInput, error && email ? sheet.sheetInputError : undefined]}
+            value={email}
+            onChangeText={v => { setEmail(v); setError(''); }}
+            placeholder="jane@example.com"
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            autoCorrect={false}
+            returnKeyType="send"
+            onSubmitEditing={submit}
+          />
+
+          {/* Error */}
+          {!!error && (
+            <View style={sheet.sheetErrorBox}>
+              <Ionicons name="alert-circle-outline" size={14} color="#ff6b6b" />
+              <Text style={sheet.sheetErrorText}>{error}</Text>
+            </View>
+          )}
+
+          {/* Submit */}
+          <TouchableOpacity
+            style={[sheet.sendBtn, loading && { opacity: 0.6 }]}
+            onPress={submit}
+            disabled={loading}
+            activeOpacity={0.85}
+          >
+            {loading
+              ? <ActivityIndicator color="#0a0a0a" size="small" />
+              : (
+                <>
+                  <Feather name="send" size={15} color="#0a0a0a" />
+                  <Text style={sheet.sendBtnText}>Send claim link</Text>
+                </>
+              )
+            }
+          </TouchableOpacity>
+
+          <TouchableOpacity style={sheet.cancelBtn} onPress={onClose}>
+            <Text style={sheet.cancelBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+};
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function BookingDetailScreen() {
@@ -304,15 +409,50 @@ export default function BookingDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuthStore();
-  const [booking, setBooking]       = useState<BookingDetail | null>(null);
-  const [loading, setLoading]       = useState(true);
-  const [refundOpen, setRefundOpen] = useState(false);
-  const [refunded, setRefunded]     = useState(false);
+  const [booking, setBooking]               = useState<BookingDetail | null>(null);
+  const [assignments, setAssignments]       = useState<TicketAssignment[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [refundOpen, setRefundOpen]         = useState(false);
+  const [refunded, setRefunded]             = useState(false);
+  const [assignTarget, setAssignTarget]     = useState<TicketAssignment | null>(null);
+  const [revoking, setRevoking]             = useState<string | null>(null); // assignmentId being revoked
   const scrollY = useRef(new Animated.Value(0)).current;
+
+  const refreshAssignments = useCallback(async () => {
+    if (!id || id.startsWith('mock-')) return;
+    try {
+      const data = await getTicketAssignments(id as string);
+      setAssignments(data);
+    } catch {}
+  }, [id]);
+
+  const handleRevoke = async (assignmentId: string) => {
+    Alert.alert(
+      'Revoke invite',
+      'This will cancel the pending invite and make the slot available to assign again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revoke',
+          style: 'destructive',
+          onPress: async () => {
+            setRevoking(assignmentId);
+            try {
+              await revokeAssignment(id as string, assignmentId);
+              await refreshAssignments();
+            } catch (e: any) {
+              Alert.alert('Error', e?.response?.data?.error ?? 'Failed to revoke. Please try again.');
+            } finally {
+              setRevoking(null);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   useEffect(() => {
     const load = async () => {
-      // Intercept mock IDs — no API call needed
       if (id?.startsWith('mock-')) {
         setBooking(MOCK_DETAILS[id] ?? null);
         setLoading(false);
@@ -320,8 +460,12 @@ export default function BookingDetailScreen() {
       }
       if (!user) { setLoading(false); return; }
       try {
-        const { data } = await api.get<BookingDetail>(`/v1/bookings/${id}`);
-        setBooking(data);
+        const [booking, assignments] = await Promise.all([
+          getBookingDetail(id as string),
+          getTicketAssignments(id as string).catch(() => []),
+        ]);
+        setBooking(booking);
+        setAssignments(assignments);
       } catch {} finally { setLoading(false); }
     };
     load();
@@ -350,7 +494,14 @@ export default function BookingDetailScreen() {
   const statusCol = STATUS_COLOR[status] ?? '#888';
   const canRefund = status === 'confirmed' && !refunded && !!user;
   const isMock    = !booking.unit_price;
-  const qrValue   = booking.qr_code_url ?? booking.booking_number;
+
+  // Determine which slots to show QR codes for.
+  // Claimed slots have a real QR; others show a pending placeholder.
+  // Fall back to booking-level qr_code_url for older bookings that were
+  // not migrated to per-assignment QR codes.
+  const hasAssignments = assignments.length > 0;
+  const claimedSlots   = assignments.filter(a => a.status === 'claimed' && a.qr_code_url);
+  const showQRs        = status === 'confirmed' || status === 'pending';
 
   return (
     <View className={s.root}>
@@ -388,21 +539,127 @@ export default function BookingDetailScreen() {
           </View>
         </Animated.View>
 
-        {/* QR */}
+        {/* QR Codes — one card per ticket slot */}
         <View className={s.qrSection}>
-          <Text className={s.sectionLabel}>ENTRY PASS</Text>
-          <View style={sheet.qrCard}>
-            {booking.qr_code_url
-              ? <Image source={{ uri: booking.qr_code_url }} style={sheet.qrImage} resizeMode="contain" />
-              : <QRPlaceholder value={qrValue} />
-            }
-            <Text className={s.qrNumber}>#{booking.booking_number}</Text>
-            <Text className={s.qrHint}>
-              {status === 'confirmed' ? 'Present this at the venue entrance'
-                : status === 'refunded' ? 'This ticket has been refunded'
-                : 'Ticket not yet confirmed'}
-            </Text>
-          </View>
+          <Text className={s.sectionLabel}>
+            {booking.ticket_quantity > 1
+              ? `ENTRY PASSES (${booking.ticket_quantity} tickets)`
+              : 'ENTRY PASS'}
+          </Text>
+
+          {status === 'refunded' ? (
+            <View style={[sheet.qrCard, { opacity: 0.4 }]}>
+              <Ionicons name="close-circle-outline" size={64} color="rgba(255,255,255,0.3)" />
+              <Text className={s.qrNumber}>#{booking.booking_number}</Text>
+              <Text className={s.qrHint}>This ticket has been refunded</Text>
+            </View>
+          ) : hasAssignments ? (
+            assignments.map((slot) => {
+              const isClaimed   = slot.status === 'claimed' && !!slot.qr_code_url;
+              const isPending   = slot.status === 'pending';
+              const isUnassigned = slot.status === 'unassigned';
+              const isInactive  = slot.status === 'cancelled' || slot.status === 'revoked';
+              const isMySlot    = slot.slot_number === 1; // buyer's own slot
+              const isRevoking  = revoking === slot.id;
+
+              return (
+                <View key={slot.id} style={[sheet.qrCard, { marginBottom: 12, opacity: isInactive ? 0.35 : 1 }]}>
+                  {booking.ticket_quantity > 1 && (
+                    <View style={sheet.slotBadge}>
+                      <Text style={sheet.slotBadgeText}>
+                        TICKET {slot.slot_number} OF {booking.ticket_quantity}
+                        {isMySlot ? '  ·  YOURS' : ''}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isClaimed ? (
+                    <Image source={{ uri: slot.qr_code_url! }} style={sheet.qrImage} resizeMode="contain" />
+                  ) : (
+                    <View style={sheet.pendingQR}>
+                      <Ionicons
+                        name={isInactive ? 'close-circle-outline' : isPending ? 'mail-outline' : 'ticket-outline'}
+                        size={48}
+                        color="rgba(255,255,255,0.2)"
+                      />
+                      <Text style={sheet.pendingText}>
+                        {isInactive    ? 'Ticket invalidated'
+                         : isPending   ? 'Invite sent — awaiting claim'
+                         : isUnassigned ? 'Not yet assigned'
+                         : 'QR not available'}
+                      </Text>
+                    </View>
+                  )}
+
+                  {slot.assignee_name ? (
+                    <Text style={sheet.assigneeName}>{slot.assignee_name}</Text>
+                  ) : null}
+
+                  <Text className={s.qrNumber}>#{booking.booking_number}</Text>
+                  <Text className={s.qrHint}>
+                    {isClaimed    ? 'Present this at the venue entrance'
+                     : isPending  ? `Claim link sent to ${slot.assignee_email ?? 'recipient'}`
+                     : isInactive ? 'This slot is no longer valid'
+                     : 'Assign this ticket to send someone their entry pass'}
+                  </Text>
+
+                  {/* Assign button — only on unassigned slots the buyer doesn't own */}
+                  {isUnassigned && !isMySlot && status === 'confirmed' && (
+                    <TouchableOpacity
+                      style={sheet.assignBtn}
+                      onPress={() => setAssignTarget(slot)}
+                      activeOpacity={0.8}
+                    >
+                      <Feather name="send" size={14} color="#0a0a0a" />
+                      <Text style={sheet.assignBtnText}>Assign ticket</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Revoke button — only on pending slots */}
+                  {isPending && status === 'confirmed' && (
+                    <TouchableOpacity
+                      style={[sheet.revokeBtn, isRevoking && { opacity: 0.5 }]}
+                      onPress={() => handleRevoke(slot.id)}
+                      disabled={isRevoking}
+                      activeOpacity={0.8}
+                    >
+                      {isRevoking
+                        ? <ActivityIndicator size="small" color="#ff6b6b" />
+                        : (
+                          <>
+                            <Feather name="x" size={14} color="#ff6b6b" />
+                            <Text style={sheet.revokeBtnText}>Revoke invite</Text>
+                          </>
+                        )
+                      }
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })
+          ) : (
+            /* Fallback for older bookings without per-assignment QR codes */
+            <View style={sheet.qrCard}>
+              {booking.qr_code_url ? (
+                <Image source={{ uri: booking.qr_code_url }} style={sheet.qrImage} resizeMode="contain" />
+              ) : (
+                <View style={sheet.pendingQR}>
+                  <Ionicons name="time-outline" size={48} color="rgba(255,255,255,0.2)" />
+                  <Text style={sheet.pendingText}>
+                    {status === 'confirmed'
+                      ? 'QR code is being generated…'
+                      : 'Ticket not yet confirmed'}
+                  </Text>
+                </View>
+              )}
+              <Text className={s.qrNumber}>#{booking.booking_number}</Text>
+              <Text className={s.qrHint}>
+                {status === 'confirmed'
+                  ? 'Present this at the venue entrance'
+                  : 'Complete payment to activate your ticket'}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Event Details */}
@@ -497,6 +754,15 @@ export default function BookingDetailScreen() {
 
       <RefundModal visible={refundOpen} bookingId={booking.id}
         onClose={() => setRefundOpen(false)} onSuccess={() => setRefunded(true)} />
+
+      <AssignSheet
+        visible={!!assignTarget}
+        bookingId={booking.id}
+        assignment={assignTarget}
+        totalTickets={booking.ticket_quantity}
+        onClose={() => setAssignTarget(null)}
+        onSuccess={refreshAssignments}
+      />
     </View>
   );
 }

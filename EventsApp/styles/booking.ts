@@ -78,12 +78,13 @@ export const s = {
 
 // ─── StyleSheet ────────────────────────────────────────────────────────────────
 export const sheet = StyleSheet.create({
-  // Floating header – animated bg handled by Animated.View inline
+
+  // ── Hero ─────────────────────────────────────────────────────────────────
   heroFade: {
     ...StyleSheet.absoluteFillObject,
   },
 
-  // QR card
+  // ── QR card ──────────────────────────────────────────────────────────────
   qrCard: {
     width: '100%',
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -100,7 +101,177 @@ export const sheet = StyleSheet.create({
     borderRadius: 8,
   },
 
-  // Info card
+  // ── Slot badge (multi-ticket label) ──────────────────────────────────────
+  slotBadge: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  slotBadgeText: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+  },
+
+  // ── Pending / unassigned QR placeholder ──────────────────────────────────
+  pendingQR: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  pendingText: {
+    color: 'rgba(255,255,255,0.25)',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  assigneeName: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+
+  // ── Assign button ─────────────────────────────────────────────────────────
+  assignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 14,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+  },
+  assignBtnText: {
+    color: '#0a0a0a',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  // ── Revoke button ─────────────────────────────────────────────────────────
+  revokeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 10,
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.35)',
+    backgroundColor: 'rgba(255,107,107,0.08)',
+  },
+  revokeBtnText: {
+    color: '#ff6b6b',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // ── Assign bottom sheet ───────────────────────────────────────────────────
+  assignSheet: {
+    backgroundColor: '#141414',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  sheetTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  sheetSub: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 22,
+  },
+  fieldLabel: {
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    marginBottom: 7,
+  },
+  sheetInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    color: '#ffffff',
+    fontSize: 15,
+  },
+  sheetInputError: {
+    borderColor: 'rgba(255,107,107,0.5)',
+  },
+  sheetErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    backgroundColor: 'rgba(255,107,107,0.08)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  sheetErrorText: {
+    color: '#ff6b6b',
+    fontSize: 13,
+    flex: 1,
+  },
+  sendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 20,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    paddingVertical: 15,
+  },
+  sendBtnText: {
+    color: '#0a0a0a',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  cancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  cancelBtnText: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 14,
+  },
+
+  // ── Info card ─────────────────────────────────────────────────────────────
   card: {
     marginHorizontal: 16,
     marginTop: 20,
@@ -118,7 +289,7 @@ export const sheet = StyleSheet.create({
     marginVertical: 4,
   },
 
-  // Refund modal sheet
+  // ── Refund modal sheet ────────────────────────────────────────────────────
   modalSheet: {
     backgroundColor: '#161616',
     borderTopLeftRadius: 24,

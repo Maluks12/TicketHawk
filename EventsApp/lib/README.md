@@ -3,12 +3,9 @@ import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 
 function getApiBaseUrl(): string {
-  // 1. Explicit env var wins (set EXPO_PUBLIC_API_URL for prod / staging)
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
-  // 2. In Expo Go / dev builds, derive the IP from the Expo debugger host
-  //    (hostUri looks like "192.168.x.x:8081" — strip the port, use 8080)
   const debuggerHost =
     Constants.expoConfig?.hostUri ??
     (Constants as any).manifest?.debuggerHost ??
@@ -18,7 +15,6 @@ function getApiBaseUrl(): string {
     const ip = debuggerHost.split(':')[0];
     return `http://${ip}:8080`;
   }
-  // 3. Fallback for local simulators / web
   return 'http://localhost:8080';
 }
 
@@ -607,15 +603,83 @@ export async function pollPaymentStatus(
   throw new Error('Payment confirmation timed out');
 }
 
+// ── Booking detail & ticket assignments ───────────────────────────────────
+
+export interface BookingDetail {
+  id: string;
+  booking_number: string;
+  event_id: string;
+  ticket_quantity: number;
+  unit_price?: number;
+  subtotal?: number;
+  platform_fee?: number;
+  organizer_fee?: number;
+  total_amount: number;
+  discount_amount?: number;
+  currency: string;
+  booking_status: string;
+  payment_status: string;
+  qr_code_url?: string | null;
+  tickets_sent?: boolean;
+  ticket_type_name?: string | null;
+  attendee_first_name?: string | null;
+  attendee_last_name?: string | null;
+  attendee_email?: string | null;
+  created_at: string;
+  confirmed_at?: string | null;
+  refunded_at?: string | null;
+  refunded_reason?: string | null;
+  refunded_amount?: number | null;
+  event?: {
+    title: string;
+    start_time: string;
+    venue_name: string;
+    city: string;
+    cover_image_url?: string | null;
+    address?: string;
+  };
+}
+
+export interface TicketAssignment {
+  id: string;
+  slot_number: number;
+  status: 'unassigned' | 'pending' | 'claimed' | 'revoked' | 'cancelled';
+  assignee_name?: string | null;
+  assignee_email?: string | null;
+  qr_code_url?: string | null;
+}
+
+export async function getBookingDetail(bookingId: string): Promise<BookingDetail> {
+  const res = await api.get<BookingDetail>(`/v1/bookings/${bookingId}`);
+  return res.data;
+}
+
+export async function getTicketAssignments(bookingId: string): Promise<TicketAssignment[]> {
+  const res = await api.get<{ data: TicketAssignment[] }>(`/v1/bookings/${bookingId}/assignments`);
+  return res.data?.data ?? [];
+}
+
+export async function assignTicket(
+  bookingId: string,
+  assignmentId: string,
+  assignee_name: string,
+  assignee_email: string,
+): Promise<void> {
+  await api.post(`/v1/bookings/${bookingId}/assignments/${assignmentId}`, {
+    assignee_name,
+    assignee_email,
+  });
+}
+
+export async function revokeAssignment(bookingId: string, assignmentId: string): Promise<void> {
+  await api.delete(`/v1/bookings/${bookingId}/assignments/${assignmentId}`);
+}
+
 // ── Event Follow ───────────────────────────────────────────────────────────
-// Types shared between the profile screen and any future event detail screen
-// follow button. Helpers kept here so formatting is consistent across the app.
 
 export interface FollowedEvent {
-  /** UUID of the event_follows row — used as FlatList key */
   follow_id:        string;
   followed_at:      string;
-  /** Event fields */
   id:               string;
   slug:             string;
   title:            string;
@@ -630,7 +694,6 @@ export interface FollowedEvent {
   category:         string;
   tickets_sold:     number;
   max_capacity?:    number | null;
-  /** Computed by the backend repository */
   is_sold_out:      boolean;
   available_tickets: number;
 }
@@ -646,7 +709,6 @@ export interface FollowStatusResponse {
   event_id:     string;
 }
 
-/** Format a UTC ISO date string for display on event cards (e.g. "Sat, 14 Jun") */
 export function fmtFollowDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-ZA', {
     weekday: 'short',
@@ -655,17 +717,12 @@ export function fmtFollowDate(iso: string): string {
   });
 }
 
-/** Format a price in ZAR, or "Free" for zero-price events */
 export function fmtFollowPrice(price: number): string {
   return price === 0
     ? 'Free'
     : `R${Math.round(price).toLocaleString('en-ZA')}`;
 }
 
-/**
- * Returns the percentage of tickets sold (0–100), or null if the event has
- * no capacity cap. Used to show "Selling Fast" pill at ≥ 80 %.
- */
 export function followAvailPct(
   sold: number,
   max: number | null | undefined,
@@ -674,13 +731,11 @@ export function followAvailPct(
   return Math.round((sold / max) * 100);
 }
 
-/** Toggle follow on an event. Returns the new follow state + count. */
 export async function toggleFollow(eventId: string): Promise<FollowStatusResponse> {
   const res = await api.post<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
   return res.data;
 }
 
-/** Check whether the current user is following an event. */
 export async function getFollowStatus(eventId: string): Promise<FollowStatusResponse> {
   const res = await api.get<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
   return res.data;

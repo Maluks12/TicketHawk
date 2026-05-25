@@ -5,7 +5,12 @@ import (
 	"context"
 	"events-db/internal/config"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"io"
+	"math"
 	"mime/multipart"
 	"path/filepath"
 	"strings"
@@ -46,14 +51,27 @@ const (
 // ── Size and count limits ─────────────────────────────────────────────────────
 
 const (
-	maxCoverSize   int64 = 5 * 1024 * 1024  // 5 MB
-	maxBannerSize  int64 = 8 * 1024 * 1024  // 8 MB
-	maxGallerySize int64 = 5 * 1024 * 1024  // 5 MB
+	maxCoverSize   int64 = 5 * 1024 * 1024   // 5 MB
+	maxBannerSize  int64 = 8 * 1024 * 1024   // 8 MB
+	maxGallerySize int64 = 5 * 1024 * 1024   // 5 MB
 	maxVideoSize   int64 = 500 * 1024 * 1024 // 500 MB
 
 	// MaxGalleryCount is the hard cap on gallery images per event. It is
 	// exported so the repository can reference it for the gallery-full check.
 	MaxGalleryCount = 10
+)
+
+// ── Compression settings ──────────────────────────────────────────────────────
+
+const (
+	// maxImageDimension is the maximum width or height of any uploaded image
+	// after compression. Images larger than this are scaled down proportionally.
+	maxImageDimension = 1920
+
+	// jpegQuality is the JPEG encoding quality (0–100). 82 gives a good
+	// balance between visual fidelity and file size (~60–70 % smaller than
+	// a typical camera JPEG at 95+ quality).
+	jpegQuality = 82
 )
 
 // ── Allowed MIME types ────────────────────────────────────────────────────────
@@ -70,6 +88,198 @@ var allowedVideoMIMETypes = map[string]string{
 	"video/webm":      ".webm",
 }
 
+// ── Image compression ─────────────────────────────────────────────────────────
+
+// compressImage decodes a JPEG or PNG, scales it down if it exceeds
+// maxImageDimension on either axis, and re-encodes it.
+//
+// Output format rules:
+//   - JPEG  → always re-encoded as JPEG at jpegQuality.
+//   - PNG with transparency → kept as PNG (JPEG has no alpha channel; converting
+//     would fill transparent areas with white, breaking logos and merch designs).
+//   - PNG without transparency → converted to JPEG for a large size reduction.
+//   - WebP  → returned unchanged; Go's stdlib has no WebP decoder and WebP is
+//     already an efficient format.
+//
+// Any decode or encode failure returns an error — the caller must reject the
+// upload rather than fall back to the raw bytes, which could be very large.
+func compressImage(data []byte, contentType string) ([]byte, string, string, error) {
+	// WebP: pass through – already efficient, no stdlib decoder available.
+	if contentType == "image/webp" {
+		return data, contentType, ".webp", nil
+	}
+
+	var (
+		img image.Image
+		err error
+	)
+
+	switch contentType {
+	case "image/jpeg":
+		img, err = jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, "", "", fmt.Errorf("failed to decode JPEG: %w", err)
+		}
+	case "image/png":
+		img, err = png.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, "", "", fmt.Errorf("failed to decode PNG: %w", err)
+		}
+	default:
+		return nil, "", "", fmt.Errorf("unsupported image format for compression: %s", contentType)
+	}
+
+	// Scale down proportionally if either dimension exceeds the cap.
+	img = scaleDown(img, maxImageDimension, maxImageDimension)
+
+	// For PNGs, check whether the image actually uses transparency.
+	// If it does, we must keep it as PNG to avoid destroying alpha data.
+	if contentType == "image/png" && hasTransparency(img) {
+		var buf bytes.Buffer
+		if err = png.Encode(&buf, img); err != nil {
+			return nil, "", "", fmt.Errorf("failed to encode PNG: %w", err)
+		}
+		return buf.Bytes(), "image/png", ".png", nil
+	}
+
+	// All other cases: re-encode as JPEG.
+	// PNG without transparency → JPEG yields 70–90 % size reduction for photos.
+	var buf bytes.Buffer
+	if err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
+		return nil, "", "", fmt.Errorf("failed to encode JPEG: %w", err)
+	}
+
+	return buf.Bytes(), "image/jpeg", ".jpg", nil
+}
+
+// hasTransparency reports whether any pixel in img has an alpha value below
+// fully opaque. Sampling every pixel is the only reliable method — format
+// metadata alone (e.g. PNG color type) does not guarantee pixels are actually
+// transparent.
+func hasTransparency(img image.Image) bool {
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, a := img.At(x, y).RGBA()
+			if a < 0xffff {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scaleDown returns img scaled so that neither dimension exceeds maxW/maxH,
+// preserving the aspect ratio. Uses bilinear interpolation for quality.
+// If the image already fits, img is returned as-is (zero allocation).
+func scaleDown(img image.Image, maxW, maxH int) image.Image {
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+
+	if w <= maxW && h <= maxH {
+		return img
+	}
+
+	ratio := math.Min(float64(maxW)/float64(w), float64(maxH)/float64(h))
+	newW := int(math.Round(float64(w) * ratio))
+	newH := int(math.Round(float64(h) * ratio))
+
+	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+
+	// Bilinear interpolation – good quality for downscaling photos.
+	for y := 0; y < newH; y++ {
+		for x := 0; x < newW; x++ {
+			// Map destination pixel back to source space.
+			srcXf := (float64(x)+0.5)*float64(w)/float64(newW) - 0.5
+			srcYf := (float64(y)+0.5)*float64(h)/float64(newH) - 0.5
+
+			x0 := int(math.Floor(srcXf))
+			y0 := int(math.Floor(srcYf))
+			x1 := x0 + 1
+			y1 := y0 + 1
+
+			// Clamp to image bounds.
+			x0 = clampInt(x0, bounds.Min.X, bounds.Max.X-1)
+			y0 = clampInt(y0, bounds.Min.Y, bounds.Max.Y-1)
+			x1 = clampInt(x1, bounds.Min.X, bounds.Max.X-1)
+			y1 = clampInt(y1, bounds.Min.Y, bounds.Max.Y-1)
+
+			fx := srcXf - math.Floor(srcXf)
+			fy := srcYf - math.Floor(srcYf)
+
+			c00 := toRGBAf(img.At(x0, y0))
+			c10 := toRGBAf(img.At(x1, y0))
+			c01 := toRGBAf(img.At(x0, y1))
+			c11 := toRGBAf(img.At(x1, y1))
+
+			r := lerp2(c00[0], c10[0], c01[0], c11[0], fx, fy)
+			g := lerp2(c00[1], c10[1], c01[1], c11[1], fx, fy)
+			b := lerp2(c00[2], c10[2], c01[2], c11[2], fx, fy)
+			a := lerp2(c00[3], c10[3], c01[3], c11[3], fx, fy)
+
+			dst.Set(x, y, color.RGBA{
+				R: uint8(clampFloat(r, 0, 255)),
+				G: uint8(clampFloat(g, 0, 255)),
+				B: uint8(clampFloat(b, 0, 255)),
+				A: uint8(clampFloat(a, 0, 255)),
+			})
+		}
+	}
+
+	return dst
+}
+
+// ── Bilinear helpers ──────────────────────────────────────────────────────────
+
+func toRGBAf(c color.Color) [4]float64 {
+	r, g, b, a := c.RGBA() // each in [0, 65535]
+	return [4]float64{
+		float64(r) / 257,
+		float64(g) / 257,
+		float64(b) / 257,
+		float64(a) / 257,
+	}
+}
+
+func lerp(a, b, t float64) float64 { return a*(1-t) + b*t }
+
+func lerp2(c00, c10, c01, c11, fx, fy float64) float64 {
+	return lerp(lerp(c00, c10, fx), lerp(c01, c11, fx), fy)
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func clampFloat(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func extensionForMIME(contentType string) string {
+	switch contentType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".jpg"
+	}
+}
+
 // ── Image upload ─────────────────────────────────────────────────────────────
 
 func (s *ImageService) UploadEventImage(
@@ -79,13 +289,12 @@ func (s *ImageService) UploadEventImage(
 	imgType ImageType,
 ) (string, error) {
 	contentType := header.Header.Get("Content-Type")
-	ext, ok := allowedImageMIMETypes[contentType]
+	_, ok := allowedImageMIMETypes[contentType]
 	if !ok {
-		ext = strings.ToLower(filepath.Ext(header.Filename))
+		ext := strings.ToLower(filepath.Ext(header.Filename))
 		switch ext {
 		case ".jpg", ".jpeg":
 			contentType = "image/jpeg"
-			ext = ".jpg"
 		case ".png":
 			contentType = "image/png"
 		case ".webp":
@@ -114,6 +323,12 @@ func (s *ImageService) UploadEventImage(
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Compress before uploading.
+	data, contentType, ext, err := compressImage(data, contentType)
+	if err != nil {
+		return "", fmt.Errorf("image compression failed: %w", err)
+	}
+
 	filename := fmt.Sprintf("events/%s/%s/%s%s", eventID, string(imgType), uuid.New().String(), ext)
 	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
 }
@@ -128,13 +343,12 @@ func (s *ImageService) UploadCollectionImage(
 	collectionID string,
 ) (string, error) {
 	contentType := header.Header.Get("Content-Type")
-	ext, ok := allowedImageMIMETypes[contentType]
+	_, ok := allowedImageMIMETypes[contentType]
 	if !ok {
-		ext = strings.ToLower(filepath.Ext(header.Filename))
+		ext := strings.ToLower(filepath.Ext(header.Filename))
 		switch ext {
 		case ".jpg", ".jpeg":
 			contentType = "image/jpeg"
-			ext = ".jpg"
 		case ".png":
 			contentType = "image/png"
 		case ".webp":
@@ -153,10 +367,15 @@ func (s *ImageService) UploadCollectionImage(
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Compress before uploading.
+	data, contentType, ext, err := compressImage(data, contentType)
+	if err != nil {
+		return "", fmt.Errorf("image compression failed: %w", err)
+	}
+
 	filename := fmt.Sprintf("collections/%s/cover/%s%s", collectionID, uuid.New().String(), ext)
 	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
 }
-
 
 // ── Video upload ─────────────────────────────────────────────────────────────
 
@@ -276,6 +495,7 @@ func (s *ImageService) DeleteEventImage(publicURL string) error {
 	})
 	return err
 }
+
 // UploadGenericImage stores an image under uploads/misc/{uuid}.ext and returns
 // the public URL. No DB write — caller associates the URL wherever needed.
 // Used by the admin dashboard for merch images during both create and edit flows.
@@ -284,13 +504,12 @@ func (s *ImageService) UploadGenericImage(
 	header *multipart.FileHeader,
 ) (string, error) {
 	contentType := header.Header.Get("Content-Type")
-	ext, ok := allowedImageMIMETypes[contentType]
+	_, ok := allowedImageMIMETypes[contentType]
 	if !ok {
-		ext = strings.ToLower(filepath.Ext(header.Filename))
+		ext := strings.ToLower(filepath.Ext(header.Filename))
 		switch ext {
 		case ".jpg", ".jpeg":
 			contentType = "image/jpeg"
-			ext = ".jpg"
 		case ".png":
 			contentType = "image/png"
 		case ".webp":
@@ -308,6 +527,12 @@ func (s *ImageService) UploadGenericImage(
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Compress before uploading.
+	data, contentType, ext, err := compressImage(data, contentType)
+	if err != nil {
+		return "", fmt.Errorf("image compression failed: %w", err)
 	}
 
 	filename := fmt.Sprintf("uploads/misc/%s%s", uuid.New().String(), ext)
