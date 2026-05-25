@@ -96,7 +96,7 @@ func UpdateAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			case repository.ErrAdAccountNotFound:
 				c.JSON(http.StatusNotFound, gin.H{"error": "Ad account not found"})
 			case repository.ErrAdAccountUnauthorized:
-				c.JSON(http.StatusForbidden, gin.H{"error": "Not your ad account"})
+				c.JSON(http.StatusNotFound, gin.H{"error": "Ad account not found"})
 			default:
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update ad account"})
 			}
@@ -136,6 +136,7 @@ func RegisterAdAccountPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "Payment method registered",
 			"status":   "active",
+			"has_payment_method": true,
 			"billing":  "Campaigns under this account will be billed automatically each morning for the previous day's actual spend.",
 		})
 	}

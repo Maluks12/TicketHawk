@@ -31,7 +31,7 @@ import (
 //	Body: { "stitch_mandate_id": "man_abc123", "email": "org@example.com" }
 func RegisterPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 
 		var dto models.RegisterPaymentMethodDTO
 		if err := c.ShouldBindJSON(&dto); err != nil {
@@ -61,7 +61,7 @@ func RegisterPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/ad-payment-method
 func GetPaymentMethodStatusHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 
 		status, err := repository.GetPaymentMethodStatus(pool, orgID)
 		if err != nil {
@@ -82,7 +82,7 @@ func GetPaymentMethodStatusHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/ad-billing?limit=30
 func GetBillingHistoryHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 		limit := 30
 		if l := c.Query("limit"); l != "" {
 			if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 90 {
@@ -114,7 +114,7 @@ func GetBillingHistoryHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	Body: { "daily_budget": 200, "end_date": "2026-12-31" }
 func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 		eventID := c.Param("id")
 
 		var dto models.CreateCampaignDTO
@@ -128,6 +128,8 @@ func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			switch err {
 			case repository.ErrCampaignUnauthorized:
 				c.JSON(http.StatusForbidden, gin.H{"error": "You do not own this event"})
+			case repository.ErrAdAccountUnauthorized:
+				c.JSON(http.StatusForbidden, gin.H{"error": "That ad account does not belong to you"})
 			case repository.ErrEventAlreadyBoosted:
 				c.JSON(http.StatusConflict, gin.H{
 					"error": "This event already has an active campaign",
@@ -164,7 +166,7 @@ func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/campaigns
 func GetMyCampaignsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 		campaigns, err := repository.GetOrganizerCampaigns(pool, orgID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch campaigns"})
@@ -179,7 +181,7 @@ func GetMyCampaignsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/campaigns/:id
 func GetCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 		campaignID := c.Param("id")
 		campaign, err := repository.GetCampaign(pool, campaignID, orgID)
 		if err != nil {
@@ -195,7 +197,7 @@ func GetCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	PATCH /organiser/campaigns/:id
 func UpdateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 		campaignID := c.Param("id")
 
 		var dto models.UpdateCampaignDTO
@@ -225,7 +227,7 @@ func UpdateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	DELETE /organiser/campaigns/:id
 func EndCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("organizer_id")
+		orgID := c.GetString("user_id")
 		campaignID := c.Param("id")
 
 		if err := repository.EndCampaign(pool, campaignID, orgID); err != nil {
