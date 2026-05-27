@@ -1,26 +1,46 @@
-import axios from 'axios';
+'use client';
+import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 
-export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
-  withCredentials: true,
-});
+interface ConfirmState { title: string; msg: string; cb: () => Promise<void>; }
+const Ctx = createContext<(title: string, msg: string, cb: () => Promise<void>) => void>(() => {});
+export const useConfirm = () => useContext(Ctx);
 
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('evt_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<ConfirmState | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const openConfirm = useCallback((title: string, msg: string, cb: () => Promise<void>) => {
+    setState({ title, msg, cb });
+  }, []);
+
+  async function handleOk() {
+    if (!state) return;
+    setRunning(true);
+    try { await state.cb(); } finally { setRunning(false); setState(null); }
   }
-  return config;
-});
 
-api.interceptors.response.use(
-  (res) => res,
-  (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('evt_token');
-      localStorage.removeItem('org_user');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
-  }
-);
+  return (
+    <Ctx.Provider value={openConfirm}>
+      {children}
+      {state && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setState(null); }}>
+          <div className="modal modal-sm">
+            <div className="modal-header">
+              <div className="modal-title">{state.title}</div>
+              <button className="modal-close" onClick={() => setState(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ color: 'var(--text-2)', fontSize: '.9rem' }}>{state.msg}</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setState(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={handleOk} disabled={running}>
+                {running ? 'Working…' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </Ctx.Provider>
+  );
+}
