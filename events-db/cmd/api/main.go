@@ -216,13 +216,15 @@ func main() {
 	if rateLimitManager != nil {
 		loginGroup := auth.Group("")
 		loginGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour},
+			// 10 attempts, refill 1 token/minute — blocks brute force without locking out real users
+			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 2 * time.Hour},
 			"login"))
 		loginGroup.POST("/login", handlers.LoginHandler(pool, cfg))
 
 		registerGroup := auth.Group("")
 		registerGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour},
+			// 5 attempts, refill 1 token/10 minutes
+			ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 600.0, TTL: 2 * time.Hour},
 			"register"))
 		registerGroup.POST("/register", handlers.CreateUserhandler(pool))
 
@@ -242,7 +244,8 @@ func main() {
 	if rateLimitManager != nil {
 		refreshGroup := auth.Group("")
 		refreshGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 3600.0, TTL: 1 * time.Hour},
+			// 20 attempts, refill 1 token/minute
+			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 1 * time.Hour},
 			"refresh"))
 		refreshGroup.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
 	} else {

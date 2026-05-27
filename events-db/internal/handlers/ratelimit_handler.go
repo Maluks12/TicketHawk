@@ -15,9 +15,11 @@ import (
 func bucketForIPCategory(category string) ratelimit.BucketConfig {
 	switch category {
 	case "login":
-		return ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour}
+		// 10 attempts, refill 1 token/minute
+		return ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 2 * time.Hour}
 	case "register":
-		return ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour}
+		// 5 attempts, refill 1 token/10 minutes
+		return ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 600.0, TTL: 2 * time.Hour}
 	case "password-reset":
 		return ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 300.0, TTL: 1 * time.Hour}
 	default:
