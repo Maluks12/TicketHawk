@@ -5,11 +5,46 @@ import { fmtMoney, fmtDate, toLocalInput, Badge } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
 
+// ── Types ───────────────────────────────────────────────────────────────────
 interface EventRow { id: string; title: string; slug: string; status: string; start_time: string; price: number; currency: string; tickets_sold: number; max_capacity: number | null; ticket_revenue: number; city: string; }
 interface TicketTypeRow { name: string; price: number; capacity: string; sort_order: number; description: string; is_visible: boolean; }
 
+interface LocalDraft {
+  id: string;
+  savedAt: string;   // ISO timestamp
+  form: FormState;
+  coverImageUrl: string | null;
+  bannerImageUrl: string | null;
+  galleryImages: string[];
+  activeTab: number;
+}
+
+const DRAFTS_KEY = 'evt_admin_event_drafts';
 const TABS = ['Basic Info', 'Location', 'Ticket Types', 'Media & Policy'];
 
+// ── Draft helpers ────────────────────────────────────────────────────────────
+function loadDrafts(): LocalDraft[] {
+  if (typeof window === 'undefined') return [];
+  try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '[]'); } catch { return []; }
+}
+function saveDrafts(drafts: LocalDraft[]) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+}
+function upsertDraft(draft: LocalDraft) {
+  const drafts = loadDrafts();
+  const idx = drafts.findIndex(d => d.id === draft.id);
+  if (idx >= 0) drafts[idx] = draft; else drafts.unshift(draft);
+  saveDrafts(drafts);
+}
+function removeDraft(id: string) {
+  saveDrafts(loadDrafts().filter(d => d.id !== id));
+}
+function isDraftEmpty(form: FormState) {
+  return !form.title && !form.description && !form.venue_name && !form.city;
+}
+
+// ── TagInput ─────────────────────────────────────────────────────────────────
 function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
   const [val, setVal] = useState('');
   function add() {
@@ -29,6 +64,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) 
   );
 }
 
+// ── TicketTypeBuilder ────────────────────────────────────────────────────────
 function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange: (r: TicketTypeRow[]) => void }) {
   function add() { onChange([...rows, { name: '', price: 0, capacity: '', sort_order: rows.length, description: '', is_visible: true }]); }
   function update(i: number, patch: Partial<TicketTypeRow>) { onChange(rows.map((r, j) => j === i ? { ...r, ...patch } : r)); }
@@ -62,19 +98,117 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
   );
 }
 
+// ── EMPTY_FORM ───────────────────────────────────────────────────────────────
 const EMPTY_FORM = () => ({
   title: '', description: '', category_id: '', timezone: 'Africa/Johannesburg',
   start_time: '', end_time: '', expires_at: '', price: '', currency: 'ZAR',
   max_capacity: '', allow_waitlist: false,
   venue_name: '', address: '', city: '', latitude: '', longitude: '',
-  cover_image_url: '', banner_image_url: '', banner_video_url: '', gallery_images: '',
+  banner_video_url: '',
   refund_policy: '', terms_and_conditions: '',
   tags: [] as string[], performers: [] as string[], teams: [] as string[],
   ticket_types: [] as TicketTypeRow[],
 });
-
 type FormState = ReturnType<typeof EMPTY_FORM>;
 
+// ── ImageUploader ────────────────────────────────────────────────────────────
+interface ImageUploaderProps {
+  label: string;
+  imageUrl: string | null;
+  uploading: boolean;
+  onUpload: (file: File) => void;
+  onRemove: () => void;
+  hint?: string;
+}
+function ImageUploader({ label, imageUrl, uploading, onUpload, onRemove, hint }: ImageUploaderProps) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '.75rem' }}>
+        {imageUrl ? (
+          <div style={{ position: 'relative', width: '120px', height: '80px', flexShrink: 0 }}>
+            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
+              onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
+            <button type="button" onClick={onRemove}
+              style={{ position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px', borderRadius: '50%', background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>✕</button>
+          </div>
+        ) : (
+          <label style={{ width: '120px', height: '80px', border: '1px dashed var(--border)', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', color: 'var(--text-3)', fontSize: '.68rem', gap: '.25rem', background: 'var(--surface-2)', flexShrink: 0 }}>
+            <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={uploading}
+              onChange={e => { const f = e.target.files?.[0]; if (f) { onUpload(f); e.target.value = ''; } }} />
+            {uploading ? <div className="spinner" style={{ width: '18px', height: '18px' }} /> : <><span style={{ fontSize: '1.5rem', lineHeight: 1 }}>+</span><span>Upload</span></>}
+          </label>
+        )}
+        <small style={{ color: 'var(--text-3)', fontSize: '.72rem', marginTop: '.25rem' }}>{hint ?? 'JPEG · PNG · WebP'}</small>
+      </div>
+    </div>
+  );
+}
+
+// ── GalleryUploader ──────────────────────────────────────────────────────────
+interface GalleryUploaderProps { images: string[]; uploading: boolean; onUpload: (file: File) => void; onRemove: (index: number) => void; }
+function GalleryUploader({ images, uploading, onUpload, onRemove }: GalleryUploaderProps) {
+  return (
+    <div className="field">
+      <label>Gallery Images</label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.4rem' }}>
+        {images.map((url, i) => (
+          <div key={i} style={{ position: 'relative', width: '76px', height: '76px', flexShrink: 0 }}>
+            <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
+              onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
+            <button type="button" onClick={() => onRemove(i)}
+              style={{ position: 'absolute', top: '-5px', right: '-5px', width: '18px', height: '18px', borderRadius: '50%', background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>✕</button>
+          </div>
+        ))}
+        <label style={{ width: '76px', height: '76px', border: '1px dashed var(--border)', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', color: 'var(--text-3)', fontSize: '.68rem', gap: '.2rem', background: 'var(--surface-2)', flexShrink: 0 }}>
+          <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={uploading}
+            onChange={e => { const f = e.target.files?.[0]; if (f) { onUpload(f); e.target.value = ''; } }} />
+          {uploading ? <div className="spinner" style={{ width: '18px', height: '18px' }} /> : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload</span></>}
+        </label>
+      </div>
+      <small style={{ color: 'var(--text-3)', fontSize: '.72rem' }}>JPEG · PNG · WebP · Max 10 MB each</small>
+    </div>
+  );
+}
+
+// ── DraftCard ────────────────────────────────────────────────────────────────
+function DraftCard({ draft, onResume, onDelete }: { draft: LocalDraft; onResume: () => void; onDelete: () => void }) {
+  const title = draft.form.title?.trim() || 'Untitled Draft';
+  const subtitle = [draft.form.city, draft.form.venue_name].filter(Boolean).join(' · ') || 'No location yet';
+  const tab = TABS[draft.activeTab] ?? 'Basic Info';
+  const ago = (() => {
+    const diff = Date.now() - new Date(draft.savedAt).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  })();
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.75rem 1rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r)', minWidth: 0 }}>
+      <div style={{ width: '36px', height: '36px', borderRadius: 'var(--r)', background: 'rgba(99,102,241,.15)', border: '1px solid rgba(99,102,241,.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <span style={{ fontSize: '1rem' }}>📝</span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 500, fontSize: '.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+        <div style={{ fontSize: '.73rem', color: 'var(--text-3)', marginTop: '.1rem', display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+          <span>{subtitle}</span>
+          <span style={{ opacity: .5 }}>·</span>
+          <span>Last edited: {tab}</span>
+          <span style={{ opacity: .5 }}>·</span>
+          <span>{ago}</span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '.4rem', flexShrink: 0 }}>
+        <button className="btn btn-sm btn-primary" onClick={onResume} style={{ fontSize: '.78rem', padding: '.3rem .7rem' }}>Resume</button>
+        <button className="btn-icon" onClick={onDelete} style={{ color: 'var(--danger)', fontSize: '.85rem' }} title="Delete draft">✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Page component ───────────────────────────────────────────────────────────
 export default function EventsPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -91,6 +225,63 @@ export default function EventsPage() {
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Image upload state ───────────────────────────────────────────────────
+  const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
+  const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
+  const [galleryImages, setGalleryImages] = useState<string[]>([]);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [galleryUploading, setGalleryUploading] = useState(false);
+
+  // ── Draft state ──────────────────────────────────────────────────────────
+  const [drafts, setDrafts] = useState<LocalDraft[]>([]);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
+  // Refs so the close handler always sees fresh values
+  const formRef = useRef(form);
+  const activeTabRef = useRef(activeTab);
+  const coverRef = useRef(coverImageUrl);
+  const bannerRef = useRef(bannerImageUrl);
+  const galleryRef = useRef(galleryImages);
+  const currentDraftIdRef = useRef(currentDraftId);
+  const editingIdRef = useRef(editingId);
+
+  useEffect(() => { formRef.current = form; }, [form]);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+  useEffect(() => { coverRef.current = coverImageUrl; }, [coverImageUrl]);
+  useEffect(() => { bannerRef.current = bannerImageUrl; }, [bannerImageUrl]);
+  useEffect(() => { galleryRef.current = galleryImages; }, [galleryImages]);
+  useEffect(() => { currentDraftIdRef.current = currentDraftId; }, [currentDraftId]);
+  useEffect(() => { editingIdRef.current = editingId; }, [editingId]);
+
+  // Load drafts from localStorage on mount
+  useEffect(() => { setDrafts(loadDrafts()); }, []);
+
+  const refreshDrafts = useCallback(() => { setDrafts(loadDrafts()); }, []);
+
+  // ── Save-as-draft on modal close (new events only) ───────────────────────
+  const closeModal = useCallback((didSubmit = false) => {
+    // Only auto-draft when creating a new event (not editing an existing one)
+    if (!editingIdRef.current && !didSubmit) {
+      const f = formRef.current;
+      if (!isDraftEmpty(f)) {
+        const draftId = currentDraftIdRef.current ?? crypto.randomUUID();
+        const draft: LocalDraft = {
+          id: draftId,
+          savedAt: new Date().toISOString(),
+          form: f,
+          coverImageUrl: coverRef.current,
+          bannerImageUrl: bannerRef.current,
+          galleryImages: galleryRef.current,
+          activeTab: activeTabRef.current,
+        };
+        upsertDraft(draft);
+        refreshDrafts();
+        toast('Draft saved', 'success');
+      }
+    }
+    setModalOpen(false);
+  }, [refreshDrafts, toast]);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -114,12 +305,57 @@ export default function EventsPage() {
 
   function setF(patch: Partial<FormState>) { setForm(p => ({ ...p, ...patch })); }
 
+  // ── Create / resume ──────────────────────────────────────────────────────
   function openCreate() {
-    setEditingId(null); setForm(EMPTY_FORM()); setActiveTab(0); setModalOpen(true);
+    setEditingId(null);
+    setForm(EMPTY_FORM());
+    setActiveTab(0);
+    setCoverImageUrl(null); setBannerImageUrl(null); setGalleryImages([]);
+    setCurrentDraftId(null);
+    setModalOpen(true);
   }
 
+  function resumeDraft(draft: LocalDraft) {
+    setEditingId(null);
+    setForm(draft.form);
+    setActiveTab(draft.activeTab);
+    setCoverImageUrl(draft.coverImageUrl);
+    setBannerImageUrl(draft.bannerImageUrl);
+    setGalleryImages(draft.galleryImages);
+    setCurrentDraftId(draft.id);
+    setModalOpen(true);
+  }
+
+  function deleteDraft(id: string) {
+    removeDraft(id);
+    refreshDrafts();
+    if (currentDraftId === id) setCurrentDraftId(null);
+    toast('Draft deleted', 'success');
+  }
+
+  // ── Image upload ─────────────────────────────────────────────────────────
+  async function uploadImage(file: File, setUploading: (v: boolean) => void, onSuccess: (url: string) => void) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
+      const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${baseURL}/admin/upload`, { method: 'POST', headers, body: fd });
+      const json = await res.json().catch(() => null) as { image_url?: string; error?: string } | null;
+      if (!res.ok) throw new Error(json?.error ?? `Upload failed (HTTP ${res.status})`);
+      const imageUrl = json?.image_url ?? null;
+      if (imageUrl) { onSuccess(imageUrl); toast('Image uploaded', 'success'); }
+      else toast('Upload succeeded but no URL was returned', 'error');
+    } catch (e: unknown) {
+      toast((e instanceof Error ? e.message : null) ?? 'Image upload failed', 'error');
+    } finally { setUploading(false); }
+  }
+
+  // ── Open edit ────────────────────────────────────────────────────────────
   async function openEdit(id: string) {
-    setEditingId(id); setActiveTab(0); setModalOpen(true);
+    setEditingId(id); setActiveTab(0); setCurrentDraftId(null); setModalOpen(true);
     try {
       const { data: e } = await api.get<Record<string, unknown>>(`/admin/events/${id}`);
       setForm({
@@ -131,16 +367,18 @@ export default function EventsPage() {
         max_capacity: String(e.max_capacity || ''), allow_waitlist: Boolean(e.allow_waitlist),
         venue_name: String(e.venue_name || ''), address: String(e.address || ''),
         city: String(e.city || ''), latitude: String(e.latitude || ''), longitude: String(e.longitude || ''),
-        cover_image_url: String(e.cover_image_url || ''), banner_image_url: String(e.banner_image_url || ''),
         banner_video_url: String(e.banner_video_url || ''),
-        gallery_images: ((e.gallery_images as string[]) || []).join(', '),
         refund_policy: String(e.refund_policy || ''), terms_and_conditions: String(e.terms_and_conditions || ''),
         tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
         teams: (e.teams as string[]) || [], ticket_types: [],
       });
+      setCoverImageUrl(e.cover_image_url ? String(e.cover_image_url) : null);
+      setBannerImageUrl(e.banner_image_url ? String(e.banner_image_url) : null);
+      setGalleryImages((e.gallery_images as string[]) || []);
     } catch { toast('Failed to load event', 'error'); }
   }
 
+  // ── Submit ───────────────────────────────────────────────────────────────
   async function submitForm() {
     if (!form.title || form.title.length < 5) { toast('Title must be at least 5 characters', 'error'); setActiveTab(0); return; }
     if (!form.description || form.description.length < 50) { toast('Description must be at least 50 characters', 'error'); setActiveTab(0); return; }
@@ -163,10 +401,10 @@ export default function EventsPage() {
         tags: form.tags, performers: form.performers, teams: form.teams,
       };
       if (form.max_capacity) body.max_capicity = parseInt(form.max_capacity);
-      if (form.cover_image_url) body.cover_image_url = form.cover_image_url;
-      if (form.banner_image_url) body.banner_image_url = form.banner_image_url;
+      if (coverImageUrl) body.cover_image_url = coverImageUrl;
+      if (bannerImageUrl) body.banner_image_url = bannerImageUrl;
       if (form.banner_video_url) body.banner_video_url = form.banner_video_url;
-      if (form.gallery_images) body.gallery_images = form.gallery_images.split(',').map(u => u.trim()).filter(Boolean);
+      if (galleryImages.length) body.gallery_images = galleryImages;
       if (form.ticket_types.length) {
         body.ticket_types = form.ticket_types.filter(t => t.name).map(t => ({
           name: t.name, price: t.price, sort_order: t.sort_order, is_visible: t.is_visible,
@@ -176,7 +414,10 @@ export default function EventsPage() {
       }
       if (editingId) { await api.put(`/admin/events/${editingId}`, body); toast('Event updated', 'success'); }
       else { await api.post('/admin/events', body); toast('Event created as draft', 'success'); }
-      setModalOpen(false); loadEvents();
+      // On success, remove local draft if one was active
+      if (currentDraftId) { removeDraft(currentDraftId); refreshDrafts(); setCurrentDraftId(null); }
+      closeModal(true);
+      loadEvents();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Save failed';
       toast(msg, 'error');
@@ -221,6 +462,28 @@ export default function EventsPage() {
         <button className="btn btn-primary" onClick={openCreate}>+ New Event</button>
       </div>
 
+      {/* ── Local Drafts ── */}
+      {drafts.length > 0 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '.65rem' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-3)', fontWeight: 500 }}>Local Drafts</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.68rem', background: 'rgba(99,102,241,.18)', color: 'var(--accent)', borderRadius: '999px', padding: '1px 7px' }}>{drafts.length}</span>
+            <span style={{ fontSize: '.72rem', color: 'var(--text-3)', marginLeft: '.25rem' }}>— unsaved forms auto-saved here when you close the modal</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.5rem' }}>
+            {drafts.map(d => (
+              <DraftCard
+                key={d.id}
+                draft={d}
+                onResume={() => resumeDraft(d)}
+                onDelete={() => deleteDraft(d.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Events Table ── */}
       <div className="table-wrap">
         <div className="table-toolbar">
           <input className="search-input" type="text" placeholder="Search events…" value={search} onChange={e => debounceSearch(e.target.value)} />
@@ -271,13 +534,18 @@ export default function EventsPage() {
         </div>
       </div>
 
-      {/* Event Modal */}
+      {/* ── Event Modal ── */}
       {modalOpen && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setModalOpen(false); }}>
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) closeModal(); }}>
           <div className="modal modal-lg">
             <div className="modal-header">
-              <div className="modal-title">{editingId ? 'Edit Event' : 'Create Event'}</div>
-              <button className="modal-close" onClick={() => setModalOpen(false)}>✕</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+                <div className="modal-title">{editingId ? 'Edit Event' : currentDraftId ? 'Resume Draft' : 'Create Event'}</div>
+                {currentDraftId && (
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.65rem', background: 'rgba(99,102,241,.18)', color: 'var(--accent)', borderRadius: '999px', padding: '2px 8px' }}>DRAFT</span>
+                )}
+              </div>
+              <button className="modal-close" onClick={() => closeModal()}>✕</button>
             </div>
             <div className="modal-body">
               <div className="tabs">
@@ -361,10 +629,29 @@ export default function EventsPage() {
               {/* Media & Policy */}
               {activeTab === 3 && (
                 <>
-                  <div className="field"><label>Cover Image URL</label><input type="url" value={form.cover_image_url} onChange={e => setF({ cover_image_url: e.target.value })} placeholder="https://…/cover.jpg" /></div>
-                  <div className="field"><label>Banner Image URL</label><input type="url" value={form.banner_image_url} onChange={e => setF({ banner_image_url: e.target.value })} placeholder="https://…/banner.jpg" /></div>
-                  <div className="field"><label>Banner Video URL</label><input type="url" value={form.banner_video_url} onChange={e => setF({ banner_video_url: e.target.value })} placeholder="https://…/banner.mp4" /></div>
-                  <div className="field"><label>Gallery Images <small style={{ color: 'var(--text-3)' }}>(comma-separated URLs)</small></label><textarea rows={2} value={form.gallery_images} onChange={e => setF({ gallery_images: e.target.value })} placeholder="https://…/img1.jpg, https://…/img2.jpg" /></div>
+                  <ImageUploader
+                    label="Cover Image"
+                    imageUrl={coverImageUrl}
+                    uploading={coverUploading}
+                    onUpload={f => uploadImage(f, setCoverUploading, setCoverImageUrl)}
+                    onRemove={() => setCoverImageUrl(null)}
+                    hint="Displayed as the event card thumbnail · JPEG · PNG · WebP"
+                  />
+                  <ImageUploader
+                    label="Banner Image"
+                    imageUrl={bannerImageUrl}
+                    uploading={bannerUploading}
+                    onUpload={f => uploadImage(f, setBannerUploading, setBannerImageUrl)}
+                    onRemove={() => setBannerImageUrl(null)}
+                    hint="Wide hero image shown at the top of the event page · JPEG · PNG · WebP"
+                  />
+                  <div className="field"><label>Banner Video URL <small style={{ color: 'var(--text-3)' }}>(optional)</small></label><input type="url" value={form.banner_video_url} onChange={e => setF({ banner_video_url: e.target.value })} placeholder="https://…/banner.mp4" /></div>
+                  <GalleryUploader
+                    images={galleryImages}
+                    uploading={galleryUploading}
+                    onUpload={f => uploadImage(f, setGalleryUploading, url => setGalleryImages(prev => [...prev, url]))}
+                    onRemove={i => setGalleryImages(prev => prev.filter((_, j) => j !== i))}
+                  />
                   <div className="section-sep">Legal</div>
                   <div className="field"><label>Refund Policy</label><textarea rows={3} value={form.refund_policy} onChange={e => setF({ refund_policy: e.target.value })} placeholder="Describe the refund policy…" /></div>
                   <div className="field"><label>Terms & Conditions</label><textarea rows={3} value={form.terms_and_conditions} onChange={e => setF({ terms_and_conditions: e.target.value })} placeholder="Terms and conditions for attendees…" /></div>
@@ -372,14 +659,14 @@ export default function EventsPage() {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn" onClick={() => setModalOpen(false)}>Cancel</button>
+              <button className="btn" onClick={() => closeModal()}>Cancel</button>
               <button className="btn btn-primary" onClick={submitForm} disabled={submitting}>{submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Create Event'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Cancel Modal */}
+      {/* ── Cancel Modal ── */}
       {cancelModalOpen && (
         <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setCancelModalOpen(false); }}>
           <div className="modal modal-sm">

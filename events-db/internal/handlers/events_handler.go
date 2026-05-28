@@ -541,6 +541,11 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		if len([]rune(query)) < 3 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "search query must be at least 3 characters"})
+			return
+		}
+
 		var cursor *utils.Cursor
 		if cursorStr != "" {
 			var err error

@@ -1026,10 +1026,26 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Combined search strategy:
+	//   1. Prefix full-text: to_tsquery with :* matches words that START with the query
+	//      e.g. "dur" -> matches "Durban", "curry" -> "Curry Mile Fest"
+	//   2. Trigram similarity: word_similarity() catches typos and transpositions
+	//      e.g. "joberg" -> matches "joburg", "captown" -> "Cape Town"
+	// Results are ranked by the best trigram similarity score across title/venue/city.
 	args := []interface{}{query, models.EventPublished}
 	whereClauses := []string{
-		"e.search_vector @@ plainto_tsquery('english', $1)",
-		"e.status = $2",
+		`e.status = $2`,
+		`(
+			e.search_vector @@ to_tsquery('simple',
+				regexp_replace(
+					regexp_replace(trim($1), '[^a-zA-Z0-9\s]', '', 'g'),
+					'\s+', ':* & ', 'g'
+				) || ':*'
+			)
+			OR word_similarity($1, e.title)      > 0.2
+			OR word_similarity($1, e.venue_name) > 0.2
+			OR word_similarity($1, e.city)       > 0.2
+		)`,
 	}
 
 	if cursor != nil {
@@ -1055,7 +1071,11 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
         JOIN categories c ON e.category_id = c.id
         %s
         ORDER BY
-            ts_rank(e.search_vector, plainto_tsquery('english', $1)) DESC,
+            GREATEST(
+                word_similarity($1, e.title),
+                word_similarity($1, e.venue_name),
+                word_similarity($1, e.city)
+            ) DESC,
             e.start_time DESC,
             e.id DESC
         LIMIT $%d
