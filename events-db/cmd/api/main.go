@@ -577,7 +577,7 @@ func main() {
 		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
-
+		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
 		// Listing fee — required for events with 20+ ticket capacity
 		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))
 		orgRoutes.POST("/events/:id/listing-fee/initiate", handlers.InitiateListingFeePaymentHandler(pool, paymentService))

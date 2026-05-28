@@ -668,3 +668,38 @@ func GetEventsByIDsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"data": events})
 	}
 }
+
+// The event is created with status='draft' and must go through admin
+// approval before it can be published.
+//
+//	POST /v1/organiser/events/create
+func OrgCreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+ 
+		var dto models.CreateEventDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Validation failed",
+				"details": utils.FormatValidationErrors(err),
+			})
+			return
+		}
+ 
+		if dto.EndTime.Before(dto.StartTime) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "End time must be after start time"})
+			return
+		}
+ 
+		event, err := repository.CreateEvent(pool, &dto, userID.(string))
+		if err != nil {
+			utils.InternalError(c, err, "failed to create event")
+			return
+		}
+ 
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Event created as draft — pending admin approval before it can be published.",
+			"event":   event,
+		})
+	}
+}
