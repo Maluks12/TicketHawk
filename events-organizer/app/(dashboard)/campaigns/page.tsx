@@ -34,7 +34,9 @@ interface AdAccount {
   id: string;
   name: string;
   status: AccountStatus;
-  stitch_mandate_status: string;
+  card_last4: string | null;
+  card_brand: string | null;
+  card_expiry: string | null;
   has_payment_method: boolean;
   total_spent: number;
   active_campaigns: number;
@@ -496,7 +498,7 @@ function AdAccountTable({
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
                   </svg>
-                  Debit mandate active
+                  Card on file
                 </span>
               ) : (
                 <button className="btn btn-sm" onClick={() => onAddPayment(a.id)}>
@@ -595,50 +597,156 @@ function CreateAdAccountModal({ onClose, onCreated }: { onClose: () => void; onC
 function RegisterPaymentModal({ accountId, onClose, onSaved }: {
   accountId: string; onClose: () => void; onSaved: () => void;
 }) {
-  const [mandateId, setMandateId] = useState('');
+  const [nameOnCard, setNameOnCard] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [cvv, setCvv] = useState('');
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  function detectBrand(num: string): string {
+    const n = num.replace(/\s/g, '');
+    if (/^4/.test(n))          return 'Visa';
+    if (/^5[1-5]/.test(n))    return 'Mastercard';
+    if (/^2[2-7]/.test(n))    return 'Mastercard';
+    if (/^3[47]/.test(n))     return 'Amex';
+    if (/^6(?:011|5)/.test(n)) return 'Discover';
+    return 'Card';
+  }
+
+  function formatCardNumber(val: string) {
+    return val.replace(/\D/g, '').slice(0, 16).replace(/(\d{4})/g, '$1 ').trim();
+  }
+
+  function formatExpiry(val: string) {
+    const digits = val.replace(/\D/g, '').slice(0, 4);
+    if (digits.length > 2) return digits.slice(0, 2) + '/' + digits.slice(2);
+    return digits;
+  }
+
   async function handleSave() {
-    if (!mandateId.trim() || !email.trim()) { setError('All fields are required'); return; }
+    const digits = cardNumber.replace(/\s/g, '');
+    if (!nameOnCard.trim())         { setError('Name on card is required'); return; }
+    if (digits.length < 13)         { setError('Enter a valid card number'); return; }
+    if (!/^\d{2}\/\d{2}$/.test(expiry)) { setError('Enter expiry as MM/YY'); return; }
+    if (cvv.length < 3)             { setError('Enter a valid CVV'); return; }
+    if (!email.trim())              { setError('Billing email is required'); return; }
+
+    const last4  = digits.slice(-4);
+    const brand  = detectBrand(digits);
+
     setSubmitting(true); setError('');
     try {
       await api.post(`/organiser/ad-accounts/${accountId}/payment-method`, {
-        stitch_mandate_id: mandateId.trim(),
-        email: email.trim(),
+        card_name:   nameOnCard.trim(),
+        card_last4:  last4,
+        card_brand:  brand,
+        card_expiry: expiry,
+        email:       email.trim(),
       });
       onSaved();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(msg ?? 'Failed to save');
+      setError(msg ?? 'Failed to save payment method');
     } finally { setSubmitting(false); }
   }
+
+  const cardBrandIcons: Record<string, string> = {
+    Visa: '💳', Mastercard: '💳', Amex: '💳', Discover: '💳',
+  };
+  const detectedBrand = detectBrand(cardNumber.replace(/\s/g, ''));
 
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal modal-sm">
         <div className="modal-header">
-          <div className="modal-title">Add payment method</div>
+          <button className="btn-icon" onClick={onClose} style={{ marginRight: 'auto' }}>‹</button>
+          <div className="modal-title" style={{ flex: 1, textAlign: 'center' }}>Debit or credit card</div>
           <button className="btn-icon" onClick={onClose}>✕</button>
         </div>
+
         <div className="modal-body">
-          <div className="alert alert-info" style={{ marginBottom: 16 }}>
-            Enter your Stitch debit mandate ID. Complete the mandate setup in Stitch first if you haven't already.
+          {/* Card brand logos row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Card details</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['VISA', 'MC', 'AMEX', 'DISC'].map(b => (
+                <span key={b} style={{
+                  padding: '2px 6px', border: '1px solid #dde1e7',
+                  borderRadius: 4, fontSize: 10, fontWeight: 700,
+                  color: detectedBrand.toUpperCase().startsWith(b.slice(0,2)) ? '#1877f2' : '#8c8c8c',
+                  background: detectedBrand.toUpperCase().startsWith(b.slice(0,2)) ? '#e7f3ff' : '#fff',
+                }}>{b}</span>
+              ))}
+            </div>
           </div>
+
           <div className="field">
-            <label>Stitch mandate ID</label>
-            <input value={mandateId} onChange={e => setMandateId(e.target.value)} placeholder="man_abc123…" />
+            <input
+              value={nameOnCard}
+              onChange={e => setNameOnCard(e.target.value)}
+              placeholder="Name on card"
+              autoFocus
+            />
           </div>
+
           <div className="field">
-            <label>Billing email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="billing@example.com" />
+            <input
+              value={cardNumber}
+              onChange={e => setCardNumber(formatCardNumber(e.target.value))}
+              placeholder="Card number"
+              inputMode="numeric"
+              maxLength={19}
+            />
           </div>
-          {error && <div style={{ color: '#c41c1c', fontSize: 13 }}>{error}</div>}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="field">
+              <input
+                value={expiry}
+                onChange={e => setExpiry(formatExpiry(e.target.value))}
+                placeholder="MM/YY"
+                inputMode="numeric"
+                maxLength={5}
+              />
+            </div>
+            <div className="field">
+              <input
+                value={cvv}
+                onChange={e => setCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="CVV"
+                inputMode="numeric"
+                maxLength={4}
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="Billing email"
+            />
+          </div>
+
+          {error && <div style={{ color: '#c41c1c', fontSize: 13, marginTop: 4 }}>{error}</div>}
+
+          <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: '#8c8c8c' }}>
+            <span style={{ fontSize: 16 }}>🔒</span>{' '}
+            Your payment methods are saved and stored securely.{' '}
+            <span style={{ color: '#1877f2', cursor: 'pointer' }}>Terms and applicable Privacy Policies apply</span>
+          </div>
         </div>
-        <div className="modal-footer">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={submitting}>
+
+        <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={submitting}
+            style={{ borderRadius: 24, minWidth: 80 }}
+          >
             {submitting ? 'Saving…' : 'Save'}
           </button>
         </div>

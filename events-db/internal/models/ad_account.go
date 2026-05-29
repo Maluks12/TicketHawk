@@ -18,11 +18,14 @@ type AdAccount struct {
 	Name        string          `json:"name"         db:"name"`
 	Status      AdAccountStatus `json:"status"       db:"status"`
 
-	// Payment method — one Stitch mandate per account.
-	// Campaigns under this account are billed against this mandate nightly.
-	StitchMandateID     *string `json:"-"                              db:"stitch_mandate_id"`
-	StitchMandateStatus string  `json:"stitch_mandate_status"          db:"stitch_mandate_status"`
-	AdPaymentEmail      *string `json:"ad_payment_email,omitempty"     db:"ad_payment_email"`
+	// Card payment details — display metadata only (no raw numbers stored).
+	CardName   *string `json:"card_name,omitempty"   db:"card_name"`
+	CardLast4  *string `json:"card_last4,omitempty"  db:"card_last4"`
+	CardBrand  *string `json:"card_brand,omitempty"  db:"card_brand"`
+	CardExpiry *string `json:"card_expiry,omitempty" db:"card_expiry"`
+
+	// Billing contact email.
+	AdPaymentEmail *string `json:"ad_payment_email,omitempty" db:"ad_payment_email"`
 
 	// Denormalised at query time — not stored.
 	HasPaymentMethod bool    `json:"has_payment_method" db:"-"`
@@ -45,10 +48,12 @@ type UpdateAdAccountDTO struct {
 	Status *AdAccountStatus `json:"status" binding:"omitempty"`
 }
 
-// RegisterAdAccountPaymentMethodDTO stores a Stitch mandate against a specific
-// ad account. Replaces the old organizer-level RegisterPaymentMethodDTO for
-// the ad-accounts flow.
+// RegisterAdAccountPaymentMethodDTO stores card display metadata for an ad account.
+// Raw card numbers and CVV are never sent here — only the safe display fields.
 type RegisterAdAccountPaymentMethodDTO struct {
-	StitchMandateID string `json:"stitch_mandate_id" binding:"required"`
-	Email           string `json:"email"             binding:"required,email"`
+	CardName   string `json:"card_name"   binding:"required,min=2,max=100"`
+	CardLast4  string `json:"card_last4"  binding:"required,len=4"`
+	CardBrand  string `json:"card_brand"  binding:"required"`
+	CardExpiry string `json:"card_expiry" binding:"required,len=5"` // MM/YY
+	Email      string `json:"email"       binding:"required,email"`
 }

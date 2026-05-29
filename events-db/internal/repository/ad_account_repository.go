@@ -16,7 +16,7 @@ var (
 )
 
 // CreateAdAccount creates a new ad account for an organizer.
-// Newly created accounts have no payment method — the organizer adds one
+// Newly created accounts have no payment card — the organizer adds one
 // separately via RegisterAdAccountPaymentMethod.
 func CreateAdAccount(pool *pgxpool.Pool, organizerID string, dto *models.CreateAdAccountDTO) (*models.AdAccount, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -27,17 +27,19 @@ func CreateAdAccount(pool *pgxpool.Pool, organizerID string, dto *models.CreateA
 		INSERT INTO ad_accounts (organizer_id, name)
 		VALUES ($1, $2)
 		RETURNING id, organizer_id, name, status,
-		          stitch_mandate_status, ad_payment_email,
+		          card_name, card_last4, card_brand, card_expiry,
+		          ad_payment_email,
 		          currency, created_at, updated_at
 	`, organizerID, dto.Name).Scan(
 		&a.ID, &a.OrganizerID, &a.Name, &a.Status,
-		&a.StitchMandateStatus, &a.AdPaymentEmail,
+		&a.CardName, &a.CardLast4, &a.CardBrand, &a.CardExpiry,
+		&a.AdPaymentEmail,
 		&a.Currency, &a.CreatedAt, &a.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("CreateAdAccount: %w", err)
 	}
-	a.HasPaymentMethod = a.StitchMandateStatus == "active"
+	a.HasPaymentMethod = a.CardLast4 != nil
 	return &a, nil
 }
 
@@ -50,7 +52,8 @@ func GetAdAccounts(pool *pgxpool.Pool, organizerID string) ([]models.AdAccount, 
 	rows, err := pool.Query(ctx, `
 		SELECT
 		    aa.id, aa.organizer_id, aa.name, aa.status,
-		    aa.stitch_mandate_status, aa.ad_payment_email,
+		    aa.card_name, aa.card_last4, aa.card_brand, aa.card_expiry,
+		    aa.ad_payment_email,
 		    aa.currency, aa.created_at, aa.updated_at,
 		    COALESCE(SUM(ac.total_spent), 0)                                    AS total_spent,
 		    COUNT(ac.id) FILTER (WHERE ac.status = 'active')                    AS active_campaigns
@@ -70,13 +73,14 @@ func GetAdAccounts(pool *pgxpool.Pool, organizerID string) ([]models.AdAccount, 
 		var a models.AdAccount
 		if err := rows.Scan(
 			&a.ID, &a.OrganizerID, &a.Name, &a.Status,
-			&a.StitchMandateStatus, &a.AdPaymentEmail,
+			&a.CardName, &a.CardLast4, &a.CardBrand, &a.CardExpiry,
+			&a.AdPaymentEmail,
 			&a.Currency, &a.CreatedAt, &a.UpdatedAt,
 			&a.TotalSpent, &a.ActiveCampaigns,
 		); err != nil {
 			return nil, err
 		}
-		a.HasPaymentMethod = a.StitchMandateStatus == "active"
+		a.HasPaymentMethod = a.CardLast4 != nil
 		out = append(out, a)
 	}
 	return out, rows.Err()
@@ -91,7 +95,8 @@ func GetAdAccount(pool *pgxpool.Pool, accountID, organizerID string) (*models.Ad
 	err := pool.QueryRow(ctx, `
 		SELECT
 		    aa.id, aa.organizer_id, aa.name, aa.status,
-		    aa.stitch_mandate_status, aa.ad_payment_email,
+		    aa.card_name, aa.card_last4, aa.card_brand, aa.card_expiry,
+		    aa.ad_payment_email,
 		    aa.currency, aa.created_at, aa.updated_at,
 		    COALESCE(SUM(ac.total_spent), 0)                                    AS total_spent,
 		    COUNT(ac.id) FILTER (WHERE ac.status = 'active')                    AS active_campaigns
@@ -101,7 +106,8 @@ func GetAdAccount(pool *pgxpool.Pool, accountID, organizerID string) (*models.Ad
 		GROUP BY aa.id
 	`, accountID).Scan(
 		&a.ID, &a.OrganizerID, &a.Name, &a.Status,
-		&a.StitchMandateStatus, &a.AdPaymentEmail,
+		&a.CardName, &a.CardLast4, &a.CardBrand, &a.CardExpiry,
+		&a.AdPaymentEmail,
 		&a.Currency, &a.CreatedAt, &a.UpdatedAt,
 		&a.TotalSpent, &a.ActiveCampaigns,
 	)
@@ -111,7 +117,7 @@ func GetAdAccount(pool *pgxpool.Pool, accountID, organizerID string) (*models.Ad
 	if a.OrganizerID != organizerID {
 		return nil, ErrAdAccountUnauthorized
 	}
-	a.HasPaymentMethod = a.StitchMandateStatus == "active"
+	a.HasPaymentMethod = a.CardLast4 != nil
 	return &a, nil
 }
 
@@ -141,22 +147,25 @@ func UpdateAdAccount(pool *pgxpool.Pool, accountID, organizerID string, dto *mod
 	return a, nil
 }
 
-// RegisterAdAccountPaymentMethod stores a Stitch mandate against a specific
-// ad account. Replaces the old organizer-level payment method registration
-// for the campaigns flow. Also re-activates any payment_failed campaigns
-// under this account.
+// RegisterAdAccountPaymentMethod stores card display metadata against a specific
+// ad account. Only the safe display fields are stored — raw card numbers and CVV
+// are handled client-side and never reach the server.
+// Also re-activates any payment_failed campaigns under this account.
 func RegisterAdAccountPaymentMethod(pool *pgxpool.Pool, accountID, organizerID string, dto *models.RegisterAdAccountPaymentMethodDTO) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	cmd, err := pool.Exec(ctx, `
 		UPDATE ad_accounts
-		SET    stitch_mandate_id     = $1,
-		       stitch_mandate_status = 'active',
-		       ad_payment_email      = $2,
-		       updated_at            = NOW()
-		WHERE  id = $3 AND organizer_id = $4
-	`, dto.StitchMandateID, dto.Email, accountID, organizerID)
+		SET    card_name       = $1,
+		       card_last4      = $2,
+		       card_brand      = $3,
+		       card_expiry     = $4,
+		       ad_payment_email = $5,
+		       updated_at      = NOW()
+		WHERE  id = $6 AND organizer_id = $7
+	`, dto.CardName, dto.CardLast4, dto.CardBrand, dto.CardExpiry,
+		dto.Email, accountID, organizerID)
 	if err != nil {
 		return fmt.Errorf("RegisterAdAccountPaymentMethod: %w", err)
 	}
@@ -176,20 +185,25 @@ func RegisterAdAccountPaymentMethod(pool *pgxpool.Pool, accountID, organizerID s
 	return nil
 }
 
-// GetAdAccountPaymentMethodStatus returns the mandate status for one account.
+// GetAdAccountPaymentMethodStatus returns the card-on-file status for one account.
 func GetAdAccountPaymentMethodStatus(pool *pgxpool.Pool, accountID, organizerID string) (string, *string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var status string
+	var cardLast4 *string
 	var email *string
 	err := pool.QueryRow(ctx, `
-		SELECT stitch_mandate_status, ad_payment_email
+		SELECT card_last4, ad_payment_email
 		FROM   ad_accounts
 		WHERE  id = $1 AND organizer_id = $2
-	`, accountID, organizerID).Scan(&status, &email)
+	`, accountID, organizerID).Scan(&cardLast4, &email)
 	if err != nil {
 		return "none", nil, ErrAdAccountNotFound
+	}
+
+	status := "none"
+	if cardLast4 != nil {
+		status = "active"
 	}
 	return status, email, nil
 }

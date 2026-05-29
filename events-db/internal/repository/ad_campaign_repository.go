@@ -17,7 +17,7 @@ var (
 	ErrCampaignNotFound     = errors.New("campaign not found")
 	ErrCampaignUnauthorized = errors.New("campaign belongs to a different organiser")
 	ErrEventAlreadyBoosted  = errors.New("this event already has an active campaign")
-	ErrNoPaymentMethod      = errors.New("no payment method on file — register a Stitch debit mandate first")
+	ErrNoPaymentMethod      = errors.New("no payment method on file — add a card via the ad account payment settings")
 )
 
 // DefaultCPMRate is ZAR per 1 000 impressions.
@@ -26,54 +26,31 @@ const DefaultCPMRate = 20.00
 
 // ── Payment method (organizer-level — kept for backward compat) ───────────────
 
-// RegisterPaymentMethod stores the organiser's Stitch debit mandate ID at the
-// organizer level. Kept for backward compat — new code should use
-// RegisterAdAccountPaymentMethod in ad_account_repository.go instead.
+// RegisterPaymentMethod is kept for backward compat. New code uses
+// RegisterAdAccountPaymentMethod in ad_account_repository.go.
 func RegisterPaymentMethod(pool *pgxpool.Pool, organizerID string, dto *models.RegisterPaymentMethodDTO) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd, err := pool.Exec(ctx, `
-		UPDATE organizers
-		SET    stitch_mandate_id     = $1,
-		       stitch_mandate_status = 'active',
-		       ad_payment_email      = $2,
-		       updated_at            = NOW()
-		WHERE  id = $3
-	`, dto.StitchMandateID, dto.Email, organizerID)
-	if err != nil {
-		return fmt.Errorf("RegisterPaymentMethod: %w", err)
-	}
-	if cmd.RowsAffected() == 0 {
-		return ErrOrganizerNotFound
-	}
-
-	// Re-activate any campaigns that were paused due to payment failure.
-	_, _ = pool.Exec(ctx, `
-		UPDATE ad_campaigns
-		SET    status = 'active', updated_at = NOW()
-		WHERE  organizer_id = $1
-		  AND  status = 'payment_failed'
-		  AND  (end_date IS NULL OR end_date >= CURRENT_DATE)
-	`, organizerID)
-
 	return nil
 }
 
-// GetPaymentMethodStatus returns whether the organiser has an active Stitch mandate.
+// GetPaymentMethodStatus returns whether the organiser has a card on file
+// across any of their ad accounts.
 func GetPaymentMethodStatus(pool *pgxpool.Pool, organizerID string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var status string
+	var count int
 	err := pool.QueryRow(ctx, `
-		SELECT COALESCE(stitch_mandate_status, 'none')
-		FROM   organizers WHERE id = $1
-	`, organizerID).Scan(&status)
+		SELECT COUNT(*) FROM ad_accounts
+		WHERE  organizer_id = (SELECT id FROM organizers WHERE user_id = $1)
+		  AND  card_last4 IS NOT NULL
+	`, organizerID).Scan(&count)
 	if err != nil {
 		return "none", err
 	}
-	return status, nil
+	if count > 0 {
+		return "active", nil
+	}
+	return "none", nil
 }
 
 // ── Campaigns ─────────────────────────────────────────────────────────────────
@@ -106,19 +83,20 @@ func CreateCampaign(pool *pgxpool.Pool, eventID, organizerID string, dto *models
 	}
 
 	// Verify the ad account belongs to this organizer and has a payment method.
-	var accountOrgID, mandateStatus, accountStatus string
+	var accountOrgID, accountStatus string
+	var cardLast4 *string
 	err = tx.QueryRow(ctx, `
-		SELECT organizer_id, stitch_mandate_status, status
+		SELECT organizer_id, card_last4, status
 		FROM   ad_accounts
 		WHERE  id = $1
-	`, dto.AdAccountID).Scan(&accountOrgID, &mandateStatus, &accountStatus)
+	`, dto.AdAccountID).Scan(&accountOrgID, &cardLast4, &accountStatus)
 	if err != nil || accountOrgID != organizerID {
 		return nil, ErrAdAccountUnauthorized
 	}
 	if accountStatus != string(models.AdAccountActive) {
 		return nil, fmt.Errorf("ad account is disabled — re-enable it before creating campaigns")
 	}
-	if mandateStatus != "active" {
+	if cardLast4 == nil {
 		return nil, ErrNoPaymentMethod
 	}
 
@@ -392,7 +370,7 @@ func GetSponsoredForFeed(pool *pgxpool.Pool, userID *string, limit int) ([]Spons
 // RecordImpressions tracks spend per impression in ad_daily_spend.
 //
 // Post-pay: no wallet deduction here — actual money is collected at end of day
-// by the nightly billing worker via Stitch debit mandate.
+// by the nightly billing worker.
 // The campaign is marked 'exhausted' only when today's spend hits daily_budget.
 func RecordImpressions(pool *pgxpool.Pool, campaigns []SponsoredEvent) {
 	if len(campaigns) == 0 {
@@ -532,7 +510,7 @@ func InjectSponsored(pool *pgxpool.Pool, organic []models.Event, userID *string,
 // ── Nightly billing ───────────────────────────────────────────────────────────
 
 // AdAccountDaySpend is one billing row per ad account for the nightly worker.
-// Billing is now per account (each has its own Stitch mandate) rather than per
+// Billing is now per account (each has its own payment method) rather than per
 // organizer. An organizer with multiple accounts gets one debit per account.
 type AdAccountDaySpend struct {
 	AdAccountID  string
@@ -557,7 +535,7 @@ func GetUnbilledDailySpend(pool *pgxpool.Pool, forDate time.Time) ([]AdAccountDa
 		SELECT
 		    aa.id                              AS ad_account_id,
 		    aa.organizer_id,
-		    aa.stitch_mandate_id              AS mandate_id,
+		    aa.card_last4                      AS mandate_id,
 		    COALESCE(aa.ad_payment_email, '') AS payment_email,
 		    SUM(ds.amount_spent)              AS total_spend
 		FROM   ad_daily_spend ds
@@ -566,10 +544,9 @@ func GetUnbilledDailySpend(pool *pgxpool.Pool, forDate time.Time) ([]AdAccountDa
 		WHERE  ds.spend_date = $1
 		  AND  ds.billed     = FALSE
 		  AND  ds.amount_spent > 0
-		  AND  aa.stitch_mandate_id IS NOT NULL
-		  AND  aa.stitch_mandate_status = 'active'
+		  AND  aa.card_last4 IS NOT NULL
 		  AND  aa.status = 'active'
-		GROUP BY aa.id, aa.organizer_id, aa.stitch_mandate_id, aa.ad_payment_email
+		GROUP BY aa.id, aa.organizer_id, aa.card_last4, aa.ad_payment_email
 		HAVING SUM(ds.amount_spent) >= 1.00
 	`, forDate.Format("2006-01-02"))
 	if err != nil {
@@ -615,7 +592,7 @@ func CreateBillingRecord(pool *pgxpool.Pool, organizerID string, billingDate tim
 	return &r, nil
 }
 
-// ConfirmBilling is called by the Stitch webhook when a daily debit succeeds.
+// ConfirmBilling is called by the payment webhook when a daily debit succeeds.
 // Atomically marks the billing record completed, flags all spend rows as billed,
 // and re-activates payment_failed campaigns under the ad account.
 func ConfirmBilling(pool *pgxpool.Pool, stitchRequestID string) error {
@@ -666,7 +643,7 @@ func ConfirmBilling(pool *pgxpool.Pool, stitchRequestID string) error {
 }
 
 // FailBilling marks a billing record as failed and pauses campaigns under the
-// ad account. Called by the nightly worker or Stitch webhook when a debit is declined.
+// ad account. Called by the nightly worker or payment webhook when a debit is declined.
 func FailBilling(pool *pgxpool.Pool, stitchRequestID string, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

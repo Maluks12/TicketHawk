@@ -9,13 +9,34 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// resolveOrganizerID translates the JWT user_id into the organizer's own primary key.
+//
+// The JWT stores the user's UUID. ad_accounts.organizer_id references
+// organizers.id — a separate UUID generated when the organizer profile was
+// created — so we must look it up before any ad-account DB operation.
+//
+// Returns (organizerID, true) on success; writes a JSON error and returns
+// ("", false) on failure so callers can return immediately.
+func resolveOrganizerID(c *gin.Context, pool *pgxpool.Pool) (string, bool) {
+	userID := c.GetString("user_id")
+	org, err := repository.GetOrganizerByUserID(pool, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Organizer profile not found"})
+		return "", false
+	}
+	return org.ID, true
+}
+
 // CreateAdAccountHandler creates a new ad account for the organizer.
 //
 //	POST /organiser/ad-accounts
 //	Body: { "name": "Thetsongaboys Main Account" }
 func CreateAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("user_id")
+		orgID, ok := resolveOrganizerID(c, pool)
+		if !ok {
+			return
+		}
 
 		var dto models.CreateAdAccountDTO
 		if err := c.ShouldBindJSON(&dto); err != nil {
@@ -42,7 +63,10 @@ func CreateAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/ad-accounts
 func GetAdAccountsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID := c.GetString("user_id")
+		orgID, ok := resolveOrganizerID(c, pool)
+		if !ok {
+			return
+		}
 
 		accounts, err := repository.GetAdAccounts(pool, orgID)
 		if err != nil {
@@ -62,7 +86,10 @@ func GetAdAccountsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/ad-accounts/:id
 func GetAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID     := c.GetString("user_id")
+		orgID, ok := resolveOrganizerID(c, pool)
+		if !ok {
+			return
+		}
 		accountID := c.Param("id")
 
 		account, err := repository.GetAdAccount(pool, accountID, orgID)
@@ -81,7 +108,10 @@ func GetAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	Body: { "name": "New Name" } or { "status": "disabled" }
 func UpdateAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID     := c.GetString("user_id")
+		orgID, ok := resolveOrganizerID(c, pool)
+		if !ok {
+			return
+		}
 		accountID := c.Param("id")
 
 		var dto models.UpdateAdAccountDTO
@@ -107,15 +137,24 @@ func UpdateAdAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-// RegisterAdAccountPaymentMethodHandler stores a Stitch mandate against a
-// specific ad account. The organizer completes the Stitch mandate OAuth flow
-// in the frontend, receives a mandate ID, then calls this endpoint once.
+// RegisterAdAccountPaymentMethodHandler stores card payment details against a
+// specific ad account. Only safe display fields are stored (last4, brand, expiry) —
+// raw card numbers and CVV are never sent here.
 //
 //	POST /organiser/ad-accounts/:id/payment-method
-//	Body: { "stitch_mandate_id": "man_abc123", "email": "billing@example.com" }
+//	Body: {
+//	  "card_name":   "John Doe",
+//	  "card_last4":  "4242",
+//	  "card_brand":  "Visa",
+//	  "card_expiry": "08/27",
+//	  "email":       "billing@example.com"
+//	}
 func RegisterAdAccountPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID     := c.GetString("user_id")
+		orgID, ok := resolveOrganizerID(c, pool)
+		if !ok {
+			return
+		}
 		accountID := c.Param("id")
 
 		var dto models.RegisterAdAccountPaymentMethodDTO
@@ -147,7 +186,10 @@ func RegisterAdAccountPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	GET /organiser/ad-accounts/:id/payment-method
 func GetAdAccountPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		orgID     := c.GetString("user_id")
+		orgID, ok := resolveOrganizerID(c, pool)
+		if !ok {
+			return
+		}
 		accountID := c.Param("id")
 
 		status, email, err := repository.GetAdAccountPaymentMethodStatus(pool, accountID, orgID)

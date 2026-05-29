@@ -18,17 +18,14 @@ import (
 
 // ── Payment method ────────────────────────────────────────────────────────────
 
-// RegisterPaymentMethodHandler stores the organiser's Stitch debit mandate.
+// RegisterPaymentMethodHandler — legacy endpoint, kept for compat.
 //
 // Flow:
-//  1. Frontend guides the organiser through Stitch's mandate OAuth flow
-//  2. Frontend receives the mandate ID from Stitch
-//  3. Frontend POST here — mandate is stored, organiser is ready to run campaigns
+// New flow: use POST /organiser/ad-accounts/:id/payment-method instead.
 //
 // All future end-of-day billing debits happen automatically — no top-ups ever needed.
 //
 //	POST /organiser/ad-payment-method
-//	Body: { "stitch_mandate_id": "man_abc123", "email": "org@example.com" }
 func RegisterPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		orgID := c.GetString("user_id")
@@ -71,7 +68,7 @@ func GetPaymentMethodStatusHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":      status,
-			"has_mandate": status == "active",
+			"has_payment_method": status == "active",
 			"billing":     "Automatic daily debit — billed each morning for previous day's actual spend",
 		})
 	}
@@ -108,7 +105,7 @@ func GetBillingHistoryHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // CreateCampaignHandler creates a boost campaign for a published event.
 //
 // Post-pay: campaign starts as 'active' immediately — no wallet required.
-// Organiser must have a Stitch debit mandate registered first.
+// Organiser must have a payment method (card) registered on the ad account first.
 //
 //	POST /organiser/events/:id/campaigns
 //	Body: { "daily_budget": 200, "end_date": "2026-12-31" }
@@ -138,7 +135,7 @@ func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			case repository.ErrNoPaymentMethod:
 				c.JSON(http.StatusPaymentRequired, gin.H{
 					"error": "No payment method on file",
-					"note":  "Register a Stitch debit mandate via POST /organiser/ad-payment-method first",
+					"note":  "Add a payment method to your ad account via the Campaigns > Ad Accounts tab",
 				})
 			default:
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -256,9 +253,9 @@ func AdminGetCampaignsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 // ── Webhook ───────────────────────────────────────────────────────────────────
 
-// AdBillingWebhookHandler handles Stitch confirmations for end-of-day ad billing debits.
+// AdBillingWebhookHandler handles payment provider confirmations for end-of-day ad billing debits.
 //
-// Called by Stitch when the nightly debit mandate charge completes or fails.
+// Called by the payment provider when the nightly charge completes or fails.
 // On success: billing record marked completed, spend rows flagged billed, payment_failed campaigns resume.
 // On failure: billing record marked failed, active campaigns paused as payment_failed.
 //
