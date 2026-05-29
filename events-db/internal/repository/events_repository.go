@@ -364,7 +364,7 @@ func TrendingEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 
 	query := fmt.Sprintf(`
         SELECT
-            e.id, e.slug, e.title, e.description, e.cover_image_url,
+            e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.views, c.name as category
         FROM events e
@@ -384,7 +384,7 @@ func TrendingEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 	for rows.Next() {
 		var event models.Event
 		err = rows.Scan(
-			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
+			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.Views, &event.Category,
 		)
@@ -706,7 +706,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 
 	query := fmt.Sprintf(`
         SELECT
-            e.id, e.slug, e.title, e.description, e.cover_image_url,
+            e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
             e.is_featured, e.status, e.views, e.created_at,
@@ -728,7 +728,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 	for rows.Next() {
 		var event models.Event
 		err = rows.Scan(
-			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
+			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
 			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
@@ -786,7 +786,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 
 	query := `
         SELECT
-            e.id, e.slug, e.title, e.description, e.cover_image_url,
+            e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
             e.is_featured, e.status, e.views, e.created_at,
@@ -807,7 +807,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 	for rows.Next() {
 		var event models.Event
 		err = rows.Scan(
-			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
+			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
 			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
@@ -861,7 +861,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 
 	query := `
 		SELECT
-            e.id, e.slug, e.title, e.description, e.cover_image_url,
+            e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
             e.is_featured, e.status, e.views, e.created_at,
@@ -882,7 +882,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 	for rows.Next() {
 		var event models.Event
 		err = rows.Scan(
-			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
+			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
 			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
@@ -949,7 +949,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
 
 	query := `
 		SELECT
-            e.id, e.slug, e.title, e.description, e.cover_image_url,
+            e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
             e.is_featured, e.status, e.views, e.created_at,
@@ -970,7 +970,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
 	for rows.Next() {
 		var event models.Event
 		err = rows.Scan(
-			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
+			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
 			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
@@ -1064,7 +1064,7 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
 
 	querySQL := fmt.Sprintf(`
         SELECT
-            e.id, COALESCE(e.slug, '') AS slug, e.title, e.description, e.cover_image_url,
+            e.id, COALESCE(e.slug, '') AS slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, c.name as category
         FROM events e
@@ -1091,7 +1091,7 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
 	for rows.Next() {
 		var event models.Event
 		err = rows.Scan(
-			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
+			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.Category,
 		)
@@ -1205,7 +1205,7 @@ func GetEventsByIDs(pool *pgxpool.Pool, ids []string) ([]models.Event, error) {
 
 	rows, err := pool.Query(ctx, `
 		SELECT
-			ev.id, ev.title, ev.description, ev.cover_image_url,
+			ev.id, ev.title, ev.description, ev.cover_image_url, ev.banner_image_url,
 			ev.start_time, ev.end_time, ev.price, ev.currency,
 			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
 			ev.is_featured, ev.status, ev.views, ev.created_at,
@@ -1225,7 +1225,7 @@ func GetEventsByIDs(pool *pgxpool.Pool, ids []string) ([]models.Event, error) {
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Title, &e.Description, &e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,

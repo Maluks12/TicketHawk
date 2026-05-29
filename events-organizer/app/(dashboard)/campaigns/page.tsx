@@ -6,43 +6,18 @@ import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
 import { fmtMoney, fmtDate, Badge } from '../../../lib/utils';
+import {
+  AdAccount, Campaign, CampaignStatus,
+  getAdAccounts, getCampaigns,
+  createAdAccount,
+  pauseCampaign as apiPauseCampaign,
+  resumeCampaign as apiResumeCampaign,
+  updateAdAccount,
+  registerPaymentMethod,
+  RegisterPaymentMethodDTO,
+} from '../../../lib/ads';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 type TabId = 'campaigns' | 'ad-accounts';
-type CampaignStatus = 'active' | 'paused' | 'exhausted' | 'ended' | 'payment_failed';
-type AccountStatus = 'active' | 'disabled';
-
-interface Campaign {
-  id: string;
-  event_id: string;
-  ad_account_id: string | null;
-  daily_budget: number;
-  total_spent: number;
-  today_spent: number;
-  total_impressions: number;
-  today_impressions: number;
-  total_clicks: number;
-  today_clicks: number;
-  start_date: string;
-  end_date: string | null;
-  status: CampaignStatus;
-  created_at: string;
-  event?: { title: string };
-}
-
-interface AdAccount {
-  id: string;
-  name: string;
-  status: AccountStatus;
-  card_last4: string | null;
-  card_brand: string | null;
-  card_expiry: string | null;
-  has_payment_method: boolean;
-  total_spent: number;
-  active_campaigns: number;
-  currency: string;
-  created_at: string;
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function CampaignsPage() {
@@ -64,18 +39,15 @@ export default function CampaignsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [campRes, accRes] = await Promise.all([
-        api.get('/organiser/campaigns'),
-        api.get('/organiser/ad-accounts'),
-      ]);
-      setCampaigns(campRes.data.campaigns ?? []);
-      setAccounts(accRes.data.accounts ?? []);
+      const [camps, accs] = await Promise.all([getCampaigns(), getAdAccounts()]);
+      setCampaigns(camps);
+      setAccounts(accs);
     } catch {
       toast('Failed to load data', 'error');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -120,7 +92,7 @@ export default function CampaignsPage() {
   // ── Campaign actions ────────────────────────────────────────────────────────
   async function pauseCampaign(id: string) {
     try {
-      await api.patch(`/organiser/campaigns/${id}`, { status: 'paused' });
+      await apiPauseCampaign(id);
       toast('Campaign paused', 'success');
       fetchData();
     } catch { toast('Failed to pause campaign', 'error'); }
@@ -128,7 +100,7 @@ export default function CampaignsPage() {
 
   async function resumeCampaign(id: string) {
     try {
-      await api.patch(`/organiser/campaigns/${id}`, { status: 'active' });
+      await apiResumeCampaign(id);
       toast('Campaign resumed', 'success');
       fetchData();
     } catch { toast('Failed to resume campaign', 'error'); }
@@ -146,7 +118,7 @@ export default function CampaignsPage() {
   async function toggleAccountStatus(account: AdAccount) {
     const newStatus = account.status === 'active' ? 'disabled' : 'active';
     try {
-      await api.patch(`/organiser/ad-accounts/${account.id}`, { status: newStatus });
+      await updateAdAccount(account.id, { status: newStatus });
       toast(`Account ${newStatus === 'active' ? 'enabled' : 'disabled'}`, 'success');
       fetchData();
     } catch { toast('Failed to update account', 'error'); }
@@ -533,7 +505,7 @@ function CreateAdAccountModal({ onClose, onCreated }: { onClose: () => void; onC
     if (!name.trim() || name.trim().length < 2) { setError('Name must be at least 2 characters'); return; }
     setSubmitting(true); setError('');
     try {
-      await api.post('/organiser/ad-accounts', { name: name.trim() });
+      await createAdAccount({ name: name.trim() });
       onCreated();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -633,18 +605,18 @@ function RegisterPaymentModal({ accountId, onClose, onSaved }: {
     if (cvv.length < 3)             { setError('Enter a valid CVV'); return; }
     if (!email.trim())              { setError('Billing email is required'); return; }
 
-    const last4  = digits.slice(-4);
-    const brand  = detectBrand(digits);
+    const dto: RegisterPaymentMethodDTO = {
+      card_name:   nameOnCard.trim(),
+      card_last4:  digits.slice(-4),
+      card_brand:  detectBrand(digits),
+      card_expiry: expiry,
+      email:       email.trim(),
+      // card number and CVV never sent to the server
+    };
 
     setSubmitting(true); setError('');
     try {
-      await api.post(`/organiser/ad-accounts/${accountId}/payment-method`, {
-        card_name:   nameOnCard.trim(),
-        card_last4:  last4,
-        card_brand:  brand,
-        card_expiry: expiry,
-        email:       email.trim(),
-      });
+      await registerPaymentMethod(accountId, dto);
       onSaved();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -652,9 +624,6 @@ function RegisterPaymentModal({ accountId, onClose, onSaved }: {
     } finally { setSubmitting(false); }
   }
 
-  const cardBrandIcons: Record<string, string> = {
-    Visa: '💳', Mastercard: '💳', Amex: '💳', Discover: '💳',
-  };
   const detectedBrand = detectBrand(cardNumber.replace(/\s/g, ''));
 
   return (

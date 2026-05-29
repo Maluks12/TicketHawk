@@ -1,65 +1,53 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../lib/utils';
+import {
+  AdAccount, BillingRecord,
+  getAdAccounts, getBillingRecords, registerPaymentMethod,
+  RegisterPaymentMethodDTO,
+} from '../../../lib/ads';
 
 type SubPage = 'accounts' | 'payment-activity';
 
-interface AdAccount {
-  id: string; name: string; status: string;
-  stitch_mandate_status: string; has_payment_method: boolean;
-  ad_payment_email: string | null; total_spent: number;
-  active_campaigns: number; currency: string; created_at: string;
-}
-
-interface BillingRecord {
-  id: string; billing_date: string; amount: number;
-  status: string; failure_reason: string | null; completed_at: string | null;
-}
-
 export default function PayoutsPage() {
   const toast = useToast();
-  const [subPage, setSubPage] = useState<SubPage>('accounts');
-  const [accounts, setAccounts] = useState<AdAccount[]>([]);
-  const [billing, setBilling] = useState<BillingRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [subPage, setSubPage]                 = useState<SubPage>('accounts');
+  const [accounts, setAccounts]               = useState<AdAccount[]>([]);
+  const [billing, setBilling]                 = useState<BillingRecord[]>([]);
+  const [loading, setLoading]                 = useState(true);
   const [selectedAccount, setSelectedAccount] = useState<AdAccount | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [accRes, billRes] = await Promise.all([
-        api.get('/organiser/ad-accounts'),
-        api.get('/organiser/ad-billing'),
+      const [accs, records] = await Promise.all([
+        getAdAccounts(),
+        getBillingRecords(),
       ]);
-      const accs = accRes.data.accounts ?? [];
       setAccounts(accs);
-      setBilling(billRes.data.records ?? []);
+      setBilling(records);
       if (accs.length > 0 && !selectedAccount) setSelectedAccount(accs[0]);
     } catch {
       toast('Failed to load billing data', 'error');
     } finally { setLoading(false); }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const totalSpent = accounts.reduce((s, a) => s + a.total_spent, 0);
+  const totalSpent    = accounts.reduce((s, a) => s + a.total_spent, 0);
   const hasAnyPayment = accounts.some(a => a.has_payment_method);
 
   return (
     <div className="page">
-
-      {/* ── Page header — "Billing & payments" title style ─────────────── */}
       <div className="page-header">
         <div className="page-title">Billing &amp; payments</div>
       </div>
 
-      {/* ── Body: page-level sub-nav + content ───────────────────────── */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-        {/* Sub-nav — mirrors Meta's Accounts | Payment methods | Payment activity | Credit lines */}
+        {/* ── Sub-nav ────────────────────────────────────────────────────── */}
         <div style={{
           width: 220, flexShrink: 0, background: '#fff',
           borderRight: '1px solid #dddfe2', padding: '12px 0', overflow: 'auto',
@@ -102,7 +90,7 @@ export default function PayoutsPage() {
           ))}
         </div>
 
-        {/* Main content area */}
+        {/* ── Main content ───────────────────────────────────────────────── */}
         <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
           {loading ? (
             <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
@@ -123,7 +111,7 @@ export default function PayoutsPage() {
           )}
         </div>
 
-        {/* Right: help sidebar — same as Meta's "Payment history / Help center" panel */}
+        {/* ── Right help sidebar ─────────────────────────────────────────── */}
         <div style={{
           width: 220, flexShrink: 0, padding: 20,
           borderLeft: '1px solid #dddfe2', background: '#fff',
@@ -142,7 +130,7 @@ export default function PayoutsPage() {
             'How post-pay billing works',
             'What to do if a payment fails',
             'Managing ad accounts',
-            'Stitch mandate setup',
+            'Adding a payment method',
           ].map(link => (
             <div key={link} style={{
               fontSize: 13, color: '#1877f2', marginBottom: 10, cursor: 'pointer',
@@ -157,19 +145,23 @@ export default function PayoutsPage() {
         </div>
       </div>
 
-      {/* Payment method modal */}
+      {/* ── Add payment method modal ───────────────────────────────────── */}
       {showPaymentModal && (
         <RegisterPaymentModal
           accountId={showPaymentModal}
           onClose={() => setShowPaymentModal(null)}
-          onSaved={() => { setShowPaymentModal(null); fetchData(); toast('Payment method saved', 'success'); }}
+          onSaved={() => {
+            setShowPaymentModal(null);
+            fetchData();
+            toast('Payment method saved', 'success');
+          }}
         />
       )}
     </div>
   );
 }
 
-// ── Accounts sub-page — mirrors Meta's Billing > Accounts layout ───────────────
+// ── Accounts sub-page ─────────────────────────────────────────────────────────
 function AccountsSubPage({
   accounts, selectedAccount, onSelectAccount, onAddPayment,
   totalSpent, hasAnyPayment, onRefresh,
@@ -182,10 +174,11 @@ function AccountsSubPage({
   hasAnyPayment: boolean;
   onRefresh: () => void;
 }) {
+  void onRefresh; // available for future use
+
   if (accounts.length === 0) {
     return (
       <div>
-        {/* Setup prompt card — same as "Set up your account" in Meta */}
         <div style={{
           background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
           padding: 20, marginBottom: 16,
@@ -213,7 +206,8 @@ function AccountsSubPage({
 
   return (
     <div style={{ display: 'flex', gap: 20 }}>
-      {/* Account list */}
+
+      {/* ── Account list ─────────────────────────────────────────────── */}
       <div style={{ flex: 1, minWidth: 0 }}>
 
         {!hasAnyPayment && (
@@ -228,7 +222,7 @@ function AccountsSubPage({
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Set up your account</div>
               <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
-                Add a Stitch debit mandate to start running ad campaigns.
+                Add a payment method to start running ad campaigns.
               </div>
             </div>
             {selectedAccount && (
@@ -239,7 +233,7 @@ function AccountsSubPage({
           </div>
         )}
 
-        {/* Current balance summary */}
+        {/* Current balance */}
         <div style={{
           background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
           padding: '16px 20px', marginBottom: 12,
@@ -255,15 +249,11 @@ function AccountsSubPage({
           </div>
         </div>
 
-        {/* Ad accounts table — same as Meta's accounts list */}
+        {/* Ad accounts table */}
         <div style={{
           background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden',
         }}>
-          {/* Table header tabs */}
-          <div style={{
-            display: 'flex', borderBottom: '1px solid #dddfe2',
-            padding: '0 16px',
-          }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid #dddfe2', padding: '0 16px' }}>
             <div style={{
               fontSize: 13, fontWeight: 700, color: '#1877f2',
               padding: '10px 4px', borderBottom: '2px solid #1877f2',
@@ -283,7 +273,8 @@ function AccountsSubPage({
             </thead>
             <tbody>
               {accounts.map(a => (
-                <tr key={a.id}
+                <tr
+                  key={a.id}
                   onClick={() => onSelectAccount(a)}
                   style={{ cursor: 'pointer', background: selectedAccount?.id === a.id ? '#f0f2f5' : undefined }}
                 >
@@ -312,7 +303,9 @@ function AccountsSubPage({
                   </td>
                   <td>
                     {a.has_payment_method
-                      ? <span style={{ fontSize: 13, color: '#606770' }}>Stitch debit mandate</span>
+                      ? <span style={{ fontSize: 13, color: '#606770' }}>
+                          {a.card_brand} •••• {a.card_last4}
+                        </span>
                       : <span style={{ fontSize: 13, color: '#8a8d91' }}>No payment method</span>
                     }
                   </td>
@@ -334,18 +327,12 @@ function AccountsSubPage({
         </div>
       </div>
 
-      {/* Selected account detail panel — right column */}
+      {/* ── Selected account detail panel ────────────────────────────── */}
       {selectedAccount && (
         <div style={{ width: 300, flexShrink: 0 }}>
 
-          {/* Back + account name */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            marginBottom: 16,
-          }}>
-            <button className="btn-icon btn-sm" onClick={() => onSelectAccount(accounts[0])}>
-              ←
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            <button className="btn-icon btn-sm" onClick={() => onSelectAccount(accounts[0])}>←</button>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{selectedAccount.name}</div>
           </div>
 
@@ -359,11 +346,9 @@ function AccountsSubPage({
               padding: '12px 16px', borderBottom: '1px solid #ebedf0',
             }}>
               <span style={{ fontSize: 14, fontWeight: 600 }}>Payment methods</span>
-              {!selectedAccount.has_payment_method && (
-                <button className="btn btn-sm" onClick={() => onAddPayment(selectedAccount.id)}>
-                  Add payment method
-                </button>
-              )}
+              <button className="btn btn-sm" onClick={() => onAddPayment(selectedAccount.id)}>
+                {selectedAccount.has_payment_method ? 'Update' : 'Add payment method'}
+              </button>
             </div>
             <div style={{ padding: '14px 16px' }}>
               {selectedAccount.has_payment_method ? (
@@ -378,9 +363,13 @@ function AccountsSubPage({
                     </svg>
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>Stitch debit mandate</div>
-                    {selectedAccount.ad_payment_email && (
-                      <div style={{ fontSize: 12, color: '#606770' }}>{selectedAccount.ad_payment_email}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>
+                      {selectedAccount.card_brand} •••• {selectedAccount.card_last4}
+                    </div>
+                    {selectedAccount.card_expiry && (
+                      <div style={{ fontSize: 12, color: '#606770' }}>
+                        Expires {selectedAccount.card_expiry}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -407,19 +396,18 @@ function AccountsSubPage({
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 13, color: '#606770' }}>Total spent</span>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{fmtMoney(selectedAccount.total_spent, selectedAccount.currency)}</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  {fmtMoney(selectedAccount.total_spent, selectedAccount.currency)}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Business info */}
+          {/* Account info */}
           <div style={{
             background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden',
           }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 16px', borderBottom: '1px solid #ebedf0',
-            }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #ebedf0' }}>
               <span style={{ fontSize: 14, fontWeight: 600 }}>Account info</span>
             </div>
             <div style={{ padding: '14px 16px' }}>
@@ -443,16 +431,14 @@ function AccountsSubPage({
 function PaymentActivitySubPage({ records }: { records: BillingRecord[] }) {
   if (records.length === 0) {
     return (
-      <div>
-        <div style={{
-          background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
-          padding: '14px 16px', marginBottom: 16,
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Payment activity</div>
-          <div style={{ fontSize: 13, color: '#606770' }}>
-            You have no recent spending.{' '}
-            <a href="/campaigns/create" style={{ color: '#1877f2' }}>Create a campaign</a>
-          </div>
+      <div style={{
+        background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
+        padding: '14px 16px',
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Payment activity</div>
+        <div style={{ fontSize: 13, color: '#606770' }}>
+          You have no recent spending.{' '}
+          <a href="/campaigns/create" style={{ color: '#1877f2' }}>Create a campaign</a>
         </div>
       </div>
     );
@@ -479,7 +465,7 @@ function PaymentActivitySubPage({ records }: { records: BillingRecord[] }) {
                 <td>
                   <span className={`badge badge-${
                     r.status === 'completed' ? 'active'
-                    : r.status === 'failed' ? 'cancelled'
+                    : r.status === 'failed'    ? 'cancelled'
                     : 'pending'
                   }`}>
                     {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
@@ -497,55 +483,153 @@ function PaymentActivitySubPage({ records }: { records: BillingRecord[] }) {
   );
 }
 
-// ── Register Payment Method Modal ─────────────────────────────────────────────
+// ── Add / update payment method modal ─────────────────────────────────────────
 function RegisterPaymentModal({ accountId, onClose, onSaved }: {
   accountId: string; onClose: () => void; onSaved: () => void;
 }) {
-  const [mandateId, setMandateId] = useState('');
-  const [email, setEmail] = useState('');
+  const [nameOnCard, setNameOnCard] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [expiry, setExpiry]         = useState('');
+  const [cvv, setCvv]               = useState('');
+  const [email, setEmail]           = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const toast = useToast();
+  const [error, setError]           = useState('');
+
+  function detectBrand(num: string): string {
+    const n = num.replace(/\s/g, '');
+    if (/^4/.test(n))           return 'Visa';
+    if (/^5[1-5]/.test(n))     return 'Mastercard';
+    if (/^2[2-7]/.test(n))     return 'Mastercard';
+    if (/^3[47]/.test(n))      return 'Amex';
+    if (/^6(?:011|5)/.test(n)) return 'Discover';
+    return 'Card';
+  }
+
+  function formatCardNumber(val: string) {
+    return val.replace(/\D/g, '').slice(0, 16).replace(/(\d{4})/g, '$1 ').trim();
+  }
+
+  function formatExpiry(val: string) {
+    const digits = val.replace(/\D/g, '').slice(0, 4);
+    return digits.length > 2 ? digits.slice(0, 2) + '/' + digits.slice(2) : digits;
+  }
 
   async function handleSave() {
-    if (!mandateId.trim() || !email.trim()) { setError('All fields are required'); return; }
+    const digits = cardNumber.replace(/\s/g, '');
+    if (!nameOnCard.trim())               { setError('Name on card is required'); return; }
+    if (digits.length < 13)               { setError('Enter a valid card number'); return; }
+    if (!/^\d{2}\/\d{2}$/.test(expiry))  { setError('Enter expiry as MM/YY'); return; }
+    if (cvv.length < 3)                   { setError('Enter a valid CVV'); return; }
+    if (!email.trim())                    { setError('Billing email is required'); return; }
+
+    const dto: RegisterPaymentMethodDTO = {
+      card_name:   nameOnCard.trim(),
+      card_last4:  digits.slice(-4),
+      card_brand:  detectBrand(digits),
+      card_expiry: expiry,
+      email:       email.trim(),
+      // card number and CVV are intentionally never sent to the server
+    };
+
     setSubmitting(true); setError('');
     try {
-      await api.post(`/organiser/ad-accounts/${accountId}/payment-method`, {
-        stitch_mandate_id: mandateId.trim(),
-        email: email.trim(),
-      });
+      await registerPaymentMethod(accountId, dto);
       onSaved();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(msg ?? 'Failed to save');
+      setError(msg ?? 'Failed to save payment method');
     } finally { setSubmitting(false); }
   }
+
+  const detectedBrand = detectBrand(cardNumber.replace(/\s/g, ''));
 
   return (
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal modal-sm">
         <div className="modal-header">
-          <div className="modal-title">Add payment method</div>
+          <button className="btn-icon" onClick={onClose} style={{ marginRight: 'auto' }}>‹</button>
+          <div className="modal-title" style={{ flex: 1, textAlign: 'center' }}>Debit or credit card</div>
           <button className="btn-icon" onClick={onClose}>✕</button>
         </div>
+
         <div className="modal-body">
-          <div className="alert alert-info">
-            Enter your Stitch debit mandate ID. You must complete the mandate authorisation in Stitch before adding it here.
+          {/* Brand indicators */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Card details</span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(['VISA', 'MC', 'AMEX', 'DISC'] as const).map(b => (
+                <span key={b} style={{
+                  padding: '2px 6px', border: '1px solid #dde1e7',
+                  borderRadius: 4, fontSize: 10, fontWeight: 700,
+                  color: detectedBrand.toUpperCase().startsWith(b.slice(0, 2)) ? '#1877f2' : '#8c8c8c',
+                  background: detectedBrand.toUpperCase().startsWith(b.slice(0, 2)) ? '#e7f3ff' : '#fff',
+                }}>{b}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <input
+              value={nameOnCard}
+              onChange={e => setNameOnCard(e.target.value)}
+              placeholder="Name on card"
+              autoFocus
+            />
           </div>
           <div className="field">
-            <label>Stitch mandate ID</label>
-            <input value={mandateId} onChange={e => setMandateId(e.target.value)} placeholder="man_abc123…" autoFocus />
+            <input
+              value={cardNumber}
+              onChange={e => setCardNumber(formatCardNumber(e.target.value))}
+              placeholder="Card number"
+              inputMode="numeric"
+              maxLength={19}
+            />
           </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label>Billing email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="billing@example.com" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="field">
+              <input
+                value={expiry}
+                onChange={e => setExpiry(formatExpiry(e.target.value))}
+                placeholder="MM/YY"
+                inputMode="numeric"
+                maxLength={5}
+              />
+            </div>
+            <div className="field">
+              <input
+                value={cvv}
+                onChange={e => setCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="CVV"
+                inputMode="numeric"
+                maxLength={4}
+              />
+            </div>
           </div>
-          {error && <div style={{ color: '#c41c1c', fontSize: 13, marginTop: 8 }}>{error}</div>}
+          <div className="field">
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="Billing email"
+            />
+          </div>
+
+          {error && <div style={{ color: '#c41c1c', fontSize: 13, marginTop: 4 }}>{error}</div>}
+
+          <div style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: '#8c8c8c' }}>
+            <span style={{ fontSize: 16 }}>🔒</span>{' '}
+            Your payment methods are saved and stored securely.{' '}
+            <span style={{ color: '#1877f2', cursor: 'pointer' }}>Terms and applicable Privacy Policies apply</span>
+          </div>
         </div>
-        <div className="modal-footer">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={submitting}>
+
+        <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={submitting}
+            style={{ borderRadius: 24, minWidth: 80 }}
+          >
             {submitting ? 'Saving…' : 'Save'}
           </button>
         </div>
