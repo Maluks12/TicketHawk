@@ -7,6 +7,7 @@ import { useConfirm } from '../../../lib/confirm';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface EventRow { id: string; title: string; slug: string; status: string; start_time: string; price: number; currency: string; tickets_sold: number; max_capacity: number | null; ticket_revenue: number; city: string; }
+interface PendingEvent { id: string; title: string; slug: string; status: string; start_time: string; end_time: string; price: number; currency: string; venue_name: string; city: string; organizer_id: string; created_at: string; }
 interface TicketTypeRow { name: string; price: number; capacity: string; sort_order: number; description: string; is_visible: boolean; }
 
 interface LocalDraft {
@@ -15,7 +16,6 @@ interface LocalDraft {
   form: FormState;
   coverImageUrl: string | null;
   bannerImageUrl: string | null;
-  galleryImages: string[];
   activeTab: number;
 }
 
@@ -75,7 +75,7 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
       {rows.map((r, i) => (
         <div key={i} className="sub-section" style={{ marginBottom: '.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '.6rem' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.72rem', color: 'var(--text-3)' }}>TICKET TYPE {i + 1}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Ticket Type {i + 1}</span>
             <button className="btn-icon" onClick={() => remove(i)} style={{ fontSize: '.9rem', color: 'var(--danger)' }}>✕</button>
           </div>
           <div className="field-row">
@@ -103,8 +103,7 @@ const EMPTY_FORM = () => ({
   title: '', description: '', category_id: '', timezone: 'Africa/Johannesburg',
   start_time: '', end_time: '', expires_at: '', price: '', currency: 'ZAR',
   max_capacity: '', allow_waitlist: false,
-  venue_name: '', address: '', city: '', latitude: '', longitude: '',
-  banner_video_url: '',
+  venue_name: '', address: '', city: '',
   refund_policy: '', terms_and_conditions: '',
   tags: [] as string[], performers: [] as string[], teams: [] as string[],
   ticket_types: [] as TicketTypeRow[],
@@ -145,31 +144,6 @@ function ImageUploader({ label, imageUrl, uploading, onUpload, onRemove, hint }:
   );
 }
 
-// ── GalleryUploader ──────────────────────────────────────────────────────────
-interface GalleryUploaderProps { images: string[]; uploading: boolean; onUpload: (file: File) => void; onRemove: (index: number) => void; }
-function GalleryUploader({ images, uploading, onUpload, onRemove }: GalleryUploaderProps) {
-  return (
-    <div className="field">
-      <label>Gallery Images</label>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.4rem' }}>
-        {images.map((url, i) => (
-          <div key={i} style={{ position: 'relative', width: '76px', height: '76px', flexShrink: 0 }}>
-            <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
-              onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
-            <button type="button" onClick={() => onRemove(i)}
-              style={{ position: 'absolute', top: '-5px', right: '-5px', width: '18px', height: '18px', borderRadius: '50%', background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>✕</button>
-          </div>
-        ))}
-        <label style={{ width: '76px', height: '76px', border: '1px dashed var(--border)', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', color: 'var(--text-3)', fontSize: '.68rem', gap: '.2rem', background: 'var(--surface-2)', flexShrink: 0 }}>
-          <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={uploading}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { onUpload(f); e.target.value = ''; } }} />
-          {uploading ? <div className="spinner" style={{ width: '18px', height: '18px' }} /> : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload</span></>}
-        </label>
-      </div>
-      <small style={{ color: 'var(--text-3)', fontSize: '.72rem' }}>JPEG · PNG · WebP · Max 10 MB each</small>
-    </div>
-  );
-}
 
 // ── DraftCard ────────────────────────────────────────────────────────────────
 function DraftCard({ draft, onResume, onDelete }: { draft: LocalDraft; onResume: () => void; onDelete: () => void }) {
@@ -187,7 +161,7 @@ function DraftCard({ draft, onResume, onDelete }: { draft: LocalDraft; onResume:
   })();
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.75rem 1rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r)', minWidth: 0 }}>
-      <div style={{ width: '36px', height: '36px', borderRadius: 'var(--r)', background: 'rgba(99,102,241,.15)', border: '1px solid rgba(99,102,241,.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ width: '36px', height: '36px', borderRadius: 'var(--r)', background: '#e7f3ff', border: '1px solid #b8d9ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{ fontSize: '1rem' }}>📝</span>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -221,6 +195,13 @@ export default function EventsPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [activeTab, setActiveTab] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+
+  // ── Review queue state ───────────────────────────────────────────────────
+  const [pendingEvents, setPendingEvents] = useState<PendingEvent[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -229,10 +210,8 @@ export default function EventsPage() {
   // ── Image upload state ───────────────────────────────────────────────────
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
   const [bannerImageUrl, setBannerImageUrl] = useState<string | null>(null);
-  const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [coverUploading, setCoverUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
-  const [galleryUploading, setGalleryUploading] = useState(false);
 
   // ── Draft state ──────────────────────────────────────────────────────────
   const [drafts, setDrafts] = useState<LocalDraft[]>([]);
@@ -242,7 +221,6 @@ export default function EventsPage() {
   const activeTabRef = useRef(activeTab);
   const coverRef = useRef(coverImageUrl);
   const bannerRef = useRef(bannerImageUrl);
-  const galleryRef = useRef(galleryImages);
   const currentDraftIdRef = useRef(currentDraftId);
   const editingIdRef = useRef(editingId);
 
@@ -250,7 +228,6 @@ export default function EventsPage() {
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { coverRef.current = coverImageUrl; }, [coverImageUrl]);
   useEffect(() => { bannerRef.current = bannerImageUrl; }, [bannerImageUrl]);
-  useEffect(() => { galleryRef.current = galleryImages; }, [galleryImages]);
   useEffect(() => { currentDraftIdRef.current = currentDraftId; }, [currentDraftId]);
   useEffect(() => { editingIdRef.current = editingId; }, [editingId]);
 
@@ -272,7 +249,6 @@ export default function EventsPage() {
           form: f,
           coverImageUrl: coverRef.current,
           bannerImageUrl: bannerRef.current,
-          galleryImages: galleryRef.current,
           activeTab: activeTabRef.current,
         };
         upsertDraft(draft);
@@ -295,7 +271,16 @@ export default function EventsPage() {
     finally { setLoading(false); }
   }, [search, statusFilter, toast]);
 
-  useEffect(() => { loadEvents(); }, [loadEvents]);
+  const loadPendingEvents = useCallback(async () => {
+    setPendingLoading(true);
+    try {
+      const { data } = await api.get<{ events: PendingEvent[] }>('/admin/events/pending');
+      setPendingEvents(data.events || []);
+    } catch { /* silently ignore — section just won't render */ }
+    finally { setPendingLoading(false); }
+  }, []);
+
+  useEffect(() => { loadEvents(); loadPendingEvents(); }, [loadEvents, loadPendingEvents]);
 
   function debounceSearch(v: string) {
     setSearch(v);
@@ -310,7 +295,7 @@ export default function EventsPage() {
     setEditingId(null);
     setForm(EMPTY_FORM());
     setActiveTab(0);
-    setCoverImageUrl(null); setBannerImageUrl(null); setGalleryImages([]);
+    setCoverImageUrl(null); setBannerImageUrl(null);
     setCurrentDraftId(null);
     setModalOpen(true);
   }
@@ -321,7 +306,6 @@ export default function EventsPage() {
     setActiveTab(draft.activeTab);
     setCoverImageUrl(draft.coverImageUrl);
     setBannerImageUrl(draft.bannerImageUrl);
-    setGalleryImages(draft.galleryImages);
     setCurrentDraftId(draft.id);
     setModalOpen(true);
   }
@@ -366,15 +350,13 @@ export default function EventsPage() {
         price: String(e.price ?? ''), currency: String(e.currency || 'ZAR'),
         max_capacity: String(e.max_capacity || ''), allow_waitlist: Boolean(e.allow_waitlist),
         venue_name: String(e.venue_name || ''), address: String(e.address || ''),
-        city: String(e.city || ''), latitude: String(e.latitude || ''), longitude: String(e.longitude || ''),
-        banner_video_url: String(e.banner_video_url || ''),
+        city: String(e.city || ''),
         refund_policy: String(e.refund_policy || ''), terms_and_conditions: String(e.terms_and_conditions || ''),
         tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
         teams: (e.teams as string[]) || [], ticket_types: [],
       });
       setCoverImageUrl(e.cover_image_url ? String(e.cover_image_url) : null);
       setBannerImageUrl(e.banner_image_url ? String(e.banner_image_url) : null);
-      setGalleryImages((e.gallery_images as string[]) || []);
     } catch { toast('Failed to load event', 'error'); }
   }
 
@@ -386,7 +368,6 @@ export default function EventsPage() {
     setSubmitting(true);
     try {
       const toISO = (v: string) => v ? new Date(v).toISOString() : null;
-      const numOrNull = (v: string) => v === '' ? null : Number(v);
       const body: Record<string, unknown> = {
         title: form.title.trim(), description: form.description.trim(),
         category_id: form.category_id ? parseInt(form.category_id) : null,
@@ -395,7 +376,6 @@ export default function EventsPage() {
         price: parseFloat(form.price) || 0, currency: form.currency,
         allow_waitlist: form.allow_waitlist,
         venue_name: form.venue_name.trim(), address: form.address.trim(), city: form.city.trim(),
-        latitude: numOrNull(form.latitude), longitude: numOrNull(form.longitude),
         refund_policy: form.refund_policy.trim() || null,
         terms_and_conditions: form.terms_and_conditions.trim() || null,
         tags: form.tags, performers: form.performers, teams: form.teams,
@@ -403,8 +383,6 @@ export default function EventsPage() {
       if (form.max_capacity) body.max_capicity = parseInt(form.max_capacity);
       if (coverImageUrl) body.cover_image_url = coverImageUrl;
       if (bannerImageUrl) body.banner_image_url = bannerImageUrl;
-      if (form.banner_video_url) body.banner_video_url = form.banner_video_url;
-      if (galleryImages.length) body.gallery_images = galleryImages;
       if (form.ticket_types.length) {
         body.ticket_types = form.ticket_types.filter(t => t.name).map(t => ({
           name: t.name, price: t.price, sort_order: t.sort_order, is_visible: t.is_visible,
@@ -413,7 +391,7 @@ export default function EventsPage() {
         }));
       }
       if (editingId) { await api.put(`/admin/events/${editingId}`, body); toast('Event updated', 'success'); }
-      else { await api.post('/admin/events', body); toast('Event created as draft', 'success'); }
+      else { await api.post('/admin/events', body); toast('Event created — pending review', 'success'); }
       // On success, remove local draft if one was active
       if (currentDraftId) { removeDraft(currentDraftId); refreshDrafts(); setCurrentDraftId(null); }
       closeModal(true);
@@ -426,10 +404,45 @@ export default function EventsPage() {
 
   async function publishEvent(id: string) {
     if (!confirm) return;
-    confirm('Publish Event', 'This event will become visible to all users.', async () => {
-      await api.post(`/organiser/events/${id}/publish`);
-      toast('Event published!', 'success'); loadEvents();
+    confirm('Publish Event', 'This event will be publicly visible to all users.', async () => {
+      try {
+        await api.put(`/admin/events/${id}/approve`);
+        toast('Event published!', 'success');
+        loadEvents();
+        loadPendingEvents();
+      } catch (e: unknown) {
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to publish event';
+        toast(msg, 'error');
+      }
     });
+  }
+
+  async function approveEvent(id: string) {
+    try {
+      await api.put(`/admin/events/${id}/approve`);
+      toast('Event approved and published!', 'success');
+      loadPendingEvents();
+      loadEvents();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to approve event';
+      toast(msg, 'error');
+    }
+  }
+
+  function openReject(id: string) { setRejectId(id); setRejectReason(''); setRejectModalOpen(true); }
+
+  async function submitReject() {
+    if (rejectReason.trim().length < 10) { toast('Reason must be at least 10 characters', 'error'); return; }
+    try {
+      await api.put(`/admin/events/${rejectId}/reject`, { reason: rejectReason.trim() });
+      toast('Event rejected. The organiser has been notified.', 'success');
+      setRejectModalOpen(false);
+      loadPendingEvents();
+      loadEvents();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to reject event';
+      toast(msg, 'error');
+    }
   }
 
   function openCancel(id: string) { setCancelId(id); setCancelReason(''); setCancelModalOpen(true); }
@@ -453,22 +466,22 @@ export default function EventsPage() {
   }
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1400px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+    <div className="page">
+      <div className="page-header">
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 600 }}>Events</div>
-          <div style={{ fontSize: '.8rem', color: 'var(--text-2)', marginTop: '.15rem' }}>Create and manage all platform events</div>
+          <div className="page-title">Events</div>
+          <div className="page-sub">Create and manage all platform events</div>
         </div>
         <button className="btn btn-primary" onClick={openCreate}>+ New Event</button>
       </div>
 
       {/* ── Local Drafts ── */}
       {drafts.length > 0 && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '.65rem' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-3)', fontWeight: 500 }}>Local Drafts</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.68rem', background: 'rgba(99,102,241,.18)', color: 'var(--accent)', borderRadius: '999px', padding: '1px 7px' }}>{drafts.length}</span>
-            <span style={{ fontSize: '.72rem', color: 'var(--text-3)', marginLeft: '.25rem' }}>— unsaved forms auto-saved here when you close the modal</span>
+        <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Local Drafts</span>
+            <span style={{ background: '#e7f3ff', color: '#1877f2', borderRadius: 99, padding: '1px 8px', fontSize: 12, fontWeight: 700 }}>{drafts.length}</span>
+            <span style={{ fontSize: 13, color: 'var(--text-3)', marginLeft: 2 }}>Unsaved forms are auto-saved when you close the modal</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '.5rem' }}>
             {drafts.map(d => (
@@ -483,26 +496,102 @@ export default function EventsPage() {
         </div>
       )}
 
+      {/* ── Organiser Review Queue ── */}
+      {(pendingLoading || pendingEvents.length > 0) && (
+        <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Organiser Review Queue</span>
+            {pendingEvents.length > 0 && (
+              <span style={{ background: '#fff3e0', color: '#e65100', borderRadius: 99, padding: '1px 8px', fontSize: 12, fontWeight: 700 }}>{pendingEvents.length}</span>
+            )}
+            <span style={{ fontSize: 13, color: 'var(--text-3)', marginLeft: 2 }}>Events submitted by organisers awaiting your review</span>
+          </div>
+          {pendingLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'var(--text-2)', fontSize: 13 }}>
+              <div className="spinner" style={{ width: 16, height: 16 }} /> Loading review queue…
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {pendingEvents.map(ev => {
+                const start = ev.start_time ? new Date(ev.start_time).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+                const price = ev.price != null ? `R ${Number(ev.price).toLocaleString()}` : 'Free';
+                const location = [ev.venue_name, ev.city].filter(Boolean).join(', ') || 'No location';
+                const submitted = (() => {
+                  if (!ev.created_at) return '';
+                  const diff = Date.now() - new Date(ev.created_at).getTime();
+                  const m = Math.floor(diff / 60000);
+                  if (m < 1) return 'just now';
+                  if (m < 60) return `${m}m ago`;
+                  const h = Math.floor(m / 60);
+                  if (h < 24) return `${h}h ago`;
+                  return `${Math.floor(h / 24)}d ago`;
+                })();
+                return (
+                  <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: '#fff', border: '1px solid #dddfe2', borderLeft: '3px solid #f59e0b', borderRadius: 6 }}>
+                    {/* Icon */}
+                    <div style={{ width: 36, height: 36, borderRadius: 6, background: '#fff3e0', border: '1px solid #fcd34d', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 16 }}>⏳</div>
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{ev.title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <span>{location}</span>
+                        <span style={{ opacity: .4 }}>·</span>
+                        <span>{start}</span>
+                        <span style={{ opacity: .4 }}>·</span>
+                        <span>{price}</span>
+                        {submitted && <><span style={{ opacity: .4 }}>·</span><span style={{ color: 'var(--text-3)' }}>Submitted {submitted}</span></>}
+                      </div>
+                    </div>
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => openEdit(ev.id)}
+                        style={{ borderColor: 'var(--border)', color: 'var(--text-2)', fontSize: 12 }}
+                        title="Preview event details"
+                      >Preview</button>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => approveEvent(ev.id)}
+                        style={{ background: '#42b72a', borderColor: '#42b72a', color: '#fff', fontSize: 12 }}
+                      >✓ Approve</button>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => openReject(ev.id)}
+                        style={{ borderColor: '#fa3e3e', color: '#fa3e3e', fontSize: 12 }}
+                      >✕ Deny</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Events Table ── */}
+      <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="table-wrap">
         <div className="table-toolbar">
           <input className="search-input" type="text" placeholder="Search events…" value={search} onChange={e => debounceSearch(e.target.value)} />
           <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="">All Statuses</option>
             <option value="draft">Draft</option>
+            <option value="pending_review">Pending Review</option>
             <option value="published">Published</option>
             <option value="cancelled">Cancelled</option>
             <option value="completed">Completed</option>
+            <option value="rejected">Rejected</option>
           </select>
           <button className="btn btn-sm" onClick={loadEvents}>↺</button>
-          <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '.72rem', color: 'var(--text-3)' }}>{events.length} events</div>
+          <div style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-3)' }}>{events.length} events</div>
         </div>
         <div style={{ overflowX: 'auto', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.85rem', tableLayout: 'fixed' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <tr>
                 {['Title', 'Status', 'Start Date', 'Price', 'Sold / Cap', 'Revenue', 'Actions'].map((h, i) => (
-                  <th key={h} style={{ padding: '.65rem 1rem', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: '.65rem', textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text-3)', fontWeight: 500, width: ['30%','10%','14%','10%','10%','12%','14%'][i] }}>{h}</th>
+                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'var(--text-2)', width: ['30%','10%','14%','10%','10%','12%','14%'][i] }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -512,17 +601,19 @@ export default function EventsPage() {
               ) : events.length === 0 ? (
                 <tr><td colSpan={7} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-3)' }}>No events found.</td></tr>
               ) : events.map(e => (
-                <tr key={e.id} style={{ borderBottom: '1px solid rgba(45,45,61,.5)' }}>
-                  <td style={{ padding: '.65rem 1rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.title}>{e.title}</td>
-                  <td style={{ padding: '.65rem 1rem' }}><Badge status={e.status} /></td>
-                  <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '.77rem', color: 'var(--text-2)' }}>{fmtDate(e.start_time)}</td>
-                  <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)' }}>{fmtMoney(e.price, e.currency)}</td>
-                  <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)' }}>{e.tickets_sold}{e.max_capacity ? ` / ${e.max_capacity}` : ''}</td>
-                  <td style={{ padding: '.65rem 1rem', fontFamily: 'var(--font-mono)' }}>{fmtMoney(e.ticket_revenue)}</td>
-                  <td style={{ padding: '.65rem 1rem', overflow: 'visible', whiteSpace: 'nowrap' }}>
+                <tr key={e.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '10px 12px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.title}>{e.title}</td>
+                  <td style={{ padding: '10px 12px' }}><Badge status={e.status} /></td>
+                  <td style={{ padding: '10px 12px', fontSize: 13, color: 'var(--text-2)' }}>{fmtDate(e.start_time)}</td>
+                  <td style={{ padding: '10px 12px' }}>{fmtMoney(e.price, e.currency)}</td>
+                  <td style={{ padding: '10px 12px' }}>{e.tickets_sold}{e.max_capacity ? ` / ${e.max_capacity}` : ''}</td>
+                  <td style={{ padding: '10px 12px' }}>{fmtMoney(e.ticket_revenue)}</td>
+                  <td style={{ padding: '10px 12px', overflow: 'visible', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '.3rem' }}>
                       <button className="btn-icon" onClick={() => openEdit(e.id)} title="Edit">✎</button>
-                      {e.status === 'draft' && <button className="btn btn-success btn-sm" onClick={() => publishEvent(e.id)}>Publish</button>}
+                      {(e.status === 'draft' || e.status === 'pending_review') && (
+                        <button className="btn btn-success btn-sm" onClick={() => publishEvent(e.id)}>Publish</button>
+                      )}
                       {e.status === 'published' && <button className="btn btn-sm" onClick={() => openCancel(e.id)} style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}>Cancel</button>}
                       <button className="btn-icon" onClick={() => deleteEvent(e.id, e.title)} style={{ color: 'var(--danger)' }} title="Delete">✕</button>
                     </div>
@@ -533,6 +624,7 @@ export default function EventsPage() {
           </table>
         </div>
       </div>
+      </div>
 
       {/* ── Event Modal ── */}
       {modalOpen && (
@@ -542,7 +634,7 @@ export default function EventsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
                 <div className="modal-title">{editingId ? 'Edit Event' : currentDraftId ? 'Resume Draft' : 'Create Event'}</div>
                 {currentDraftId && (
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.65rem', background: 'rgba(99,102,241,.18)', color: 'var(--accent)', borderRadius: '999px', padding: '2px 8px' }}>DRAFT</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: '#e7f3ff', color: '#1877f2', borderRadius: 99, padding: '2px 8px' }}>DRAFT</span>
                 )}
               </div>
               <button className="modal-close" onClick={() => closeModal()}>✕</button>
@@ -616,10 +708,6 @@ export default function EventsPage() {
                     <div className="field"><label>City *</label><input type="text" value={form.city} onChange={e => setF({ city: e.target.value })} placeholder="e.g. Johannesburg" /></div>
                     <div className="field" />
                   </div>
-                  <div className="field-row">
-                    <div className="field"><label>Latitude <small style={{ color: 'var(--text-3)' }}>(optional)</small></label><input type="number" step="0.000001" value={form.latitude} onChange={e => setF({ latitude: e.target.value })} placeholder="-26.2041" /></div>
-                    <div className="field"><label>Longitude <small style={{ color: 'var(--text-3)' }}>(optional)</small></label><input type="number" step="0.000001" value={form.longitude} onChange={e => setF({ longitude: e.target.value })} placeholder="28.0473" /></div>
-                  </div>
                 </>
               )}
 
@@ -645,13 +733,6 @@ export default function EventsPage() {
                     onRemove={() => setBannerImageUrl(null)}
                     hint="Wide hero image shown at the top of the event page · JPEG · PNG · WebP"
                   />
-                  <div className="field"><label>Banner Video URL <small style={{ color: 'var(--text-3)' }}>(optional)</small></label><input type="url" value={form.banner_video_url} onChange={e => setF({ banner_video_url: e.target.value })} placeholder="https://…/banner.mp4" /></div>
-                  <GalleryUploader
-                    images={galleryImages}
-                    uploading={galleryUploading}
-                    onUpload={f => uploadImage(f, setGalleryUploading, url => setGalleryImages(prev => [...prev, url]))}
-                    onRemove={i => setGalleryImages(prev => prev.filter((_, j) => j !== i))}
-                  />
                   <div className="section-sep">Legal</div>
                   <div className="field"><label>Refund Policy</label><textarea rows={3} value={form.refund_policy} onChange={e => setF({ refund_policy: e.target.value })} placeholder="Describe the refund policy…" /></div>
                   <div className="field"><label>Terms & Conditions</label><textarea rows={3} value={form.terms_and_conditions} onChange={e => setF({ terms_and_conditions: e.target.value })} placeholder="Terms and conditions for attendees…" /></div>
@@ -661,6 +742,41 @@ export default function EventsPage() {
             <div className="modal-footer">
               <button className="btn" onClick={() => closeModal()}>Cancel</button>
               <button className="btn btn-primary" onClick={submitForm} disabled={submitting}>{submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Create Event'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reject Modal ── */}
+      {rejectModalOpen && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setRejectModalOpen(false); }}>
+          <div className="modal modal-sm">
+            <div className="modal-header">
+              <div className="modal-title">Deny Event</div>
+              <button className="modal-close" onClick={() => setRejectModalOpen(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="alert alert-warning" style={{ marginBottom: '.75rem' }}>The organiser will be notified with your reason and can revise and resubmit the event.</div>
+              <div className="field">
+                <label>Reason for Denial <small style={{ color: 'var(--text-3)', fontWeight: 300 }}>(min 10 characters)</small></label>
+                <textarea
+                  rows={4}
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  placeholder="e.g. Missing venue details, price not clearly defined, event description too short…"
+                  autoFocus
+                />
+                <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{rejectReason.trim().length} / 10 min characters</div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setRejectModalOpen(false)}>Back</button>
+              <button
+                className="btn"
+                onClick={submitReject}
+                disabled={rejectReason.trim().length < 10}
+                style={{ background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}
+              >Deny Event</button>
             </div>
           </div>
         </div>

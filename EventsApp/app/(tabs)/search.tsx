@@ -188,6 +188,7 @@ export default function SearchScreen() {
             <FlatList
               data={activeItems}
               keyExtractor={e => e.id}
+              keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => <EventResultRow item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor, marginLeft: 20 }} />}

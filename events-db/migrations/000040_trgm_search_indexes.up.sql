@@ -7,6 +7,6 @@
 -- venue_name and city to use index scans instead of seq scans.
 -- ============================================================
 
-CREATE INDEX idx_events_title_trgm    ON events USING GIN (title       gin_trgm_ops);
-CREATE INDEX idx_events_venue_trgm    ON events USING GIN (venue_name  gin_trgm_ops);
-CREATE INDEX idx_events_city_trgm     ON events USING GIN (city        gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_events_title_trgm    ON events USING GIN (title       gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_events_venue_trgm    ON events USING GIN (venue_name  gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_events_city_trgm     ON events USING GIN (city        gin_trgm_ops);

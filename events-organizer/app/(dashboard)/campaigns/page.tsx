@@ -176,7 +176,7 @@ export default function CampaignsPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {tab === 'ad-accounts' && (
-            <button className="btn" onClick={() => setShowCreateAccountModal(true)}>
+            <button className="btn btn-primary" onClick={() => setShowCreateAccountModal(true)}>
               + Add ad account
             </button>
           )}
