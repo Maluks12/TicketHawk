@@ -7,7 +7,7 @@ import { ToastProvider } from '../../lib/toast';
 import { ConfirmProvider } from '../../lib/confirm';
 
 const NAV: Array<
-  | { type: 'item'; icon: React.ReactNode; label: string; href: string; badge?: boolean; exact?: boolean }
+  | { type: 'item'; icon: React.ReactNode; label: string; href: string; badge?: boolean | string; exact?: boolean }
   | { type: 'divider' }
 > = [
   {
@@ -18,6 +18,10 @@ const NAV: Array<
   {
     type: 'item', href: '/events', label: 'Events',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/></svg>,
+  },
+  {
+    type: 'item', href: '/approvals', label: 'Event Approvals', badge: 'approval',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>,
   },
   {
     type: 'item', href: '/merch', label: 'Merch & Collections',
@@ -40,6 +44,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const { user, hydrate, isLoading, logout } = useAdminAuth();
   const [oversoldCount, setOversoldCount] = useState(0);
+  const [approvalCount, setApprovalCount] = useState(0);
 
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => { if (!isLoading && !user) router.replace('/login'); }, [user, isLoading, router]);
@@ -48,8 +53,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!user) return;
     const token = localStorage.getItem('evt_token');
     const base = localStorage.getItem('evt_base') || process.env.NEXT_PUBLIC_API_URL?.replace('/v1', '') || 'http://localhost:8080';
-    fetch(`${base}/v1/admin/merch/oversold`, { headers: { Authorization: `Bearer ${token}` } })
+    const h = { Authorization: `Bearer ${token}` };
+    fetch(`${base}/v1/admin/merch/oversold`, { headers: h })
       .then(r => r.json()).then(d => setOversoldCount((d.data || []).length)).catch(() => {});
+    fetch(`${base}/v1/admin/events/pending`, { headers: h })
+      .then(r => r.json()).then(d => setApprovalCount((d.events || []).length)).catch(() => {});
   }, [user]);
 
   if (isLoading || !user) {
@@ -118,12 +126,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   }}>
                     <span style={{ color: active ? '#1877f2' : '#606770', flexShrink: 0 }}>{item.icon}</span>
                     <span style={{ flex: 1 }}>{item.label}</span>
-                    {item.badge && oversoldCount > 0 && (
+                    {item.badge === true && oversoldCount > 0 && (
                       <span style={{
                         background: '#fa3e3e', color: '#fff', fontSize: 11, fontWeight: 700,
                         borderRadius: '99px', padding: '1px 7px', minWidth: 20, textAlign: 'center',
                       }}>
                         {oversoldCount}
+                      </span>
+                    )}
+                    {item.badge === 'approval' && approvalCount > 0 && (
+                      <span style={{
+                        background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 700,
+                        borderRadius: '99px', padding: '1px 7px', minWidth: 20, textAlign: 'center',
+                      }}>
+                        {approvalCount}
                       </span>
                     )}
                   </Link>

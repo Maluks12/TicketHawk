@@ -7,7 +7,6 @@ import { useConfirm } from '../../../lib/confirm';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface EventRow { id: string; title: string; slug: string; status: string; start_time: string; price: number; currency: string; tickets_sold: number; max_capacity: number | null; ticket_revenue: number; city: string; }
-interface PendingEvent { id: string; title: string; slug: string; status: string; start_time: string; end_time: string; price: number; currency: string; venue_name: string; city: string; organizer_id: string; created_at: string; }
 interface TicketTypeRow { name: string; price: number; capacity: string; sort_order: number; description: string; is_visible: boolean; }
 
 interface LocalDraft {
@@ -196,12 +195,6 @@ export default function EventsPage() {
   const [activeTab, setActiveTab] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Review queue state ───────────────────────────────────────────────────
-  const [pendingEvents, setPendingEvents] = useState<PendingEvent[]>([]);
-  const [pendingLoading, setPendingLoading] = useState(false);
-  const [rejectModalOpen, setRejectModalOpen] = useState(false);
-  const [rejectId, setRejectId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -271,16 +264,8 @@ export default function EventsPage() {
     finally { setLoading(false); }
   }, [search, statusFilter, toast]);
 
-  const loadPendingEvents = useCallback(async () => {
-    setPendingLoading(true);
-    try {
-      const { data } = await api.get<{ events: PendingEvent[] }>('/admin/events/pending');
-      setPendingEvents(data.events || []);
-    } catch { /* silently ignore — section just won't render */ }
-    finally { setPendingLoading(false); }
-  }, []);
 
-  useEffect(() => { loadEvents(); loadPendingEvents(); }, [loadEvents, loadPendingEvents]);
+  useEffect(() => { loadEvents(); }, [loadEvents]);
 
   function debounceSearch(v: string) {
     setSearch(v);
@@ -409,7 +394,6 @@ export default function EventsPage() {
         await api.put(`/admin/events/${id}/approve`);
         toast('Event published!', 'success');
         loadEvents();
-        loadPendingEvents();
       } catch (e: unknown) {
         const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to publish event';
         toast(msg, 'error');
@@ -417,33 +401,6 @@ export default function EventsPage() {
     });
   }
 
-  async function approveEvent(id: string) {
-    try {
-      await api.put(`/admin/events/${id}/approve`);
-      toast('Event approved and published!', 'success');
-      loadPendingEvents();
-      loadEvents();
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to approve event';
-      toast(msg, 'error');
-    }
-  }
-
-  function openReject(id: string) { setRejectId(id); setRejectReason(''); setRejectModalOpen(true); }
-
-  async function submitReject() {
-    if (rejectReason.trim().length < 10) { toast('Reason must be at least 10 characters', 'error'); return; }
-    try {
-      await api.put(`/admin/events/${rejectId}/reject`, { reason: rejectReason.trim() });
-      toast('Event rejected. The organiser has been notified.', 'success');
-      setRejectModalOpen(false);
-      loadPendingEvents();
-      loadEvents();
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to reject event';
-      toast(msg, 'error');
-    }
-  }
 
   function openCancel(id: string) { setCancelId(id); setCancelReason(''); setCancelModalOpen(true); }
 
@@ -496,78 +453,6 @@ export default function EventsPage() {
         </div>
       )}
 
-      {/* ── Organiser Review Queue ── */}
-      {(pendingLoading || pendingEvents.length > 0) && (
-        <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Organiser Review Queue</span>
-            {pendingEvents.length > 0 && (
-              <span style={{ background: '#fff3e0', color: '#e65100', borderRadius: 99, padding: '1px 8px', fontSize: 12, fontWeight: 700 }}>{pendingEvents.length}</span>
-            )}
-            <span style={{ fontSize: 13, color: 'var(--text-3)', marginLeft: 2 }}>Events submitted by organisers awaiting your review</span>
-          </div>
-          {pendingLoading ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'var(--text-2)', fontSize: 13 }}>
-              <div className="spinner" style={{ width: 16, height: 16 }} /> Loading review queue…
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {pendingEvents.map(ev => {
-                const start = ev.start_time ? new Date(ev.start_time).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-                const price = ev.price != null ? `R ${Number(ev.price).toLocaleString()}` : 'Free';
-                const location = [ev.venue_name, ev.city].filter(Boolean).join(', ') || 'No location';
-                const submitted = (() => {
-                  if (!ev.created_at) return '';
-                  const diff = Date.now() - new Date(ev.created_at).getTime();
-                  const m = Math.floor(diff / 60000);
-                  if (m < 1) return 'just now';
-                  if (m < 60) return `${m}m ago`;
-                  const h = Math.floor(m / 60);
-                  if (h < 24) return `${h}h ago`;
-                  return `${Math.floor(h / 24)}d ago`;
-                })();
-                return (
-                  <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: '#fff', border: '1px solid #dddfe2', borderLeft: '3px solid #f59e0b', borderRadius: 6 }}>
-                    {/* Icon */}
-                    <div style={{ width: 36, height: 36, borderRadius: 6, background: '#fff3e0', border: '1px solid #fcd34d', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 16 }}>⏳</div>
-                    {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>{ev.title}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <span>{location}</span>
-                        <span style={{ opacity: .4 }}>·</span>
-                        <span>{start}</span>
-                        <span style={{ opacity: .4 }}>·</span>
-                        <span>{price}</span>
-                        {submitted && <><span style={{ opacity: .4 }}>·</span><span style={{ color: 'var(--text-3)' }}>Submitted {submitted}</span></>}
-                      </div>
-                    </div>
-                    {/* Actions */}
-                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => openEdit(ev.id)}
-                        style={{ borderColor: 'var(--border)', color: 'var(--text-2)', fontSize: 12 }}
-                        title="Preview event details"
-                      >Preview</button>
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => approveEvent(ev.id)}
-                        style={{ background: '#42b72a', borderColor: '#42b72a', color: '#fff', fontSize: 12 }}
-                      >✓ Approve</button>
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => openReject(ev.id)}
-                        style={{ borderColor: '#fa3e3e', color: '#fa3e3e', fontSize: 12 }}
-                      >✕ Deny</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Events Table ── */}
       <div style={{ flex: 1, padding: '16px 20px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -747,40 +632,6 @@ export default function EventsPage() {
         </div>
       )}
 
-      {/* ── Reject Modal ── */}
-      {rejectModalOpen && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setRejectModalOpen(false); }}>
-          <div className="modal modal-sm">
-            <div className="modal-header">
-              <div className="modal-title">Deny Event</div>
-              <button className="modal-close" onClick={() => setRejectModalOpen(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="alert alert-warning" style={{ marginBottom: '.75rem' }}>The organiser will be notified with your reason and can revise and resubmit the event.</div>
-              <div className="field">
-                <label>Reason for Denial <small style={{ color: 'var(--text-3)', fontWeight: 300 }}>(min 10 characters)</small></label>
-                <textarea
-                  rows={4}
-                  value={rejectReason}
-                  onChange={e => setRejectReason(e.target.value)}
-                  placeholder="e.g. Missing venue details, price not clearly defined, event description too short…"
-                  autoFocus
-                />
-                <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{rejectReason.trim().length} / 10 min characters</div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn" onClick={() => setRejectModalOpen(false)}>Back</button>
-              <button
-                className="btn"
-                onClick={submitReject}
-                disabled={rejectReason.trim().length < 10}
-                style={{ background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}
-              >Deny Event</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Cancel Modal ── */}
       {cancelModalOpen && (
