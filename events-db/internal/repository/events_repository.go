@@ -567,6 +567,217 @@ func UpdateEvents(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO
 	return GetEventByID(pool, event.ID, &organizerID)
 }
 
+// AdminUpdateEvent applies a partial update to any event without requiring
+// organizer ownership. Used exclusively by the admin panel (PUT /admin/events/:id)
+// so admins can edit events created by any organizer.
+func AdminUpdateEvent(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO) (*models.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	updates := []string{}
+	args := []interface{}{}
+	argIndex := 1
+
+	if dto.Title != nil {
+		updates = append(updates, fmt.Sprintf("title = $%d", argIndex))
+		args = append(args, *dto.Title)
+		argIndex++
+		updates = append(updates, fmt.Sprintf("slug = $%d", argIndex))
+		args = append(args, utils.GenerateSlug(*dto.Title, eventID))
+		argIndex++
+	}
+	if dto.Description != nil {
+		updates = append(updates, fmt.Sprintf("description = $%d", argIndex))
+		args = append(args, *dto.Description)
+		argIndex++
+	}
+	if dto.CoverImageURL != nil {
+		updates = append(updates, fmt.Sprintf("cover_image_url = $%d", argIndex))
+		args = append(args, *dto.CoverImageURL)
+		argIndex++
+	}
+	if dto.BannerImageURL != nil {
+		updates = append(updates, fmt.Sprintf("banner_image_url = $%d", argIndex))
+		args = append(args, *dto.BannerImageURL)
+		argIndex++
+	}
+	if dto.BannerVideoURL != nil {
+		updates = append(updates, fmt.Sprintf("banner_video_url = $%d", argIndex))
+		args = append(args, *dto.BannerVideoURL)
+		argIndex++
+	}
+	if dto.Price != nil {
+		updates = append(updates, fmt.Sprintf("price = $%d", argIndex))
+		args = append(args, *dto.Price)
+		argIndex++
+	}
+	if dto.StartTime != nil {
+		updates = append(updates, fmt.Sprintf("start_time = $%d", argIndex))
+		args = append(args, *dto.StartTime)
+		argIndex++
+	}
+	if dto.EndTime != nil {
+		updates = append(updates, fmt.Sprintf("end_time = $%d", argIndex))
+		args = append(args, *dto.EndTime)
+		argIndex++
+	}
+	if dto.ExpiresAt != nil {
+		updates = append(updates, fmt.Sprintf("expires_at = $%d", argIndex))
+		args = append(args, *dto.ExpiresAt)
+		argIndex++
+	}
+	if dto.Timezone != nil {
+		updates = append(updates, fmt.Sprintf("timezone = $%d", argIndex))
+		args = append(args, *dto.Timezone)
+		argIndex++
+	}
+	if dto.VenueName != nil {
+		updates = append(updates, fmt.Sprintf("venue_name = $%d", argIndex))
+		args = append(args, *dto.VenueName)
+		argIndex++
+	}
+	if dto.Address != nil {
+		updates = append(updates, fmt.Sprintf("address = $%d", argIndex))
+		args = append(args, *dto.Address)
+		argIndex++
+	}
+	if dto.City != nil {
+		updates = append(updates, fmt.Sprintf("city = $%d", argIndex))
+		args = append(args, *dto.City)
+		argIndex++
+	}
+	if dto.Latitude != nil {
+		updates = append(updates, fmt.Sprintf("latitude = $%d", argIndex))
+		args = append(args, *dto.Latitude)
+		argIndex++
+	}
+	if dto.Longitude != nil {
+		updates = append(updates, fmt.Sprintf("longitude = $%d", argIndex))
+		args = append(args, *dto.Longitude)
+		argIndex++
+	}
+	if dto.MaxCapacity != nil {
+		updates = append(updates, fmt.Sprintf("max_capacity = $%d", argIndex))
+		args = append(args, *dto.MaxCapacity)
+		argIndex++
+	}
+	if dto.AllowWaitlist != nil {
+		updates = append(updates, fmt.Sprintf("allow_waitlist = $%d", argIndex))
+		args = append(args, *dto.AllowWaitlist)
+		argIndex++
+	}
+	if dto.IsFeatured != nil {
+		updates = append(updates, fmt.Sprintf("is_featured = $%d", argIndex))
+		args = append(args, *dto.IsFeatured)
+		argIndex++
+	}
+	if dto.FeaturedUntil != nil {
+		updates = append(updates, fmt.Sprintf("featured_until = $%d", argIndex))
+		args = append(args, *dto.FeaturedUntil)
+		argIndex++
+	}
+	if dto.RefundPolicy != nil {
+		updates = append(updates, fmt.Sprintf("refund_policy = $%d", argIndex))
+		args = append(args, *dto.RefundPolicy)
+		argIndex++
+	}
+	if dto.TermsAndConditions != nil {
+		updates = append(updates, fmt.Sprintf("terms_and_conditions = $%d", argIndex))
+		args = append(args, *dto.TermsAndConditions)
+		argIndex++
+	}
+	if dto.Tags != nil {
+		updates = append(updates, fmt.Sprintf("tags = $%d", argIndex))
+		args = append(args, *dto.Tags)
+		argIndex++
+	}
+	if dto.Performers != nil {
+		updates = append(updates, fmt.Sprintf("performers = $%d", argIndex))
+		args = append(args, *dto.Performers)
+		argIndex++
+	}
+	if dto.Teams != nil {
+		updates = append(updates, fmt.Sprintf("teams = $%d", argIndex))
+		args = append(args, *dto.Teams)
+		argIndex++
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
+
+	updates = append(updates, "updated_at = CURRENT_TIMESTAMP")
+
+	// Admin variant: no organizer_id constraint — admins can edit any event.
+	query := fmt.Sprintf(`
+        UPDATE events
+        SET %s
+        WHERE id = $%d
+        RETURNING id
+    `, strings.Join(updates, ", "), argIndex)
+
+	args = append(args, eventID)
+
+	var returnedID string
+	err := pool.QueryRow(ctx, query, args...).Scan(&returnedID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrEventNotFound
+		}
+		return nil, fmt.Errorf("AdminUpdateEvent: failed to update event: %w", err)
+	}
+
+	return AdminGetEventByID(pool, returnedID)
+}
+
+// AdminGetEventByID fetches a full event by UUID with no status restriction —
+// admins can view events in any state (draft, pending, published, cancelled).
+func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var event models.Event
+	err := pool.QueryRow(ctx, `
+        SELECT
+            e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
+            e.start_time, e.end_time, e.expires_at, e.timezone,
+            e.venue_name, e.address, e.city, e.latitude, e.longitude,
+            e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
+            e.allow_waitlist, e.is_featured, e.featured_until, e.status,
+            e.refund_policy, e.terms_and_conditions, e.tags, e.views,
+            e.organizer_id, e.created_at, e.updated_at,
+            c.name as category,
+            e.performers, e.teams
+        FROM events e
+        JOIN categories c ON e.category_id = c.id
+        WHERE e.id = $1
+    `, id).Scan(
+		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
+		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
+		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
+		&event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
+		&event.AllowWaitlist, &event.IsFeatured, &event.FeaturedUntil, &event.Status,
+		&event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
+		&event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
+		&event.Category,
+		&event.Performers, &event.Teams,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrEventNotFound
+		}
+		return nil, fmt.Errorf("AdminGetEventByID: %w", err)
+	}
+
+	event.ComputeAvailableTickets()
+
+	ticketTypes, err := GetTicketTypesByEventID(pool, event.ID)
+	if err == nil && len(ticketTypes) > 0 {
+		event.TicketTypes = ticketTypes
+	}
+
+	return &event, nil
+}
+
 // GetEventByID fetches a full event by UUID. When requestingUserID is nil only
 // published events are returned; when set, drafts owned by that user are also
 // visible (supporting the organiser preview flow).
