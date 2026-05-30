@@ -125,7 +125,8 @@ func main() {
 	// Services
 	// ==========================================
 	emailService   := services.NewEmailService(cfg)
-	qrService      := services.NewQRService(pool, cfg)
+	qrService         := services.NewQRService(pool, cfg)
+	rotatingQRService := services.NewRotatingQRService(cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
 	workers.StartAdWorker(pool, paymentService, ctx)
@@ -427,16 +428,29 @@ func main() {
 	}
 
 	// ==========================================
-	// Ticket Claim Route (public — no auth)
+	// Ticket Routes
 	// ==========================================
 	tickets := v1.Group("/tickets")
-	if rateLimitManager != nil {
-		tickets.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
-			"ticket-claim"))
-	}
 	{
-		tickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService))
+		// Public: claim an assigned ticket (no auth)
+		publicTickets := tickets.Group("")
+		if rateLimitManager != nil {
+			publicTickets.Use(middleware.RateLimitByIP(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+				"ticket-claim"))
+		}
+		publicTickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService))
+
+		// Authenticated: rotating QR token (ticket holder) + organiser scan
+		authTickets := tickets.Group("")
+		authTickets.Use(middleware.AuthMiddleware(cfg))
+		if rateLimitManager != nil {
+			authTickets.Use(middleware.RateLimitByUser(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 120, RefillRate: 2.0, TTL: 5 * time.Minute},
+				"qr-token"))
+		}
+		authTickets.GET("/:assignmentId/qr",   handlers.GetRotatingQRTokenHandler(pool, rotatingQRService))
+		authTickets.POST("/:assignmentId/scan", handlers.ScanRotatingQRHandler(pool, rotatingQRService))
 	}
 
 	// ==========================================

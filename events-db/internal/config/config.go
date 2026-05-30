@@ -11,36 +11,37 @@ import (
 )
 
 type Config struct {
-    DatabaseURL string
-    Port        string
-    JWTSecret   string
-    RedisAddr   string
+	DatabaseURL string
+	Port        string
+	JWTSecret   string
+	RedisAddr   string
 
-    SendGridAPIKey   string
-    EmailFromAddress string
-    EmailFromName    string
+	SendGridAPIKey   string
+	EmailFromAddress string
+	EmailFromName    string
 
-    QREncryptionKey string
+	QREncryptionKey string // AES-GCM key for static QR codes (email/offline)
+	QRHMACSecret    string // HMAC-SHA256 secret for rotating in-app QR tokens
 
-    R2AccountID  string
-    R2AccessKey  string
-    R2SecretKey  string
-    R2Bucket     string
-    R2URL        string  // S3-compatible API endpoint: https://<account-id>.r2.cloudflarestorage.com
-    R2PublicURL  string  // Public serving URL: https://pub-xxx.r2.dev or https://cdn.yourdomain.com
+	R2AccountID string
+	R2AccessKey string
+	R2SecretKey string
+	R2Bucket    string
+	R2URL       string // S3-compatible API endpoint: https://<account-id>.r2.cloudflarestorage.com
+	R2PublicURL string // Public serving URL: https://pub-xxx.r2.dev or https://cdn.yourdomain.com
 
-    FrontendURLs []string
+	FrontendURLs []string
 
-    EnableEmailVerification bool
-    EnableWaitlist          bool
+	EnableEmailVerification bool
+	EnableWaitlist          bool
 
-    StitchClientID      string
-    StitchClientSecret  string
-    StitchWebhookSecret string
-    StitchEnvironment   string
+	StitchClientID      string
+	StitchClientSecret  string
+	StitchWebhookSecret string
+	StitchEnvironment   string
 
-    // Fix 3: booking expiry window — defaults to 15 minutes
-    BookingExpiryMinutes int
+	// Fix 3: booking expiry window — defaults to 15 minutes
+	BookingExpiryMinutes int
 }
 
 func Load() (*Config, error) {
@@ -59,6 +60,7 @@ func Load() (*Config, error) {
 		EmailFromName:    os.Getenv("EMAIL_FROM_NAME"),
 
 		QREncryptionKey: os.Getenv("QR_ENCRYPTION_KEY"),
+		QRHMACSecret:    os.Getenv("QR_HMAC_SECRET"),
 
 		R2AccountID: os.Getenv("R2_ACCOUNT_ID"),
 		R2AccessKey: os.Getenv("R2_ACCESS_KEY"),
@@ -128,6 +130,9 @@ func (c *Config) validate() error {
 	}
 	if c.SendGridAPIKey == "" {
 		missing = append(missing, "SENDGRID_API_KEY")
+	}
+	if len(c.QRHMACSecret) < 32 {
+		missing = append(missing, "QR_HMAC_SECRET (must be at least 32 chars — generate with: openssl rand -hex 32)")
 	}
 
 	if len(missing) > 0 {
