@@ -135,6 +135,8 @@ func createEventsHandlerTestTables(t *testing.T, pool *pgxpool.Pool) {
 			tickets_sold         INTEGER NOT NULL DEFAULT 0,
 			reserved_count       INTEGER NOT NULL DEFAULT 0,
 			allow_waitlist       BOOLEAN DEFAULT TRUE,
+			max_tickets_per_user INTEGER,
+			venue_type           VARCHAR(20),
 			status               VARCHAR(50) NOT NULL DEFAULT 'draft',
 			is_featured          BOOLEAN DEFAULT FALSE,
 			featured_until       TIMESTAMPTZ,

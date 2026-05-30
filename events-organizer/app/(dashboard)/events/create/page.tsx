@@ -27,7 +27,9 @@ export default function CreateEventPage() {
   const [expiresAt,   setExpiresAt]   = useState('');
   const [price,       setPrice]       = useState('0');
   const [currency,    setCurrency]    = useState('ZAR');
-  const [maxCapacity, setMaxCapacity] = useState('');
+  const [maxCapacity,      setMaxCapacity]      = useState('');
+  const [maxTicketsPerUser, setMaxTicketsPerUser] = useState('');
+  const [venueType,         setVenueType]         = useState<'auto'|'stadium'|'auditorium'|'none'>('auto');
   const [isFree,      setIsFree]      = useState(true);
 
   useEffect(() => {
@@ -73,6 +75,8 @@ export default function CreateEventPage() {
         price:        isFree ? 0 : parseFloat(price) || 0,
         currency,
         max_capacity: maxCapacity ? parseInt(maxCapacity) : undefined,
+        max_tickets_per_user: maxTicketsPerUser ? parseInt(maxTicketsPerUser) : undefined,
+        venue_type: venueType !== 'auto' ? venueType : undefined,
       };
       await api.post('/organiser/events/create', payload);
       toast('Event created as draft — pending admin approval', 'success');
@@ -222,6 +226,36 @@ export default function CreateEventPage() {
                 </div>
               </FormCard>
             </div>
+
+                <div className="field">
+                  <label>Max Tickets Per User <small>(blank = no limit)</small></label>
+                  <input type="number" min="1" max="20" value={maxTicketsPerUser}
+                    onChange={e => setMaxTicketsPerUser(e.target.value)} placeholder="No limit" />
+                </div>
+
+                <div className="field">
+                  <label>Venue Type</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    {([
+                      { value: "auto",       label: "⚡ Auto-detect" },
+                      { value: "stadium",    label: "🏟️ Stadium" },
+                      { value: "auditorium", label: "🎭 Hall / Theatre" },
+                      { value: "none",       label: "🎫 None (skip seat map)" },
+                    ] as const).map(opt => (
+                      <button key={opt.value} type="button"
+                        onClick={() => setVenueType(opt.value)}
+                        style={{
+                          padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 13,
+                          fontWeight: venueType === opt.value ? 600 : 400,
+                          border: venueType === opt.value ? "2px solid var(--blue)" : "1px solid var(--border)",
+                          background: venueType === opt.value ? "var(--blue-light, #e8f0fe)" : "transparent",
+                          color: venueType === opt.value ? "var(--blue, #1877f2)" : "inherit",
+                        }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
             {/* Right: help sidebar */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

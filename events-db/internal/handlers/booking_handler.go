@@ -50,6 +50,14 @@ func CreateBookingHandler(
 			return
 		}
 
+		if event.MaxTicketsPerUser != nil && dto.TicketQuantity > *event.MaxTicketsPerUser {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Exceeds per-person ticket limit",
+				"max_tickets_per_user": *event.MaxTicketsPerUser,
+			})
+			return
+		}
+
 		if event.Status != models.EventPublished {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Event is not available for booking"})
 			return

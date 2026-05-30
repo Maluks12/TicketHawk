@@ -35,6 +35,8 @@ interface EventDetail {
   currency: string;
   max_capacity: number | null;
   allow_waitlist: boolean;
+  max_tickets_per_user: number | null;
+  venue_type: string | null;
   tickets_sold: number;
   venue_name: string;
   address: string;

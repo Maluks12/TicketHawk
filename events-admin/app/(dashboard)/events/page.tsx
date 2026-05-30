@@ -102,7 +102,9 @@ const EMPTY_FORM = () => ({
   title: '', description: '', category_id: '', timezone: 'Africa/Johannesburg',
   start_time: '', end_time: '', expires_at: '', price: '', currency: 'ZAR',
   max_capacity: '', allow_waitlist: false,
+  max_tickets_per_user: '',
   venue_name: '', address: '', city: '',
+  venue_type: 'auto' as 'auto' | 'stadium' | 'auditorium' | 'none',
   refund_policy: '', terms_and_conditions: '',
   tags: [] as string[], performers: [] as string[], teams: [] as string[],
   ticket_types: [] as TicketTypeRow[],
@@ -334,8 +336,10 @@ export default function EventsPage() {
         expires_at: toLocalInput(e.expires_at as string),
         price: String(e.price ?? ''), currency: String(e.currency || 'ZAR'),
         max_capacity: String(e.max_capacity || ''), allow_waitlist: Boolean(e.allow_waitlist),
+        max_tickets_per_user: String(e.max_tickets_per_user || ''),
         venue_name: String(e.venue_name || ''), address: String(e.address || ''),
         city: String(e.city || ''),
+        venue_type: (['stadium','auditorium','none'].includes(e.venue_type as string) ? e.venue_type as 'stadium'|'auditorium'|'none' : 'auto'),
         refund_policy: String(e.refund_policy || ''), terms_and_conditions: String(e.terms_and_conditions || ''),
         tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
         teams: (e.teams as string[]) || [], ticket_types: [],
@@ -366,6 +370,8 @@ export default function EventsPage() {
         tags: form.tags, performers: form.performers, teams: form.teams,
       };
       if (form.max_capacity) body.max_capicity = parseInt(form.max_capacity);
+      if (form.max_tickets_per_user) body.max_tickets_per_user = parseInt(form.max_tickets_per_user);
+      body.venue_type = form.venue_type !== 'auto' ? form.venue_type : null;
       if (coverImageUrl) body.cover_image_url = coverImageUrl;
       if (bannerImageUrl) body.banner_image_url = bannerImageUrl;
       if (form.ticket_types.length) {
@@ -573,9 +579,10 @@ export default function EventsPage() {
                   </div>
                   <div className="field-row">
                     <div className="field"><label>Max Capacity <small style={{ color: 'var(--text-3)' }}>(leave blank for unlimited)</small></label><input type="number" min="1" value={form.max_capacity} onChange={e => setF({ max_capacity: e.target.value })} placeholder="Unlimited" /></div>
-                    <div className="field" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '.1rem' }}>
-                      <label className="check-row"><input type="checkbox" checked={form.allow_waitlist} onChange={e => setF({ allow_waitlist: e.target.checked })} /><span style={{ fontSize: '.88rem', color: 'var(--text)' }}>Allow Waitlist when sold out</span></label>
-                    </div>
+                    <div className="field"><label>Max Tickets Per User <small style={{ color: 'var(--text-3)' }}>(blank = no limit)</small></label><input type="number" min="1" max="20" value={form.max_tickets_per_user} onChange={e => setF({ max_tickets_per_user: e.target.value })} placeholder="No limit" /></div>
+                  </div>
+                  <div className="field" style={{ marginBottom: '16px' }}>
+                    <label className="check-row"><input type="checkbox" checked={form.allow_waitlist} onChange={e => setF({ allow_waitlist: e.target.checked })} /><span style={{ fontSize: '.88rem', color: 'var(--text)' }}>Allow Waitlist when sold out</span></label>
                   </div>
                   <div className="section-sep">Tags & Performers</div>
                   <div className="field"><label>Tags <small style={{ color: 'var(--text-3)' }}>(press Enter to add)</small></label><TagInput tags={form.tags} onChange={t => setF({ tags: t })} /></div>
@@ -592,6 +599,34 @@ export default function EventsPage() {
                   <div className="field-row">
                     <div className="field"><label>City *</label><input type="text" value={form.city} onChange={e => setF({ city: e.target.value })} placeholder="e.g. Johannesburg" /></div>
                     <div className="field" />
+                  </div>
+                  <div className="section-sep">Seating</div>
+                  <div className="field">
+                    <label>Venue Type <small style={{ color: 'var(--text-3)', fontWeight: 300 }}>(controls seating map shown in app)</small></label>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                      {([
+                        { value: 'auto',       emoji: '⚡', label: 'Auto-detect',   hint: 'Guess from category & venue name' },
+                        { value: 'stadium',    emoji: '🏟️', label: 'Stadium',        hint: 'Full stadium section map' },
+                        { value: 'auditorium', emoji: '🎭', label: 'Hall / Theatre', hint: 'Auditorium seating map' },
+                        { value: 'none',       emoji: '🎫', label: 'None',           hint: 'Skip seating map — go straight to checkout' },
+                      ] as const).map(opt => (
+                        <button key={opt.value} type="button" title={opt.hint}
+                          onClick={() => setF({ venue_type: opt.value })}
+                          style={{
+                            padding: '8px 14px', borderRadius: 'var(--r)', cursor: 'pointer', fontSize: '13px',
+                            fontWeight: form.venue_type === opt.value ? 600 : 400,
+                            border: form.venue_type === opt.value ? '2px solid var(--blue)' : '1px solid var(--border)',
+                            background: form.venue_type === opt.value ? 'var(--blue-light)' : 'var(--surface)',
+                            color: form.venue_type === opt.value ? 'var(--blue)' : 'var(--text-2)',
+                            transition: 'all .15s',
+                          }}>
+                          {opt.emoji} {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <small style={{ color: 'var(--text-3)', fontSize: '12px', marginTop: '6px', display: 'block' }}>
+                      <strong>None</strong> skips seat selection entirely — buyers pick a quantity and proceed straight to checkout.
+                    </small>
                   </div>
                 </>
               )}

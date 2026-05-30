@@ -117,6 +117,8 @@ export interface Event {
   teams?: string[];
   performers?: string[];
   max_capacity?: number;
+  max_tickets_per_user?: number | null;
+  venue_type?: 'stadium' | 'auditorium' | 'none' | null;
 }
 
 export interface HomeSection {

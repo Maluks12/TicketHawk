@@ -51,10 +51,11 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             start_time, end_time, expires_at, timezone,
             venue_name, address, city, latitude, longitude,
             category_id, price, currency, max_capacity, allow_waitlist,
+            max_tickets_per_user, venue_type,
             refund_policy, terms_and_conditions, tags, performers, teams,
             organizer_id, status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
         RETURNING id, slug, title, description, cover_image_url, start_time, end_time,
                   price, currency, max_capacity, tickets_sold, status, organizer_id, created_at, updated_at
     `
@@ -66,6 +67,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		dto.StartTime, dto.EndTime, dto.ExpiresAt, dto.Timezone,
 		dto.VenueName, dto.Address, dto.City, dto.Latitude, dto.Longitude,
 		dto.CategoryID, dto.Price, dto.Currency, dto.MaxCapacity, dto.AllowWaitlist,
+		dto.MaxTicketsPerUser, dto.VenueType,
 		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags, dto.Performers, dto.Teams,
 		organizerID, models.EventDraft,
 	).Scan(
@@ -506,6 +508,16 @@ func UpdateEvents(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO
 		args = append(args, *dto.AllowWaitlist)
 		argIndex++
 	}
+	if dto.MaxTicketsPerUser != nil {
+		updates = append(updates, fmt.Sprintf("max_tickets_per_user = $%d", argIndex))
+		args = append(args, *dto.MaxTicketsPerUser)
+		argIndex++
+	}
+	if dto.VenueType != nil {
+		updates = append(updates, fmt.Sprintf("venue_type = $%d", argIndex))
+		args = append(args, *dto.VenueType)
+		argIndex++
+	}
 	if dto.IsFeatured != nil {
 		updates = append(updates, fmt.Sprintf("is_featured = $%d", argIndex))
 		args = append(args, *dto.IsFeatured)
@@ -666,6 +678,16 @@ func AdminUpdateEvent(pool *pgxpool.Pool, eventID string, dto *models.UpdateEven
 		args = append(args, *dto.AllowWaitlist)
 		argIndex++
 	}
+	if dto.MaxTicketsPerUser != nil {
+		updates = append(updates, fmt.Sprintf("max_tickets_per_user = $%d", argIndex))
+		args = append(args, *dto.MaxTicketsPerUser)
+		argIndex++
+	}
+	if dto.VenueType != nil {
+		updates = append(updates, fmt.Sprintf("venue_type = $%d", argIndex))
+		args = append(args, *dto.VenueType)
+		argIndex++
+	}
 	if dto.IsFeatured != nil {
 		updates = append(updates, fmt.Sprintf("is_featured = $%d", argIndex))
 		args = append(args, *dto.IsFeatured)
@@ -742,7 +764,8 @@ func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
             e.start_time, e.end_time, e.expires_at, e.timezone,
             e.venue_name, e.address, e.city, e.latitude, e.longitude,
             e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
-            e.allow_waitlist, e.is_featured, e.featured_until, e.status,
+            e.allow_waitlist, e.max_tickets_per_user, e.venue_type,
+            e.is_featured, e.featured_until, e.status,
             e.refund_policy, e.terms_and_conditions, e.tags, e.views,
             e.organizer_id, e.created_at, e.updated_at,
             c.name as category,
@@ -755,7 +778,8 @@ func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
 		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
 		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
 		&event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
-		&event.AllowWaitlist, &event.IsFeatured, &event.FeaturedUntil, &event.Status,
+		&event.AllowWaitlist, &event.MaxTicketsPerUser, &event.VenueType,
+		&event.IsFeatured, &event.FeaturedUntil, &event.Status,
 		&event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
 		&event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
 		&event.Category,
@@ -791,7 +815,8 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
             e.start_time, e.end_time, e.expires_at, e.timezone,
             e.venue_name, e.address, e.city, e.latitude, e.longitude,
             e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
-            e.allow_waitlist, e.is_featured, e.featured_until, e.status,
+            e.allow_waitlist, e.max_tickets_per_user, e.venue_type,
+            e.is_featured, e.featured_until, e.status,
             e.refund_policy, e.terms_and_conditions, e.tags, e.views,
             e.organizer_id, e.created_at, e.updated_at,
             c.name as category,
@@ -816,7 +841,8 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
         &event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
         &event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
         &event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
-        &event.AllowWaitlist, &event.IsFeatured, &event.FeaturedUntil, &event.Status,
+        &event.AllowWaitlist, &event.MaxTicketsPerUser, &event.VenueType,
+		&event.IsFeatured, &event.FeaturedUntil, &event.Status,
         &event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
         &event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
         &event.Category,
@@ -856,7 +882,8 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
             e.start_time, e.end_time, e.expires_at, e.timezone,
             e.venue_name, e.address, e.city, e.latitude, e.longitude,
             e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
-            e.allow_waitlist, e.is_featured, e.featured_until, e.status,
+            e.allow_waitlist, e.max_tickets_per_user, e.venue_type,
+            e.is_featured, e.featured_until, e.status,
             e.refund_policy, e.terms_and_conditions, e.tags, e.views,
             e.organizer_id, e.created_at, e.updated_at,
             c.name as category,
@@ -871,7 +898,8 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
 		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
 		&event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
-		&event.AllowWaitlist, &event.IsFeatured, &event.FeaturedUntil, &event.Status,
+		&event.AllowWaitlist, &event.MaxTicketsPerUser, &event.VenueType,
+		&event.IsFeatured, &event.FeaturedUntil, &event.Status,
 		&event.RefundPolicy, &event.TermsAndConditions, &event.Tags, &event.Views,
 		&event.OrganizerID, &event.CreatedAt, &event.UpdatedAt,
 		&event.Category,
