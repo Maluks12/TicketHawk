@@ -6,7 +6,7 @@ import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
-type Tab = 'overview' | 'bookings' | 'merch';
+type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
 
 interface EventStats {
   event: {
@@ -154,13 +154,31 @@ export default function EventDetailPage() {
         {([
           { id: 'overview' as Tab, label: 'Overview' },
           { id: 'bookings' as Tab, label: `Bookings (${stats.total_bookings})` },
-          { id: 'merch' as Tab, label: 'Merch' },
+          { id: 'merch'    as Tab, label: 'Merch' },
         ] as const).map(t => (
           <button key={t.id} className={`tab-item${tab === t.id ? ' active' : ''}`}
             onClick={() => setTab(t.id)}>
             {t.label}
           </button>
         ))}
+
+        {/* Scan Tickets — opens full-screen scanner */}
+        <Link
+          href={`/event/${id}/scan`}
+          style={{
+            marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '7px 14px', borderRadius: 6,
+            background: '#1877f2', color: '#fff',
+            fontSize: 13, fontWeight: 700, textDecoration: 'none',
+            alignSelf: 'center',
+          }}
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zM3 13a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zM13 3a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2v1h1V5h-1z" clipRule="evenodd"/>
+            <path d="M11 4a1 1 0 10-2 0v1a1 1 0 002 0V4zM10 7a1 1 0 011 1v1h2a1 1 0 110 2h-3a1 1 0 01-1-1V8a1 1 0 011-1zM16 9a1 1 0 100 2 1 1 0 000-2zM9 13a1 1 0 011-1h1a1 1 0 110 2v2a1 1 0 11-2 0v-3zM7 11a1 1 0 100-2H4a1 1 0 100 2h3zM17 13a1 1 0 01-1 1h-2a1 1 0 110-2h2a1 1 0 011 1zM16 17a1 1 0 100-2h-3a1 1 0 100 2h3z"/>
+          </svg>
+          Scan Tickets
+        </Link>
       </div>
 
       {/* ── Tab content ──────────────────────────────────────────────── */}
