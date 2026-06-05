@@ -677,6 +677,25 @@ export async function revokeAssignment(bookingId: string, assignmentId: string):
   await api.delete(`/v1/bookings/${bookingId}/assignments/${assignmentId}`);
 }
 
+// ── Rotating QR ────────────────────────────────────────────────────────────
+
+export interface RotatingQRToken {
+  token:      string;
+  expires_at: string;   // ISO-8601
+  window_sec: number;   // 30 — rotation window in seconds
+  issued_at:  string;   // ISO-8601
+}
+
+/**
+ * Fetches a fresh rotating HMAC QR token for a claimed ticket assignment.
+ * The token rotates every `window_sec` seconds and is accepted by
+ * POST /v1/tickets/:assignmentId/scan on the organiser scanner.
+ */
+export async function getRotatingQRToken(assignmentId: string): Promise<RotatingQRToken> {
+  const res = await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
+  return res.data;
+}
+
 // ── Event Follow ───────────────────────────────────────────────────────────
 
 export interface FollowedEvent {

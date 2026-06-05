@@ -20,6 +20,7 @@ import {
 } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/booking';
+import { RotatingQR } from '../../components/RotatingQR';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -500,7 +501,7 @@ export default function BookingDetailScreen() {
   // Fall back to booking-level qr_code_url for older bookings that were
   // not migrated to per-assignment QR codes.
   const hasAssignments = assignments.length > 0;
-  const claimedSlots   = assignments.filter(a => a.status === 'claimed' && a.qr_code_url);
+  const claimedSlots   = assignments.filter(a => a.status === 'claimed');
   const showQRs        = status === 'confirmed' || status === 'pending';
 
   return (
@@ -555,7 +556,7 @@ export default function BookingDetailScreen() {
             </View>
           ) : hasAssignments ? (
             assignments.map((slot) => {
-              const isClaimed   = slot.status === 'claimed' && !!slot.qr_code_url;
+              const isClaimed   = slot.status === 'claimed';
               const isPending   = slot.status === 'pending';
               const isUnassigned = slot.status === 'unassigned';
               const isInactive  = slot.status === 'cancelled' || slot.status === 'revoked';
@@ -574,7 +575,7 @@ export default function BookingDetailScreen() {
                   )}
 
                   {isClaimed ? (
-                    <Image source={{ uri: slot.qr_code_url! }} style={sheet.qrImage} resizeMode="contain" />
+                    <RotatingQR assignmentId={slot.id} size={SW - 96} />
                   ) : (
                     <View style={sheet.pendingQR}>
                       <Ionicons
@@ -597,7 +598,7 @@ export default function BookingDetailScreen() {
 
                   <Text className={s.qrNumber}>#{booking.booking_number}</Text>
                   <Text className={s.qrHint}>
-                    {isClaimed    ? 'Present this at the venue entrance'
+                    {isClaimed    ? 'Live QR — present at the venue entrance'
                      : isPending  ? `Claim link sent to ${slot.assignee_email ?? 'recipient'}`
                      : isInactive ? 'This slot is no longer valid'
                      : 'Assign this ticket to send someone their entry pass'}

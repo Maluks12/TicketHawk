@@ -194,7 +194,7 @@ export default function CreateEventPage() {
   const [bannerUploading, setBannerUploading] = useState(false);
 
   useEffect(() => {
-    api.get('/v1/categories')
+    api.get('/categories')
       .then(r => setCategories(r.data.categories ?? r.data ?? []))
       .catch(() => {});
   }, []);

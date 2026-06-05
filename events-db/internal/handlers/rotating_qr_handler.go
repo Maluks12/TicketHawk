@@ -175,7 +175,7 @@ func ScanRotatingQRHandler(
 			FROM ticket_assignments ta
 			JOIN bookings  b ON ta.booking_id = b.id
 			JOIN events    e ON b.event_id    = e.id
-			JOIN organizers o ON e.organizer_id = o.id
+			JOIN organizers o ON o.user_id = e.organizer_id
 			WHERE ta.id = $1
 		`, payload.AssignmentID).Scan(
 			&assignStatus,
