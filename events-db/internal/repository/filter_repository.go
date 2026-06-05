@@ -200,7 +200,8 @@ func FilterEvents(
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description, e.cover_image_url,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description,
+			e.cover_image_url, e.banner_image_url,
 			e.start_time, e.end_time, e.price, e.currency,
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
@@ -222,7 +223,8 @@ func FilterEvents(
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Slug, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,

@@ -49,7 +49,9 @@ type Event struct {
 	TicketsSold    int         `json:"tickets_sold" db:"tickets_sold"`
 	AvailableTickets int       `json:"available_tickets" db:"-"`
 	IsSoldOut      bool        `json:"is_sold_out" db:"-"`
-	AllowWaitlist  bool        `json:"allow_waitlist" db:"allow_waitlist"`
+	AllowWaitlist       bool        `json:"allow_waitlist" db:"allow_waitlist"`
+	MaxTicketsPerUser   *int        `json:"max_tickets_per_user,omitempty" db:"max_tickets_per_user"`
+	VenueType           *string     `json:"venue_type,omitempty" db:"venue_type"`
 	IsFeatured     bool        `json:"is_featured" db:"is_featured"`
 	FeaturedUntil  *time.Time  `json:"featured_until,omitempty" db:"featured_until"`
 	Status         EventStatus `json:"status" db:"status"`
@@ -195,7 +197,9 @@ type CreateEventDTO struct {
 	Price              float64    `json:"price" binding:"required"`
 	Currency           string     `json:"currency" binding:"required"`
 	MaxCapacity        *int       `json:"max_capicity" binding:"omitempty,min=1"`
-	AllowWaitlist      bool       `json:"allow_waitlist"`
+	AllowWaitlist       bool       `json:"allow_waitlist"`
+	MaxTicketsPerUser   *int       `json:"max_tickets_per_user" binding:"omitempty,min=1,max=20"`
+	VenueType           *string    `json:"venue_type" binding:"omitempty,oneof=stadium auditorium none"`
 	RefundPolicy       *string    `json:"refund_policy"`
 	TermsAndConditions *string    `json:"terms_and_conditions"`
 	Tags               []string   `json:"tags"`
@@ -224,7 +228,9 @@ type UpdateEventDTO struct {
 	Longitude          *float64   `json:"longitude"`
 	Price              *float64   `json:"price" binding:"omitempty,min=0"`
 	MaxCapacity        *int       `json:"max_capicity" binding:"omitempty,min=1"`
-	AllowWaitlist      *bool      `json:"allow_waitlist"`
+	AllowWaitlist       *bool      `json:"allow_waitlist"`
+	MaxTicketsPerUser   *int       `json:"max_tickets_per_user" binding:"omitempty,min=1,max=20"`
+	VenueType           *string    `json:"venue_type" binding:"omitempty,oneof=stadium auditorium none"`
 	IsFeatured         *bool      `json:"is_featured"`
 	FeaturedUntil      *time.Time `json:"featured_until"`
 	RefundPolicy       *string    `json:"refund_policy"`

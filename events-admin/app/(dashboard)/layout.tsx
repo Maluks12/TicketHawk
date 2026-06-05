@@ -6,16 +6,37 @@ import { useAdminAuth } from '../../store/authStore';
 import { ToastProvider } from '../../lib/toast';
 import { ConfirmProvider } from '../../lib/confirm';
 
-const NAV = [
-  { section: 'Overview' },
-  { href: '/dashboard', label: 'Dashboard',           icon: '▦' },
-  { section: 'Content' },
-  { href: '/events',    label: 'Events',               icon: '◈' },
-  { href: '/merch',     label: 'Merch & Collections',  icon: '◇' },
-  { section: 'Users' },
-  { href: '/users',     label: 'All Users',            icon: '◉' },
-  { section: 'Alerts' },
-  { href: '/oversold',  label: 'Oversold Orders',      icon: '⚠', badge: true },
+const NAV: Array<
+  | { type: 'item'; icon: React.ReactNode; label: string; href: string; badge?: boolean | string; exact?: boolean }
+  | { type: 'divider' }
+> = [
+  {
+    type: 'item', href: '/dashboard', exact: true, label: 'Dashboard',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M2 11l8-8 8 8v7a1 1 0 01-1 1H3a1 1 0 01-1-1v-7z"/></svg>,
+  },
+  { type: 'divider' },
+  {
+    type: 'item', href: '/events', label: 'Events',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/></svg>,
+  },
+  {
+    type: 'item', href: '/approvals', label: 'Event Approvals', badge: 'approval',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>,
+  },
+  {
+    type: 'item', href: '/merch', label: 'Merch & Collections',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M10 2a4 4 0 00-4 4v1H5a1 1 0 00-.994.89l-1 9A1 1 0 004 18h12a1 1 0 00.994-1.11l-1-9A1 1 0 0015 7h-1V6a4 4 0 00-4-4zm2 5V6a2 2 0 10-4 0v1h4zm-6 3a1 1 0 112 0 1 1 0 01-2 0zm7-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd"/></svg>,
+  },
+  { type: 'divider' },
+  {
+    type: 'item', href: '/users', label: 'All Users',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>,
+  },
+  { type: 'divider' },
+  {
+    type: 'item', href: '/oversold', label: 'Oversold Orders', badge: true,
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>,
+  },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -23,6 +44,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const { user, hydrate, isLoading, logout } = useAdminAuth();
   const [oversoldCount, setOversoldCount] = useState(0);
+  const [approvalCount, setApprovalCount] = useState(0);
 
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => { if (!isLoading && !user) router.replace('/login'); }, [user, isLoading, router]);
@@ -30,57 +52,94 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!user) return;
     const token = localStorage.getItem('evt_token');
-    const base = localStorage.getItem('evt_base') || process.env.NEXT_PUBLIC_API_URL?.replace('/v1','') || 'http://localhost:8080';
-    fetch(`${base}/v1/admin/merch/oversold`, { headers: { Authorization: `Bearer ${token}` } })
+    const base = localStorage.getItem('evt_base') || process.env.NEXT_PUBLIC_API_URL?.replace('/v1', '') || 'http://localhost:8080';
+    const h = { Authorization: `Bearer ${token}` };
+    fetch(`${base}/v1/admin/merch/oversold`, { headers: h })
       .then(r => r.json()).then(d => setOversoldCount((d.data || []).length)).catch(() => {});
+    fetch(`${base}/v1/admin/events/pending`, { headers: h })
+      .then(r => r.json()).then(d => setApprovalCount((d.events || []).length)).catch(() => {});
   }, [user]);
 
   if (isLoading || !user) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-        <div className="spinner" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f0f2f5' }}>
+        <div className="spinner spinner-lg" />
       </div>
     );
   }
 
+  function isActive(href: string, exact?: boolean) {
+    if (exact) return pathname === href;
+    return pathname === href || pathname.startsWith(href + '/');
+  }
+
   function handleLogout() { logout(); router.replace('/login'); }
-  const initials = user.email.slice(0, 2).toUpperCase();
+  const initials = (user.email ?? '??').slice(0, 2).toUpperCase();
 
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', height: '100vh', overflow: 'hidden' }}>
-          <aside style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '1.25rem 1rem', fontFamily: 'var(--font-mono)', fontSize: '.95rem', fontWeight: 600, color: 'var(--accent)', borderBottom: '1px solid var(--border)', letterSpacing: '.04em', flexShrink: 0 }}>
-              ⬡ events
-              <em style={{ color: 'var(--text-3)', fontStyle: 'normal', fontWeight: 400, fontSize: '.7rem', display: 'block', marginTop: '.1rem', letterSpacing: '.06em', textTransform: 'uppercase' }}>
-                admin panel
-              </em>
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f0f2f5' }}>
+
+          {/* Sidebar */}
+          <aside style={{
+            width: 244, flexShrink: 0,
+            background: '#ffffff',
+            borderRight: '1px solid #dddfe2',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Logo */}
+            <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f2f5', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: '#1877f2',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <svg viewBox="0 0 20 20" fill="white" width="16" height="16">
+                    <path d="M2 11l8-8 8 8v7a1 1 0 01-1 1H3a1 1 0 01-1-1v-7z"/>
+                  </svg>
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1c1e21', lineHeight: 1.2 }}>Events</div>
+                  <div style={{ fontSize: 11, color: '#606770', lineHeight: 1 }}>Admin Panel</div>
+                </div>
+              </div>
             </div>
 
-            <nav style={{ flex: 1, padding: '.75rem 0', overflowY: 'auto' }}>
+            {/* Nav */}
+            <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto' }}>
               {NAV.map((item, i) => {
-                if ('section' in item) {
-                  return (
-                    <div key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: '.6rem', textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text-3)', padding: '.5rem 1rem .2rem', marginTop: '.5rem' }}>
-                      {item.section}
-                    </div>
-                  );
+                if (item.type === 'divider') {
+                  return <div key={i} style={{ height: 1, background: '#f0f2f5', margin: '4px 0' }} />;
                 }
-                const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href!));
+                const active = isActive(item.href, item.exact);
                 return (
-                  <Link key={item.href} href={item.href!} style={{
-                    display: 'flex', alignItems: 'center', gap: '.65rem', padding: '.55rem 1rem',
-                    color: active ? 'var(--accent)' : 'var(--text-2)',
-                    borderLeft: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
-                    background: active ? 'var(--accent-d)' : 'transparent',
-                    fontSize: '.88rem', textDecoration: 'none', marginBottom: '.1rem', transition: 'all .15s',
+                  <Link key={item.href} href={item.href} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', margin: '1px 8px', borderRadius: 6,
+                    textDecoration: 'none',
+                    color: active ? '#1877f2' : '#1c1e21',
+                    background: active ? '#e7f3ff' : 'transparent',
+                    fontWeight: active ? 600 : 500, fontSize: 14,
+                    transition: 'background .12s, color .12s',
                   }}>
-                    <span style={{ width: '16px', textAlign: 'center', fontSize: '13px', flexShrink: 0 }}>{item.icon}</span>
-                    {item.label}
-                    {item.badge && oversoldCount > 0 && (
-                      <span style={{ marginLeft: 'auto', background: 'var(--danger)', color: '#fff', fontSize: '.65rem', fontFamily: 'var(--font-mono)', borderRadius: '99px', padding: '1px 6px', minWidth: '18px', textAlign: 'center' }}>
+                    <span style={{ color: active ? '#1877f2' : '#606770', flexShrink: 0 }}>{item.icon}</span>
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                    {item.badge === true && oversoldCount > 0 && (
+                      <span style={{
+                        background: '#fa3e3e', color: '#fff', fontSize: 11, fontWeight: 700,
+                        borderRadius: '99px', padding: '1px 7px', minWidth: 20, textAlign: 'center',
+                      }}>
                         {oversoldCount}
+                      </span>
+                    )}
+                    {item.badge === 'approval' && approvalCount > 0 && (
+                      <span style={{
+                        background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 700,
+                        borderRadius: '99px', padding: '1px 7px', minWidth: 20, textAlign: 'center',
+                      }}>
+                        {approvalCount}
                       </span>
                     )}
                   </Link>
@@ -88,21 +147,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               })}
             </nav>
 
-            <div style={{ padding: '.75rem 1rem', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.8rem' }}>
-                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'var(--accent-d)', border: '1px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontSize: '.65rem', color: 'var(--accent)', flexShrink: 0 }}>
+            {/* User strip */}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  background: '#1877f2', color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, fontWeight: 700, flexShrink: 0,
+                }}>
                   {initials}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '.6rem', color: 'var(--accent)', textTransform: 'uppercase' }}>administrator</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1e21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
+                  <div style={{ fontSize: 11, color: '#606770' }}>Administrator</div>
                 </div>
-                <button className="btn-icon" onClick={handleLogout} title="Logout" style={{ fontSize: '1rem' }}>⇥</button>
+                <button onClick={handleLogout} title="Sign out"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8a8d91', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
+                    <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h4a1 1 0 100-2H4V5h3a1 1 0 100-2H3zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </aside>
 
-          <main style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {/* Main */}
+          <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {children}
           </main>
         </div>

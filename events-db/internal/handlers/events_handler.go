@@ -155,6 +155,39 @@ func UpdateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 	}
 }
 
+// AdminUpdateEventHandler is the admin-only variant of UpdateEventHandler.
+// Unlike the organizer version, it does NOT enforce organizer_id ownership —
+// admins can edit any event regardless of who created it.
+func AdminUpdateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventID := c.Param("id")
+
+		var dto models.UpdateEventDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Validation failed",
+				"details": utils.FormatValidationErrors(err),
+			})
+			return
+		}
+
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
+		}
+
+		event, err := repository.AdminUpdateEvent(pool, eventID, &dto)
+		if err != nil {
+			utils.InternalError(c, err, "failed to update event")
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Event updated successfully",
+			"event":   event,
+		})
+	}
+}
+
 // FIX 5: renamed GetEventByIDHandlers → GetEventByIDHandler
 func GetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -197,34 +230,67 @@ func GetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 	}
 }
 
-// GetEventBySlugHandler fetches a single published event by its URL slug.
-//
-//	GET /events/:id
-//
-// FIX 1: c.Param("slug") was wrong — the route param is registered as ":id",
-// so c.Param("id") is the correct call. Using "slug" always returns "" causing
-// the handler to immediately 400 every request.
-//
-// FIX 7: userID is now extracted from context and passed through, so the
-// response can be personalised in future (e.g. isFollowing flag) without
-// changing the handler signature.
-func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+// AdminGetEventByIDHandler is the admin-only variant. It returns any event
+// regardless of status (draft, pending, published, cancelled) so admins can
+// view and edit events in all states.
+func AdminGetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// FIX 1: was c.Param("slug") — must match the route param name ":id"
-		slug := c.Param("id")
+		eventID := c.Param("id")
 
-		if slug == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
+		if _, err := uuid.Parse(eventID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
 			return
 		}
 
-		event, err := repository.GetEventBySlug(pool, slug)
+		event, err := repository.AdminGetEventByID(pool, eventID)
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 				return
 			}
-			utils.InternalError(c, err, "failed to fetch event by slug")
+			utils.InternalError(c, err, "failed to fetch event")
+			return
+		}
+
+		if ec != nil {
+			event.Views += int(ec.GetPendingViewCount(c.Request.Context(), eventID))
+		}
+
+		c.JSON(http.StatusOK, event)
+	}
+}
+
+// GetEventBySlugHandler fetches a single published event by its URL slug.
+// It also accepts a bare UUID so the mobile app's GET /events/:id call
+// (which passes event.id) resolves correctly alongside slug-based links.
+//
+//	GET /events/:id
+func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		slugOrID := c.Param("id")
+
+		if slugOrID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "event id or slug is required"})
+			return
+		}
+
+		var event *models.Event
+		var err error
+
+		// If it looks like a UUID, try GetEventByID first so we don't force
+		// callers to know (or construct) the slug.
+		if _, uuidErr := uuid.Parse(slugOrID); uuidErr == nil {
+			event, err = repository.GetEventByID(pool, slugOrID, nil)
+		} else {
+			event, err = repository.GetEventBySlug(pool, slugOrID)
+		}
+
+		if err != nil {
+			if errors.Is(err, repository.ErrEventNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to fetch event")
 			return
 		}
 
@@ -541,6 +607,11 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		if len([]rune(query)) < 3 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "search query must be at least 3 characters"})
+			return
+		}
+
 		var cursor *utils.Cursor
 		if cursorStr != "" {
 			var err error
@@ -666,5 +737,40 @@ func GetEventsByIDsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"data": events})
+	}
+}
+
+// The event is created with status='draft' and must go through admin
+// approval before it can be published.
+//
+//	POST /v1/organiser/events/create
+func OrgCreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+ 
+		var dto models.CreateEventDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Validation failed",
+				"details": utils.FormatValidationErrors(err),
+			})
+			return
+		}
+ 
+		if dto.EndTime.Before(dto.StartTime) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "End time must be after start time"})
+			return
+		}
+ 
+		event, err := repository.CreateEvent(pool, &dto, userID.(string))
+		if err != nil {
+			utils.InternalError(c, err, "failed to create event")
+			return
+		}
+ 
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Event created as draft — pending admin approval before it can be published.",
+			"event":   event,
+		})
 	}
 }

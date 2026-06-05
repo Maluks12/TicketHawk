@@ -22,10 +22,12 @@ type BucketConfig struct {
 
 // Common configurations
 var (
+	// 10 attempts, refills 1 token per minute. Prevents brute force without
+	// locking legitimate users out for hours.
 	LoginBucket = BucketConfig{
-		Capacity:   5,
+		Capacity:   10,
 		RefillRate: 1.0 / 60.0,
-		TTL:        1 * time.Hour,
+		TTL:        2 * time.Hour,
 	}
 
 	APIReadBucket = BucketConfig{

@@ -24,13 +24,17 @@ export function formatAttrs(raw: string | null | undefined) {
   try { const o = JSON.parse(raw || '{}'); return Object.entries(o).map(([k, v]) => `${k}: ${v}`).join(', '); } catch { return raw || ''; }
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', published: 'Published', cancelled: 'Cancelled',
+  completed: 'Completed', active: 'Active', inactive: 'Inactive',
+  pending_review: 'Pending Review', rejected: 'Rejected', pending: 'Pending',
+  admin: 'Admin', organizer: 'Organiser', organiser: 'Organiser',
+  attendee: 'Attendee', user: 'User', delivery: 'Delivery',
+  pickup: 'Pickup', oversold: 'Oversold',
+};
+
 export function Badge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    draft: 'badge-draft', published: 'badge-published', cancelled: 'badge-cancelled',
-    completed: 'badge-completed', active: 'badge-active', inactive: 'badge-inactive',
-    admin: 'badge-admin', organizer: 'badge-organizer', organiser: 'badge-organizer',
-    attendee: 'badge-attendee', user: 'badge-user', delivery: 'badge-delivery',
-    pickup: 'badge-pickup', both: 'badge-both', oversold: 'badge-oversold',
-  };
-  return <span className={`badge ${map[status] || 'badge-draft'}`}>{status}</span>;
+  const cls = status.replace(/_/g, '_');
+  const label = STATUS_LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+  return <span className={`badge badge-${cls}`}>{label}</span>;
 }

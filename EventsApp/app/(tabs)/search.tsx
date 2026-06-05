@@ -74,15 +74,19 @@ export default function SearchScreen() {
   const [suggResults, setSuggResults] = useState<Event[]>([]);
   const [suggTitle,   setSuggTitle]   = useState('');
   const [suggLoading, setSuggLoading] = useState(false);
-  const [view,        setView]        = useState<'idle' | 'results' | 'suggestion'>('idle');
+  const [view,        setView]        = useState<'idle' | 'typing' | 'results' | 'suggestion'>('idle');
 
   const animateFocus = (focused: boolean) =>
     Animated.timing(underlineAnim, { toValue: focused ? 1 : 0, duration: 180, useNativeDriver: false }).start();
 
+  const MIN_QUERY_LENGTH = 3;
+
   const runSearch = useCallback(async (q: string) => {
-    if (!q.trim()) { setResults([]); setView('idle'); return; }
+    const trimmed = q.trim();
+    if (!trimmed) { setResults([]); setView('idle'); return; }
+    if (trimmed.length < MIN_QUERY_LENGTH) { setResults([]); setView('typing'); return; }
     setLoading(true); setView('results');
-    setResults(await searchEvents(q));
+    setResults(await searchEvents(trimmed));
     setLoading(false);
   }, []);
 
@@ -155,6 +159,17 @@ export default function SearchScreen() {
         />
       )}
 
+      {/* Typing: show hint until 3 chars */}
+      {view === 'typing' && (
+        <View style={{ alignItems: 'center', paddingTop: 60, paddingHorizontal: 40 }}>
+          <Ionicons name="search-outline" size={40} color={colors.iconColor} />
+          <Text style={{ fontSize: 15, color: colors.subText, marginTop: 14, textAlign: 'center', lineHeight: 22 }}>
+            Keep typing… results appear after{'\n'}
+            <Text style={{ color: ACCENT, fontWeight: '700' }}>3 characters</Text>
+          </Text>
+        </View>
+      )}
+
       {/* Results / suggestion */}
       {(view === 'results' || view === 'suggestion') && (
         <>
@@ -173,6 +188,7 @@ export default function SearchScreen() {
             <FlatList
               data={activeItems}
               keyExtractor={e => e.id}
+              keyboardDismissMode="on-drag"
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => <EventResultRow item={item} onPress={() => handleEventPress(item)} colors={colors} />}
               ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor, marginLeft: 20 }} />}

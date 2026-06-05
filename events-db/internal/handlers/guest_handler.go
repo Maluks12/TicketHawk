@@ -36,6 +36,14 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 			return
 		}
 
+		if event.MaxTicketsPerUser != nil && dto.TicketQuantity > *event.MaxTicketsPerUser {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Exceeds per-person ticket limit",
+				"max_tickets_per_user": *event.MaxTicketsPerUser,
+			})
+			return
+		}
+
 		booking, err := repository.CreateGuestBooking(pool, &dto, event)
 		if err != nil {
 			if errors.Is(err, repository.ErrInsufficientCapacity) {

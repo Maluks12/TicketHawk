@@ -1,0 +1,343 @@
+'use client';
+import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { api } from '../../../lib/api';
+import { useToast } from '../../../lib/toast';
+import { useConfirm } from '../../../lib/confirm';
+import { fmtMoney, fmtDate, fmtDateTime } from '../../../lib/utils';
+
+interface OrgEvent {
+  id: string;
+  title: string;
+  status: string;
+  start_time: string;
+  end_time: string;
+  city: string;
+  venue_name: string;
+  price: number;
+  currency: string;
+  tickets_sold: number;
+  max_capacity: number | null;
+  views: number;
+  created_at: string;
+}
+
+type StatusFilter = 'all' | 'published' | 'draft' | 'cancelled' | 'completed';
+type SortKey = 'title' | 'start_time' | 'tickets_sold' | 'views' | 'created_at';
+
+export default function EventsPage() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
+
+  const [events, setEvents] = useState<OrgEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('start_time');
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const fetchEvents = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/organiser/events');
+      setEvents(res.data.events ?? []);
+    } catch {
+      toast('Failed to load events', 'error');
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+
+  // ── Filter + sort ───────────────────────────────────────────────────────────
+  const filtered = events
+    .filter(e => {
+      if (statusFilter !== 'all' && e.status !== statusFilter) return false;
+      if (search && !e.title.toLowerCase().includes(search.toLowerCase()) &&
+          !e.city.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      let valA: string | number = a[sortKey] as string | number;
+      let valB: string | number = b[sortKey] as string | number;
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+      if (valA < valB) return sortAsc ? -1 : 1;
+      if (valA > valB) return sortAsc ? 1 : -1;
+      return 0;
+    });
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) setSortAsc(p => !p);
+    else { setSortKey(key); setSortAsc(true); }
+  }
+
+  function SortIcon({ k }: { k: SortKey }) {
+    if (sortKey !== k) return <span style={{ color: '#ccd0d5', fontSize: 10 }}>↕</span>;
+    return <span style={{ color: '#1877f2', fontSize: 10 }}>{sortAsc ? '↑' : '↓'}</span>;
+  }
+
+  // ── Selection ───────────────────────────────────────────────────────────────
+  function toggle(id: string) {
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  function toggleAll() {
+    setSelected(selected.size === filtered.length ? new Set() : new Set(filtered.map(e => e.id)));
+  }
+  const allSelected = selected.size === filtered.length && filtered.length > 0;
+
+  // ── Counts by status ────────────────────────────────────────────────────────
+  const counts = {
+    all: events.length,
+    published: events.filter(e => e.status === 'published').length,
+    draft: events.filter(e => e.status === 'draft').length,
+    cancelled: events.filter(e => e.status === 'cancelled').length,
+    completed: events.filter(e => e.status === 'completed').length,
+  };
+
+  // ── Actions ─────────────────────────────────────────────────────────────────
+  async function cancelEvent(id: string) {
+    confirm('Cancel event', 'This will cancel the event. Attendees will be notified.', async () => {
+      await api.post(`/organiser/events/${id}/cancel`);
+      toast('Event cancelled', 'success');
+      fetchEvents();
+    });
+  }
+
+  async function publishEvent(id: string) {
+    try {
+      await api.post(`/organiser/events/${id}/publish`);
+      toast('Event submitted for review', 'success');
+      fetchEvents();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast(msg ?? 'Failed to publish', 'error');
+    }
+  }
+
+  // ── Capacity fill % ─────────────────────────────────────────────────────────
+  function capacityPct(e: OrgEvent) {
+    if (!e.max_capacity) return null;
+    return Math.min((e.tickets_sold / e.max_capacity) * 100, 100);
+  }
+
+  return (
+    <div className="page">
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <div className="page-header">
+        <div>
+          <div className="page-title">My Events</div>
+          <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
+            {counts.published} published · {counts.draft} draft
+          </div>
+        </div>
+        <Link href="/events/create" className="btn btn-primary">+ Create event</Link>
+      </div>
+
+      {/* ── Filter pill strip ────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '8px 16px', borderBottom: '1px solid #dddfe2',
+        background: '#fff', flexWrap: 'wrap',
+      }}>
+        {(Object.entries(counts) as [StatusFilter, number][]).map(([s, count]) => (
+          <button
+            key={s}
+            onClick={() => { setStatusFilter(s); setSelected(new Set()); }}
+            style={{
+              padding: '5px 12px', borderRadius: 16, fontSize: 13, fontWeight: 600,
+              border: `1px solid ${statusFilter === s ? '#1877f2' : '#dddfe2'}`,
+              background: statusFilter === s ? '#e7f3ff' : '#fff',
+              color: statusFilter === s ? '#1877f2' : '#606770',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+            {count > 0 && (
+              <span style={{
+                background: statusFilter === s ? '#1877f2' : '#ebedf0',
+                color: statusFilter === s ? '#fff' : '#606770',
+                borderRadius: 99, padding: '0 5px', fontSize: 11,
+              }}>
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+
+        {/* Search pushed right */}
+        <div style={{ marginLeft: 'auto' }}>
+          <div className="search-box">
+            <svg viewBox="0 0 20 20" fill="#606770" width="14" height="14">
+              <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
+            </svg>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search events…"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Action toolbar — shows when rows are selected ─────────────── */}
+      {selected.size > 0 && (
+        <div className="toolbar" style={{ background: '#e7f3ff', borderBottom: '1px solid #b8d9ff' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1877f2' }}>
+            {selected.size} selected
+          </span>
+          <button className="btn btn-sm" onClick={() => {
+            const id = [...selected][0];
+            if (id) router.push(`/event/${id}`);
+          }}>
+            View details
+          </button>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={() => { selected.forEach(id => cancelEvent(id)); }}
+          >
+            Cancel selected
+          </button>
+          <button className="btn btn-sm" style={{ marginLeft: 'auto' }}
+            onClick={() => setSelected(new Set())}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ── Table ────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflow: 'auto', background: '#fff' }}>
+        {loading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
+            <div className="spinner" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📅</div>
+            <div className="empty-title">
+              {search || statusFilter !== 'all' ? 'No events match your filters' : 'No events yet'}
+            </div>
+            <div className="empty-desc">
+              {search || statusFilter !== 'all'
+                ? 'Try adjusting your search or filter.'
+                : 'Events you create will appear here once an admin sets them up for your organizer account.'}
+            </div>
+          </div>
+        ) : (
+          <table className="meta-table">
+            <thead>
+              <tr>
+                <th className="col-check">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                    style={{ accentColor: '#1877f2', cursor: 'pointer' }} />
+                </th>
+                <th className="sortable" onClick={() => handleSort('title')}>
+                  Event <SortIcon k="title" />
+                </th>
+                <th>Status</th>
+                <th className="sortable" onClick={() => handleSort('start_time')}>
+                  Date <SortIcon k="start_time" />
+                </th>
+                <th>Location</th>
+                <th className="sortable" onClick={() => handleSort('tickets_sold')}>
+                  Tickets sold <SortIcon k="tickets_sold" />
+                </th>
+                <th className="sortable" onClick={() => handleSort('views')}>
+                  Views <SortIcon k="views" />
+                </th>
+                <th>Price</th>
+                <th className="col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(e => {
+                const pct = capacityPct(e);
+                return (
+                  <tr key={e.id} style={{ background: selected.has(e.id) ? '#e7f3ff' : undefined }}>
+                    <td>
+                      <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)}
+                        style={{ accentColor: '#1877f2', cursor: 'pointer' }} />
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: '#1877f2', cursor: 'pointer' }}
+                        onClick={() => router.push(`/event/${e.id}`)}>
+                        {e.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 1 }}>
+                        {fmtDateTime(e.created_at)}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`badge badge-${e.status}`}>
+                        {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
+                      </span>
+                    </td>
+                    <td style={{ color: '#606770' }}>
+                      <div>{fmtDate(e.start_time)}</div>
+                      <div style={{ fontSize: 11, color: '#8a8d91' }}>{fmtDate(e.end_time)}</div>
+                    </td>
+                    <td style={{ color: '#606770' }}>
+                      <div>{e.venue_name || '—'}</div>
+                      <div style={{ fontSize: 11, color: '#8a8d91' }}>{e.city}</div>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>
+                        {e.tickets_sold.toLocaleString()}
+                        {e.max_capacity && (
+                          <span style={{ fontSize: 11, color: '#8a8d91', fontWeight: 400 }}>
+                            {' '}/ {e.max_capacity.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                      {pct !== null && (
+                        <div style={{ marginTop: 4, width: 80 }}>
+                          <div className="progress-bar">
+                            <div className="progress-fill" style={{
+                              width: `${pct}%`,
+                              background: pct >= 90 ? '#c41c1c' : pct >= 70 ? '#e65c00' : '#1877f2',
+                            }} />
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ color: '#606770' }}>{e.views.toLocaleString()}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {e.price === 0 ? (
+                        <span style={{ color: '#1a7f37', fontSize: 13 }}>Free</span>
+                      ) : fmtMoney(e.price, e.currency)}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                        <Link href={`/event/${e.id}`} className="btn btn-xs">
+                          Details
+                        </Link>
+                        {e.status === 'draft' && (
+                          <button className="btn btn-xs btn-primary" onClick={() => publishEvent(e.id)}>
+                            Submit
+                          </button>
+                        )}
+                        {e.status === 'published' && (
+                          <button className="btn btn-xs" onClick={() => router.push(`/campaigns/create`)}>
+                            Boost
+                          </button>
+                        )}
+                        {!['cancelled', 'completed'].includes(e.status) && (
+                          <button className="btn btn-xs btn-danger" onClick={() => cancelEvent(e.id)}>
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}

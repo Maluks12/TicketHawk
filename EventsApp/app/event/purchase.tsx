@@ -123,11 +123,34 @@ export default function TicketPurchaseScreen() {
     setLoading(true);
     getTicketTypes(event.id)
       .then((types) => {
-        setTicketTypes(types);
-        const first = types.find((t) => !isSoldOut(t));
-        if (first) setSelectedId(first.id);
+        if (types.length === 0 && event?.price != null) {
+          // Flat-price event with no ticket types — show a GA fallback
+          const fallback: TicketType = {
+            id: 'ga-fallback',
+            event_id: event.id,
+            name: 'GENERAL ADMISSION',
+            description: null,
+            price: event.price,
+            capacity: null,
+            tickets_sold: 0,
+            reserved_count: 0,
+            sort_order: 0,
+            is_visible: true,
+            sale_starts_at: null,
+            sale_ends_at: null,
+            created_at: '',
+            updated_at: '',
+          };
+          setTicketTypes([fallback]);
+          setSelectedId('ga-fallback');
+        } else {
+          setTicketTypes(types);
+          const first = types.find((t) => !isSoldOut(t));
+          if (first) setSelectedId(first.id);
+        }
       })
       .catch(() => {
+        // Network / HTTP error — still try the flat-price fallback
         if (event?.price != null) {
           const fallback: TicketType = {
             id: 'ga-fallback',
@@ -156,7 +179,12 @@ export default function TicketPurchaseScreen() {
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
   const platformFee  = Math.ceil(totalAmount * 0.05);
   const grandTotal   = totalAmount + platformFee;
-  const venueType    = event ? detectVenueType(event.category ?? '', event.venue_name) : 'none';
+  const venueType = (() => {
+    if (!event) return 'none' as const;
+    const override = event.venue_type as string | undefined;
+    if (override && override !== 'auto') return override as 'stadium' | 'auditorium' | 'none';
+    return detectVenueType(event.category ?? '', event.venue_name);
+  })();
   const bannerImage  = event?.banner_image_url ?? event?.cover_image_url ?? null;
 
   const handleSelectType = useCallback((id: string) => setSelectedId(id), []);
@@ -393,28 +421,46 @@ export default function TicketPurchaseScreen() {
                   })
                 )}
 
-                {selectedType && !isSoldOut(selectedType) && (
-                  <View style={ss.qtySection}>
-                    <View style={ss.qtySectionHeader}>
-                      <Text style={ss.qtySectionTitle}>How many tickets?</Text>
-                      <Text style={ss.seatedNote}>🪑 Seated together</Text>
+                {selectedType && !isSoldOut(selectedType) && (() => {
+                  const maxPer = typeof event?.max_tickets_per_user === 'number'
+                    ? event.max_tickets_per_user
+                    : Infinity;
+
+                  // Admin locked to exactly 1 ticket — skip the picker entirely,
+                  // quantity stays at its initial value of 1.
+                  if (maxPer === 1) return null;
+
+                  const maxVisible = Math.min(maxPer, 6);
+                  const opts = Array.from({ length: maxVisible }, (_, i) => i + 1);
+
+                  return (
+                    <View style={ss.qtySection}>
+                      <View style={ss.qtySectionHeader}>
+                        <Text style={ss.qtySectionTitle}>How many tickets?</Text>
+                        <Text style={ss.seatedNote}>🪑 Seated together</Text>
+                      </View>
+                      {isFinite(maxPer) && (
+                        <Text style={{ fontSize: 12, color: '#888', marginBottom: 8, marginLeft: 2 }}>
+                          Max {maxPer} ticket{maxPer !== 1 ? 's' : ''} per person
+                        </Text>
+                      )}
+                      <View style={ss.qtyGrid}>
+                        {opts.map((n) => (
+                          <TouchableOpacity
+                            key={n}
+                            onPress={() => setQuantity(n)}
+                            style={[ss.qtyBtn, quantity === n && ss.qtyBtnSel]}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={[ss.qtyBtnText, quantity === n && ss.qtyBtnTextSel]}>
+                              {n === maxVisible && !isFinite(maxPer) ? '6+' : String(n)}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
                     </View>
-                    <View style={ss.qtyGrid}>
-                      {[1, 2, 3, 4, 5, 6].map((n) => (
-                        <TouchableOpacity
-                          key={n}
-                          onPress={() => setQuantity(n)}
-                          style={[ss.qtyBtn, quantity === n && ss.qtyBtnSel]}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[ss.qtyBtnText, quantity === n && ss.qtyBtnTextSel]}>
-                            {n === 6 ? '6+' : n}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
+                  );
+                })()}
               </View>
             )}
 

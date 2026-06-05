@@ -193,7 +193,8 @@ func ForYou(pool *pgxpool.Pool, userID string, limit int) ([]models.Event, error
 			GROUP BY e.category_id
 		)
 		SELECT
-			ev.id, ev.title, ev.description, ev.cover_image_url,
+			ev.id, COALESCE(ev.slug, '') AS slug, ev.title, ev.description,
+			ev.cover_image_url, ev.banner_image_url,
 			ev.start_time, ev.end_time, ev.price, ev.currency,
 			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
 			ev.is_featured, ev.status, ev.views, ev.created_at,
@@ -231,7 +232,8 @@ func ForYou(pool *pgxpool.Pool, userID string, limit int) ([]models.Event, error
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
@@ -257,7 +259,8 @@ func NearYou(pool *pgxpool.Pool, city string, limit int) ([]models.Event, error)
 
 	rows, err := pool.Query(ctx, `
 		SELECT
-			ev.id, ev.title, ev.description, ev.cover_image_url,
+			ev.id, COALESCE(ev.slug, '') AS slug, ev.title, ev.description,
+			ev.cover_image_url, ev.banner_image_url,
 			ev.start_time, ev.end_time, ev.price, ev.currency,
 			ev.city, ev.venue_name, ev.max_capacity, ev.tickets_sold,
 			ev.is_featured, ev.status, ev.views, ev.created_at,
@@ -280,7 +283,8 @@ func NearYou(pool *pgxpool.Pool, city string, limit int) ([]models.Event, error)
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
@@ -332,7 +336,8 @@ func TrendingNow(pool *pgxpool.Pool, limit int) ([]models.Event, *utils.Cursor, 
 
 	rows, err := pool.Query(ctx, `
 		SELECT
-			e.id, e.title, e.description, e.cover_image_url,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description,
+			e.cover_image_url, e.banner_image_url,
 			e.start_time, e.end_time, e.price, e.currency,
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
@@ -361,7 +366,8 @@ func TrendingNow(pool *pgxpool.Pool, limit int) ([]models.Event, *utils.Cursor, 
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
@@ -394,7 +400,8 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.title, e.description, e.cover_image_url,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description,
+			e.cover_image_url, e.banner_image_url,
 			e.start_time, e.end_time, e.price, e.currency,
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
@@ -416,7 +423,8 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
@@ -459,7 +467,8 @@ func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.title, e.description, e.cover_image_url,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description,
+			e.cover_image_url, e.banner_image_url,
 			e.start_time, e.end_time, e.price, e.currency,
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
@@ -481,7 +490,8 @@ func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,
@@ -550,7 +560,8 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.title, e.description, e.cover_image_url,
+			e.id, COALESCE(e.slug, '') AS slug, e.title, e.description,
+			e.cover_image_url, e.banner_image_url,
 			e.start_time, e.end_time, e.price, e.currency,
 			e.city, e.venue_name, e.max_capacity, e.tickets_sold,
 			e.is_featured, e.status, e.views, e.created_at,
@@ -572,7 +583,8 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 	for rows.Next() {
 		var e models.Event
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.CoverImageURL,
+			&e.ID, &e.Slug, &e.Title, &e.Description,
+			&e.CoverImageURL, &e.BannerImageURL,
 			&e.StartTime, &e.EndTime, &e.Price, &e.Currency,
 			&e.City, &e.VenueName, &e.MaxCapacity, &e.TicketsSold,
 			&e.IsFeatured, &e.Status, &e.Views, &e.CreatedAt,

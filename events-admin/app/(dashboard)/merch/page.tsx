@@ -322,36 +322,19 @@ export default function MerchPage() {
   async function uploadImage(file: File) {
     setImgUploading(true);
     try {
-      const fd = new FormData();
+      const fd      = new FormData();
       fd.append('image', file);
       const token   = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
       const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
-      let imageUrl: string | null = null;
+      const res = await fetch(`${baseURL}/admin/upload`, { method: 'POST', headers, body: fd });
+      const json = await res.json().catch(() => null) as { image_url?: string; error?: string } | null;
+      if (!res.ok) throw new Error(json?.error ?? `Upload failed (HTTP ${res.status})`);
 
-      // ── 1. Try R2 via the Go backend ────────────────────────────────────
-      try {
-        const res = await fetch(`${baseURL}/admin/upload`, { method: 'POST', headers, body: fd });
-        if (res.ok) {
-          const json = await res.json() as { image_url?: string };
-          imageUrl = json.image_url ?? null;
-        } else {
-          const json = await res.json().catch(() => null) as { error?: string } | null;
-          throw new Error(json?.error ?? `Backend returned HTTP ${res.status}`);
-        }
-      } catch {
-        // ── 2. R2 unavailable (local dev) — fall back to Next.js local storage
-        const fd2   = new FormData();
-        fd2.append('image', file);
-        const local = await fetch('/api/upload', { method: 'POST', body: fd2 });
-        const json  = await local.json() as { image_url?: string; error?: string };
-        if (!local.ok) throw new Error(json.error ?? 'Local upload failed');
-        imageUrl = json.image_url ?? null;
-      }
-
+      const imageUrl = json?.image_url ?? null;
       if (imageUrl) {
-        setUploadedImages(prev => [...prev, imageUrl!]);
+        setUploadedImages(prev => [...prev, imageUrl]);
         toast('Image uploaded', 'success');
       } else {
         toast('Upload succeeded but no URL was returned', 'error');

@@ -125,12 +125,13 @@ func main() {
 	// Services
 	// ==========================================
 	emailService   := services.NewEmailService(cfg)
-	qrService      := services.NewQRService(pool, cfg)
+	qrService         := services.NewQRService(pool, cfg)
+	rotatingQRService := services.NewRotatingQRService(cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
 	workers.StartAdWorker(pool, paymentService, ctx)
-	log.Info().Msg("ad worker started (post-pay billing)")
-	imgService     := services.NewImageService(cfg)
+	log.Info().Msg("ad worker started (post-pay billing, per-account mode)")
+	imgService := services.NewImageService(cfg)
 
 	// ==========================================
 	// Setup Router
@@ -216,13 +217,15 @@ func main() {
 	if rateLimitManager != nil {
 		loginGroup := auth.Group("")
 		loginGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour},
+			// 10 attempts, refill 1 token/minute — blocks brute force without locking out real users
+			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 2 * time.Hour},
 			"login"))
 		loginGroup.POST("/login", handlers.LoginHandler(pool, cfg))
 
 		registerGroup := auth.Group("")
 		registerGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 3600.0, TTL: 2 * time.Hour},
+			// 5 attempts, refill 1 token/10 minutes
+			ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 600.0, TTL: 2 * time.Hour},
 			"register"))
 		registerGroup.POST("/register", handlers.CreateUserhandler(pool))
 
@@ -233,16 +236,17 @@ func main() {
 		passwordResetGroup.POST("/reset_password_request", handlers.RequestPasswordResetHandler(pool, emailService, cfg))
 		passwordResetGroup.POST("/reset_password",         handlers.ResetPasswordHandler(pool))
 	} else {
-		auth.POST("/login",                    handlers.LoginHandler(pool, cfg))
-		auth.POST("/register",                 handlers.CreateUserhandler(pool))
-		auth.POST("/reset_password_request",   handlers.RequestPasswordResetHandler(pool, emailService, cfg))
-		auth.POST("/reset_password",           handlers.ResetPasswordHandler(pool))
+		auth.POST("/login",                  handlers.LoginHandler(pool, cfg))
+		auth.POST("/register",               handlers.CreateUserhandler(pool))
+		auth.POST("/reset_password_request", handlers.RequestPasswordResetHandler(pool, emailService, cfg))
+		auth.POST("/reset_password",         handlers.ResetPasswordHandler(pool))
 	}
 
 	if rateLimitManager != nil {
 		refreshGroup := auth.Group("")
 		refreshGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 3600.0, TTL: 1 * time.Hour},
+			// 20 attempts, refill 1 token/minute
+			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 1 * time.Hour},
 			"refresh"))
 		refreshGroup.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
 	} else {
@@ -271,10 +275,7 @@ func main() {
 		public.GET("/filter",            handlers.FilterEventsHandler(pool, eventCache))
 		public.GET("/:id/merch",         handlers.GetEventMerchHandler(pool, eventCache))
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
-		// Ticket types — visible tiers for the event detail page
 		public.GET("/:id/ticket-types",  handlers.GetTicketTypesHandler(pool))
-		// Frontend calls this once when the user opens the event detail screen.
-		// Keeps view counts accurate — only real user opens are counted.
 		public.POST("/:id/view",         handlers.TrackEventViewHandler(pool, eventCache))
 		// Must be last — catches both UUIDs and slugs
 		public.GET("/:id",               handlers.GetEventBySlugHandler(pool, eventCache))
@@ -310,15 +311,15 @@ func main() {
 	// ==========================================
 	// Public Collection Routes
 	// ==========================================
-	collections := v1.Group("/collections")
-	collections.Use(middleware.OptionalAuth(cfg))
+	collectionsPublic := v1.Group("/collections")
+	collectionsPublic.Use(middleware.OptionalAuth(cfg))
 	if rateLimitManager != nil {
-		collections.Use(middleware.RateLimitByUser(rateLimitManager,
+		collectionsPublic.Use(middleware.RateLimitByUser(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 200, RefillRate: 5.0, TTL: 15 * time.Minute},
 			"collections"))
 	}
 	{
-		collections.GET("/:id", handlers.GetCollectionByIDHandler(pool))
+		collectionsPublic.GET("/:id", handlers.GetCollectionByIDHandler(pool))
 	}
 
 	// ==========================================
@@ -365,11 +366,11 @@ func main() {
 			"guest-bookings"))
 	}
 	{
-		guest.POST("/bookings",                                  handlers.CreateGuestBookingHandler(pool, paymentService))
-		guest.GET("/bookings/:bookingNumber",                    handlers.GetGuestBookingHandler(pool, rdb))
-		guest.GET("/bookings/:bookingNumber/assignments",        handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
-		guest.GET("/bookings/:bookingNumber/payment",            handlers.GuestPaymentStatusHandler(pool, paymentService))
-		guest.POST("/bookings/:bookingNumber/payment/retry",     handlers.GuestRetryPaymentHandler(pool, paymentService))
+		guest.POST("/bookings",                              handlers.CreateGuestBookingHandler(pool, paymentService))
+		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber/payment",        handlers.GuestPaymentStatusHandler(pool, paymentService))
+		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
 	}
 
 	// ==========================================
@@ -383,10 +384,10 @@ func main() {
 			"notifications"))
 	}
 	{
-		notifs.GET("",              handlers.GetNotificationsHandler(pool))
-		notifs.GET("/unread",       handlers.GetUnreadCountHandler(pool))
-		notifs.PATCH("/:id/read",   handlers.MarkReadHandler(pool))
-		notifs.POST("/read-all",    handlers.MarkAllReadHandler(pool))
+		notifs.GET("",            handlers.GetNotificationsHandler(pool))
+		notifs.GET("/unread",     handlers.GetUnreadCountHandler(pool))
+		notifs.PATCH("/:id/read", handlers.MarkReadHandler(pool))
+		notifs.POST("/read-all",  handlers.MarkAllReadHandler(pool))
 	}
 
 	// ==========================================
@@ -400,14 +401,14 @@ func main() {
 			"bookings"))
 	}
 	{
-		bookings.POST("",      handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
-		bookings.GET("",       handlers.GetUserBookingsHandler(bookingRepo))
-		bookings.GET("/:id",   handlers.GetBookingDetailsHandler(bookingRepo))
-		bookings.POST("/:id/refund",                        handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
-		bookings.GET("/:id/assignments",                    handlers.GetTicketAssignmentsHandler(pool))
-		bookings.POST("/:id/assignments/:assignmentId",     handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURLs[0]))
-		bookings.DELETE("/:id/assignments/:assignmentId",   handlers.RevokeAssignmentHandler(pool))
-		bookings.POST("/:id/verify",                        handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
+		bookings.POST("",    handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
+		bookings.GET("",     handlers.GetUserBookingsHandler(bookingRepo))
+		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
+		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
+		bookings.GET("/:id/assignments",                  handlers.GetTicketAssignmentsHandler(pool))
+		bookings.POST("/:id/assignments/:assignmentId",   handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURLs[0]))
+		bookings.DELETE("/:id/assignments/:assignmentId", handlers.RevokeAssignmentHandler(pool))
+		bookings.POST("/:id/verify",                      handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
 
 		if rateLimitManager != nil {
 			paymentRoutes := bookings.Group("")
@@ -422,21 +423,34 @@ func main() {
 			bookings.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
 			bookings.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
-			bookings.GET("/:id/payment/page", handlers.PaymentPageHandler())
+			bookings.GET("/:id/payment/page",   handlers.PaymentPageHandler())
 		}
 	}
 
 	// ==========================================
-	// Ticket Claim Route (public — no auth)
+	// Ticket Routes
 	// ==========================================
 	tickets := v1.Group("/tickets")
-	if rateLimitManager != nil {
-		tickets.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
-			"ticket-claim"))
-	}
 	{
-		tickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService))
+		// Public: claim an assigned ticket (no auth)
+		publicTickets := tickets.Group("")
+		if rateLimitManager != nil {
+			publicTickets.Use(middleware.RateLimitByIP(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+				"ticket-claim"))
+		}
+		publicTickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService))
+
+		// Authenticated: rotating QR token (ticket holder) + organiser scan
+		authTickets := tickets.Group("")
+		authTickets.Use(middleware.AuthMiddleware(cfg))
+		if rateLimitManager != nil {
+			authTickets.Use(middleware.RateLimitByUser(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 120, RefillRate: 2.0, TTL: 5 * time.Minute},
+				"qr-token"))
+		}
+		authTickets.GET("/:assignmentId/qr",   handlers.GetRotatingQRTokenHandler(pool, rotatingQRService))
+		authTickets.POST("/:assignmentId/scan", handlers.ScanRotatingQRHandler(pool, rotatingQRService))
 	}
 
 	// ==========================================
@@ -454,7 +468,19 @@ func main() {
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
 	}
+
+	// ==========================================
+	// Categories
+	// ==========================================
 	categoriesGroup := v1.Group("/categories")
+	if rateLimitManager != nil {
+		categoriesGroup.Use(middleware.RateLimitByIP(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 1.0, TTL: 15 * time.Minute},
+			"categories"))
+	}
+	{
+		categoriesGroup.GET("", handlers.GetCategoriesHandler(pool))
+	}
 
 	// ==========================================
 	// Event Follow Routes (authenticated)
@@ -473,14 +499,6 @@ func main() {
 		eventFollowGroup.POST("/:id/follow", handlers.ToggleFollowHandler(pool))
 		eventFollowGroup.GET("/:id/follow",  handlers.GetFollowStatusHandler(pool))
 	}
-		if rateLimitManager != nil {
-			categoriesGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-				ratelimit.BucketConfig{Capacity: 60, RefillRate: 1.0, TTL: 15 * time.Minute},
-				"categories"))
-		}
-		{
-			categoriesGroup.GET("", handlers.GetCategoriesHandler(pool))
-		}
 
 	// ==========================================
 	// Home Feed
@@ -505,47 +523,43 @@ func main() {
 	}
 	{
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache))
-		admin.PUT("/events/:id",     handlers.UpdateEventHandler(pool, eventCache))
-		admin.GET("/events/:id",     handlers.GetEventByIDHandler(pool, eventCache))
+		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
+		admin.GET("/events/:id",     handlers.AdminGetEventByIDHandler(pool, eventCache))
 		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool))
 		admin.GET("/events",         handlers.GetAdminEventsHandler(pool))
 		admin.GET("/stats",          handlers.GetAdminStatsHandler(pool))
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))
-		// All merch (event-linked + standalone) — for admin dashboard
 		admin.GET("/merch",          handlers.GetAllMerchHandler(pool))
 		admin.PUT("/merch/:id",      handlers.AdminUpdateMerchHandler(pool, eventCache))
-		// Create standalone merch (not linked to any event) — admin
-		admin.POST("/merch",                handlers.AdminCreateMerchHandler(pool, eventCache))
-		admin.POST("/events/:id/merch",     handlers.AdminCreateEventMerchHandler(pool, eventCache))
-		// Assign / un-assign any merch item to any collection — admin
-		admin.PUT("/merch/variants/:id",     handlers.AdminUpdateVariantHandler(pool))
-		admin.POST("/upload",                handlers.UploadAdminImageHandler(imgService))
-		admin.PUT("/merch/:id/collection",   handlers.AdminAssignMerchToCollectionHandler(pool))
-		// Collection CRUD — admin has full access, no ownership checks
-		admin.POST("/collections",        handlers.AdminCreateCollectionHandler(pool))
-		admin.GET("/collections",         handlers.AdminGetCollectionsHandler(pool))
-		admin.PUT("/collections/:id",     handlers.AdminUpdateCollectionHandler(pool))
-		admin.DELETE("/collections/:id",  handlers.AdminDeactivateCollectionHandler(pool))
-		admin.POST("/collections/:id/image", handlers.UploadCollectionCoverImageHandler(pool, imgService, true))
-		admin.GET("/users",               controllers.GetAllUsersHandler(pool))
-		admin.PUT("/users/promote/:id",   controllers.PromoteUserHandler(pool))
-		admin.PUT("/users/demote/:id",    controllers.DemoteUserHandler(pool))
-		admin.DELETE("/users/delete/:id", handlers.DeleteUserHandler(pool))
-		admin.GET("/campaigns",           handlers.AdminGetCampaignsHandler(pool))
+		admin.POST("/merch",                  handlers.AdminCreateMerchHandler(pool, eventCache))
+		admin.POST("/events/:id/merch",       handlers.AdminCreateEventMerchHandler(pool, eventCache))
+		admin.PUT("/merch/variants/:id",      handlers.AdminUpdateVariantHandler(pool))
+		admin.POST("/upload",                 handlers.UploadAdminImageHandler(imgService))
+		admin.PUT("/merch/:id/collection",    handlers.AdminAssignMerchToCollectionHandler(pool))
+		admin.POST("/collections",            handlers.AdminCreateCollectionHandler(pool))
+		admin.GET("/collections",             handlers.AdminGetCollectionsHandler(pool))
+		admin.PUT("/collections/:id",         handlers.AdminUpdateCollectionHandler(pool))
+		admin.DELETE("/collections/:id",      handlers.AdminDeactivateCollectionHandler(pool))
+		admin.POST("/collections/:id/image",  handlers.UploadCollectionCoverImageHandler(pool, imgService, true))
+		admin.GET("/users",                   controllers.GetAllUsersHandler(pool))
+		admin.PUT("/users/promote/:id",       controllers.PromoteUserHandler(pool))
+		admin.PUT("/users/demote/:id",        controllers.DemoteUserHandler(pool))
+		admin.DELETE("/users/delete/:id",     handlers.DeleteUserHandler(pool))
+		admin.GET("/campaigns",               handlers.AdminGetCampaignsHandler(pool))
 
 		// Event approval queue
-		admin.GET("/events/pending",      handlers.AdminGetPendingEventsHandler(pool))
-		admin.PUT("/events/:id/approve",  handlers.AdminApproveEventHandler(pool, eventCache))
-		admin.PUT("/events/:id/reject",   handlers.AdminRejectEventHandler(pool))
+		admin.GET("/events/pending",     handlers.AdminGetPendingEventsHandler(pool))
+		admin.PUT("/events/:id/approve", handlers.AdminApproveEventHandler(pool, eventCache))
+		admin.PUT("/events/:id/reject",  handlers.AdminRejectEventHandler(pool))
 
 		// Merch approval queue
-		admin.GET("/merch/pending",       handlers.AdminGetPendingMerchHandler(pool))
-		admin.PUT("/merch/:id/approve",   handlers.AdminApproveMerchHandler(pool))
-		admin.PUT("/merch/:id/reject",    handlers.AdminRejectMerchHandler(pool))
+		admin.GET("/merch/pending",    handlers.AdminGetPendingMerchHandler(pool))
+		admin.PUT("/merch/:id/approve", handlers.AdminApproveMerchHandler(pool))
+		admin.PUT("/merch/:id/reject",  handlers.AdminRejectMerchHandler(pool))
 
-		// Organiser account management (suspend/ban - no approval queue)
-		admin.GET("/organizers",             handlers.AdminGetOrganizersHandler(pool))
-		admin.PUT("/organizers/:id/status",  handlers.AdminUpdateOrganizerStatusHandler(pool))
+		// Organiser account management
+		admin.GET("/organizers",            handlers.AdminGetOrganizersHandler(pool))
+		admin.PUT("/organizers/:id/status", handlers.AdminUpdateOrganizerStatusHandler(pool))
 	}
 
 	// ==========================================
@@ -555,11 +569,11 @@ func main() {
 		adminAPI := v1.Group("/admin/ratelimit")
 		adminAPI.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
 		{
-			adminAPI.GET("/ip/:ip",              handlers.RateLimitIPStatusHandler(rateLimitManager))
-			adminAPI.POST("/ip/:ip/reset",       handlers.RateLimitIPResetHandler(rateLimitManager))
-			adminAPI.GET("/user/:userId",         handlers.RateLimitUserStatusHandler(rateLimitManager))
-			adminAPI.POST("/user/:userId/reset",  handlers.RateLimitUserResetHandler(rateLimitManager))
-			adminAPI.GET("/metrics",              handlers.RateLimitMetricsHandler())
+			adminAPI.GET("/ip/:ip",             handlers.RateLimitIPStatusHandler(rateLimitManager))
+			adminAPI.POST("/ip/:ip/reset",      handlers.RateLimitIPResetHandler(rateLimitManager))
+			adminAPI.GET("/user/:userId",        handlers.RateLimitUserStatusHandler(rateLimitManager))
+			adminAPI.POST("/user/:userId/reset", handlers.RateLimitUserResetHandler(rateLimitManager))
+			adminAPI.GET("/metrics",             handlers.RateLimitMetricsHandler())
 		}
 	}
 
@@ -571,15 +585,15 @@ func main() {
 	if rateLimitManager != nil {
 		orgRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 50, RefillRate: 2.0, TTL: 15 * time.Minute},
-			"organiser-merch"))
+			"organiser"))
 	}
 	{
 		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
-
+		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
 		// Listing fee — required for events with 20+ ticket capacity
-		orgRoutes.GET("/events/:id/listing-fee",          handlers.GetListingFeeHandler(pool))
+		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))
 		orgRoutes.POST("/events/:id/listing-fee/initiate", handlers.InitiateListingFeePaymentHandler(pool, paymentService))
 
 		// Merch linked to an event
@@ -589,15 +603,15 @@ func main() {
 		orgRoutes.POST("/merch/:id/variants", handlers.OrgCreateVariantHandler(pool, eventCache))
 		orgRoutes.PUT("/merch/variants/:id",  handlers.OrgUpdateVariantHandler(pool, eventCache))
 		// Standalone merch — not linked to any event
-		orgRoutes.POST("/merch",              handlers.OrgCreateStandaloneMerchHandler(pool, eventCache))
+		orgRoutes.POST("/merch", handlers.OrgCreateStandaloneMerchHandler(pool, eventCache))
 		// Assign / un-assign a merch item to a collection
 		orgRoutes.PUT("/merch/:id/collection", handlers.OrgAssignMerchToCollectionHandler(pool))
 
 		// Collection CRUD — organiser-scoped, ownership enforced
-		orgRoutes.POST("/collections",        handlers.OrgCreateCollectionHandler(pool))
-		orgRoutes.GET("/collections",         handlers.OrgGetCollectionsHandler(pool))
-		orgRoutes.PUT("/collections/:id",     handlers.OrgUpdateCollectionHandler(pool))
-		orgRoutes.DELETE("/collections/:id",  handlers.OrgDeactivateCollectionHandler(pool))
+		orgRoutes.POST("/collections",           handlers.OrgCreateCollectionHandler(pool))
+		orgRoutes.GET("/collections",            handlers.OrgGetCollectionsHandler(pool))
+		orgRoutes.PUT("/collections/:id",        handlers.OrgUpdateCollectionHandler(pool))
+		orgRoutes.DELETE("/collections/:id",     handlers.OrgDeactivateCollectionHandler(pool))
 		orgRoutes.POST("/collections/:id/image", handlers.UploadCollectionCoverImageHandler(pool, imgService, false))
 
 		// Ticket Types
@@ -607,26 +621,58 @@ func main() {
 		orgRoutes.PATCH("/ticket-types/:typeId",   handlers.OrgUpdateTicketTypeHandler(pool))
 		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool))
 
-		// Payment method - set once, billed automatically each day
-		orgRoutes.POST("/ad-payment-method",    handlers.RegisterPaymentMethodHandler(pool))
-		orgRoutes.GET("/ad-payment-method",     handlers.GetPaymentMethodStatusHandler(pool))
-		orgRoutes.GET("/ad-billing",            handlers.GetBillingHistoryHandler(pool))
-		// Ad campaigns
-		orgRoutes.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
-		orgRoutes.GET("/campaigns",             handlers.GetMyCampaignsHandler(pool))
-		orgRoutes.GET("/campaigns/:id",         handlers.GetCampaignHandler(pool))
-		orgRoutes.PATCH("/campaigns/:id",       handlers.UpdateCampaignHandler(pool))
-		orgRoutes.DELETE("/campaigns/:id",      handlers.EndCampaignHandler(pool))
+		// ── Ad Accounts ───────────────────────────────────────────────────────
+		// Ad account routes get tighter rate limiting than the general organiser
+		// bucket — creating accounts and registering payment methods are
+		// low-frequency, sensitive operations.
+		adAccountRoutes := orgRoutes.Group("")
+		if rateLimitManager != nil {
+			adAccountRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+				"ad-accounts"))
+		}
+		{
+			adAccountRoutes.POST("/ad-accounts",                    handlers.CreateAdAccountHandler(pool))
+			adAccountRoutes.GET("/ad-accounts",                     handlers.GetAdAccountsHandler(pool))
+			adAccountRoutes.GET("/ad-accounts/:id",                 handlers.GetAdAccountHandler(pool))
+			adAccountRoutes.PATCH("/ad-accounts/:id",               handlers.UpdateAdAccountHandler(pool))
+			adAccountRoutes.POST("/ad-accounts/:id/payment-method", handlers.RegisterAdAccountPaymentMethodHandler(pool))
+			adAccountRoutes.GET("/ad-accounts/:id/payment-method",  handlers.GetAdAccountPaymentMethodHandler(pool))
+		}
 
-		orgRoutes.GET("/dashboard/stats",                handlers.GetOrganizerDashboardStatsHandler(pool))
-		orgRoutes.GET("/dashboard/events",               handlers.GetOrganizerDashboardEventsHandler(pool))
-		orgRoutes.GET("/dashboard/events/:id/stats",     handlers.GetOrganizerEventStatsHandler(pool))
-		orgRoutes.GET("/dashboard/events/:id/bookings",  handlers.GetOrganizerEventBookingsHandler(pool))
-		orgRoutes.GET("/dashboard/events/:id/merch",     handlers.GetOrganizerEventMerchHandler(pool))
+		// ── Ad Campaigns ──────────────────────────────────────────────────────
+		// Campaign mutations (create/update/delete) get a stricter bucket than
+		// reads — abusive campaign creation would burn ad spend.
+		adCampaignWriteRoutes := orgRoutes.Group("")
+		if rateLimitManager != nil {
+			adCampaignWriteRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 30, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+				"ad-campaigns-write"))
+		}
+		{
+			adCampaignWriteRoutes.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
+			adCampaignWriteRoutes.PATCH("/campaigns/:id",       handlers.UpdateCampaignHandler(pool))
+			adCampaignWriteRoutes.DELETE("/campaigns/:id",      handlers.EndCampaignHandler(pool))
+		}
+		orgRoutes.GET("/campaigns",    handlers.GetMyCampaignsHandler(pool))
+		orgRoutes.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
+		orgRoutes.GET("/ad-billing",   handlers.GetBillingHistoryHandler(pool))
+
+		// Backward compat — old organizer-level payment method endpoints.
+		// Remove once events-organizer frontend fully migrates to /ad-accounts/:id/payment-method.
+		orgRoutes.POST("/ad-payment-method", handlers.RegisterPaymentMethodHandler(pool))
+		orgRoutes.GET("/ad-payment-method",  handlers.GetPaymentMethodStatusHandler(pool))
+
+		// ── Dashboard ─────────────────────────────────────────────────────────
+		orgRoutes.GET("/dashboard/stats",               handlers.GetOrganizerDashboardStatsHandler(pool))
+		orgRoutes.GET("/dashboard/events",              handlers.GetOrganizerDashboardEventsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/stats",    handlers.GetOrganizerEventStatsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/bookings", handlers.GetOrganizerEventBookingsHandler(pool))
+		orgRoutes.GET("/dashboard/events/:id/merch",    handlers.GetOrganizerEventMerchHandler(pool))
+		orgRoutes.GET("/dashboard/payouts",             handlers.GetOrganizerPayoutSummaryHandler(pool))
 
 		// Resubmit rejected merch for review
-		orgRoutes.POST("/merch/:id/resubmit",                handlers.OrgResubmitMerchHandler(pool))
-		orgRoutes.GET("/dashboard/payouts",              handlers.GetOrganizerPayoutSummaryHandler(pool))
+		orgRoutes.POST("/merch/:id/resubmit", handlers.OrgResubmitMerchHandler(pool))
 	}
 
 	// ==========================================
