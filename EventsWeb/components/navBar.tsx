@@ -7,6 +7,7 @@ import { useAppTheme } from '@/themes/colors';
 import { ShoppingCart } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { getCart, getCachedSessionId } from '@/lib/api';
+import { Home, ShoppingBag, Search, Ticket, User } from 'lucide-react';
 
 function CartButton() {
   const router = useRouter();
@@ -41,11 +42,11 @@ function CartButton() {
 }
 
 const NAV_LINKS = [
-  { href: '/',        label: 'Home' },
-  { href: '/search',  label: 'Search' },
-  { href: '/merch',   label: 'Drops' },
-  { href: '/tickets', label: 'Tickets' },
-  { href: '/profile', label: 'Profile' },
+  { href: '/',        label: 'Home',    Icon: Home        },
+  { href: '/merch',   label: 'Drops',   Icon: ShoppingBag },
+  { href: '/search',  label: 'Search',  Icon: Search      },
+  { href: '/tickets', label: 'Tickets', Icon: Ticket      },
+  { href: '/profile', label: 'Profile', Icon: User        },
 ];
 
 export default function NavBar() {
@@ -69,19 +70,19 @@ export default function NavBar() {
         <Link href="/" className="text-lg font-black tracking-wide" style={{ color: colors.text }}>
           EVENTS<span style={{ color: '#FF2D55' }}>APP</span>
         </Link>
-        {NAV_LINKS.map(({ href, label }) => {
-          const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-          return (
-            <Link
-              key={href}
-              href={href}
-              className="text-sm font-semibold transition-opacity"
-              style={{ color: active ? colors.text : colors.subText, opacity: active ? 1 : 0.75 }}
-            >
-              {label}
-            </Link>
-          );
-        })}
+        {NAV_LINKS.map(({ href, label, Icon }) => {
+        const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+        return (
+          <Link key={href} href={href} className="flex flex-col items-center gap-0.5 px-3">
+            <Icon size={24} color={active ? colors.text : colors.iconColor} />
+            <span className="text-[10px] font-semibold tracking-wide"
+                  style={{ color: active ? colors.text : colors.iconColor }}>
+              {label.toUpperCase()}
+            </span>
+            {active && <div className="w-1.5 h-1.5 rounded-full bg-[#ff3c6e]" />}
+          </Link>
+        );
+      })}
       </nav>
 
       {/* Right — cart + auth */}
