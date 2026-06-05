@@ -1,7 +1,8 @@
-// This local fallback has been removed.
-// All image uploads go through the Go API at POST /organiser/upload,
-// which stores files in Cloudflare R2.
+// Image uploads go directly to the Go backend — no Next.js proxy needed.
 //
-// Ensure NEXT_PUBLIC_API_URL is set in .env.local, e.g.:\
-//   NEXT_PUBLIC_API_URL=http://localhost:8080/v1
+// Organiser dashboard calls:  POST /organiser/upload  (field: "image")
+// Backend handler:            handlers.UploadOrganiserImageHandler
+// Returns:                    { image_url: "https://..." }
+//
+// See: events-db/internal/handlers/image_handler.go → UploadOrganiserImageHandler
 export {};
