@@ -204,7 +204,7 @@ export const authLogout = () =>
   api.post('/auth/logout');
 
 export const getMe = () =>
-  api.get<AuthUser>('/users/me');
+  api.get('/v1/user/me');
 
 // ── Event endpoints ────────────────────────────────────────────────────────────
 export const getHomeSections = (city?: string) =>
@@ -328,7 +328,7 @@ export const clearCart = async (sessionId?: string | null) => {
 
 // ── Merch/Drops endpoints ──────────────────────────────────────────────────────
 export const getDropsFeed = async (): Promise<{ data: { available: MerchandiseItem[]; upcoming: MerchandiseItem[] } }> => {
-  const res = await api.get<{ data: { available: MerchandiseItem[]; upcoming: MerchandiseItem[] } }>('/v1/merchandise/drops');
+  const res = await api.get<{ data: { available: MerchandiseItem[]; upcoming: MerchandiseItem[] } }>('/v1/drops');
   return res.data;
 };
 

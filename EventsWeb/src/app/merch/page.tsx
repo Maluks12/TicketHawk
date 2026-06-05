@@ -147,9 +147,9 @@ function AvailableCard({ entry, onPress }: { entry: CollectionEntry; onPress: ()
     ? (entry.collectionName || item.event_name || item.name) : item.name;
 
   return (
-    <button
+    <div
       onClick={onPress}
-      className="w-full rounded-[14px] overflow-hidden text-left transition-transform hover:scale-[1.01] active:scale-[0.99]"
+      className="w-full rounded-[14px] overflow-hidden text-left transition-transform hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
       style={{ backgroundColor: bg }}
     >
       {/* Top bar */}
@@ -197,7 +197,7 @@ function AvailableCard({ entry, onPress }: { entry: CollectionEntry; onPress: ()
           {entry.isCollection ? 'VIEW ALL' : `BUY  ${fmtPrice(item.effective_price)}`}
         </button>
       </div>
-    </button>
+    </div>
   );
 }
 
