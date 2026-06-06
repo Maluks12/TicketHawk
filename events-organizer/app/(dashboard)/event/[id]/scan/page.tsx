@@ -130,9 +130,16 @@ export default function ScanPage() {
       try {
         // Dynamically import to avoid SSR issues — @zxing/browser is browser-only
         const { BrowserQRCodeReader } = await import('@zxing/browser');
+        const { DecodeHintType }      = await import('@zxing/library');
         if (stopped || !videoRef.current) return;
 
-        const reader = new BrowserQRCodeReader();
+        // TRY_HARDER makes ZXing work hard on every frame — essential for
+        // real-world scanning (angled phones, screen glare, partial framing).
+        // Without it the default decoder demands a nearly-perfect QR alignment.
+        const hints = new Map<typeof DecodeHintType[keyof typeof DecodeHintType], unknown>();
+        hints.set(DecodeHintType.TRY_HARDER, true);
+
+        const reader = new BrowserQRCodeReader(hints);
         const controls = await reader.decodeFromConstraints(
           {
             video: {
@@ -142,7 +149,9 @@ export default function ScanPage() {
             },
           },
           videoRef.current,
-          (res) => { if (res) handleScan(res.getText()); },
+          // @zxing/browser 0.2.x calls this on every frame:
+          // result is populated on a successful decode, error on a missed frame.
+          (result, _err) => { if (result) handleScan(result.getText()); },
         );
 
         if (stopped) {

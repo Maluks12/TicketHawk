@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@zxing/browser": "^0.2.0",
+    "@zxing/library": "^0.22.0",
     "axios": "^1.16.1",
     "next": "16.2.6",
     "react": "19.2.4",
