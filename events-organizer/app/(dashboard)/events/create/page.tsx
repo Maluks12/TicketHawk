@@ -5,42 +5,60 @@ import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import { validateRequired, validateMinLength, firstError } from '../../../../lib/validation';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-interface Category { id: number; name: string; slug: string; }
+// ── Draft ─────────────────────────────────────────────────────────────────────
+export const DRAFT_KEY = 'org_event_draft';
+
 interface TicketTypeRow {
   name: string; price: number; capacity: string;
   sort_order: number; description: string; is_visible: boolean;
 }
 
-// ── TagInput ─────────────────────────────────────────────────────────────────
+interface EventDraft {
+  savedAt: string;
+  title: string; description: string; categoryId: string;
+  timezone: string; startTime: string; endTime: string; expiresAt: string;
+  isFree: boolean; price: string; currency: string;
+  maxCapacity: string; maxTicketsPerUser: string; allowWaitlist: boolean;
+  venueName: string; address: string; city: string;
+  venueType: 'auto' | 'stadium' | 'auditorium' | 'none';
+  tags: string[]; performers: string[]; teams: string[];
+  ticketTypes: TicketTypeRow[];
+  refundPolicy: string; termsAndConditions: string;
+  coverImageUrl: string | null; bannerImageUrl: string | null;
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60_000);
+  const h = Math.floor(diff / 3_600_000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// ── TagInput ──────────────────────────────────────────────────────────────────
 function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
   const [val, setVal] = useState('');
-  function add() {
+  function commit() {
     const v = val.trim().replace(/,$/, '');
     if (v && !tags.includes(v)) onChange([...tags, v]);
     setVal('');
   }
   return (
-    <div
-      className="tag-input-wrap"
-      onClick={e => (e.currentTarget.querySelector('input') as HTMLInputElement)?.focus()}
-    >
+    <div className="tag-input-wrap"
+      onClick={e => (e.currentTarget.querySelector('input') as HTMLInputElement)?.focus()}>
       {tags.map((t, i) => (
         <span key={i} className="tag-pill">
-          {t}{' '}
-          <button type="button" onClick={() => onChange(tags.filter((_, j) => j !== i))}>✕</button>
+          {t} <button type="button" onClick={() => onChange(tags.filter((_, j) => j !== i))}>✕</button>
         </span>
       ))}
-      <input
-        className="tag-bare-input"
-        value={val}
+      <input className="tag-bare-input" value={val} placeholder="Add…"
         onChange={e => setVal(e.target.value)}
-        placeholder="Add…"
         onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); }
+          if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
           else if (e.key === 'Backspace' && !val) onChange(tags.slice(0, -1));
-        }}
-      />
+        }} />
     </div>
   );
 }
@@ -50,10 +68,8 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
   function add() {
     onChange([...rows, { name: '', price: 0, capacity: '', sort_order: rows.length, description: '', is_visible: true }]);
   }
-  function update(i: number, patch: Partial<TicketTypeRow>) {
-    onChange(rows.map((r, j) => j === i ? { ...r, ...patch } : r));
-  }
-  function remove(i: number) { onChange(rows.filter((_, j) => j !== i)); }
+  function upd(i: number, p: Partial<TicketTypeRow>) { onChange(rows.map((r, j) => j === i ? { ...r, ...p } : r)); }
+  function del(i: number) { onChange(rows.filter((_, j) => j !== i)); }
 
   return (
     <>
@@ -66,44 +82,41 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
               Ticket Type {i + 1}
             </span>
-            <button
-              type="button" className="btn-icon"
-              onClick={() => remove(i)}
-              style={{ fontSize: '.9rem', color: 'var(--danger, #c41c1c)' }}
-            >✕</button>
+            <button type="button" className="btn-icon" onClick={() => del(i)}
+              style={{ fontSize: '.9rem', color: 'var(--danger, #c41c1c)' }}>✕</button>
           </div>
           <div className="field-row">
             <div className="field" style={{ margin: 0 }}>
               <label>Name *</label>
-              <input type="text" value={r.name} onChange={e => update(i, { name: e.target.value })}
-                placeholder="e.g. General Admission" style={inputStyle} />
+              <input type="text" value={r.name} style={inp}
+                onChange={e => upd(i, { name: e.target.value })} placeholder="e.g. General Admission" />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label>Price (0 = free)</label>
-              <input type="number" min="0" step="0.01" value={r.price}
-                onChange={e => update(i, { price: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+              <input type="number" min="0" step="0.01" value={r.price} style={inp}
+                onChange={e => upd(i, { price: parseFloat(e.target.value) || 0 })} />
             </div>
           </div>
           <div className="field-row" style={{ marginTop: '.5rem' }}>
             <div className="field" style={{ margin: 0 }}>
               <label>Capacity (blank = unlimited)</label>
-              <input type="number" min="1" value={r.capacity}
-                onChange={e => update(i, { capacity: e.target.value })} style={inputStyle} />
+              <input type="number" min="1" value={r.capacity} style={inp}
+                onChange={e => upd(i, { capacity: e.target.value })} />
             </div>
             <div className="field" style={{ margin: 0 }}>
               <label>Sort Order</label>
-              <input type="number" value={r.sort_order}
-                onChange={e => update(i, { sort_order: parseInt(e.target.value) || 0 })} style={inputStyle} />
+              <input type="number" value={r.sort_order} style={inp}
+                onChange={e => upd(i, { sort_order: parseInt(e.target.value) || 0 })} />
             </div>
           </div>
           <div className="field" style={{ marginTop: '.5rem', marginBottom: '.25rem' }}>
             <label>Description</label>
-            <input type="text" value={r.description}
-              onChange={e => update(i, { description: e.target.value })} placeholder="Optional" style={inputStyle} />
+            <input type="text" value={r.description} style={inp} placeholder="Optional"
+              onChange={e => upd(i, { description: e.target.value })} />
           </div>
           <label className="check-row" style={{ marginTop: '.25rem' }}>
             <input type="checkbox" checked={r.is_visible}
-              onChange={e => update(i, { is_visible: e.target.checked })} />
+              onChange={e => upd(i, { is_visible: e.target.checked })} />
             <span style={{ fontSize: '.88rem' }}>Visible to buyers</span>
           </label>
         </div>
@@ -118,7 +131,7 @@ function ImageUploader({
   label, imageUrl, uploading, onUpload, onRemove, hint,
 }: {
   label: string; imageUrl: string | null; uploading: boolean;
-  onUpload: (file: File) => void; onRemove: () => void; hint?: string;
+  onUpload: (f: File) => void; onRemove: () => void; hint?: string;
 }) {
   return (
     <div className="field">
@@ -126,15 +139,10 @@ function ImageUploader({
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '.75rem' }}>
         {imageUrl ? (
           <div style={{ position: 'relative', width: 120, height: 80, flexShrink: 0 }}>
-            <img
-              src={imageUrl} alt=""
-              style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
-              onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
-            />
-            <button
-              type="button" onClick={onRemove}
-              style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#c41c1c', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >✕</button>
+            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
+              onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
+            <button type="button" onClick={onRemove}
+              style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#c41c1c', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
           </div>
         ) : (
           <label style={{ width: 120, height: 80, border: '1px dashed var(--border-2)', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', color: 'var(--text-3)', fontSize: '.68rem', gap: '.25rem', background: 'var(--surface-2)', flexShrink: 0 }}>
@@ -142,48 +150,70 @@ function ImageUploader({
               onChange={e => { const f = e.target.files?.[0]; if (f) { onUpload(f); e.target.value = ''; } }} />
             {uploading
               ? <div className="spinner" style={{ width: 18, height: 18 }} />
-              : <><span style={{ fontSize: '1.5rem', lineHeight: 1 }}>+</span><span>Upload</span></>
-            }
+              : <><span style={{ fontSize: '1.5rem', lineHeight: 1 }}>+</span><span>Upload</span></>}
           </label>
         )}
         <small style={{ color: 'var(--text-3)', fontSize: '.72rem', marginTop: '.25rem' }}>
-          {hint ?? 'JPEG · PNG · WebP'}
+          {hint ?? 'JPEG · PNG · WebP · uploaded to R2 immediately'}
         </small>
       </div>
     </div>
   );
 }
 
-// ── Page component ────────────────────────────────────────────────────────────
+// ── FormCard + helpers ────────────────────────────────────────────────────────
+const inp: React.CSSProperties = {
+  width: '100%', padding: '9px 12px', border: '1px solid var(--border-2)',
+  borderRadius: 'var(--r)', fontSize: 14, color: 'var(--text)', background: 'var(--surface)',
+  outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+};
+
+function Required() { return <span style={{ color: '#c41c1c', marginLeft: 2 }}>*</span>; }
+
+function FormCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
+  return (
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <span style={{ fontSize: 15, fontWeight: 700 }}>{title}</span>
+      </div>
+      <div style={{ padding: 16 }}>{children}</div>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function CreateEventPage() {
-  const router = useRouter();
-  const toast = useToast();
+  const router  = useRouter();
+  const toast   = useToast();
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories]   = useState<{ id: number; name: string; slug: string }[]>([]);
+  const [submitting, setSubmitting]   = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<EventDraft | null>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
 
-  // ── Form fields ───────────────────────────────────────────────────────────
-  const [title,       setTitle]       = useState('');
-  const [description, setDescription] = useState('');
-  const [categoryId,  setCategoryId]  = useState('');
-  const [timezone,    setTimezone]    = useState('Africa/Johannesburg');
-  const [startTime,   setStartTime]   = useState('');
-  const [endTime,     setEndTime]     = useState('');
-  const [expiresAt,   setExpiresAt]   = useState('');
-  const [isFree,      setIsFree]      = useState(true);
-  const [price,       setPrice]       = useState('0');
-  const [currency,    setCurrency]    = useState('ZAR');
-  const [maxCapacity,       setMaxCapacity]       = useState('');
-  const [maxTicketsPerUser, setMaxTicketsPerUser] = useState('');
-  const [allowWaitlist,     setAllowWaitlist]     = useState(false);
-  const [venueName,   setVenueName]   = useState('');
-  const [address,     setAddress]     = useState('');
-  const [city,        setCity]        = useState('');
-  const [venueType,   setVenueType]   = useState<'auto' | 'stadium' | 'auditorium' | 'none'>('auto');
-  const [tags,        setTags]        = useState<string[]>([]);
-  const [performers,  setPerformers]  = useState<string[]>([]);
-  const [teams,       setTeams]       = useState<string[]>([]);
-  const [ticketTypes, setTicketTypes] = useState<TicketTypeRow[]>([]);
+  // ── Text fields ───────────────────────────────────────────────────────────
+  const [title,               setTitle]               = useState('');
+  const [description,         setDescription]         = useState('');
+  const [categoryId,          setCategoryId]          = useState('');
+  const [timezone,            setTimezone]            = useState('Africa/Johannesburg');
+  const [startTime,           setStartTime]           = useState('');
+  const [endTime,             setEndTime]             = useState('');
+  const [expiresAt,           setExpiresAt]           = useState('');
+  const [isFree,              setIsFree]              = useState(true);
+  const [price,               setPrice]               = useState('0');
+  const [currency,            setCurrency]            = useState('ZAR');
+  const [maxCapacity,         setMaxCapacity]         = useState('');
+  const [maxTicketsPerUser,   setMaxTicketsPerUser]   = useState('');
+  const [allowWaitlist,       setAllowWaitlist]       = useState(false);
+  const [venueName,           setVenueName]           = useState('');
+  const [address,             setAddress]             = useState('');
+  const [city,                setCity]                = useState('');
+  const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('auto');
+  const [tags,                setTags]                = useState<string[]>([]);
+  const [performers,          setPerformers]          = useState<string[]>([]);
+  const [teams,               setTeams]               = useState<string[]>([]);
+  const [ticketTypes,         setTicketTypes]         = useState<TicketTypeRow[]>([]);
   const [refundPolicy,        setRefundPolicy]        = useState('');
   const [termsAndConditions,  setTermsAndConditions]  = useState('');
 
@@ -193,13 +223,84 @@ export default function CreateEventPage() {
   const [coverUploading,  setCoverUploading]  = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
 
+  // ── Load categories ───────────────────────────────────────────────────────
   useEffect(() => {
-    api.get('/categories')
+    api.get('/v1/categories')
       .then(r => setCategories(r.data.categories ?? r.data ?? []))
       .catch(() => {});
   }, []);
 
-  // ── Image upload — sends directly to Go backend → Cloudflare R2 ──────────
+  // ── Check for saved draft on mount ────────────────────────────────────────
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw) as EventDraft;
+      if (d.title || d.description || d.venueName) setPendingDraft(d);
+    } catch { /* corrupt data — ignore */ }
+  }, []);
+
+  // ── Auto-save draft (debounced 800 ms) ────────────────────────────────────
+  useEffect(() => {
+    if (submitting) return;
+    if (!title && !description && !venueName) return; // nothing worth saving
+    const t = setTimeout(() => {
+      const draft: EventDraft = {
+        savedAt: new Date().toISOString(),
+        title, description, categoryId, timezone, startTime, endTime, expiresAt,
+        isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
+        venueName, address, city, venueType, tags, performers, teams, ticketTypes,
+        refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
+      };
+      try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+        setDraftSavedAt(draft.savedAt);
+      } catch { /* storage quota */ }
+    }, 800);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
+      isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
+      venueName, address, city, venueType, tags, performers, teams, ticketTypes,
+      refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl, submitting]);
+
+  // ── Restore draft ─────────────────────────────────────────────────────────
+  function restoreDraft(d: EventDraft) {
+    setTitle(d.title ?? '');
+    setDescription(d.description ?? '');
+    setCategoryId(d.categoryId ?? '');
+    setTimezone(d.timezone ?? 'Africa/Johannesburg');
+    setStartTime(d.startTime ?? '');
+    setEndTime(d.endTime ?? '');
+    setExpiresAt(d.expiresAt ?? '');
+    setIsFree(d.isFree ?? true);
+    setPrice(d.price ?? '0');
+    setCurrency(d.currency ?? 'ZAR');
+    setMaxCapacity(d.maxCapacity ?? '');
+    setMaxTicketsPerUser(d.maxTicketsPerUser ?? '');
+    setAllowWaitlist(d.allowWaitlist ?? false);
+    setVenueName(d.venueName ?? '');
+    setAddress(d.address ?? '');
+    setCity(d.city ?? '');
+    setVenueType(d.venueType ?? 'auto');
+    setTags(d.tags ?? []);
+    setPerformers(d.performers ?? []);
+    setTeams(d.teams ?? []);
+    setTicketTypes(d.ticketTypes ?? []);
+    setRefundPolicy(d.refundPolicy ?? '');
+    setTermsAndConditions(d.termsAndConditions ?? '');
+    setCoverImageUrl(d.coverImageUrl ?? null);
+    setBannerImageUrl(d.bannerImageUrl ?? null);
+    setDraftSavedAt(d.savedAt);
+    setPendingDraft(null);
+  }
+
+  function discardDraft() {
+    localStorage.removeItem(DRAFT_KEY);
+    setPendingDraft(null);
+  }
+
+  // ── Image upload — calls Go backend directly (same pattern as admin) ─────
   async function uploadImage(
     file: File,
     setUploading: (v: boolean) => void,
@@ -207,17 +308,17 @@ export default function CreateEventPage() {
   ) {
     setUploading(true);
     try {
-      const fd = new FormData();
+      const fd    = new FormData();
       fd.append('image', file);
-      const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
+      const token   = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
       const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`${baseURL}/organiser/upload`, { method: 'POST', headers, body: fd });
+      const res  = await fetch(`${baseURL}/organiser/upload`, { method: 'POST', headers, body: fd });
       const json = await res.json().catch(() => null) as { image_url?: string; error?: string } | null;
       if (!res.ok) throw new Error(json?.error ?? `Upload failed (HTTP ${res.status})`);
-      const imageUrl = json?.image_url ?? null;
-      if (imageUrl) { onSuccess(imageUrl); toast('Image uploaded', 'success'); }
-      else toast('Upload succeeded but no URL was returned', 'error');
+      const url = json?.image_url ?? null;
+      if (url) { onSuccess(url); toast('Image uploaded', 'success'); }
+      else toast('Upload succeeded but no URL returned', 'error');
     } catch (e: unknown) {
       toast((e instanceof Error ? e.message : null) ?? 'Image upload failed', 'error');
     } finally { setUploading(false); }
@@ -246,50 +347,48 @@ export default function CreateEventPage() {
     if (new Date(endTime) <= new Date(startTime)) {
       toast('End time must be after start time', 'error'); return;
     }
-
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
-        title:       title.trim(),
-        description: description.trim(),
-        category_id: parseInt(categoryId),
-        venue_name:  venueName.trim(),
-        address:     address.trim(),
-        city:        city.trim(),
+        title:        title.trim(),
+        description:  description.trim(),
+        category_id:  parseInt(categoryId),
+        venue_name:   venueName.trim(),
+        address:      address.trim(),
+        city:         city.trim(),
         timezone,
-        start_time:  new Date(startTime).toISOString(),
-        end_time:    new Date(endTime).toISOString(),
-        expires_at:  new Date(expiresAt).toISOString(),
-        price:       isFree ? 0 : parseFloat(price) || 0,
+        start_time:   new Date(startTime).toISOString(),
+        end_time:     new Date(endTime).toISOString(),
+        expires_at:   new Date(expiresAt).toISOString(),
+        price:        isFree ? 0 : parseFloat(price) || 0,
         currency,
-        allow_waitlist: allowWaitlist,
+        allow_waitlist:       allowWaitlist,
         tags,
         performers,
         teams,
-        refund_policy:       refundPolicy.trim() || null,
+        refund_policy:        refundPolicy.trim()       || null,
         terms_and_conditions: termsAndConditions.trim() || null,
       };
-
-      if (maxCapacity)       body.max_capacity          = parseInt(maxCapacity);
+      // Note: backend DTO spells this "max_capicity" (typo kept intentionally to match backend)
+      if (maxCapacity)       body.max_capicity          = parseInt(maxCapacity);
       if (maxTicketsPerUser) body.max_tickets_per_user  = parseInt(maxTicketsPerUser);
       if (venueType !== 'auto') body.venue_type         = venueType;
       if (coverImageUrl)     body.cover_image_url       = coverImageUrl;
       if (bannerImageUrl)    body.banner_image_url      = bannerImageUrl;
-
       if (ticketTypes.length) {
         body.ticket_types = ticketTypes.filter(t => t.name).map(t => ({
           name: t.name, price: t.price, sort_order: t.sort_order, is_visible: t.is_visible,
-          ...(t.capacity    ? { capacity:    parseInt(t.capacity) }  : {}),
-          ...(t.description ? { description: t.description }        : {}),
+          ...(t.capacity    ? { capacity:    parseInt(t.capacity) } : {}),
+          ...(t.description ? { description: t.description }       : {}),
         }));
       }
 
       await api.post('/organiser/events/create', body);
-      toast('Event created as draft — pending admin approval', 'success');
+      localStorage.removeItem(DRAFT_KEY);
+      toast('Event submitted for review', 'success');
       router.push('/events');
     } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
         ?? 'Failed to create event';
       toast(msg, 'error');
     } finally { setSubmitting(false); }
@@ -297,23 +396,24 @@ export default function CreateEventPage() {
 
   // ── Checklist ─────────────────────────────────────────────────────────────
   const checklist = [
-    { done: title.length >= 5,                label: 'Add a title (5+ chars)' },
-    { done: description.length >= 50,         label: 'Write a description (50+ chars)' },
-    { done: !!categoryId,                     label: 'Choose a category' },
-    { done: !!venueName && !!city,            label: 'Set venue and city' },
-    { done: !!startTime && !!endTime,         label: 'Set start and end times' },
-    { done: !!expiresAt,                      label: 'Set a booking deadline' },
-    { done: isFree || parseFloat(price) > 0,  label: 'Set ticket pricing' },
-    { done: !!coverImageUrl,                  label: 'Upload a cover image' },
+    { done: title.length >= 5,               label: 'Add a title (5+ chars)' },
+    { done: description.length >= 50,        label: 'Write a description (50+ chars)' },
+    { done: !!categoryId,                    label: 'Choose a category' },
+    { done: !!venueName && !!city,           label: 'Set venue and city' },
+    { done: !!startTime && !!endTime,        label: 'Set start and end times' },
+    { done: !!expiresAt,                     label: 'Set a booking deadline' },
+    { done: isFree || parseFloat(price) > 0, label: 'Set ticket pricing' },
+    { done: !!coverImageUrl,                 label: 'Upload a cover image' },
   ];
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>
             <span style={{ cursor: 'pointer' }} onClick={() => router.push('/events')}>My Events</span>
-            {' → '}<span>Create event</span>
+            {' → '}Create event
           </div>
           <div className="page-title">Create a new event</div>
           <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2 }}>
@@ -323,10 +423,40 @@ export default function CreateEventPage() {
       </div>
 
       <div className="page-content">
+
+        {/* ── Draft restore banner ─────────────────────────────────────── */}
+        {pendingDraft && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+            padding: '12px 16px', marginBottom: 16,
+            background: '#fff8e1', border: '1px solid #fcd34d',
+            borderRadius: 'var(--r-lg)', color: '#92400e',
+          }}>
+            <span style={{ fontSize: 18 }}>📝</span>
+            <div style={{ flex: 1, minWidth: 180 }}>
+              <strong style={{ fontSize: 14 }}>
+                {pendingDraft.title ? `"${pendingDraft.title}"` : 'Untitled draft'}
+              </strong>
+              <span style={{ fontSize: 13, marginLeft: 8 }}>
+                — saved {relativeTime(pendingDraft.savedAt)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-sm btn-primary"
+                onClick={() => restoreDraft(pendingDraft)}>
+                Restore draft
+              </button>
+              <button className="btn btn-sm" onClick={discardDraft}>
+                Start fresh
+              </button>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} noValidate>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20, maxWidth: 980 }}>
 
-            {/* ── Left column: all form cards ── */}
+            {/* ── Left column ───────────────────────────────────────────── */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
               {/* Event details */}
@@ -334,16 +464,14 @@ export default function CreateEventPage() {
                 <div className="field">
                   <label>Event title <Required /></label>
                   <input value={title} onChange={e => setTitle(e.target.value)}
-                    placeholder="e.g. Summer Music Festival 2025"
-                    style={inputStyle} />
+                    placeholder="e.g. Summer Music Festival 2025" style={inp} />
                   <div className="field-hint">{title.length}/255 · minimum 5 characters</div>
                 </div>
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label>Description <Required /></label>
                   <textarea value={description} onChange={e => setDescription(e.target.value)}
                     placeholder="Describe your event in detail — what attendees can expect, lineup, dress code, etc. (minimum 50 characters)"
-                    rows={5}
-                    style={{ ...inputStyle, resize: 'vertical' }} />
+                    rows={5} style={{ ...inp, resize: 'vertical' }} />
                   <div className="field-hint">{description.length}/∞ · minimum 50 characters</div>
                 </div>
               </FormCard>
@@ -352,7 +480,7 @@ export default function CreateEventPage() {
               <FormCard title="Date & time" icon="📅">
                 <div className="field">
                   <label>Timezone</label>
-                  <select value={timezone} onChange={e => setTimezone(e.target.value)} style={inputStyle}>
+                  <select value={timezone} onChange={e => setTimezone(e.target.value)} style={inp}>
                     <option value="Africa/Johannesburg">Africa/Johannesburg (SAST)</option>
                     <option value="Africa/Cape_Town">Africa/Cape_Town</option>
                     <option value="UTC">UTC</option>
@@ -366,18 +494,18 @@ export default function CreateEventPage() {
                   <div className="field">
                     <label>Start time <Required /></label>
                     <input type="datetime-local" value={startTime}
-                      onChange={e => setStartTime(e.target.value)} style={inputStyle} />
+                      onChange={e => setStartTime(e.target.value)} style={inp} />
                   </div>
                   <div className="field">
                     <label>End time <Required /></label>
                     <input type="datetime-local" value={endTime}
-                      onChange={e => setEndTime(e.target.value)} style={inputStyle} />
+                      onChange={e => setEndTime(e.target.value)} style={inp} />
                   </div>
                 </div>
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label>Booking deadline <Required /></label>
                   <input type="datetime-local" value={expiresAt}
-                    onChange={e => setExpiresAt(e.target.value)} style={inputStyle} />
+                    onChange={e => setExpiresAt(e.target.value)} style={inp} />
                   <div className="field-hint">Tickets stop selling after this date</div>
                 </div>
               </FormCard>
@@ -387,51 +515,41 @@ export default function CreateEventPage() {
                 <div className="field">
                   <label>Venue name <Required /></label>
                   <input value={venueName} onChange={e => setVenueName(e.target.value)}
-                    placeholder="e.g. FNB Stadium" style={inputStyle} />
+                    placeholder="e.g. FNB Stadium" style={inp} />
                 </div>
                 <div className="field">
                   <label>Street address <Required /></label>
                   <input value={address} onChange={e => setAddress(e.target.value)}
-                    placeholder="e.g. 1 Soccer City Ave" style={inputStyle} />
+                    placeholder="e.g. 1 Soccer City Ave" style={inp} />
                 </div>
                 <div className="field">
                   <label>City <Required /></label>
                   <input value={city} onChange={e => setCity(e.target.value)}
-                    placeholder="e.g. Johannesburg" style={inputStyle} />
+                    placeholder="e.g. Johannesburg" style={inp} />
                 </div>
-
                 <div className="field" style={{ marginBottom: 0 }}>
-                  <label>
-                    Venue type{' '}
-                    <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>
-                      (controls seating map shown in app)
-                    </small>
-                  </label>
+                  <label>Venue type <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(controls seating map in app)</small></label>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
                     {([
-                      { value: 'auto',       emoji: '⚡', label: 'Auto-detect',    hint: 'Guess from category & venue name' },
-                      { value: 'stadium',    emoji: '🏟️', label: 'Stadium',         hint: 'Full stadium section map' },
-                      { value: 'auditorium', emoji: '🎭', label: 'Hall / Theatre',  hint: 'Auditorium seating map' },
-                      { value: 'none',       emoji: '🎫', label: 'None',            hint: 'Skip seating map — go straight to checkout' },
-                    ] as const).map(opt => (
-                      <button key={opt.value} type="button" title={opt.hint}
-                        onClick={() => setVenueType(opt.value)}
+                      { value: 'auto',       emoji: '⚡', label: 'Auto',          hint: 'Guess from category & name' },
+                      { value: 'stadium',    emoji: '🏟️', label: 'Stadium',        hint: 'Stadium section map' },
+                      { value: 'auditorium', emoji: '🎭', label: 'Hall / Theatre', hint: 'Auditorium seating map' },
+                      { value: 'none',       emoji: '🎫', label: 'None',           hint: 'No map — straight to checkout' },
+                    ] as const).map(o => (
+                      <button key={o.value} type="button" title={o.hint}
+                        onClick={() => setVenueType(o.value)}
                         style={{
                           padding: '8px 14px', borderRadius: 'var(--r)', cursor: 'pointer', fontSize: 13,
-                          fontWeight: venueType === opt.value ? 600 : 400,
-                          border: venueType === opt.value ? '2px solid var(--blue)' : '1px solid var(--border)',
-                          background: venueType === opt.value ? 'var(--blue-light)' : 'var(--surface)',
-                          color: venueType === opt.value ? 'var(--blue)' : 'var(--text-2)',
+                          fontWeight: venueType === o.value ? 600 : 400,
+                          border: venueType === o.value ? '2px solid var(--blue)' : '1px solid var(--border)',
+                          background: venueType === o.value ? 'var(--blue-light)' : 'var(--surface)',
+                          color: venueType === o.value ? 'var(--blue)' : 'var(--text-2)',
                           transition: 'all .15s',
-                        }}
-                      >
-                        {opt.emoji} {opt.label}
+                        }}>
+                        {o.emoji} {o.label}
                       </button>
                     ))}
                   </div>
-                  <small style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 6, display: 'block' }}>
-                    <strong>None</strong> skips seat selection entirely — buyers pick a quantity and go straight to checkout.
-                  </small>
                 </div>
               </FormCard>
 
@@ -439,7 +557,7 @@ export default function CreateEventPage() {
               <FormCard title="Tickets & pricing" icon="🎟">
                 <div className="field">
                   <label>Category <Required /></label>
-                  <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={inputStyle}>
+                  <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={inp}>
                     <option value="">— Select a category —</option>
                     {categories.length > 0
                       ? categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
@@ -451,20 +569,15 @@ export default function CreateEventPage() {
                   </select>
                 </div>
 
-                {/* Free / Paid toggle */}
                 <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
                   {[true, false].map(free => (
-                    <label
-                      key={String(free)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '10px 14px',
-                        border: `2px solid ${isFree === free ? 'var(--blue)' : 'var(--border)'}`,
-                        borderRadius: 'var(--r)',
-                        background: isFree === free ? 'var(--blue-light)' : 'var(--surface)',
-                        cursor: 'pointer', flex: 1,
-                      }}
-                    >
+                    <label key={String(free)} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+                      border: `2px solid ${isFree === free ? 'var(--blue)' : 'var(--border)'}`,
+                      borderRadius: 'var(--r)',
+                      background: isFree === free ? 'var(--blue-light)' : 'var(--surface)',
+                      cursor: 'pointer', flex: 1,
+                    }}>
                       <input type="radio" name="pricing" checked={isFree === free}
                         onChange={() => setIsFree(free)} style={{ accentColor: 'var(--blue)' }} />
                       <div>
@@ -485,12 +598,12 @@ export default function CreateEventPage() {
                         <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-2)', fontWeight: 600 }}>R</span>
                         <input type="number" min="0" step="0.01" value={price}
                           onChange={e => setPrice(e.target.value)}
-                          style={{ ...inputStyle, paddingLeft: 28 }} />
+                          style={{ ...inp, paddingLeft: 28 }} />
                       </div>
                     </div>
                     <div className="field">
                       <label>Currency</label>
-                      <select value={currency} onChange={e => setCurrency(e.target.value)} style={inputStyle}>
+                      <select value={currency} onChange={e => setCurrency(e.target.value)} style={inp}>
                         <option value="ZAR">ZAR — South African Rand</option>
                         <option value="USD">USD — US Dollar</option>
                         <option value="EUR">EUR — Euro</option>
@@ -504,22 +617,14 @@ export default function CreateEventPage() {
 
                 <div className="field-row">
                   <div className="field" style={{ marginBottom: 0 }}>
-                    <label>
-                      Max capacity{' '}
-                      <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(blank = unlimited)</small>
-                    </label>
+                    <label>Max capacity <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(blank = unlimited)</small></label>
                     <input type="number" min="1" value={maxCapacity}
-                      onChange={e => setMaxCapacity(e.target.value)}
-                      placeholder="Unlimited" style={inputStyle} />
+                      onChange={e => setMaxCapacity(e.target.value)} placeholder="Unlimited" style={inp} />
                   </div>
                   <div className="field" style={{ marginBottom: 0 }}>
-                    <label>
-                      Max tickets per user{' '}
-                      <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(blank = no limit)</small>
-                    </label>
+                    <label>Max per user <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(blank = no limit)</small></label>
                     <input type="number" min="1" max="20" value={maxTicketsPerUser}
-                      onChange={e => setMaxTicketsPerUser(e.target.value)}
-                      placeholder="No limit" style={inputStyle} />
+                      onChange={e => setMaxTicketsPerUser(e.target.value)} placeholder="No limit" style={inp} />
                   </div>
                 </div>
 
@@ -529,7 +634,6 @@ export default function CreateEventPage() {
                   <span style={{ fontSize: '.88rem' }}>Allow waitlist when sold out</span>
                 </label>
 
-                {/* Ticket types */}
                 <div style={{ marginTop: 20 }}>
                   <div className="section-sep" style={{ marginTop: 0 }}>Ticket Types</div>
                   <TicketTypeBuilder rows={ticketTypes} onChange={setTicketTypes} />
@@ -539,10 +643,7 @@ export default function CreateEventPage() {
               {/* Tags & people */}
               <FormCard title="Tags & people" icon="🏷">
                 <div className="field">
-                  <label>
-                    Tags{' '}
-                    <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(press Enter to add)</small>
-                  </label>
+                  <label>Tags <small style={{ color: 'var(--text-3)', fontWeight: 400 }}>(press Enter to add)</small></label>
                   <TagInput tags={tags} onChange={setTags} />
                 </div>
                 <div className="field">
@@ -563,7 +664,7 @@ export default function CreateEventPage() {
                   uploading={coverUploading}
                   onUpload={f => uploadImage(f, setCoverUploading, setCoverImageUrl)}
                   onRemove={() => setCoverImageUrl(null)}
-                  hint="Displayed as the event card thumbnail · JPEG · PNG · WebP"
+                  hint="Event card thumbnail · JPEG · PNG · WebP · max 10 MB"
                 />
                 <ImageUploader
                   label="Banner image"
@@ -571,7 +672,7 @@ export default function CreateEventPage() {
                   uploading={bannerUploading}
                   onUpload={f => uploadImage(f, setBannerUploading, setBannerImageUrl)}
                   onRemove={() => setBannerImageUrl(null)}
-                  hint="Wide hero image shown at the top of the event page · JPEG · PNG · WebP"
+                  hint="Wide hero image at the top of the event page · JPEG · PNG · WebP · max 10 MB"
                 />
                 <div className="section-sep">Legal</div>
                 <div className="field">
@@ -579,21 +680,21 @@ export default function CreateEventPage() {
                   <textarea rows={3} value={refundPolicy}
                     onChange={e => setRefundPolicy(e.target.value)}
                     placeholder="Describe the refund policy…"
-                    style={{ ...inputStyle, resize: 'vertical' }} />
+                    style={{ ...inp, resize: 'vertical' }} />
                 </div>
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label>Terms &amp; conditions</label>
                   <textarea rows={3} value={termsAndConditions}
                     onChange={e => setTermsAndConditions(e.target.value)}
                     placeholder="Terms and conditions for attendees…"
-                    style={{ ...inputStyle, resize: 'vertical' }} />
+                    style={{ ...inp, resize: 'vertical' }} />
                 </div>
               </FormCard>
 
             </div>{/* end left column */}
 
-            {/* ── Right column: sticky checklist ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* ── Right column: sticky checklist ────────────────────────── */}
+            <div>
               <div style={{
                 background: 'var(--surface)', border: '1px solid var(--border)',
                 borderRadius: 'var(--r-lg)', padding: 16, position: 'sticky', top: 16,
@@ -602,11 +703,10 @@ export default function CreateEventPage() {
                 {checklist.map(item => (
                   <div key={item.label} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
                     <span style={{
-                      width: 16, height: 16, borderRadius: '50%',
+                      width: 16, height: 16, borderRadius: '50%', flexShrink: 0, marginTop: 1,
                       background: item.done ? '#1a7f37' : 'var(--surface-3)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 10, color: item.done ? '#fff' : 'var(--text-3)',
-                      flexShrink: 0, marginTop: 1,
                     }}>
                       {item.done ? '✓' : '·'}
                     </span>
@@ -620,9 +720,9 @@ export default function CreateEventPage() {
                   </div>
                 ))}
                 <div style={{ height: 1, background: 'var(--border)', margin: '12px 0' }} />
-                <div className="alert alert-info" style={{ fontSize: 12, padding: '8px 10px' }}>
+                <div className="alert alert-info" style={{ fontSize: 12, padding: '8px 10px', marginBottom: 0 }}>
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style={{ flexShrink: 0 }}>
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/>
                   </svg>
                   <span>Events need admin approval before going live. You&apos;ll be notified once approved.</span>
                 </div>
@@ -631,50 +731,25 @@ export default function CreateEventPage() {
 
           </div>{/* end grid */}
 
-          {/* ── Footer buttons ── */}
+          {/* ── Footer ───────────────────────────────────────────────────── */}
           <div style={{
-            display: 'flex', gap: 8, marginTop: 20, paddingTop: 20,
-            borderTop: '1px solid var(--border)', maxWidth: 640,
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+            marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--border)', maxWidth: 640,
           }}>
-            <button type="button" className="btn" onClick={() => router.push('/events')}>
-              Cancel
-            </button>
+            <button type="button" className="btn" disabled={submitting}
+              onClick={() => router.push('/events')}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={submitting}>
               {submitting ? 'Submitting…' : 'Submit for review'}
             </button>
+            {draftSavedAt && !submitting && (
+              <span style={{ fontSize: 12, color: 'var(--text-3)', marginLeft: 4 }}>
+                💾 Draft saved {relativeTime(draftSavedAt)}
+              </span>
+            )}
           </div>
+
         </form>
       </div>
-    </div>
-  );
-}
-
-// ── Shared helpers ────────────────────────────────────────────────────────────
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '9px 12px', border: '1px solid var(--border-2)',
-  borderRadius: 'var(--r)', fontSize: 14, color: 'var(--text)', background: 'var(--surface)',
-  outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
-};
-
-function Required() {
-  return <span style={{ color: '#c41c1c', marginLeft: 2 }}>*</span>;
-}
-
-function FormCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
-  return (
-    <div style={{
-      background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 'var(--r-lg)', overflow: 'hidden',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '12px 16px', borderBottom: '1px solid var(--border)',
-        background: 'var(--surface-2)',
-      }}>
-        <span style={{ fontSize: 16 }}>{icon}</span>
-        <span style={{ fontSize: 15, fontWeight: 700 }}>{title}</span>
-      </div>
-      <div style={{ padding: 16 }}>{children}</div>
     </div>
   );
 }

@@ -7,6 +7,18 @@ import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../lib/utils';
 
+const DRAFT_KEY = 'org_event_draft';
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60_000);
+  const h = Math.floor(diff / 3_600_000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 interface OrgEvent {
   id: string;
   title: string;
@@ -17,9 +29,9 @@ interface OrgEvent {
   venue_name: string;
   price: number;
   currency: string;
-  tickets_sold: number;
+  tickets_sold?: number;   // optional — backend may omit
   max_capacity: number | null;
-  views: number;
+  views?: number;          // optional — backend may omit
   created_at: string;
 }
 
@@ -38,6 +50,7 @@ export default function EventsPage() {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('start_time');
   const [sortAsc, setSortAsc] = useState(true);
+  const [draftInfo, setDraftInfo] = useState<{ savedAt: string; title: string } | null>(null);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
@@ -51,6 +64,16 @@ export default function EventsPage() {
 
   useEffect(() => { fetchEvents(); }, [fetchEvents]);
 
+  // Check for saved draft on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw) as { savedAt: string; title: string };
+      if (d.savedAt) setDraftInfo({ savedAt: d.savedAt, title: d.title ?? '' });
+    } catch { /* ignore */ }
+  }, []);
+
   // ── Filter + sort ───────────────────────────────────────────────────────────
   const filtered = events
     .filter(e => {
@@ -60,8 +83,8 @@ export default function EventsPage() {
       return true;
     })
     .sort((a, b) => {
-      let valA: string | number = a[sortKey] as string | number;
-      let valB: string | number = b[sortKey] as string | number;
+      let valA: string | number = a[sortKey] as string | number ?? 0;
+      let valB: string | number = b[sortKey] as string | number ?? 0;
       if (typeof valA === 'string') valA = valA.toLowerCase();
       if (typeof valB === 'string') valB = valB.toLowerCase();
       if (valA < valB) return sortAsc ? -1 : 1;
@@ -120,7 +143,7 @@ export default function EventsPage() {
   // ── Capacity fill % ─────────────────────────────────────────────────────────
   function capacityPct(e: OrgEvent) {
     if (!e.max_capacity) return null;
-    return Math.min((e.tickets_sold / e.max_capacity) * 100, 100);
+    return Math.min(((e.tickets_sold ?? 0) / e.max_capacity) * 100, 100);
   }
 
   return (
@@ -168,20 +191,42 @@ export default function EventsPage() {
           </button>
         ))}
 
-        {/* Search pushed right */}
         <div style={{ marginLeft: 'auto' }}>
           <div className="search-box">
             <svg viewBox="0 0 20 20" fill="#606770" width="14" height="14">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
             </svg>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search events…"
-            />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search events…" />
           </div>
         </div>
       </div>
+
+      {/* ── Draft banner ─────────────────────────────────────────────── */}
+      {draftInfo && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          padding: '10px 16px', background: '#fff8e1',
+          borderBottom: '1px solid #fcd34d', color: '#92400e',
+        }}>
+          <span style={{ fontSize: 16 }}>📝</span>
+          <span style={{ fontSize: 13, flex: 1, minWidth: 140 }}>
+            <strong>Unsaved draft</strong>
+            {draftInfo.title ? ` — "${draftInfo.title}"` : ''}
+            <span style={{ fontWeight: 400 }}> · saved {relativeTime(draftInfo.savedAt)}</span>
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-sm btn-primary" onClick={() => router.push('/events/create')}>
+              Resume draft
+            </button>
+            <button className="btn btn-sm" onClick={() => {
+              localStorage.removeItem(DRAFT_KEY);
+              setDraftInfo(null);
+            }}>
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Action toolbar — shows when rows are selected ─────────────── */}
       {selected.size > 0 && (
@@ -195,10 +240,8 @@ export default function EventsPage() {
           }}>
             View details
           </button>
-          <button
-            className="btn btn-sm btn-danger"
-            onClick={() => { selected.forEach(id => cancelEvent(id)); }}
-          >
+          <button className="btn btn-sm btn-danger"
+            onClick={() => { selected.forEach(id => cancelEvent(id)); }}>
             Cancel selected
           </button>
           <button className="btn btn-sm" style={{ marginLeft: 'auto' }}
@@ -255,6 +298,8 @@ export default function EventsPage() {
             <tbody>
               {filtered.map(e => {
                 const pct = capacityPct(e);
+                const ticketsSold = e.tickets_sold ?? 0;
+                const views = e.views ?? 0;
                 return (
                   <tr key={e.id} style={{ background: selected.has(e.id) ? '#e7f3ff' : undefined }}>
                     <td>
@@ -285,7 +330,7 @@ export default function EventsPage() {
                     </td>
                     <td>
                       <div style={{ fontWeight: 600 }}>
-                        {e.tickets_sold.toLocaleString()}
+                        {ticketsSold.toLocaleString()}
                         {e.max_capacity && (
                           <span style={{ fontSize: 11, color: '#8a8d91', fontWeight: 400 }}>
                             {' '}/ {e.max_capacity.toLocaleString()}
@@ -303,7 +348,7 @@ export default function EventsPage() {
                         </div>
                       )}
                     </td>
-                    <td style={{ color: '#606770' }}>{e.views.toLocaleString()}</td>
+                    <td style={{ color: '#606770' }}>{views.toLocaleString()}</td>
                     <td style={{ fontWeight: 600 }}>
                       {e.price === 0 ? (
                         <span style={{ color: '#1a7f37', fontSize: 13 }}>Free</span>

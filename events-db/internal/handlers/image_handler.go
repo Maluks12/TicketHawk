@@ -352,3 +352,28 @@ func UploadAdminImageHandler(imgService *services.ImageService) gin.HandlerFunc 
 		c.JSON(http.StatusOK, gin.H{"image_url": url})
 	}
 }
+
+// UploadOrganiserImageHandler handles POST /organiser/upload.
+// A generic image upload for the organiser dashboard — stores to R2 and
+// returns the public URL with no DB write. The organiser dashboard uses this
+// during event creation (before an event ID exists) so the URL can be
+// included in the CreateEventDTO payload as cover_image_url / banner_image_url.
+// Route is protected by AuthMiddleware + OrganizerOnlyMiddleware.
+func UploadOrganiserImageHandler(imgService *services.ImageService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("image")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required (field name: image)"})
+			return
+		}
+		defer file.Close()
+
+		url, err := imgService.UploadGenericImage(file, header)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"image_url": url})
+	}
+}
