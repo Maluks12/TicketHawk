@@ -147,7 +147,31 @@ func GetOrganizerEventStatsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
 			return
 		}
-		c.JSON(http.StatusOK, stats)
+
+		// Reshape to match the frontend EventStats interface:
+		// { event: { id, title, ... }, total_bookings, confirmed_bookings, ... }
+		c.JSON(http.StatusOK, gin.H{
+			"event": gin.H{
+				"id":              stats.EventID,
+				"title":           stats.Title,
+				"status":          stats.Status,
+				"start_time":      stats.StartTime,
+				"end_time":        stats.EndTime,
+				"city":            stats.City,
+				"venue_name":      stats.VenueName,
+				"price":           stats.Price,
+				"currency":        stats.Currency,
+				"tickets_sold":    stats.TicketsSold,
+				"max_capacity":    stats.MaxCapacity,
+				"views":           stats.Views,
+				"cover_image_url": stats.CoverImageURL,
+			},
+			"total_revenue":      stats.TotalNetEarnings,
+			"total_bookings":     stats.TotalBookings + stats.PendingBookings,
+			"confirmed_bookings": stats.TotalBookings,
+			"pending_bookings":   stats.PendingBookings,
+			"active_campaign":    nil,
+		})
 	}
 }
 

@@ -243,11 +243,17 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 
 // OrganizerEventStats is the full financial breakdown for one event.
 type OrganizerEventStats struct {
-	EventID   string             `json:"event_id"`
-	Title     string             `json:"title"`
-	Status    models.EventStatus `json:"status"`
-	StartTime time.Time          `json:"start_time"`
-	Currency  string             `json:"currency"`
+	EventID       string             `json:"event_id"`
+	Title         string             `json:"title"`
+	Status        models.EventStatus `json:"status"`
+	StartTime     time.Time          `json:"start_time"`
+	EndTime       time.Time          `json:"end_time"`
+	City          string             `json:"city"`
+	VenueName     string             `json:"venue_name"`
+	Price         float64            `json:"price"`
+	Currency      string             `json:"currency"`
+	Views         int                `json:"views"`
+	CoverImageURL *string            `json:"cover_image_url"`
 
 	// Capacity
 	MaxCapacity  *int    `json:"max_capacity,omitempty"`
@@ -284,12 +290,15 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 
 	// Verify ownership and pull basic event fields
 	err := pool.QueryRow(ctx, `
-		SELECT id, title, status, start_time, currency, max_capacity, tickets_sold
+		SELECT id, title, status, start_time, end_time, city, venue_name,
+		       price, currency, max_capacity, tickets_sold,
+		       COALESCE(views, 0), cover_image_url
 		FROM events
 		WHERE id = $1 AND organizer_id = $2
 	`, eventID, organizerID).Scan(
-		&s.EventID, &s.Title, &s.Status, &s.StartTime,
-		&s.Currency, &s.MaxCapacity, &s.TicketsSold,
+		&s.EventID, &s.Title, &s.Status, &s.StartTime, &s.EndTime,
+		&s.City, &s.VenueName, &s.Price, &s.Currency,
+		&s.MaxCapacity, &s.TicketsSold, &s.Views, &s.CoverImageURL,
 	)
 	if err != nil {
 		return nil, ErrEventNotFound
@@ -302,17 +311,22 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 	}
 
 	// Booking breakdown
+	// Note: refunded_amount lives on the payments table, not bookings.
+	// Pull it via a subquery to avoid a column-not-found error.
 	err = pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE booking_status = 'confirmed')                         AS confirmed,
-			COUNT(*) FILTER (WHERE booking_status = 'pending')                           AS pending,
-			COUNT(*) FILTER (WHERE booking_status = 'cancelled')                         AS cancelled,
-			COUNT(*) FILTER (WHERE booking_status = 'refunded')                          AS refunded,
-			COALESCE(SUM(subtotal)     FILTER (WHERE booking_status = 'confirmed'), 0)   AS gross_revenue,
-			COALESCE(SUM(platform_fee) FILTER (WHERE booking_status = 'confirmed'), 0)   AS platform_fees,
-			COALESCE(SUM(refunded_amount) FILTER (
-				WHERE booking_status IN ('refunded','cancelled')
-				  AND refunded_amount IS NOT NULL), 0)                                   AS total_refunded
+			COUNT(*) FILTER (WHERE booking_status = 'confirmed')                       AS confirmed,
+			COUNT(*) FILTER (WHERE booking_status = 'pending')                         AS pending,
+			COUNT(*) FILTER (WHERE booking_status = 'cancelled')                       AS cancelled,
+			COUNT(*) FILTER (WHERE booking_status = 'refunded')                        AS refunded,
+			COALESCE(SUM(subtotal)     FILTER (WHERE booking_status = 'confirmed'), 0) AS gross_revenue,
+			COALESCE(SUM(platform_fee) FILTER (WHERE booking_status = 'confirmed'), 0) AS platform_fees,
+			COALESCE((
+				SELECT SUM(p.refunded_amount)
+				FROM payments p
+				JOIN bookings b2 ON p.booking_id = b2.id
+				WHERE b2.event_id = $1 AND p.refunded_amount IS NOT NULL
+			), 0)                                                                    AS total_refunded
 		FROM bookings
 		WHERE event_id = $1
 	`, eventID).Scan(

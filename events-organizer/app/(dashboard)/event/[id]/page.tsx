@@ -14,6 +14,7 @@ interface EventStats {
     city: string; venue_name: string; price: number; currency: string;
     tickets_sold: number; max_capacity: number | null; views: number;
     cover_image_url: string | null;
+    banner_image_url: string | null;
   };
   total_revenue: number;
   total_bookings: number;
@@ -46,6 +47,8 @@ export default function EventDetailPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [merch, setMerch] = useState<MerchItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [bannerUploading, setBannerUploading] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -75,6 +78,36 @@ export default function EventDetailPage() {
     if (tab === 'bookings') fetchBookings();
     if (tab === 'merch') fetchMerch();
   }, [tab, fetchBookings, fetchMerch]);
+
+  async function handleCoverUpload(file: File) {
+    setCoverUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const res = await api.post(`/organiser/events/${id}/media/cover`, fd);
+      setStats(prev => prev ? {
+        ...prev,
+        event: { ...prev.event, cover_image_url: res.data.cover_image_url },
+      } : prev);
+      toast('Cover image updated', 'success');
+    } catch { toast('Failed to upload cover image', 'error'); }
+    finally { setCoverUploading(false); }
+  }
+
+  async function handleBannerUpload(file: File) {
+    setBannerUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const res = await api.post(`/organiser/events/${id}/media/banner`, fd);
+      setStats(prev => prev ? {
+        ...prev,
+        event: { ...prev.event, banner_image_url: res.data.banner_image_url },
+      } : prev);
+      toast('Banner image updated', 'success');
+    } catch { toast('Failed to upload banner image', 'error'); }
+    finally { setBannerUploading(false); }
+  }
 
   if (loading) {
     return (
@@ -186,6 +219,104 @@ export default function EventDetailPage() {
 
         {tab === 'overview' && (
           <div>
+            {/* ── Event images ──────────────────────────────────────────── */}
+            <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #ebedf0', fontWeight: 700, fontSize: 15 }}>
+                Event images
+              </div>
+              <div style={{ padding: 16, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+
+                {/* Cover image */}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#606770', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Cover image</div>
+                  <div style={{ position: 'relative', width: 160, height: 100 }}>
+                    {ev.cover_image_url ? (
+                      <>
+                        <img
+                          src={ev.cover_image_url}
+                          alt="Cover"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2', display: 'block' }}
+                          onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
+                        />
+                        <label
+                          title="Replace cover image"
+                          style={{
+                            position: 'absolute', bottom: 4, right: 4,
+                            background: 'rgba(0,0,0,.55)', color: '#fff',
+                            borderRadius: 4, padding: '3px 7px', fontSize: 11,
+                            cursor: coverUploading ? 'wait' : 'pointer',
+                            fontWeight: 600,
+                          }}>
+                          <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
+                            onChange={e => { const f = e.target.files?.[0]; if (f) { handleCoverUpload(f); e.target.value = ''; } }} />
+                          {coverUploading ? '…' : '✎ Replace'}
+                        </label>
+                      </>
+                    ) : (
+                      <label style={{
+                        width: '100%', height: '100%', border: '1.5px dashed #ccd0d5', borderRadius: 6,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        cursor: coverUploading ? 'wait' : 'pointer', color: '#8a8d91',
+                        fontSize: 11, gap: 4, background: '#f7f8fa',
+                      }}>
+                        <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
+                          onChange={e => { const f = e.target.files?.[0]; if (f) { handleCoverUpload(f); e.target.value = ''; } }} />
+                        {coverUploading
+                          ? <div className="spinner" style={{ width: 18, height: 18 }} />
+                          : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload cover</span></>}
+                      </label>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 6 }}>JPEG · PNG · WebP · max 5 MB</div>
+                </div>
+
+                {/* Banner image */}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#606770', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Banner image</div>
+                  <div style={{ position: 'relative', width: 240, height: 100 }}>
+                    {ev.banner_image_url ? (
+                      <>
+                        <img
+                          src={ev.banner_image_url}
+                          alt="Banner"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2', display: 'block' }}
+                          onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
+                        />
+                        <label
+                          title="Replace banner image"
+                          style={{
+                            position: 'absolute', bottom: 4, right: 4,
+                            background: 'rgba(0,0,0,.55)', color: '#fff',
+                            borderRadius: 4, padding: '3px 7px', fontSize: 11,
+                            cursor: bannerUploading ? 'wait' : 'pointer',
+                            fontWeight: 600,
+                          }}>
+                          <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={bannerUploading}
+                            onChange={e => { const f = e.target.files?.[0]; if (f) { handleBannerUpload(f); e.target.value = ''; } }} />
+                          {bannerUploading ? '…' : '✎ Replace'}
+                        </label>
+                      </>
+                    ) : (
+                      <label style={{
+                        width: '100%', height: '100%', border: '1.5px dashed #ccd0d5', borderRadius: 6,
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        cursor: bannerUploading ? 'wait' : 'pointer', color: '#8a8d91',
+                        fontSize: 11, gap: 4, background: '#f7f8fa',
+                      }}>
+                        <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={bannerUploading}
+                          onChange={e => { const f = e.target.files?.[0]; if (f) { handleBannerUpload(f); e.target.value = ''; } }} />
+                        {bannerUploading
+                          ? <div className="spinner" style={{ width: 18, height: 18 }} />
+                          : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload banner</span></>}
+                      </label>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 6 }}>Wide hero image · JPEG · PNG · WebP · max 8 MB</div>
+                </div>
+
+              </div>
+            </div>
+
             {/* Stat row */}
             <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
               {[
