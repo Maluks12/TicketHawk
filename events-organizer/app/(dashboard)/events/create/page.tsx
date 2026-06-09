@@ -399,7 +399,7 @@ export default function CreateEventPage() {
     { done: title.length >= 5,               label: 'Add a title (5+ chars)' },
     { done: description.length >= 50,        label: 'Write a description (50+ chars)' },
     { done: !!categoryId,                    label: 'Choose a category' },
-    { done: !!venueName && !!city,           label: 'Set venue and city' },
+    { done: !!venueName && !!address && !!city,  label: 'Set venue and city' },
     { done: !!startTime && !!endTime,        label: 'Set start and end times' },
     { done: !!expiresAt,                     label: 'Set a booking deadline' },
     { done: isFree || parseFloat(price) > 0, label: 'Set ticket pricing' },

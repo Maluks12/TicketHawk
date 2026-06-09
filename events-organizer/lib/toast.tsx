@@ -19,7 +19,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={toast}>
       {children}
-      <div id="toast-container">
+      <div id="toast-root">
         {toasts.map(t => (
           <div key={t.id} className={`toast ${t.type}`}>
             <span style={{ flexShrink: 0 }}>{icons[t.type]}</span> {t.msg}
