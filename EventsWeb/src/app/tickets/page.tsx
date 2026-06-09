@@ -74,14 +74,29 @@ function TicketCard({ booking, index, onPress }: { booking: Booking; index: numb
     : booking.booking_status === 'cancelled' || booking.booking_status === 'refunded' ? '#ff4d4d'
     : '#888';
 
+
+  const stackCount = Math.min(booking.ticket_quantity - 1, 2);
   return (
+    <div className="relative" style={{ paddingBottom: stackCount * 5 }}>
+      {/* Stack shadow cards */}
+      {Array.from({ length: stackCount }).map((_, i) => (
+        <div
+          key={i}
+          className="absolute inset-x-0 rounded-[16px]"
+          style={{
+            bottom: -(i + 1) * 5,
+            left: (i + 1) * 4,
+            right: (i + 1) * 4,
+            height: 40,
+            background: `linear-gradient(135deg, ${PALETTES[(index + i + 1) % PALETTES.length].top} 0%, ${PALETTES[(index + i + 1) % PALETTES.length].bottom} 100%)`,
+            opacity: 0.45 - i * 0.15,
+            borderRadius: 16,
+          }}
+        />
+      ))}
     <button
       onClick={onPress}
-      className="w-full text-left rounded-[16px] overflow-hidden relative transition-transform hover:scale-[1.01] active:scale-[0.99]"
-      style={{
-        minHeight: 210,
-        background: `linear-gradient(135deg, ${pal.top} 0%, ${pal.bottom} 100%)`,
-      }}
+      className="w-full text-left rounded-[16px] overflow-hidden relative transition-transform hover:scale-[1.01] active:scale-[0.99] z-10"
     >
       {/* Blurred background image */}
       {booking.event?.cover_image_url && (
@@ -155,6 +170,7 @@ function TicketCard({ booking, index, onPress }: { booking: Booking; index: numb
         </div>
       </div>
     </button>
+    </div>
   );
 }
 
