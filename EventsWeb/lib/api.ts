@@ -219,7 +219,7 @@ export const getTrendingEvents = (limit = 50) =>
 export const getActiveEvents = (limit = 50) =>
   api.get<{ data: Event[] }>('/v1/events/active', { params: { limit } });
 
-export const getEventsByCategory = (category: string, limit = 50) =>
+export const getEventsByCategory = (category: string | number, limit = 50) =>
   api.get<{ data: Event[] }>('/v1/events', { params: { category, limit } });
 
 export const searchEvents = async (query: string): Promise<Event[]> => {
@@ -444,3 +444,43 @@ export const getFollowedEvents = async (): Promise<Event[]> => {
     return [];
   }
 };
+
+// ── Following feed types & helpers ──────────────────────────────────────────
+
+export interface FollowedEvent {
+  follow_id: string;
+  id: string;
+  slug?: string;
+  title: string;
+  start_time: string;
+  venue_name: string;
+  city: string;
+  cover_image_url?: string;
+  price: number;
+  category?: string;
+  is_sold_out: boolean;
+  tickets_sold?: number;
+  max_capacity?: number;
+}
+
+export interface FollowingResponse {
+  data: FollowedEvent[];
+  next_cursor?: string | null;
+}
+
+export function fmtFollowDate(iso?: string | null): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-ZA', {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
+
+export function fmtFollowPrice(price: number): string {
+  if (!price || price === 0) return 'Free';
+  return `R${Math.round(price).toLocaleString('en-ZA')}`;
+}
+
+export function followAvailPct(sold?: number, capacity?: number): number | null {
+  if (sold == null || capacity == null || capacity === 0) return null;
+  return Math.round((sold / capacity) * 100);
+}
