@@ -9,6 +9,7 @@ import {
 } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
+import { CollectionModal } from '@/components/collectionModal';
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const PALETTE: Record<string, { bg: string; text: string }> = {
@@ -403,6 +404,7 @@ function DetailDrawer({ item, onClose }: { item: MerchandiseItem; onClose: () =>
               </div>
             </div>
           )}
+           
 
           {/* Details grid */}
           {[
@@ -480,6 +482,7 @@ export default function MerchPage() {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string | null>(null);
   const [selected,  setSelected]  = useState<MerchandiseItem | null>(null);
+  const [collectionEntry, setCollectionEntry] = useState<CollectionEntry | null>(null);
 
   const fetchDrops = useCallback(async () => {
     try {
@@ -498,9 +501,12 @@ export default function MerchPage() {
   const upcomingCollections  = useMemo(() => buildCollections(upcoming),  [upcoming]);
   const visible = tab === 'available' ? availableCollections : upcomingCollections;
 
-  const handleEntryPress = (entry: CollectionEntry) => {
-    // For collections just open the first item for now
-    setSelected(entry.representativeItem);
+   const handleEntryPress = (entry: CollectionEntry) => {
+    if (entry.isCollection && entry.items.length > 1) {
+      setCollectionEntry(entry);
+    } else {
+      setSelected(entry.representativeItem);
+    }
   };
 
   return (
@@ -567,6 +573,15 @@ export default function MerchPage() {
 
       {/* ── Detail drawer ─────────────────────────────────────────────────── */}
       {selected && <DetailDrawer item={selected} onClose={() => setSelected(null)} />}
+      {collectionEntry && (
+        <CollectionModal
+          collectionName={collectionEntry.collectionName ?? collectionEntry.representativeItem.event_name ?? 'Collection'}
+          description={undefined}
+          items={collectionEntry.items}
+          onSelectItem={(item) => { setCollectionEntry(null); setSelected(item); }}
+          onClose={() => setCollectionEntry(null)}
+        />
+      )}
     </div>
   );
 }
