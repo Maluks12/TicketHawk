@@ -83,6 +83,10 @@ func CreateBookingHandler(
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to confirm free booking"})
 				return
 			}
+			// Trigger the booking worker so it creates ticket assignments,
+			// generates the QR code, and sends the confirmation email —
+			// identical to the post-payment flow for paid bookings.
+			paymentService.EnqueueJob(booking.ID)
 			c.JSON(http.StatusCreated, models.BookingResponse{
 				BookingID:     booking.ID,
 				BookingNumber: booking.BookingNumber,
