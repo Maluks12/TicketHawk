@@ -194,7 +194,7 @@ type CreateEventDTO struct {
 	Latitude           *float64   `json:"latitude"`
 	Longitude          *float64   `json:"longitude"`
 	CategoryID         int        `json:"category_id" binding:"required"`
-	Price              float64    `json:"price" binding:"required"`
+	Price              float64    `json:"price" binding:"min=0"`
 	Currency           string     `json:"currency" binding:"required"`
 	MaxCapacity        *int       `json:"max_capicity" binding:"omitempty,min=1"`
 	AllowWaitlist       bool       `json:"allow_waitlist"`

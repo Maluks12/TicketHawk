@@ -242,6 +242,13 @@ export default function TicketPurchaseScreen() {
       console.log('[PAY] endpoint:', endpoint, 'payload:', JSON.stringify(payload));
       const { data: booking } = await api.post(endpoint, payload);
 
+      // Free ticket — booking is already confirmed server-side, no payment step needed.
+      if ((booking as any).total_amount === 0) {
+        router.replace('/(tabs)/tickets');
+        Alert.alert('You\'re in! 🎟', 'Your free ticket has been confirmed. Check the Tickets tab.');
+        return;
+      }
+
       // Navigate to the payment WebView screen
       router.push({
         pathname: '/payment/[id]',
