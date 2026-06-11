@@ -146,8 +146,11 @@ func ScanRotatingQRHandler(
 		// ── Step 1: crypto verification (stateless) ───────────────────────────
 		payload, err := rotatingQR.VerifyToken(input.Token)
 		if err != nil {
-			// Keep the error generic — don't signal whether it was expired vs. forged.
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired QR code"})
+			// Use 422 (Unprocessable Entity), NOT 401 — the bearer JWT is valid;
+			// it's the QR payload itself that's expired or forged.
+			// 401 would fire the frontend's auto-logout interceptor which is wrong
+			// here and silently redirects the organizer to the login page.
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Invalid or expired QR code"})
 			return
 		}
 
@@ -156,12 +159,12 @@ func ScanRotatingQRHandler(
 
 		// ── Step 2: DB status checks ──────────────────────────────────────────
 		var (
-			assignStatus  string
-			scannedAt     *time.Time
-			bookingStatus string
-			startTime     time.Time
-			endTime       time.Time
-			organizerUserID string // user_id of the event's organizer
+			assignStatus    string
+			scannedAt       *time.Time
+			bookingStatus   string
+			startTime       time.Time
+			endTime         time.Time
+			organizerUserID string // user_id stored directly on events.organizer_id
 		)
 
 		err = pool.QueryRow(ctx, `
@@ -171,11 +174,10 @@ func ScanRotatingQRHandler(
 				b.booking_status,
 				e.start_time,
 				e.end_time,
-				o.user_id AS organizer_user_id
+				e.organizer_id AS organizer_user_id
 			FROM ticket_assignments ta
 			JOIN bookings  b ON ta.booking_id = b.id
 			JOIN events    e ON b.event_id    = e.id
-			JOIN organizers o ON o.user_id = e.organizer_id
 			WHERE ta.id = $1
 		`, payload.AssignmentID).Scan(
 			&assignStatus,

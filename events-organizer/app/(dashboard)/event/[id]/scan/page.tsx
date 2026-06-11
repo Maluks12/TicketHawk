@@ -108,12 +108,16 @@ export default function ScanPage() {
       setAdmitted(n => n + 1);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number; data?: { error?: string; first_scan_at?: string } } };
-      const data = axiosErr.response?.data;
+      const status   = axiosErr.response?.status;
+      const data     = axiosErr.response?.data;
 
-      if (axiosErr.response?.status === 409 && data?.first_scan_at) {
+      if (status === 409 && data?.first_scan_at) {
         setResult({ phase: 'already_used', firstScanAt: data.first_scan_at });
         setPhase('already_used');
       } else {
+        // 422 = invalid/expired QR token  |  403 = wrong organizer
+        // 404 = ticket not found          |  409 = outside window
+        // All surface as 'invalid' with the backend's error message.
         setResult({ phase: 'invalid', message: data?.error ?? 'Ticket could not be verified' });
         setPhase('invalid');
       }
