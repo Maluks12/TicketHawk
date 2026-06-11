@@ -25,6 +25,9 @@ type BookingQuerier interface {
 	// contains only merchandise (no ticket items). Needed so the payment record
 	// has a booking to anchor to.
 	CreateMerchOnlyBooking(cartID string, userID, sessionID *string, total float64, currency string) (*models.Booking, error)
+	// ConfirmBooking marks a booking as confirmed with payment completed.
+	// Used for free-ticket bookings that require no payment step.
+	ConfirmBooking(bookingID string) error
 }
 
 // EventQuerier is the read/write contract for event data.
@@ -87,6 +90,9 @@ func (q *PgxBookingQuerier) SumBookingTotalsByIDs(ids []string) (float64, error)
 }
 func (q *PgxBookingQuerier) CreateMerchOnlyBooking(cartID string, userID, sessionID *string, total float64, currency string) (*models.Booking, error) {
 	return CreateMerchOnlyBooking(q.pool, cartID, userID, sessionID, total, currency)
+}
+func (q *PgxBookingQuerier) ConfirmBooking(bookingID string) error {
+	return ConfirmBooking(q.pool, bookingID)
 }
 
 type PgxEventQuerier struct{ pool *pgxpool.Pool }

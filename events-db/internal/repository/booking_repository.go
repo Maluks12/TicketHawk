@@ -159,10 +159,14 @@ func CreateGuestBooking(pool *pgxpool.Pool, dto *models.CreateGuestBookingDTO, e
 }
 
 func CalculatePlatformFee(subtotal float64) float64 {
+	// Free tickets always pay no fee — avoid charging a fixed component on a R0 subtotal.
+	if subtotal == 0 {
+		return 0
+	}
 	// example platform fees such as stipe
 	percentage := subtotal * 0.029
 	fixed := 0.30
-	return  percentage + fixed
+	return percentage + fixed
 }
 
 func ConfirmBooking(pool *pgxpool.Pool, bookingID string) error {

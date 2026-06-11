@@ -243,7 +243,7 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
-  const all      = dedup([...apiBookings]);
+  const all      = dedup([...apiBookings]).filter(b => b.booking_status !== 'pending');
   const upcoming = all.filter(isUpcoming);
   const past     = all.filter(b => !isUpcoming(b));
 
@@ -389,91 +389,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
 
  
 
-// ─── Mock tickets (remove when real data is flowing) ──────────────────────────
-
-const MOCK_BOOKINGS: Booking[] = [
-  {
-    id: 'mock-1',
-    booking_number: 'BK-A3F7K2',
-    event_id: 'evt-1',
-    ticket_quantity: 2,
-    total_amount: 1400,
-    currency: 'ZAR',
-    booking_status: 'confirmed',
-    payment_status: 'completed',
-    qr_code_url: null,
-    created_at: new Date().toISOString(),
-    ticket_type_name: 'VIP',
-    event: {
-      title: 'Sun Met 2026 — Cape Town',
-      start_time: new Date(Date.now() + 7 * 86400000).toISOString(),
-      venue_name: 'Kenilworth Racecourse',
-      city: 'Cape Town',
-      cover_image_url: 'https://images.unsplash.com/photo-1551698618-1dfe5d97d256?w=800',
-    },
-  },
-  {
-    id: 'mock-2',
-    booking_number: 'BK-R9Q2M1',
-    event_id: 'evt-2',
-    ticket_quantity: 1,
-    total_amount: 650,
-    currency: 'ZAR',
-    booking_status: 'confirmed',
-    payment_status: 'completed',
-    qr_code_url: null,
-    created_at: new Date().toISOString(),
-    ticket_type_name: 'GENERAL ADMISSION',
-    event: {
-      title: 'Afro Nation Johannesburg',
-      start_time: new Date(Date.now() + 1 * 86400000).toISOString(),
-      venue_name: 'FNB Stadium',
-      city: 'Johannesburg',
-      cover_image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800',
-    },
-  },
-  {
-    id: 'mock-3',
-    booking_number: 'BK-T5X8N4',
-    event_id: 'evt-3',
-    ticket_quantity: 3,
-    total_amount: 2100,
-    currency: 'ZAR',
-    booking_status: 'confirmed',
-    payment_status: 'completed',
-    qr_code_url: null,
-    created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
-    ticket_type_name: 'PREMIUM',
-    event: {
-      title: 'Ultra South Africa — Johannesburg',
-      start_time: new Date(Date.now() - 10 * 86400000).toISOString(),
-      venue_name: 'Expo Centre',
-      city: 'Johannesburg',
-      cover_image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800',
-    },
-  },
-  {
-    id: 'mock-4',
-    booking_number: 'BK-D2W6P9',
-    event_id: 'evt-4',
-    ticket_quantity: 1,
-    total_amount: 350,
-    currency: 'ZAR',
-    booking_status: 'cancelled',
-    payment_status: 'refunded',
-    qr_code_url: null,
-    created_at: new Date(Date.now() - 60 * 86400000).toISOString(),
-    ticket_type_name: 'GENERAL ADMISSION',
-    event: {
-      title: 'Design Indaba 2025',
-      start_time: new Date(Date.now() - 45 * 86400000).toISOString(),
-      venue_name: 'Cape Town International Convention Centre',
-      city: 'Cape Town',
-      cover_image_url: 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
-    },
-  },
-];
-
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function TicketsScreen() {
@@ -481,7 +396,7 @@ export default function TicketsScreen() {
   const { user } = useAuthStore();
   const { colors } = useAppTheme(); 
 
-  const [apiBookings, setApiBookings] = useState<Booking[]>(MOCK_BOOKINGS); // remove mock and keep it like this:   const [apiBookings, setApiBookings] = useState<Booking[]>([]);
+  const [apiBookings, setApiBookings] = useState<Booking[]>([]);
   const [loading, setLoading]         = useState(false);
   const [refreshing, setRefreshing]   = useState(false);
   const [error, setError]             = useState<string | null>(null);
@@ -519,8 +434,8 @@ export default function TicketsScreen() {
 
   useEffect(() => { load(); }, [user]);
 
-  const totalCount = dedup([...apiBookings]).length;
-  const showGuestLookup = false; // hardcoded mock mode — restore to: !user
+  const totalCount = dedup([...apiBookings]).filter(b => b.booking_status !== 'pending').length;
+  const showGuestLookup = !user;
 
   return (
     <View className={s.root} style={{ backgroundColor: colors.background }}>

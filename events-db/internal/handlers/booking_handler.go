@@ -76,12 +76,33 @@ func CreateBookingHandler(
 			return
 		}
 
+		// Free event — skip Stitch entirely, confirm the booking immediately.
+		if booking.TotalAmount == 0 {
+			if err := bookings.ConfirmBooking(booking.ID); err != nil {
+				log.Error().Err(err).Str("booking_id", booking.ID).Msg("failed to auto-confirm free booking")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to confirm free booking"})
+				return
+			}
+			// Trigger the booking worker so it creates ticket assignments,
+			// generates the QR code, and sends the confirmation email —
+			// identical to the post-payment flow for paid bookings.
+			paymentService.EnqueueJob(booking.ID)
+			c.JSON(http.StatusCreated, models.BookingResponse{
+				BookingID:     booking.ID,
+				BookingNumber: booking.BookingNumber,
+				TotalAmount:   0,
+				Currency:      booking.Currency,
+				ClientToken:   "",
+				ExpiresAt:     booking.CreatedAt.Add(expiryDuration),
+			})
+			return
+		}
+
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize payment"})
 			return
 		}
-
 		c.JSON(http.StatusCreated, models.BookingResponse{
 			BookingID:        booking.ID,
 			BookingNumber:    booking.BookingNumber,

@@ -841,6 +841,18 @@ func stitchMethodToInternal(s string) models.PaymentMethod {
 		return models.PaymentCreditCard
 	}
 }
+
+// EnqueueJob sends a confirmed booking ID to the booking worker pipeline.
+// Call this for free bookings that bypass the Stitch payment flow so the
+// worker still creates ticket assignments, generates QR codes, and sends
+// the confirmation email.
+func (s *PaymentService) EnqueueJob(bookingID string) {
+	select {
+	case s.jobChan <- bookingID:
+	default:
+		log.Warn().Str("booking_id", bookingID).Msg("payment_service: job channel full, dropping booking job")
+	}
+}
 // InitiateDebitMandate initiates a Stitch debit mandate payment to bill an
 // organiser for their end-of-day ad spend.
 //
