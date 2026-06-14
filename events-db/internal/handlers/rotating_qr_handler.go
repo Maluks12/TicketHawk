@@ -154,23 +154,34 @@ func ScanRotatingQRHandler(
 			return
 		}
 
+		// ── Step 1b: URL param must match the verified token payload ─────────
+		// The handler resolves the assignment via payload.AssignmentID (HMAC-
+		// verified), but we also validate the URL param for consistency — a
+		// mismatch hints at a client bug or crafted request.
+		if urlID := c.Param("assignmentId"); urlID != payload.AssignmentID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Assignment ID mismatch between URL and token"})
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
 		// ── Step 2: DB status checks ──────────────────────────────────────────
+		// Note: ta.qr_scanned_at is intentionally NOT selected here — the
+		// duplicate-entry guard is handled atomically by the UPDATE below
+		// (WHERE qr_scanned_at IS NULL). Fetching it upfront would add a
+		// nullable TIMESTAMPTZ scan that serves no purpose in this path.
 		var (
 			assignStatus    string
-			scannedAt       *time.Time
 			bookingStatus   string
 			startTime       time.Time
 			endTime         time.Time
-			organizerUserID string // user_id stored directly on events.organizer_id
+			organizerUserID string // equals events.organizer_id which REFERENCES users(id)
 		)
 
 		err = pool.QueryRow(ctx, `
 			SELECT
 				ta.status,
-				ta.qr_scanned_at,
 				b.booking_status,
 				e.start_time,
 				e.end_time,
@@ -181,7 +192,6 @@ func ScanRotatingQRHandler(
 			WHERE ta.id = $1
 		`, payload.AssignmentID).Scan(
 			&assignStatus,
-			&scannedAt,
 			&bookingStatus,
 			&startTime,
 			&endTime,
@@ -236,17 +246,20 @@ func ScanRotatingQRHandler(
 		}
 
 		if tag.RowsAffected() == 0 {
-			// Ticket was already admitted — fetch when it was first scanned for the error.
-			var firstScan time.Time
+			// Ticket was already admitted — fetch when it was first scanned for the UI.
+			// Use *time.Time so that a NULL (shouldn't happen, but defensive) or a
+			// failed sub-query doesn't send "0001-01-01T00:00:00Z" to the client.
+			var firstScan *time.Time
 			_ = pool.QueryRow(ctx,
 				`SELECT qr_scanned_at FROM ticket_assignments WHERE id = $1`,
 				payload.AssignmentID,
 			).Scan(&firstScan)
 
-			c.JSON(http.StatusConflict, gin.H{
-				"error":         "Ticket already scanned",
-				"first_scan_at": firstScan,
-			})
+			resp := gin.H{"error": "Ticket already scanned"}
+			if firstScan != nil {
+				resp["first_scan_at"] = *firstScan
+			}
+			c.JSON(http.StatusConflict, resp)
 			return
 		}
 

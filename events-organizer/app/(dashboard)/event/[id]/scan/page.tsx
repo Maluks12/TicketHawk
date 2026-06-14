@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { CSSProperties } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../../../../lib/api';
@@ -80,6 +81,9 @@ export default function ScanPage() {
     setTimeout(() => {
       setResult(null);
       setPhase('ready');
+      // Re-arm the scanner immediately — the cooldown was held during the card
+      // display (3.5 s), so we reset it here so the next code scans instantly.
+      cooldownRef.current = 0;
     }, 3500);
   }, []);
 
@@ -111,12 +115,14 @@ export default function ScanPage() {
       const status   = axiosErr.response?.status;
       const data     = axiosErr.response?.data;
 
-      if (status === 409 && data?.first_scan_at) {
+      if (status === 409 && data?.error === 'Ticket already scanned') {
+        // first_scan_at is present when the backend could retrieve the timestamp;
+        // it may be absent if the row was deleted in a race — handle both cases.
         setResult({ phase: 'already_used', firstScanAt: data.first_scan_at });
         setPhase('already_used');
       } else {
         // 422 = invalid/expired QR token  |  403 = wrong organizer
-        // 404 = ticket not found          |  409 = outside window
+        // 404 = ticket not found          |  409 (other) = outside window / status
         // All surface as 'invalid' with the backend's error message.
         setResult({ phase: 'invalid', message: data?.error ?? 'Ticket could not be verified' });
         setPhase('invalid');
@@ -313,7 +319,7 @@ export default function ScanPage() {
                 { top: 0,    right: 0,   borderLeft: 'none',  borderBottom: 'none', borderRadius: '0 10px 0 0' },
                 { bottom: 0, left: 0,    borderRight: 'none', borderTop: 'none',    borderRadius: '0 0 0 10px' },
                 { bottom: 0, right: 0,   borderLeft: 'none',  borderTop: 'none',    borderRadius: '0 0 10px 0' },
-              ] as React.CSSProperties[]).map((style, i) => (
+              ] as CSSProperties[]).map((style, i) => (
                 <div key={i} style={{
                   position: 'absolute', width: 22, height: 22,
                   border: '3px solid #1877f2',
