@@ -23,6 +23,16 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
 
+      {/* Organiser Studio — presented as a full-screen modal so it feels like
+          stepping into a separate app (YouTube → YouTube Studio). */}
+      <Stack.Screen
+        name="organiser"
+        options={{
+          presentation: 'fullScreenModal',
+          animation: 'slide_from_bottom',
+        }}
+      />
+
       <Stack.Screen name="event/[id]" />
 
       <Stack.Screen

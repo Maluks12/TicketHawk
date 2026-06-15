@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Alert, Linking,
+  View, Text, ScrollView, TouchableOpacity, Alert, Linking, StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -101,6 +101,7 @@ export default function ProfileScreen() {
   }, [logout]);
 
   const fullName = user?.first_name ?? user?.email?.split('@')[0] ?? 'Guest';
+  const isOrganiser = user?.role === 'organizer' || user?.role === 'admin';
 
   return (
     <View className={s.root} style={{ backgroundColor: colors.background }}>
@@ -156,6 +157,63 @@ export default function ProfileScreen() {
 
         {/* ── Logged-in ──────────────────────────────────────────────────── */}
         {user && <Avatar name={fullName} email={user.email} />}
+
+        {/* ── Organiser Studio entry — opens the read-only dashboard ──────── */}
+        {isOrganiser && (
+          <View className={s.section}>
+            <Text className={s.sectionTitle} style={{ color: colors.subText }}>ORGANISER</Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push('/organiser' as any)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 14,
+                padding: 16,
+                borderRadius: 16,
+                backgroundColor: isDark ? 'rgba(110,123,255,0.10)' : 'rgba(79,70,229,0.07)',
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: 'rgba(110,123,255,0.30)',
+              }}
+            >
+              <View
+                style={{
+                  width: 46,
+                  height: 46,
+                  borderRadius: 13,
+                  backgroundColor: '#4F46E5',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Feather name="bar-chart-2" size={22} color="#fff" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>
+                    Organiser Dashboard
+                  </Text>
+                  <View
+                    style={{
+                      backgroundColor: 'rgba(110,123,255,0.16)',
+                      borderRadius: 5,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                    }}
+                  >
+                    <Text style={{ fontSize: 8.5, fontWeight: '800', letterSpacing: 1, color: '#7C8CFF' }}>
+                      STUDIO
+                    </Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 12.5, color: colors.subText, marginTop: 2 }}>
+                  Stats, campaigns & scan tickets
+                </Text>
+              </View>
+              <Feather name="arrow-up-right" size={18} color="#7C8CFF" />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {user && (
           <>
