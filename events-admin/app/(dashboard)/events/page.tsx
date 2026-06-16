@@ -422,12 +422,17 @@ export default function EventsPage() {
   }
 
   function deleteEvent(id: string, title: string) {
-    confirm('Delete Event', `Permanently delete "${title}"? This cannot be undone.`, async () => {
+  confirm('Delete Event', `Permanently delete "${title}"? This cannot be undone.`, async () => {
+    try {
       await api.delete(`/admin/events/${id}`);
-      toast('Event deleted', 'success'); loadEvents();
-    });
-  }
-
+      toast('Event deleted', 'success');
+      loadEvents();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Delete failed';
+      toast(msg, 'error');
+    }
+  });
+}
   return (
     <div className="page">
       <div className="page-header">

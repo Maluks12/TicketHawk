@@ -56,6 +56,10 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 				// bust the cache for every affected event so fresh reads kick in.
 				expireMerchListings(pool, ec, ctx)
 
+				// Mark events whose end_time has passed as completed so they
+				// drop out of every public listing.
+				completeEndedEvents(pool, ec, ctx)
+
 			case <-viewTicker.C:
 				flushViewCounts(pool, ec, ctx)
 
@@ -67,6 +71,28 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 			}
 		}
 	}()
+}
+
+// completeEndedEvents transitions published events whose end_time has passed to
+// the 'completed' status, removing them from every public listing, then busts
+// the feed caches so the change is reflected on the next read.
+func completeEndedEvents(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Context) {
+	ids, err := repository.CompleteEndedEvents(pool, ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("expiry worker: complete ended events")
+		return
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	log.Info().
+		Int("count", len(ids)).
+		Msg("expiry worker: marked ended events as completed")
+
+	if ec != nil {
+		ec.BustOnEventUpdate(ctx)
+	}
 }
 
 // expireMerchListings deactivates any merchandise items whose sale_end has

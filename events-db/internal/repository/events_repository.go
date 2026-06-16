@@ -12,10 +12,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrEventNotFound = errors.New("event not found")
+var ErrEventHasBookings = errors.New("event has bookings or orders and cannot be deleted")
 var ErrEventSoldOut = errors.New("event is sold out")
 var ErrEventNotPublishable = errors.New("event not found or not in a submittable state")
 var ErrEventNotCancellable = errors.New("event not found or cannot be cancelled")
@@ -286,6 +288,60 @@ func DeleteEvents(pool *pgxpool.Pool, eventID string, organizerID string) error 
 		return ErrEventNotFound
 	}
 	return nil
+}
+
+// AdminDeleteEvent hard-deletes an event of ANY status (admin-only). Child rows
+// with ON DELETE CASCADE — ticket types, reservations, ad campaigns, follows,
+// cart items, and the payment-supporting tables — are removed automatically.
+//
+// Bookings and merch orders use ON DELETE RESTRICT, so an event that has either
+// cannot be hard-deleted; Postgres raises a foreign-key violation (SQLSTATE
+// 23503), which we translate to ErrEventHasBookings so the caller can tell the
+// admin to cancel the event instead of deleting it (preserving attendee and
+// financial records).
+func AdminDeleteEvent(pool *pgxpool.Pool, eventID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `DELETE FROM events WHERE id = $1`, eventID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" { // foreign_key_violation
+			return ErrEventHasBookings
+		}
+		return fmt.Errorf("failed to delete event: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrEventNotFound
+	}
+	return nil
+}
+
+// CompleteEndedEvents transitions every published event whose end_time has
+// passed to the 'completed' status, so it drops out of all public listings
+// (which filter on status = 'published'). Returns the affected event IDs so the
+// caller can bust any feed caches. Run periodically by the expiry worker.
+func CompleteEndedEvents(pool *pgxpool.Pool, ctx context.Context) ([]string, error) {
+	rows, err := pool.Query(ctx, `
+		UPDATE events
+		SET    status = $1, updated_at = NOW()
+		WHERE  status = $2 AND end_time < NOW()
+		RETURNING id
+	`, models.EventCompleted, models.EventPublished)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID string) error {

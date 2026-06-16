@@ -54,20 +54,34 @@ func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 }
 
 
-func DeleteEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func DeleteEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
-
-		err := repository.DeleteEvents(pool, eventID, userID.(string))
-		if err != nil {
-			if errors.Is(err, repository.ErrEventNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
-				return
-			}
-			utils.InternalError(c, err, "failed to delete event")
+		if _, err := uuid.Parse(eventID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
 			return
 		}
+
+		err := repository.AdminDeleteEvent(pool, eventID)
+		if err != nil {
+			switch {
+			case errors.Is(err, repository.ErrEventNotFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			case errors.Is(err, repository.ErrEventHasBookings):
+				c.JSON(http.StatusConflict, gin.H{
+					"error": "This event has bookings or orders and can't be deleted. Cancel the event instead.",
+				})
+			default:
+				utils.InternalError(c, err, "failed to delete event")
+			}
+			return
+		}
+
+		// Remove the event from the home/feed caches immediately.
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
+		}
+
 		c.JSON(http.StatusOK, gin.H{"message": "Event deleted successfully"})
 	}
 }
@@ -312,14 +326,22 @@ func GetEventBySlugHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 //	POST /v1/events/:id/view
 func TrackEventViewHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		slug := c.Param("id")
-		if slug == "" {
+		slugOrID := c.Param("id")
+		if slugOrID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "event id or slug is required"})
 			return
 		}
 
-		// Resolve slug → UUID so views are always stored against the stable ID.
-		event, err := repository.GetEventBySlug(pool, slug)
+		// Resolve the event so views are always stored against the stable UUID.
+		// The :id param may be a bare UUID (mobile app passes event.id) or a
+		// slug (web links), so handle both — mirroring GetEventBySlugHandler.
+		var event *models.Event
+		var err error
+		if _, uuidErr := uuid.Parse(slugOrID); uuidErr == nil {
+			event, err = repository.GetEventByID(pool, slugOrID, nil)
+		} else {
+			event, err = repository.GetEventBySlug(pool, slugOrID)
+		}
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
