@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getEventsByCategory, type Event } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { useAppTheme } from '../../theme/colors';
+import { CoverImage } from '../../components/CoverImage';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_IMAGE_H = Math.round(SCREEN_W * 0.52);
@@ -47,7 +48,7 @@ function CategoryEventCard({ item, onPress }: { item: Event; onPress: () => void
     <TouchableOpacity onPress={onPress} style={styles.card} activeOpacity={0.88}>
       <View style={styles.cardImageWrap}>
         {item.cover_image_url ? (
-          <Image source={{ uri: item.cover_image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} />
         ) : (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#2a2a2a' }]} />
         )}

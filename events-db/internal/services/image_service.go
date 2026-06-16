@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -267,6 +268,48 @@ func clampFloat(v, lo, hi float64) float64 {
 	return v
 }
 
+// ── Card thumbnail ────────────────────────────────────────────────────────────
+
+const (
+	thumbMaxDimension = 600 // longest edge of the card thumbnail
+	thumbJPEGQuality  = 80
+)
+
+// makeThumbnail produces a small JPEG (max 600px) used on list/feed cards.
+// Transparency is flattened onto white so PNGs don't turn black in JPEG.
+// WebP is unsupported by the stdlib decoder and returns an error — the caller
+// treats that as "no thumbnail" (the app falls back to the full image).
+func makeThumbnail(data []byte, contentType string) ([]byte, error) {
+	var (
+		img image.Image
+		err error
+	)
+	switch contentType {
+	case "image/jpeg":
+		img, err = jpeg.Decode(bytes.NewReader(data))
+	case "image/png":
+		img, err = png.Decode(bytes.NewReader(data))
+	default:
+		return nil, fmt.Errorf("thumbnail unsupported for content type %s", contentType)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("decode for thumbnail: %w", err)
+	}
+
+	img = scaleDown(img, thumbMaxDimension, thumbMaxDimension)
+
+	b := img.Bounds()
+	flat := image.NewRGBA(b)
+	draw.Draw(flat, b, image.NewUniform(color.White), image.Point{}, draw.Src)
+	draw.Draw(flat, b, img, b.Min, draw.Over)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, flat, &jpeg.Options{Quality: thumbJPEGQuality}); err != nil {
+		return nil, fmt.Errorf("encode thumbnail: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func extensionForMIME(contentType string) string {
 	switch contentType {
 	case "image/jpeg":
@@ -323,6 +366,11 @@ func (s *ImageService) UploadEventImage(
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Keep the original bytes/type so the thumbnail is generated from the source
+	// rather than the already-recompressed full image.
+	rawData := data
+	origContentType := contentType
+
 	// Compress before uploading.
 	data, contentType, ext, err := compressImage(data, contentType)
 	if err != nil {
@@ -330,7 +378,22 @@ func (s *ImageService) UploadEventImage(
 	}
 
 	filename := fmt.Sprintf("events/%s/%s/%s%s", eventID, string(imgType), uuid.New().String(), ext)
-	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
+	fullURL, err := s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return "", err
+	}
+
+	// Best-effort card thumbnail for covers & banners, stored at a deterministic
+	// sibling path ("<key>_thumb.jpg") so the app derives its URL with no DB or
+	// query changes. Failure here never fails the upload.
+	if imgType == ImageTypeCover || imgType == ImageTypeBanner {
+		if thumb, terr := makeThumbnail(rawData, origContentType); terr == nil {
+			thumbKey := strings.TrimSuffix(filename, ext) + "_thumb.jpg"
+			_, _ = s.uploadToR2(thumbKey, "image/jpeg", bytes.NewReader(thumb), int64(len(thumb)))
+		}
+	}
+
+	return fullURL, nil
 }
 
 // ── Collection cover upload ───────────────────────────────────────────────────

@@ -50,26 +50,46 @@ func HomeSectionsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			city = &cityStr
 		}
 
-		// Only cache fully anonymous, location-free requests
 		isPersonalized := userID != nil || city != nil
 
-		if !isPersonalized && ec != nil {
-			if result, ok := ec.GetHome(ctx); ok {
-				c.JSON(http.StatusOK, result)
+		// The shared sections (trending, happening soon, this weekend, recently
+		// added, featured) are identical for every visitor, so we cache them
+		// globally and reuse them for signed-in users too. Only the personalised
+		// "For You" / "Near You" sections are computed fresh per request.
+		var shared *repository.HomeSectionsResult
+		if ec != nil {
+			if cached, ok := ec.GetHome(ctx); ok {
+				shared = cached
+			}
+		}
+		if shared == nil {
+			result, err := repository.SharedHomeSections(pool)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load home sections"})
 				return
+			}
+			shared = result
+			if ec != nil {
+				ec.SetHome(ctx, shared)
 			}
 		}
 
-		result, err := repository.GetHomeSections(pool, userID, city)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load home sections"})
+		// Anonymous, location-free request → the cached shared feed is the whole
+		// response.
+		if !isPersonalized {
+			c.JSON(http.StatusOK, shared)
 			return
 		}
 
-		if !isPersonalized && ec != nil {
-			ec.SetHome(ctx, result)
-		}
+		// Personalised request → run only the cheap user-specific sections and
+		// merge them around the cached shared ones (For You first, Near You last).
+		forYou, nearYou := repository.PersonalHomeSections(pool, userID, city)
 
-		c.JSON(http.StatusOK, result)
+		merged := make([]repository.HomeSection, 0, len(forYou)+len(shared.Sections)+len(nearYou))
+		merged = append(merged, forYou...)
+		merged = append(merged, shared.Sections...)
+		merged = append(merged, nearYou...)
+
+		c.JSON(http.StatusOK, repository.HomeSectionsResult{Sections: merged})
 	}
 }
