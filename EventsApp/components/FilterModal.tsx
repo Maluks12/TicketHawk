@@ -34,8 +34,7 @@ const { width: SW } = Dimensions.get('window');
 const CELL = Math.floor((SW - 48) / 7);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-export type DatePreset = 'any' | 'tomorrow' | 'weekend' | 'custom';
+export type DatePreset = 'any' | 'today' | 'tomorrow' | 'weekend' | 'custom';
 
 export interface FilterParams {
   city?: string;
@@ -296,6 +295,56 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const { colors, isDark } = useAppTheme();
 
   const [screen, setScreen] = useState<Screen>('filter');
+  const [screen, setScreen] = useState<'filter' | 'location' | 'calendar'>('filter');
+  const [locQuery, setLocQuery]   = useState('');
+  const [locCities, setLocCities] = useState<{city: string; event_count: number}[]>([]);
+  const [locLoading, setLocLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const PROVINCE_CITIES: Record<string,string[]> = {
+    'Gauteng':       ['Johannesburg','Pretoria','Sandton','Soweto','Midrand','Centurion','Randburg','Roodepoort'],
+    'Western Cape':  ['Cape Town','Stellenbosch','Paarl','George','Knysna','Mossel Bay'],
+    'KwaZulu-Natal': ['Durban','Pietermaritzburg','Richards Bay','Newcastle','Umhlanga'],
+    'Eastern Cape':  ['Port Elizabeth','East London','Mthatha'],
+    'Limpopo':       ['Polokwane','Tzaneen','Phalaborwa'],
+    'Mpumalanga':    ['Nelspruit','Witbank','Secunda'],
+    'North West':    ['Rustenburg','Klerksdorp','Mafikeng'],
+    'Free State':    ['Bloemfontein','Welkom','Sasolburg'],
+    'Northern Cape': ['Kimberley','Upington','Springbok'],
+  };
+
+  async function loadCities(q: string) {
+    setLocLoading(true);
+    try {
+      const url = `${getBaseUrl()}/v1/cities${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      setLocCities(Array.isArray(json.cities) ? json.cities : []);
+    } catch { setLocCities([]); }
+    setLocLoading(false);
+  }
+
+  function handleLocQueryChange(q: string) {
+    setLocQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!q.trim()) { setLocCities([]); return; }
+    debounceRef.current = setTimeout(() => loadCities(q), 280);
+  }
+
+  // Build flat list: provinces when empty, filtered cities+provinces when typing
+  function buildLocRows(q: string) {
+    if (!q) return Object.keys(PROVINCE_CITIES).sort().map(p => ({ type: 'province' as const, label: p }));
+    const ql = q.toLowerCase(); const rows: {type:'province'|'city'; label: string; count?: number}[] = [];
+    for (const [prov, cities] of Object.entries(PROVINCE_CITIES)) {
+      if (prov.toLowerCase().includes(ql)) {
+        rows.push({ type: 'province', label: prov });
+        cities.forEach(c => rows.push({ type: 'city', label: c }));
+      }
+    }
+    const added = new Set(rows.filter(r=>r.type==='city').map(r=>r.label.toLowerCase()));
+    locCities.forEach(c => { if (!added.has(c.city.toLowerCase())) rows.push({ type: 'city', label: c.city, count: Number(c.event_count ?? 0) }); });
+    return rows;
+  }
 
   const [selectedCity,     setSelectedCity]     = useState<string | null>(initialParams?.city     ?? null);
   const [selectedProvince, setSelectedProvince] = useState<string | null>(initialParams?.province ?? null);
@@ -489,18 +538,92 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
         </View>
       </View>
 
-      {/* ── Location ── */}
-      <Text style={[s.sectionTitle, { color: colors.text }]}>Location</Text>
-      <TouchableOpacity onPress={() => setScreen('location')} style={s.locationRow} activeOpacity={0.7}>
-        <View style={[s.locationIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}>
-          <Ionicons name="location-outline" size={20} color={colors.text} />
-        </View>
-        <Text style={[s.locationText, { color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)' },
-          locationIsSet && { color: colors.text, fontWeight: '600' }]}>
-          {locationLabel}
-        </Text>
-        <Text style={[s.chevron, { color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }]}>›</Text>
-      </TouchableOpacity>
+     {/* Location row — opens sub-screen instead of inline input */}
+      <div onClick={() => { setLocQuery(''); setLocCities([]); setScreen('location'); }}
+        style={{ display: 'flex', alignItems: 'center', padding: '14px 0', cursor: 'pointer', borderBottom: `1px solid ${isDark ? '#2a2a2a' : '#eee'}` }}>
+        <div style={{ width: 44, height: 44, borderRadius: 22, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, flexShrink: 0 }}>
+          <span style={{ fontSize: 18 }}>📍</span>
+        </div>
+        <p style={{ margin: 0, flex: 1, fontSize: 17, color: city || province ? colors.text : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'), fontWeight: city || province ? 600 : 400 }}>
+          {city || province || (nearbyMode ? 'Near me' : 'Anywhere')}
+        </p>
+        <span style={{ fontSize: 22, color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)' }}>›</span>
+      </div>
+
+      {/* ══ Location sub-screen ══ */}
+{screen === 'location' && (
+  <div style={{ position: 'fixed', inset: 0, background: isDark ? '#0a0a0a' : '#fff', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
+    {/* Search bar */}
+    <div style={{ padding: '16px 16px 10px', borderBottom: `1px solid ${isDark ? '#222' : '#eee'}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', borderRadius: 14, padding: '10px 14px' }}>
+        <span>🔍</span>
+        <input
+          autoFocus
+          value={locQuery}
+          onChange={e => handleLocQueryChange(e.target.value)}
+          placeholder="Search by city or province…"
+          style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: colors.text }}
+        />
+        {locQuery && <button onClick={() => { setLocQuery(''); setLocCities([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.subText }}>✕</button>}
+      </div>
+    </div>
+
+    {/* Results */}
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      {/* Anywhere row */}
+      <button onClick={() => { setCity(''); setProvince(''); setNearbyMode(false); setScreen('filter'); }}
+        style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '15px 20px', background: 'none', border: 'none', borderBottom: `1px solid ${isDark ? '#1a1a1a' : '#f0f0f0'}`, cursor: 'pointer', textAlign: 'left' }}>
+        <span style={{ marginRight: 12, fontSize: 16 }}>🌍</span>
+        <span style={{ fontSize: 16, color: !city && !province && !nearbyMode ? '#ff3c6e' : colors.text, fontWeight: !city && !province && !nearbyMode ? 700 : 400 }}>Anywhere</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: colors.subText }}>All SA</span>
+      </button>
+
+      {locLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+          <div style={{ width: 20, height: 20, border: '2px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'qr-spin 0.8s linear infinite' }} />
+        </div>
+      ) : (
+        buildLocRows(locQuery).map((row, i) => (
+          <button
+            key={i}
+            onClick={() => {
+              if (row.type === 'province') { setProvince(row.label); setCity(''); setNearbyMode(false); }
+              else { setCity(row.label); setProvince(''); setNearbyMode(false); }
+              setScreen('filter');
+            }}
+            style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '15px 20px', background: 'none', border: 'none', borderBottom: `1px solid ${isDark ? '#1a1a1a' : '#f0f0f0'}`, cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ marginRight: 12, fontSize: 16 }}>{row.type === 'province' ? '🗺' : '📍'}</span>
+            <span style={{ flex: 1, fontSize: 16, color: (city === row.label || province === row.label) ? '#ff3c6e' : colors.text, fontWeight: (city === row.label || province === row.label) ? 700 : 400 }}>
+              {row.label}
+            </span>
+            <span style={{ fontSize: 11, color: colors.subText }}>
+              {row.type === 'province' ? 'Province' : row.count ? `${row.count} events` : ''}
+            </span>
+          </button>
+        ))
+      )}
+    </div>
+
+    {/* Use current location */}
+    <div style={{ borderTop: `1px solid ${isDark ? '#222' : '#eee'}` }}>
+      <button
+        onClick={async () => {
+          if (!navigator.geolocation) return;
+          navigator.geolocation.getCurrentPosition(pos => {
+            setNearbyMode(true); setCity(''); setProvince('');
+            setLat(pos.coords.latitude); setLng(pos.coords.longitude);
+            setScreen('filter');
+          });
+        }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: 18, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 600, color: colors.text }}>
+        📡 Use Current Location
+      </button>
+    </div>
+
+    {/* Cancel */}
+    <button onClick={() => setScreen('filter')} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.subText }}>✕</button>
+  </div>
+)}
 
       <View style={[s.divider, { backgroundColor: colors.dividerColor }]} />
 

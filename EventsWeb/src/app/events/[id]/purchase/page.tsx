@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
+import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtPrice(p: number) {
@@ -41,7 +42,7 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
   const [loading,        setLoading]        = useState(true);
   const [selectedId,     setSelectedId]     = useState<string | null>(null);
   const [quantity,       setQuantity]       = useState(1);
-  const [step,           setStep]           = useState<'select' | 'summary'>('select');
+  const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
   const [adding,         setAdding]         = useState(false);
   const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal' | 'apple_pay'>('card');
   const [paySheetOpen,   setPaySheetOpen]   = useState(false);
@@ -85,6 +86,12 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
   const platformFee  = Math.ceil(totalAmount * 0.05);
   const grandTotal   = totalAmount + platformFee;
+  const venueType = (() => {
+  if (!event) return 'none' as const;
+  const override = (event as any).venue_type as string | undefined;
+  if (override && override !== 'auto') return override as 'stadium' | 'auditorium' | 'none';
+  return detectVenueType(event.category ?? '', event.venue_name);
+})();
 
   const handleAddToCart = async () => {
     if (!selectedType || !event) return;
@@ -139,42 +146,48 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
     </div>
   );
 
-  const steps = ['select', 'summary'] as const;
-  const stepIndex = steps.indexOf(step);
+const steps = venueType !== 'none'
+  ? (['select', 'map', 'summary'] as const)
+  : (['select', 'summary'] as const);
+const stepIndex = (steps as readonly string[]).indexOf(step);
 
-  return (
-    <div style={{ minHeight: '100vh', background: bg }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+return (
+  <div style={{ minHeight: '100vh', background: bg }}>
+    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
-      {/* ── Header ─────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 16px 12px', borderBottom: `1px solid ${border}`, background: bg, position: 'sticky', top: 0, zIndex: 40 }}>
-        <button onClick={() => step === 'summary' ? setStep('select') : router.back()}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.text, padding: 0 }}>←</button>
-        <h1 style={{ flex: 1, margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>
-          {step === 'select' ? 'Select Tickets' : 'Checkout'}
-        </h1>
-        {/* Step dots */}
-        <div style={{ display: 'flex', gap: 5 }}>
-          {steps.map((_, i) => (
-            <div key={i} style={{ width: i === stepIndex ? 18 : 6, height: 6, borderRadius: 3, background: i === stepIndex ? '#ff2d55' : (isDark ? '#444' : '#ccc'), transition: 'width 0.2s' }} />
-          ))}
-        </div>
+    {/* Header */}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 16px 12px', borderBottom: `1px solid ${border}`, background: bg, position: 'sticky', top: 0, zIndex: 40 }}>
+      <button
+        onClick={() => {
+          if (step === 'summary') setStep(venueType !== 'none' ? 'map' : 'select');
+          else if (step === 'map') setStep('select');
+          else router.back();
+        }}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.text, padding: 0 }}>←</button>
+      <h1 style={{ flex: 1, margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>
+        {step === 'select' ? 'Select Tickets' : step === 'map' ? 'Choose Seats' : 'Checkout'}
+      </h1>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {steps.map((_, i) => (
+          <div key={i} style={{ width: i === stepIndex ? 18 : 6, height: 6, borderRadius: 3, background: i === stepIndex ? '#ff2d55' : (isDark ? '#444' : '#ccc'), transition: 'width 0.2s' }} />
+        ))}
       </div>
+    </div>
 
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px 100px' }}>
+    <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px 100px' }}>
 
-        {/* ── Event title strip ──────────────────────────────────────── */}
-        <div style={{ padding: '16px 0 12px', borderBottom: `1px solid ${border}` }}>
-          <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: colors.text }}>{event.title}</p>
-          <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.subText }}>
-            {fmtDate(event.start_time)} · {fmtTime(event.start_time)}
+      {/* Event title strip — unchanged */}
+      <div style={{ padding: '16px 0 12px', borderBottom: `1px solid ${border}` }}>
+        <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: colors.text }}>{event.title}</p>
+        <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.subText }}>
+          {fmtDate(event.start_time)} · {fmtTime(event.start_time)}
+        </p>
+        {event.venue_name && (
+          <p style={{ margin: '2px 0 0', fontSize: 13, color: colors.subText }}>
+            {event.venue_name}{event.city ? `, ${event.city}` : ''}
           </p>
-          {event.venue_name && (
-            <p style={{ margin: '2px 0 0', fontSize: 13, color: colors.subText }}>
-              {event.venue_name}{event.city ? `, ${event.city}` : ''}
-            </p>
-          )}
-        </div>
+        )}
+      </div>
 
         {/* ══ STEP: Select ticket type ══════════════════════════════════ */}
         {step === 'select' && (
@@ -258,6 +271,36 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
             })()}
           </div>
         )}
+
+              {/* ══ STEP: Seating Map ══ */}
+      {step === 'map' && venueType !== 'none' && (
+        <div style={{ paddingTop: 16 }}>
+          <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 8px' }}>CHOOSE YOUR SECTION</p>
+          <p style={{ fontSize: 13, color: colors.subText, margin: '0 0 16px' }}>Tap a section to select your tier</p>
+          <div style={{ marginBottom: 16 }}>
+            <MapLegend ticketTypes={ticketTypes} selectedTypeId={selectedId} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', overflowX: 'auto' }}>
+            <SeatingMap
+              venueType={venueType}
+              ticketTypes={ticketTypes}
+              selectedTypeId={selectedId}
+              onSelectType={setSelectedId}
+            />
+          </div>
+          {selectedType && (
+            <div style={{ marginTop: 16, background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>{selectedType.name.toUpperCase()}</p>
+                <p style={{ margin: '2px 0 0', fontSize: 12, color: colors.subText }}>{quantity} ticket{quantity !== 1 ? 's' : ''} · {selectedType.price === 0 ? 'Free' : `R${Math.round(selectedType.price).toLocaleString('en-ZA')}`} each</p>
+              </div>
+              <p style={{ margin: 0, fontSize: 17, fontWeight: 800, color: colors.text }}>
+                {totalAmount === 0 ? 'Free' : `R${Math.round(totalAmount).toLocaleString('en-ZA')}`}
+              </p>
+            </div>
+          )}
+        </div>
+      )
 
         {/* ══ STEP: Checkout summary ════════════════════════════════════ */}
         {step === 'summary' && selectedType && (
@@ -343,22 +386,33 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
         )}
       </div>
 
-      {/* ── Sticky CTA bar ──────────────────────────────────────────── */}
-      {selectedType && !isSoldOut(selectedType) && (
-        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, maxWidth: 640, margin: '0 auto' }}>
-          <div>
-            <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>Total</p>
-            <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>{fmtPrice(step === 'summary' ? grandTotal : totalAmount)}</p>
-          </div>
-          <button
-            onClick={step === 'select' ? () => setStep('summary') : handleAddToCart}
-            disabled={adding}
-            style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer', opacity: adding ? 0.6 : 1 }}
-          >
-            {adding ? 'Processing…' : step === 'select' ? 'Review Order' : 'Pay Now'}
-          </button>
+       {/* CTA bar */}
+    {selectedType && !isSoldOut(selectedType) && (
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, maxWidth: 640, margin: '0 auto' }}>
+        <div>
+          <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>Total</p>
+          <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>
+            {(step === 'summary' ? grandTotal : totalAmount) === 0 ? 'Free' : `R${Math.round(step === 'summary' ? grandTotal : totalAmount).toLocaleString('en-ZA')}`}
+          </p>
         </div>
-      )}
+        <button
+          onClick={() => {
+            if (step === 'select') {
+              if (!selectedId) { setError('Please choose a ticket type to continue.'); return; }
+              setStep(venueType !== 'none' ? 'map' : 'summary');
+            } else if (step === 'map') {
+              setStep('summary');
+            } else {
+              handleAddToCart();
+            }
+          }}
+          disabled={adding}
+          style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer', opacity: adding ? 0.6 : 1 }}
+        >
+          {adding ? 'Processing…' : step === 'select' ? (venueType !== 'none' ? 'Choose Seats' : 'Review Order') : step === 'map' ? 'Review Order' : 'Pay Now'}
+        </button>
+      </div>
+    )}
 
       {/* ── Guest contact sheet ──────────────────────────────────────── */}
       {contactOpen && (
