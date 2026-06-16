@@ -41,92 +41,47 @@ type HomeSectionsResult struct {
 // (1-indexed). Sponsored ranking weights daily_budget × category affinity,
 // so ads relevant to the user rank higher regardless of raw budget alone.
 func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSectionsResult, error) {
-	type sectionFetcher struct {
-		id    string
-		title string
-		fetch func() ([]models.Event, *utils.Cursor, error)
+	// Composed of the shared (cacheable) sections plus the personalised ones.
+	// Retained for any direct callers; the home handler caches the shared part
+	// separately and merges the personalised sections on top.
+	shared, err := SharedHomeSections(pool)
+	if err != nil {
+		return nil, err
 	}
+	forYou, nearYou := PersonalHomeSections(pool, userID, city)
 
-	fetchers := make([]sectionFetcher, 0, 7)
+	out := make([]HomeSection, 0, len(forYou)+len(shared.Sections)+len(nearYou))
+	out = append(out, forYou...)
+	out = append(out, shared.Sections...)
+	out = append(out, nearYou...)
+	return &HomeSectionsResult{Sections: out}, nil
+}
 
-	if userID != nil {
-		uid := *userID
-		fetchers = append(fetchers, sectionFetcher{
-			id:    "for_you",
-			title: "For You",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				events, err := ForYou(pool, uid, 10)
-				return events, nil, err
-			},
-		})
-	}
+// sectionFetcher pairs a section's identity with the query that fills it.
+type sectionFetcher struct {
+	id    string
+	title string
+	fetch func() ([]models.Event, *utils.Cursor, error)
+}
 
-	fetchers = append(fetchers,
-		sectionFetcher{
-			id:    "trending",
-			title: "Trending Now",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return TrendingNow(pool, 10)
-			},
-		},
-		sectionFetcher{
-			id:    "happening_soon",
-			title: "Happening Soon",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return HappeningSoon(pool, 10, nil)
-			},
-		},
-		sectionFetcher{
-			id:    "this_weekend",
-			title: "This Weekend",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return ThisWeekend(pool, 10, nil)
-			},
-		},
-		sectionFetcher{
-			id:    "recently_added",
-			title: "Recently Added",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return RecentlyAdded(pool, 10, nil)
-			},
-		},
-		sectionFetcher{
-			id:    "featured",
-			title: "Featured Events",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				return FeaturedEvents(pool, 10, nil)
-			},
-		},
-	)
-
-	if city != nil && *city != "" {
-		ct := *city
-		fetchers = append(fetchers, sectionFetcher{
-			id:    "near_you",
-			title: "Near You",
-			fetch: func() ([]models.Event, *utils.Cursor, error) {
-				events, err := NearYou(pool, ct, 10)
-				return events, nil, err
-			},
-		})
+// runSections executes the given section fetchers in parallel, weaves in
+// sponsored cards (fetched once, ranked for sponsoredUserID), drops sections
+// that errored or came back empty, and preserves the input order. Sponsored
+// impressions are recorded once for the cards actually shown.
+func runSections(pool *pgxpool.Pool, fetchers []sectionFetcher, sponsoredUserID *string) []HomeSection {
+	if len(fetchers) == 0 {
+		return nil
 	}
 
 	type result struct {
 		section HomeSection
 		err     error
 	}
-
 	results := make([]result, len(fetchers))
 	var wg sync.WaitGroup
 
-	// ── Pre-fetch sponsored events ONCE ──────────────────────────────────────
-	// GetSponsoredForFeed runs a 4-table JOIN. Previously it was called inside
-	// every goroutine, meaning up to 7 identical queries fired concurrently on
-	// every home load. Fetching once here and sharing the result cuts that to a
-	// single query regardless of how many sections are assembled.
-	sponsored, _ := GetSponsoredForFeed(pool, userID, 2)
-	// (error is non-fatal — if no sponsored events exist the slice is nil and
-	// InjectPreFetched is a no-op)
+	// Pre-fetch sponsored events ONCE and share across all sections.
+	sponsored, _ := GetSponsoredForFeed(pool, sponsoredUserID, 2)
 
 	for i, f := range fetchers {
 		wg.Add(1)
@@ -137,9 +92,7 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSec
 				results[idx] = result{err: err}
 				return
 			}
-			// Weave the pre-fetched sponsored cards in — no extra DB round-trip.
 			events = InjectPreFetched(events, sponsored, 2)
-
 			results[idx] = result{
 				section: HomeSection{
 					ID:         sf.id,
@@ -152,8 +105,6 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSec
 	}
 	wg.Wait()
 
-	// Record impressions once for the sponsored events that were actually shown,
-	// rather than once per section as before.
 	if len(sponsored) > 0 {
 		go RecordImpressions(pool, sponsored)
 	}
@@ -165,8 +116,89 @@ func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSec
 		}
 		out = append(out, r.section)
 	}
+	return out
+}
 
-	return &HomeSectionsResult{Sections: out}, nil
+// SharedHomeSections returns the non-personalised feed sections. These are
+// identical for every visitor, so the handler caches them globally and reuses
+// them for signed-in users too — only the personalised sections are computed
+// fresh per request.
+func SharedHomeSections(pool *pgxpool.Pool) (*HomeSectionsResult, error) {
+	fetchers := []sectionFetcher{
+		{
+			id:    "trending",
+			title: "Trending Now",
+			fetch: func() ([]models.Event, *utils.Cursor, error) { return TrendingNow(pool, 10) },
+		},
+		{
+			id:    "happening_soon",
+			title: "Happening Soon",
+			fetch: func() ([]models.Event, *utils.Cursor, error) { return HappeningSoon(pool, 10, nil) },
+		},
+		{
+			id:    "this_weekend",
+			title: "This Weekend",
+			fetch: func() ([]models.Event, *utils.Cursor, error) { return ThisWeekend(pool, 10, nil) },
+		},
+		{
+			id:    "recently_added",
+			title: "Recently Added",
+			fetch: func() ([]models.Event, *utils.Cursor, error) { return RecentlyAdded(pool, 10, nil) },
+		},
+		{
+			id:    "featured",
+			title: "Featured Events",
+			fetch: func() ([]models.Event, *utils.Cursor, error) { return FeaturedEvents(pool, 10, nil) },
+		},
+	}
+	return &HomeSectionsResult{Sections: runSections(pool, fetchers, nil)}, nil
+}
+
+// PersonalHomeSections returns only the user-specific sections:
+//   - forYou  (0 or 1 section) when userID is set
+//   - nearYou (0 or 1 section) when city is set
+//
+// They are returned separately so the caller can place "For You" first and
+// "Near You" last, around the shared sections. Each is dropped if it comes back
+// empty, matching the shared-section behaviour.
+func PersonalHomeSections(pool *pgxpool.Pool, userID *string, city *string) (forYou, nearYou []HomeSection) {
+	var fetchers []sectionFetcher
+
+	if userID != nil {
+		uid := *userID
+		fetchers = append(fetchers, sectionFetcher{
+			id:    "for_you",
+			title: "For You",
+			fetch: func() ([]models.Event, *utils.Cursor, error) {
+				events, err := ForYou(pool, uid, 10)
+				return events, nil, err
+			},
+		})
+	}
+	if city != nil && *city != "" {
+		ct := *city
+		fetchers = append(fetchers, sectionFetcher{
+			id:    "near_you",
+			title: "Near You",
+			fetch: func() ([]models.Event, *utils.Cursor, error) {
+				events, err := NearYou(pool, ct, 10)
+				return events, nil, err
+			},
+		})
+	}
+	if len(fetchers) == 0 {
+		return nil, nil
+	}
+
+	for _, sec := range runSections(pool, fetchers, userID) {
+		switch sec.ID {
+		case "for_you":
+			forYou = append(forYou, sec)
+		case "near_you":
+			nearYou = append(nearYou, sec)
+		}
+	}
+	return forYou, nearYou
 }
 
 // ── For You ───────────────────────────────────────────────────────────────────

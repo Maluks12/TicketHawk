@@ -120,7 +120,10 @@ func (s *RotatingQRService) VerifyToken(token string) (*RotatingQRPayload, error
 	// ── Check time window ────────────────────────────────────────────────────
 	now := currentWindow()
 	age := now - payload.Window
-	if age < 0 || age > qrWindowTolerance {
+	// age > qrWindowTolerance → token is too old (expired)
+	// age < -qrWindowTolerance → token is too far in the future (severe clock skew or replay)
+	// We allow age == -1 (device clock 1 window ahead of server) to handle normal clock drift.
+	if age > qrWindowTolerance || age < -qrWindowTolerance {
 		// age < 0 means the token is from the future (clock skew / replay from another server)
 		// age > tolerance means it's too old
 		return nil, fmt.Errorf("token expired (window age: %d)", age)

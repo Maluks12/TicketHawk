@@ -10,6 +10,7 @@ import { searchEvents, getSuggestionEvents, type Event } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/search';
 import { useAppTheme } from '../../theme/colors'; // ADD
+import { CoverImage } from '../../components/CoverImage';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ const EventResultRow = ({ item, onPress, colors }: { item: Event; onPress: () =>
   <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 }} onPress={onPress} activeOpacity={0.75}>
     <View style={sheet.resultThumb}>
       {item.cover_image_url
-        ? <Image source={{ uri: item.cover_image_url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+        ? <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} />
         : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.sectionCardBg }]} />
       }
     </View>

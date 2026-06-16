@@ -14,6 +14,8 @@ import {
   type AppStateStatus,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { prefetchImages } from '../../lib/img';
+import { CoverImage } from '../../components/CoverImage';
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -191,16 +193,15 @@ const fmtCardDate = (iso?: string | null) => {
 };
 
 // ─── PERF: React.memo + expo-image (memory-disk cache, blur-up transition) ───
-const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
+const EventCard = memo(({ item, onPress, colors, priority }: { item: Event; onPress: () => void; colors: any; priority?: 'low' | 'normal' | 'high' }) => (
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea} style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
-        <Image
-          source={{ uri: item.cover_image_url }}
+        <CoverImage
+          uri={item.cover_image_url}
           style={sheet.absoluteFill}
           contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={200}
+          priority={priority ?? 'normal'}
           recyclingKey={item.id}
         />
       )}
@@ -227,12 +228,10 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
   <TouchableOpacity className={s.hCard} onPress={onPress}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
-        <Image
-          source={{ uri: item.cover_image_url }}
+        <CoverImage
+          uri={item.cover_image_url}
           style={sheet.absoluteFill}
           contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={200}
           recyclingKey={item.id}
         />
       )}
@@ -324,7 +323,7 @@ const SectionRow = memo(({
         renderItem={({ item, index }) =>
           isTop10
           ? <Top10Card item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
-          : <EventCard item={item} onPress={() => onEventPress(item)} colors={colors} />
+          : <EventCard item={item} onPress={() => onEventPress(item)} colors={colors} priority={index < 3 ? 'high' : 'normal'} />
         }
       />
     </>
@@ -533,6 +532,11 @@ export default function Index() {
       const loaded = sectionsRes.data.sections ?? [];
       setSections(loaded);
       setHomeSections(loaded);
+      // Warm the cache for the first few covers of each section so they render
+      // instantly as the user scrolls instead of downloading on first sight.
+      prefetchImages(
+        loaded.flatMap((sec) => (sec.events ?? []).slice(0, 6)).map((e) => e.cover_image_url),
+      );
       const cats = categoriesRes?.data?.categories ?? [];
       if (cats.length > 0) setDbCategories(cats);
     } catch (err: any) {
@@ -540,28 +544,36 @@ export default function Index() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchSections().finally(() => setLoading(false));
-  }, [fetchSections]);
-
-  // Re-fetch when auth transitions guest → logged-in so "For You" appears
-  // automatically. We track the previous userId in a ref so we only re-fetch
-  // on the null → non-null transition, not on unrelated re-renders.
+  // Single startup fetch: wait until session restore has settled (authReady),
+  // then load the feed once with the correct guest/signed-in state. This avoids
+  // the old "fetch as guest on mount, then re-fetch when auth resolves" double
+  // request.
+  const authReady = useAuthStore((state) => state.authReady);
+  const didInitialFetch = useRef(false);
   const prevAuthUserId = useRef<string | null>(null);
+
   useEffect(() => {
-    if (authUserId !== null && prevAuthUserId.current !== authUserId) {
-      prevAuthUserId.current = authUserId;
-      // Load this user's recently viewed history from persistent storage
+    if (!authReady || didInitialFetch.current) return;
+    didInitialFetch.current = true;
+    prevAuthUserId.current = authUserId;
+    if (authUserId) loadRecentlyViewed(authUserId);
+    fetchSections(filterParams.city).finally(() => setLoading(false));
+  }, [authReady, authUserId, fetchSections, filterParams.city, loadRecentlyViewed]);
+
+  // Later auth changes (logging in or out while the app is open) swap the
+  // personalised sections in or out. The initial load is handled above, so this
+  // only runs on a genuine post-startup transition.
+  useEffect(() => {
+    if (!didInitialFetch.current) return;
+    if (authUserId === prevAuthUserId.current) return;
+    prevAuthUserId.current = authUserId;
+    if (authUserId) {
       loadRecentlyViewed(authUserId);
-      // Don't show the skeleton again — just silently swap in the personalised
-      // sections once auth is ready.
-      fetchSections(filterParams.city);
-    }
-    if (authUserId === null) {
-      prevAuthUserId.current = null;
+    } else {
       clearRecentlyViewed();
     }
-  }, [authUserId, fetchSections, loadRecentlyViewed, clearRecentlyViewed]);
+    fetchSections(filterParams.city);
+  }, [authUserId, fetchSections, filterParams.city, loadRecentlyViewed, clearRecentlyViewed]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -722,6 +734,8 @@ export default function Index() {
                     style={sheet.absoluteFill}
                     contentFit="cover"
                     cachePolicy="memory-disk"
+                    priority="high"
+                    transition={200}
                     recyclingKey={evt!.id}
                   />
                 ) : (
