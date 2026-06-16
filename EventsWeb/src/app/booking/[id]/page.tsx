@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import { api } from '@/lib/api';
+import { RotatingQR } from '@/components/rotatingQR';
 
 interface BookingDetail {
   id: string; booking_number: string; event_id: string; ticket_quantity: number;
@@ -144,52 +145,65 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           </div>
         )}
 
-        {/* QR / Entry passes */}
-        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 12 }}>
-          <p style={{ margin: '0 0 12px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>
-            {booking.ticket_quantity > 1 ? `ENTRY PASSES (${booking.ticket_quantity} tickets)` : 'ENTRY PASS'}
-          </p>
-          {status === 'refunded' ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 20, opacity: 0.5 }}>
-              <span style={{ fontSize: 40 }}>❌</span>
-              <p style={{ margin: 0, fontSize: 13, color: colors.subText }}>This ticket has been refunded</p>
-            </div>
-          ) : hasAssignments ? (
-            assignments.map((slot) => {
-              const isClaimed = slot.status === 'claimed';
-              const isPending = slot.status === 'pending';
-              const isUnassigned = slot.status === 'unassigned';
-              const isInactive = slot.status === 'cancelled' || slot.status === 'revoked';
-              return (
-                <div key={slot.id} style={{ background: isDark ? '#1a1a1a' : '#f9f9f9', borderRadius: 12, padding: 16, marginBottom: 10, opacity: isInactive ? 0.4 : 1 }}>
-                  {booking.ticket_quantity > 1 && <p style={{ margin: '0 0 8px', fontSize: 10, fontWeight: 800, letterSpacing: 1, color: colors.subText }}>TICKET {slot.slot_number} OF {booking.ticket_quantity}{slot.slot_number === 1 ? '  ·  YOURS' : ''}</p>}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 8 }}>
-                    <span style={{ fontSize: 36 }}>{isClaimed ? '✅' : isPending ? '📧' : isInactive ? '❌' : '🎟'}</span>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: colors.text, textAlign: 'center' }}>
-                      {isClaimed ? 'Ticket claimed — present QR at entrance' : isPending ? `Invite sent to ${slot.assignee_email ?? 'recipient'}` : isInactive ? 'Ticket invalidated' : 'Not yet assigned'}
-                    </p>
-                    {slot.assignee_name && <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>{slot.assignee_name}</p>}
-                    <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>#{booking.booking_number}</p>
-                  </div>
-                  {isUnassigned && slot.slot_number !== 1 && status === 'confirmed' && (
-                    <button onClick={() => { setAssignTarget(slot); setAssignName(''); setAssignEmail(''); setAssignErr(''); }} style={{ width: '100%', background: '#fff', color: '#0a0a0a', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 800, cursor: 'pointer', marginTop: 8 }}>📤 Assign ticket</button>
-                  )}
-                  {isPending && status === 'confirmed' && (
-                    <button onClick={async () => { if (!confirm('Revoke this invite?')) return; await api.delete(`/v1/bookings/${id}/assignments/${slot.id}`); await refreshAssignments(); }} style={{ width: '100%', background: 'transparent', color: '#ff4d4d', border: '1px solid #ff4d4d', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>✕ Revoke invite</button>
-                  )}
-                </div>
-              );
-            })
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 20, gap: 8 }}>
-              {booking.qr_code_url ? <img src={booking.qr_code_url} alt="QR Code" style={{ width: 180, height: 180 }} /> : <span style={{ fontSize: 48 }}>⏳</span>}
-              <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>#{booking.booking_number}</p>
-              <p style={{ margin: 0, fontSize: 13, color: colors.subText, textAlign: 'center' }}>
-                {status === 'confirmed' ? (booking.qr_code_url ? 'Present this at the venue entrance' : 'QR code is being generated…') : 'Complete payment to activate your ticket'}
-              </p>
-            </div>
-          )}
+        {/* QR / Entry passes — one card per ticket slot */}
+<div style={{ marginTop: 24 }}>
+  <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: 'rgba(128,128,128,0.6)', margin: '0 0 12px' }}>ENTRY PASSES</p>
+
+  {booking.status === 'refunded' || booking.status === 'cancelled' ? (
+    <div style={{ textAlign: 'center', padding: 24, background: 'rgba(255,255,255,0.03)', borderRadius: 12, opacity: 0.4 }}>
+      <p style={{ margin: 0, fontSize: 13, color: '#888' }}>This ticket has been {booking.status}</p>
+    </div>
+  ) : assignments.length > 0 ? (
+    assignments.map((slot: any) => {
+      const isClaimed  = slot.status === 'claimed';
+      const isPending  = slot.status === 'pending';
+      const isInactive = slot.status === 'inactive' || slot.status === 'revoked';
+      const status     = booking.status;
+      const showQR     = (status === 'confirmed' || status === 'pending') && !isInactive;
+
+      return (
+        <div key={slot.id} style={{ marginBottom: 12, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', opacity: isInactive ? 0.35 : 1 }}>
+          <div style={{ background: 'rgba(255,255,255,0.04)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#aaa' }}>
+              {isPending ? `Invite sent to ${slot.assignee_email ?? 'recipient'}` : isClaimed ? 'Assigned' : isInactive ? 'Invalidated' : 'Unassigned'}
+            </p>
+            <span style={{ fontSize: 10, fontWeight: 800, color: STATUS_COLOR[booking.status] ?? '#888', letterSpacing: 1 }}>
+              #{booking.booking_number}
+            </span>
+          </div>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            {showQR && isClaimed ? (
+              <RotatingQR assignmentId={slot.id} size={200} />
+            ) : (
+              <div style={{ width: 200, height: 200, borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <span style={{ fontSize: 40 }}>{isPending ? '📧' : isInactive ? '🚫' : '⏳'}</span>
+                <p style={{ margin: 0, fontSize: 12, color: '#888', textAlign: 'center', maxWidth: 160 }}>
+                  {isPending ? `Invite sent to ${slot.assignee_email ?? 'recipient'}` : isInactive ? 'Ticket invalidated' : status === 'confirmed' ? 'Ticket not yet claimed' : 'Complete payment to activate'}
+                </p>
+              </div>
+            )}
+            <p style={{ margin: 0, fontSize: 11, color: '#666', textAlign: 'center' }}>
+              {isClaimed ? 'Live QR — present at venue entrance' : isPending ? 'Waiting for recipient to claim' : isInactive ? 'This slot has been invalidated' : status === 'confirmed' ? 'QR will appear once claimed' : 'Complete payment to activate your ticket'}
+            </p>
+          </div>
         </div>
+      );
+    })
+  ) : (
+    /* Fallback for older bookings without per-assignment QR */
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 16 }}>
+      {booking.qr_code_url
+        ? <img src={booking.qr_code_url} alt="QR Code" style={{ width: 200, height: 200, borderRadius: 8 }} />
+        : <span style={{ fontSize: 48 }}>⏳</span>
+      }
+      <p style={{ margin: '8px 0 0', fontSize: 12, color: '#888', textAlign: 'center' }}>
+        {booking.status === 'confirmed'
+          ? (booking.qr_code_url ? 'Present this at the venue entrance' : 'QR code is being generated…')
+          : 'Complete payment to activate your ticket'}
+      </p>
+    </div>
+  )}
+</div>
 
         {/* Event Details */}
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
