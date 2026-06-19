@@ -36,6 +36,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -45,6 +46,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
+	"events-db/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,20 +55,40 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// TestMain registers the app's custom binding validators (strong_password, etc.)
+// with gin's shared validator engine before any test runs — production does this
+// once in main(), and the DTOs the auth handlers bind depend on it.
+func TestMain(m *testing.M) {
+	utils.RegisterCustomValidators()
+	os.Exit(m.Run())
+}
+
 // ─── shared test setup ───────────────────────────────────────────────────────
 
 const authTestDBURL = "postgresql://testuser:testpass@localhost:5433/test_db"
 
+// authTestConfig builds a config for tests. The payment provider fields are
+// Paystack (cards + Apple Pay) and PayPal — Stitch has been removed. The
+// PaystackSecretKey doubles as the webhook HMAC-SHA512 key, so webhook tests
+// can sign payloads against it.
 func authTestConfig() *config.Config {
 	return &config.Config{
-		JWTSecret:           "test-secret-that-is-at-least-32-chars!!",
-		//FrontendURLs:         "http://localhost:3000",
-		SendGridAPIKey:      "SG.test",
-		//StitchClientID:      "test-client",
-		//StitchClientSecret:  "test-secret",
-		//StitchWebhookSecret: "whsec_test",
-		EmailFromAddress:    "noreply@test.com",
-		EmailFromName:       "Test",
+		JWTSecret:        "test-secret-that-is-at-least-32-chars!!",
+		FrontendURLs:     []string{"http://localhost:3000"},
+		SendGridAPIKey:   "SG.test",
+		EmailFromAddress: "noreply@test.com",
+		EmailFromName:    "Test",
+
+		PaystackSecretKey:   "sk_test_paystack_secret_key",
+		PaystackPublicKey:   "pk_test_paystack_public_key",
+		PaystackEnvironment: "test",
+
+		PayPalClientID:     "paypal-client-id",
+		PayPalClientSecret: "paypal-client-secret",
+		PayPalWebhookID:    "paypal-webhook-id",
+		PayPalEnvironment:  "sandbox",
+
+		PaymentCallbackURL: "http://localhost:3000/payments/return",
 	}
 }
 
@@ -92,16 +114,33 @@ func setupAuthTestDB(t *testing.T) *pgxpool.Pool {
 
 func createAuthTestTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
+	ctx := context.Background()
+
+	// Drop-and-recreate (not IF NOT EXISTS) so a stale, thinner users table from
+	// an earlier run can't linger without the columns the repository writes.
+	for _, s := range []string{
+		"DROP TABLE IF EXISTS password_resets CASCADE",
+		"DROP TABLE IF EXISTS refresh_tokens  CASCADE",
+		"DROP TABLE IF EXISTS users           CASCADE",
+	} {
+		pool.Exec(ctx, s)
+	}
+
 	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS users (
-			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			email       VARCHAR(255) UNIQUE NOT NULL,
-			password    TEXT NOT NULL,
-			role        VARCHAR(50) NOT NULL DEFAULT 'user',
-			created_at  TIMESTAMPTZ DEFAULT NOW(),
-			updated_at  TIMESTAMPTZ DEFAULT NOW()
+		// CreateUser inserts first_name, last_name, phone_number; the various
+		// SELECTs read role and created_at — every column must exist here.
+		`CREATE TABLE users (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			email        VARCHAR(255) UNIQUE NOT NULL,
+			password     TEXT NOT NULL,
+			role         VARCHAR(50) NOT NULL DEFAULT 'user',
+			first_name   VARCHAR(100),
+			last_name    VARCHAR(100),
+			phone_number VARCHAR(50),
+			created_at   TIMESTAMPTZ DEFAULT NOW(),
+			updated_at   TIMESTAMPTZ DEFAULT NOW()
 		)`,
-		`CREATE TABLE IF NOT EXISTS password_resets (
+		`CREATE TABLE password_resets (
 			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			token_hash  TEXT NOT NULL,
@@ -109,7 +148,7 @@ func createAuthTestTables(t *testing.T, pool *pgxpool.Pool) {
 			used        BOOLEAN DEFAULT FALSE,
 			created_at  TIMESTAMPTZ DEFAULT NOW()
 		)`,
-		`CREATE TABLE IF NOT EXISTS refresh_tokens (
+		`CREATE TABLE refresh_tokens (
 			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			token_hash  TEXT UNIQUE NOT NULL,
@@ -119,8 +158,8 @@ func createAuthTestTables(t *testing.T, pool *pgxpool.Pool) {
 		)`,
 	}
 	for _, s := range stmts {
-		if _, err := pool.Exec(context.Background(), s); err != nil {
-			t.Logf("table setup warning: %v", err)
+		if _, err := pool.Exec(ctx, s); err != nil {
+			t.Fatalf("auth table setup failed: %v\nSQL: %s", err, s)
 		}
 	}
 }
@@ -134,6 +173,18 @@ func cleanAuthTables(t *testing.T, pool *pgxpool.Pool) {
 
 func randomEmail() string {
 	return fmt.Sprintf("user%d_%d@test.com", rand.Intn(1_000_000), time.Now().UnixNano())
+}
+
+// validRegisterPayload returns a registration body satisfying every required
+// field on RegisterRequest (email, password, first_name, last_name, phone_number).
+func validRegisterPayload(email string) map[string]string {
+	return map[string]string{
+		"email":        email,
+		"password":     "SecurePass1!",
+		"first_name":   "Test",
+		"last_name":    "User",
+		"phone_number": "+27123456789",
+	}
 }
 
 // buildAuthRouter wires up all auth routes (no rate limiting).
@@ -211,10 +262,8 @@ func TestAuthRegister(t *testing.T) {
 	t.Run("success — new user gets 201 with email in response", func(t *testing.T) {
 		cleanAuthTables(t, pool)
 		email := randomEmail()
-		w := doRequest(r, http.MethodPost, "/auth/register", map[string]string{
-			"email": email, "password": "SecurePass1!",
-		})
-		assert.Equal(t, http.StatusCreated, w.Code)
+		w := doRequest(r, http.MethodPost, "/auth/register", validRegisterPayload(email))
+		assert.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 		var resp map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, email, resp["email"])
@@ -224,16 +273,10 @@ func TestAuthRegister(t *testing.T) {
 	t.Run("duplicate email returns 400", func(t *testing.T) {
 		cleanAuthTables(t, pool)
 		email := randomEmail()
-		// First registration
-		w := doRequest(r, http.MethodPost, "/auth/register", map[string]string{
-			"email": email, "password": "SecurePass1!",
-		})
-		require.Equal(t, http.StatusCreated, w.Code)
+		w := doRequest(r, http.MethodPost, "/auth/register", validRegisterPayload(email))
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 
-		// Second registration with same email
-		w = doRequest(r, http.MethodPost, "/auth/register", map[string]string{
-			"email": email, "password": "OtherPass1!",
-		})
+		w = doRequest(r, http.MethodPost, "/auth/register", validRegisterPayload(email))
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		var resp map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -241,23 +284,22 @@ func TestAuthRegister(t *testing.T) {
 	})
 
 	t.Run("missing email returns 400 validation error", func(t *testing.T) {
-		w := doRequest(r, http.MethodPost, "/auth/register", map[string]string{
-			"password": "SecurePass1!",
-		})
+		body := validRegisterPayload(randomEmail())
+		delete(body, "email")
+		w := doRequest(r, http.MethodPost, "/auth/register", body)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("password too short (< 8 chars) returns 400", func(t *testing.T) {
-		w := doRequest(r, http.MethodPost, "/auth/register", map[string]string{
-			"email": randomEmail(), "password": "short",
-		})
+		body := validRegisterPayload(randomEmail())
+		body["password"] = "short"
+		w := doRequest(r, http.MethodPost, "/auth/register", body)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("invalid email format returns 400", func(t *testing.T) {
-		w := doRequest(r, http.MethodPost, "/auth/register", map[string]string{
-			"email": "not-an-email", "password": "SecurePass1!",
-		})
+		body := validRegisterPayload("not-an-email")
+		w := doRequest(r, http.MethodPost, "/auth/register", body)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
@@ -275,7 +317,6 @@ func TestAuthLogin(t *testing.T) {
 	cfg := authTestConfig()
 	r := buildAuthRouter(pool, cfg)
 
-	// Seed a known user once
 	cleanAuthTables(t, pool)
 	const knownEmail = "login_test@test.com"
 	const knownPassword = "LoginPass1234!"
@@ -347,8 +388,7 @@ func TestAuthRefreshToken(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var resp map[string]interface{}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		// Note: handler uses "access_tokens" key (see user_handler.go)
-		assert.NotEmpty(t, resp["access_tokens"])
+		assert.NotEmpty(t, resp["access_token"])
 		assert.NotEmpty(t, resp["refresh_token"], "a new refresh token must be issued")
 	})
 
@@ -357,13 +397,11 @@ func TestAuthRefreshToken(t *testing.T) {
 		_, refreshToken := loginAndGetTokens(t, pool, cfg)
 		r := buildAuthRouter(pool, cfg)
 
-		// First use — succeeds
 		w := doRequest(r, http.MethodPost, "/auth/refresh", map[string]string{
 			"refresh_token": refreshToken,
 		})
 		require.Equal(t, http.StatusOK, w.Code)
 
-		// Second use of same token — must fail
 		w = doRequest(r, http.MethodPost, "/auth/refresh", map[string]string{
 			"refresh_token": refreshToken,
 		})
@@ -465,7 +503,7 @@ func TestAuthPasswordReset(t *testing.T) {
 	t.Run("reset with expired/non-existent token returns 400", func(t *testing.T) {
 		r := buildAuthRouter(pool, cfg)
 		w := doRequest(r, http.MethodPost, "/auth/reset_password", map[string]string{
-			"token":        "550e8400-e29b-41d4-a716-446655440000", // valid UUID format, doesn't exist
+			"token":        "550e8400-e29b-41d4-a716-446655440000",
 			"new_password": "NewSecurePass1!",
 		})
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -488,7 +526,6 @@ func TestAuthMiddleware(t *testing.T) {
 	defer pool.Close()
 	cfg := authTestConfig()
 
-	// A protected test route
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/protected", middleware.AuthMiddleware(cfg), handlers.TestProtectedHandler())
