@@ -38,7 +38,7 @@ export type DatePreset = 'any' | 'today' | 'tomorrow' | 'weekend' | 'custom';
 
 export interface FilterParams {
   city?: string;
-  province?: string;   // province-level filter — maps to ?province= on the backend
+  province?: string;
   lat?: number;
   lng?: number;
   radius_km?: number;
@@ -62,17 +62,10 @@ interface FilterModalProps {
 type Screen = 'filter' | 'location' | 'calendar';
 
 // ─── API URL ──────────────────────────────────────────────────────────────────
-//
-// On a physical device "localhost" = the phone itself, not your dev machine.
-// We fall back to the Expo debugger host (your machine's LAN IP) automatically.
-//
 export function getBaseUrl(): string {
-  // Explicit env var always wins
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
   }
-  // In Expo Go / dev builds, Constants.expoConfig.hostUri is "192.168.x.x:8081"
-  // Strip the port and use 8080 (your Go server)
   const debuggerHost =
     Constants.expoConfig?.hostUri ??
     (Constants as any).manifest?.debuggerHost ??
@@ -97,7 +90,6 @@ async function fetchCities(query: string): Promise<CityResult[]> {
     const res  = await fetch(url);
     if (!res.ok) return [];
     const json = await res.json();
-    // Backend returns { "cities": [...] }
     return Array.isArray(json.cities) ? json.cities : [];
   } catch {
     return [];
@@ -118,17 +110,12 @@ function toISO(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-/** "May 28, 2026" — calendar header */
 function formatDisplay(iso: string): string {
   if (!iso) return 'Select date';
   const [y, m, d] = iso.split('-');
   return `${MONTH_SHORT[parseInt(m) - 1]} ${parseInt(d)}, ${y}`;
 }
 
-/**
- * "Apr 29 – May 15" — home header + Set Dates button label.
- * Exported so index.tsx can use it directly.
- */
 export function formatDateRangeLabel(from: string, to: string): string {
   if (!from || !to) return 'All dates';
   const [, fm, fd] = from.split('-');
@@ -160,7 +147,7 @@ interface CalendarMonthProps {
   from: string; to: string;
   todayStr: string;
   onDayPress: (iso: string) => void;
-  isDark: boolean;  
+  isDark: boolean;
 }
 
 function CalendarMonth({ year, month, from, to, todayStr, onDayPress, isDark }: CalendarMonthProps) {
@@ -226,7 +213,7 @@ function calStyles(isDark: boolean) {
   });
 }
 
-// ─── Province → cities mapping (client-side province search) ─────────────────
+// ─── Province → cities mapping ────────────────────────────────────────────────
 
 const PROVINCE_CITIES: Record<string, string[]> = {
   'Gauteng':           ['Johannesburg', 'Pretoria', 'Sandton', 'Soweto', 'Midrand', 'Centurion', 'Randburg', 'Roodepoort', 'Boksburg', 'Benoni', 'Germiston', 'Krugersdorp'],
@@ -240,20 +227,11 @@ const PROVINCE_CITIES: Record<string, string[]> = {
   'Northern Cape':     ['Kimberley', 'Upington', 'Springbok'],
 };
 
-// A flat row item for the FlatList
 type LocRow =
   | { type: 'province'; key: string; label: string }
   | { type: 'city';     key: string; label: string; eventCount: number };
 
-/**
- * Build the flat list of province headers + city rows.
- *
- * Empty query  → show all 9 provinces so the user can tap directly without
- *                typing. Cities only appear once they start searching.
- * Non-empty    → filter provinces and cities that match the query.
- */
 function buildLocationResults(query: string, backendCities: CityResult[]): LocRow[] {
-  // ── No query: show all provinces ────────────────────────────────────────
   if (!query) {
     return Object.keys(PROVINCE_CITIES)
       .sort()
@@ -267,7 +245,6 @@ function buildLocationResults(query: string, backendCities: CityResult[]): LocRo
   const q    = query.toLowerCase();
   const rows: LocRow[] = [];
 
-  // 1. Province match — show province header + all cities in that province
   for (const [province, cities] of Object.entries(PROVINCE_CITIES)) {
     if (!province.toLowerCase().includes(q)) continue;
     rows.push({ type: 'province', key: `prov-${province}`, label: province });
@@ -276,7 +253,6 @@ function buildLocationResults(query: string, backendCities: CityResult[]): LocRo
     }
   }
 
-  // 2. Direct city matches from backend (deduplicate vs province-expanded cities)
   const alreadyAdded = new Set(rows.filter(r => r.type === 'city').map(r => r.label.toLowerCase()));
   for (const c of backendCities) {
     if (!alreadyAdded.has(c.city.toLowerCase())) {
@@ -294,61 +270,10 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
-  const [screen, setScreen] = useState<Screen>('filter');
-  const [screen, setScreen] = useState<'filter' | 'location' | 'calendar'>('filter');
-  const [locQuery, setLocQuery]   = useState('');
-  const [locCities, setLocCities] = useState<{city: string; event_count: number}[]>([]);
-  const [locLoading, setLocLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const PROVINCE_CITIES: Record<string,string[]> = {
-    'Gauteng':       ['Johannesburg','Pretoria','Sandton','Soweto','Midrand','Centurion','Randburg','Roodepoort'],
-    'Western Cape':  ['Cape Town','Stellenbosch','Paarl','George','Knysna','Mossel Bay'],
-    'KwaZulu-Natal': ['Durban','Pietermaritzburg','Richards Bay','Newcastle','Umhlanga'],
-    'Eastern Cape':  ['Port Elizabeth','East London','Mthatha'],
-    'Limpopo':       ['Polokwane','Tzaneen','Phalaborwa'],
-    'Mpumalanga':    ['Nelspruit','Witbank','Secunda'],
-    'North West':    ['Rustenburg','Klerksdorp','Mafikeng'],
-    'Free State':    ['Bloemfontein','Welkom','Sasolburg'],
-    'Northern Cape': ['Kimberley','Upington','Springbok'],
-  };
-
-  async function loadCities(q: string) {
-    setLocLoading(true);
-    try {
-      const url = `${getBaseUrl()}/v1/cities${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      setLocCities(Array.isArray(json.cities) ? json.cities : []);
-    } catch { setLocCities([]); }
-    setLocLoading(false);
-  }
-
-  function handleLocQueryChange(q: string) {
-    setLocQuery(q);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!q.trim()) { setLocCities([]); return; }
-    debounceRef.current = setTimeout(() => loadCities(q), 280);
-  }
-
-  // Build flat list: provinces when empty, filtered cities+provinces when typing
-  function buildLocRows(q: string) {
-    if (!q) return Object.keys(PROVINCE_CITIES).sort().map(p => ({ type: 'province' as const, label: p }));
-    const ql = q.toLowerCase(); const rows: {type:'province'|'city'; label: string; count?: number}[] = [];
-    for (const [prov, cities] of Object.entries(PROVINCE_CITIES)) {
-      if (prov.toLowerCase().includes(ql)) {
-        rows.push({ type: 'province', label: prov });
-        cities.forEach(c => rows.push({ type: 'city', label: c }));
-      }
-    }
-    const added = new Set(rows.filter(r=>r.type==='city').map(r=>r.label.toLowerCase()));
-    locCities.forEach(c => { if (!added.has(c.city.toLowerCase())) rows.push({ type: 'city', label: c.city, count: Number(c.event_count ?? 0) }); });
-    return rows;
-  }
-
-  const [selectedCity,     setSelectedCity]     = useState<string | null>(initialParams?.city     ?? null);
+  const [screen,           setScreen]           = useState<Screen>('filter');
+  const [selectedCity,     setSelectedCity]     = useState<string | null>(initialParams?.city     ?? null); // ← was missing
   const [selectedProvince, setSelectedProvince] = useState<string | null>(initialParams?.province ?? null);
-  const [nearMeCoords,   setNearMeCoords]   = useState<{ lat: number; lng: number } | undefined>(
+  const [nearMeCoords,     setNearMeCoords]     = useState<{ lat: number; lng: number } | undefined>(
     initialParams?.lat != null ? { lat: initialParams.lat!, lng: initialParams.lng! } : undefined,
   );
   const [previousCities, setPreviousCities] = useState<string[]>(
@@ -359,10 +284,10 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const [dateTo,     setDateTo]     = useState(initialParams?.date_to   ?? '');
 
   // Location screen
-  const [query,       setQuery]       = useState('');
-  const [cities,      setCities]      = useState<CityResult[]>([]);
-  const [cityLoading, setCityLoading] = useState(false);
-  const [locLoading,  setLocLoading]  = useState(false);
+  const [query,           setQuery]           = useState('');
+  const [cities,          setCities]          = useState<CityResult[]>([]);
+  const [cityLoading,     setCityLoading]     = useState(false);
+  const [locLoading,      setLocLoading]      = useState(false);
   const [locInputFocused, setLocInputFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -374,9 +299,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const [calStep, setCalStep] = useState<'from' | 'to'>('from');
   const months = buildMonths(12);
 
-  // Sync modal's internal state from initialParams every time the modal opens.
-  // Without this, useState initialises only once (on mount) so reopening the
-  // modal after a filter change leaves stale values in the fields.
+  // Sync internal state whenever the modal opens
   useEffect(() => {
     if (!visible) {
       setTimeout(() => setScreen('filter'), 300);
@@ -394,9 +317,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
     setDateTo(initialParams?.date_to ?? '');
   }, [visible]);
 
-  // On mount of location screen: clear query so province list is shown fresh.
-  // Don't auto-focus the keyboard — provinces are already visible so the user
-  // can tap directly without typing.
+  // Clear query when location screen mounts
   useEffect(() => {
     if (screen !== 'location') return;
     setQuery('');
@@ -493,23 +414,23 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
   function handleDone() {
     const params: FilterParams = { date: datePreset };
-    if (selectedCity)        params.city     = selectedCity;
-    else if (selectedProvince) params.province = selectedProvince;
-    else if (nearMeCoords)   { params.lat = nearMeCoords.lat; params.lng = nearMeCoords.lng; params.radius_km = 50; }
+    if (selectedCity)          params.city      = selectedCity;
+    else if (selectedProvince) params.province  = selectedProvince;
+    else if (nearMeCoords)     { params.lat = nearMeCoords.lat; params.lng = nearMeCoords.lng; params.radius_km = 50; }
     if (datePreset === 'custom' && dateFrom && dateTo) { params.date_from = dateFrom; params.date_to = dateTo; }
     onApply(params);
   }
 
-  const locationIsSet = !!selectedCity || !!selectedProvince || !!nearMeCoords;
-  const locationLabel = selectedCity ?? selectedProvince ?? (nearMeCoords ? 'Near me' : 'Anywhere');
-  const customBtnLabel =
-    datePreset === 'custom' && dateFrom && dateTo
-      ? formatDateRangeLabel(dateFrom, dateTo)
-      : 'Set dates';
+  const locationIsSet  = !!selectedCity || !!selectedProvince || !!nearMeCoords;
+  const locationLabel  = selectedCity ?? selectedProvince ?? (nearMeCoords ? 'Near me' : 'Anywhere');
+  const customBtnLabel = datePreset === 'custom' && dateFrom && dateTo
+    ? formatDateRangeLabel(dateFrom, dateTo)
+    : 'Set dates';
   const calCanApply = !!calFrom && !!calTo && calFrom <= calTo;
 
   const PILLS: { key: DatePreset; label: string }[] = [
     { key: 'any',      label: 'Any date'  },
+    { key: 'today',    label: 'Today'     },
     { key: 'tomorrow', label: 'Tomorrow'  },
     { key: 'weekend',  label: 'Weekend'   },
   ];
@@ -524,157 +445,84 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
     >
 
       {/* ══════════ FILTER SHEET ══════════ */}
-     {screen === 'filter' && (
-  <View style={s.filterRoot}>
-    <Pressable style={s.backdrop} onPress={onClose} />
-    <View style={[s.sheet, { backgroundColor: colors.background }]}>
-      <View style={[s.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)' }]} />
+      {screen === 'filter' && (
+        <View style={s.filterRoot}>
+          <Pressable style={s.backdrop} onPress={onClose} />
+          <View style={[s.sheet, { backgroundColor: colors.background }]}>
+            <View style={[s.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)' }]} />
 
-      {/* ── Header ── */}
-      <View style={s.filterHeader}>
-        <Text style={[s.filterTitle, { color: colors.text }]}>Filters</Text>
-        <View style={[s.filterPinCircle, { backgroundColor: colors.ctaBg }]}>
-          <Ionicons name="location" size={16} color="#fff" />
+            {/* ── Header ── */}
+            <View style={s.filterHeader}>
+              <Text style={[s.filterTitle, { color: colors.text }]}>Filters</Text>
+              <View style={[s.filterPinCircle, { backgroundColor: colors.ctaBg }]}>
+                <Ionicons name="location" size={16} color="#fff" />
+              </View>
+            </View>
+
+            {/* ── Location row ── */}
+            <TouchableOpacity
+              onPress={() => { setQuery(''); setCities([]); setScreen('location'); }}
+              style={s.locationRow}
+              activeOpacity={0.7}
+            >
+              <View style={[s.locationIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}>
+                <Ionicons name="location" size={18} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(10,10,10,0.5)'} />
+              </View>
+              <Text style={[s.locationText, locationIsSet && s.locationTextSet]}>
+                {locationLabel}
+              </Text>
+              <Text style={s.chevron}>›</Text>
+            </TouchableOpacity>
+
+            <View style={[s.divider, { backgroundColor: colors.dividerColor }]} />
+
+            {/* ── Dates ── */}
+            <View style={s.datesHeader}>
+              <Text style={[s.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Dates</Text>
+              <Ionicons name="calendar-outline" size={22} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'} />
+            </View>
+
+            {/* Date pills: Any | Today | Tomorrow | Weekend */}
+            <View style={s.pillRow}>
+              {PILLS.map(p => (
+                <TouchableOpacity
+                  key={p.key}
+                  style={[s.pill, datePreset === p.key && s.pillActive]}
+                  onPress={() => handleDatePreset(p.key)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[s.pillText, datePreset === p.key && s.pillTextActive]}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Set dates button */}
+            <TouchableOpacity
+              onPress={() => handleDatePreset('custom')}
+              style={[s.setDatesBtn, datePreset === 'custom' && s.setDatesBtnActive]}
+              activeOpacity={0.8}
+            >
+              <Text style={[s.setDatesText, datePreset === 'custom' && s.setDatesTextActive]}>
+                {customBtnLabel}
+              </Text>
+            </TouchableOpacity>
+
+            {/* ── Done ── */}
+            <View style={s.doneRow}>
+              <TouchableOpacity onPress={handleDone} style={[s.doneBtn, { backgroundColor: colors.secondaryBg }]} activeOpacity={0.85}>
+                <Text style={[s.doneBtnText, { color: colors.secondaryText }]}>DONE</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      </View>
-
-     {/* Location row — opens sub-screen instead of inline input */}
-      <div onClick={() => { setLocQuery(''); setLocCities([]); setScreen('location'); }}
-        style={{ display: 'flex', alignItems: 'center', padding: '14px 0', cursor: 'pointer', borderBottom: `1px solid ${isDark ? '#2a2a2a' : '#eee'}` }}>
-        <div style={{ width: 44, height: 44, borderRadius: 22, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, flexShrink: 0 }}>
-          <span style={{ fontSize: 18 }}>📍</span>
-        </div>
-        <p style={{ margin: 0, flex: 1, fontSize: 17, color: city || province ? colors.text : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'), fontWeight: city || province ? 600 : 400 }}>
-          {city || province || (nearbyMode ? 'Near me' : 'Anywhere')}
-        </p>
-        <span style={{ fontSize: 22, color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)' }}>›</span>
-      </div>
-
-      {/* ══ Location sub-screen ══ */}
-{screen === 'location' && (
-  <div style={{ position: 'fixed', inset: 0, background: isDark ? '#0a0a0a' : '#fff', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
-    {/* Search bar */}
-    <div style={{ padding: '16px 16px 10px', borderBottom: `1px solid ${isDark ? '#222' : '#eee'}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', borderRadius: 14, padding: '10px 14px' }}>
-        <span>🔍</span>
-        <input
-          autoFocus
-          value={locQuery}
-          onChange={e => handleLocQueryChange(e.target.value)}
-          placeholder="Search by city or province…"
-          style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: colors.text }}
-        />
-        {locQuery && <button onClick={() => { setLocQuery(''); setLocCities([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.subText }}>✕</button>}
-      </div>
-    </div>
-
-    {/* Results */}
-    <div style={{ flex: 1, overflowY: 'auto' }}>
-      {/* Anywhere row */}
-      <button onClick={() => { setCity(''); setProvince(''); setNearbyMode(false); setScreen('filter'); }}
-        style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '15px 20px', background: 'none', border: 'none', borderBottom: `1px solid ${isDark ? '#1a1a1a' : '#f0f0f0'}`, cursor: 'pointer', textAlign: 'left' }}>
-        <span style={{ marginRight: 12, fontSize: 16 }}>🌍</span>
-        <span style={{ fontSize: 16, color: !city && !province && !nearbyMode ? '#ff3c6e' : colors.text, fontWeight: !city && !province && !nearbyMode ? 700 : 400 }}>Anywhere</span>
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: colors.subText }}>All SA</span>
-      </button>
-
-      {locLoading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-          <div style={{ width: 20, height: 20, border: '2px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'qr-spin 0.8s linear infinite' }} />
-        </div>
-      ) : (
-        buildLocRows(locQuery).map((row, i) => (
-          <button
-            key={i}
-            onClick={() => {
-              if (row.type === 'province') { setProvince(row.label); setCity(''); setNearbyMode(false); }
-              else { setCity(row.label); setProvince(''); setNearbyMode(false); }
-              setScreen('filter');
-            }}
-            style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '15px 20px', background: 'none', border: 'none', borderBottom: `1px solid ${isDark ? '#1a1a1a' : '#f0f0f0'}`, cursor: 'pointer', textAlign: 'left' }}>
-            <span style={{ marginRight: 12, fontSize: 16 }}>{row.type === 'province' ? '🗺' : '📍'}</span>
-            <span style={{ flex: 1, fontSize: 16, color: (city === row.label || province === row.label) ? '#ff3c6e' : colors.text, fontWeight: (city === row.label || province === row.label) ? 700 : 400 }}>
-              {row.label}
-            </span>
-            <span style={{ fontSize: 11, color: colors.subText }}>
-              {row.type === 'province' ? 'Province' : row.count ? `${row.count} events` : ''}
-            </span>
-          </button>
-        ))
       )}
-    </div>
-
-    {/* Use current location */}
-    <div style={{ borderTop: `1px solid ${isDark ? '#222' : '#eee'}` }}>
-      <button
-        onClick={async () => {
-          if (!navigator.geolocation) return;
-          navigator.geolocation.getCurrentPosition(pos => {
-            setNearbyMode(true); setCity(''); setProvince('');
-            setLat(pos.coords.latitude); setLng(pos.coords.longitude);
-            setScreen('filter');
-          });
-        }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: 18, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 600, color: colors.text }}>
-        📡 Use Current Location
-      </button>
-    </div>
-
-    {/* Cancel */}
-    <button onClick={() => setScreen('filter')} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.subText }}>✕</button>
-  </div>
-)}
-
-      <View style={[s.divider, { backgroundColor: colors.dividerColor }]} />
-
-      {/* ── Dates ── */}
-      <View style={s.datesHeader}>
-        <Text style={[s.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Dates</Text>
-        <Ionicons name="calendar-outline" size={22} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'} />
-      </View>
-
-      {/* Segmented toggle: Any date | Pick date */}
-      <View style={[s.segmentTrack, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }]}>
-        <TouchableOpacity
-          style={[s.segmentBtn, datePreset === 'any' && { backgroundColor: colors.ctaBg }]}
-          onPress={() => handleDatePreset('any')}
-          activeOpacity={0.8}
-        >
-          <Text style={[s.segmentText, { color: datePreset === 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
-            Any date
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.segmentBtn, datePreset !== 'any' && { backgroundColor: isDark ? '#2a2a2a' : '#2a2a2a' }]}
-          onPress={() => handleDatePreset('custom')}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="calendar-outline" size={14}
-            color={datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)')}
-            style={{ marginRight: 5 }}
-          />
-          <Text style={[s.segmentText, { color: datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
-            {datePreset === 'custom' && dateFrom && dateTo ? formatDateRangeLabel(dateFrom, dateTo) : 'Pick date'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Done ── */}
-      <View style={s.doneRow}>
-        <TouchableOpacity onPress={handleDone} style={[s.doneBtn, { backgroundColor: colors.secondaryBg }]} activeOpacity={0.85}>
-          <Text style={[s.doneBtnText, { color: colors.secondaryText }]}>DONE</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  </View>
-)}
 
       {/* ══════════ LOCATION SCREEN ══════════ */}
       {screen === 'location' && (
         <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 
-            {/* ── Search bar — matches search tab design ── */}
+            {/* ── Search bar ── */}
             <View style={s.locTopBar}>
               <View style={[s.locSearchBox, locInputFocused && s.locSearchBoxFocused,
                 { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(10,10,10,0.06)' }]}>
@@ -699,7 +547,6 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                   </TouchableOpacity>
                 )}
               </View>
-              {/* Cancel only appears while input is focused */}
               {locInputFocused && (
                 <TouchableOpacity
                   onPress={() => { Keyboard.dismiss(); setLocInputFocused(false); setScreen('filter'); }}
@@ -723,11 +570,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                 contentContainerStyle={s.locListContent}
                 ListHeaderComponent={
                   <>
-                    <TouchableOpacity
-                      onPress={handleClearLocation}
-                      style={s.locRow}
-                      activeOpacity={0.7}
-                    >
+                    <TouchableOpacity onPress={handleClearLocation} style={s.locRow} activeOpacity={0.7}>
                       <View style={s.locRowLeft}>
                         <Ionicons name="earth-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
                         <Text style={[s.locRowText, !locationIsSet && s.locRowTextSelected]}>
@@ -742,11 +585,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                 renderItem={({ item }) => {
                   if (item.type === 'province') {
                     return (
-                      <TouchableOpacity
-                        onPress={() => handleProvinceSelect(item.label)}
-                        style={s.locRow}
-                        activeOpacity={0.7}
-                      >
+                      <TouchableOpacity onPress={() => handleProvinceSelect(item.label)} style={s.locRow} activeOpacity={0.7}>
                         <View style={s.locRowLeft}>
                           <Ionicons name="map-outline" size={18} color={isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)'} style={{ marginRight: 12 }} />
                           <Text style={[s.locRowText, selectedProvince === item.label && s.locRowTextSelected, { color: colors.text }]}>
@@ -798,7 +637,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
       {/* ══════════ CALENDAR SCREEN ══════════ */}
       {screen === 'calendar' && (
-       <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
+        <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
           <View style={s.calHeader}>
             <TouchableOpacity style={[s.calHeaderCol, calStep === 'from' && s.calHeaderColActive]} onPress={() => setCalStep('from')} activeOpacity={0.7}>
               <Text style={s.calHeaderLabel}>FROM</Text>
@@ -847,12 +686,12 @@ const s = StyleSheet.create({
   backdrop:            { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   sheet:               { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 44, shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.14, shadowRadius: 20, elevation: 24 },
   handle:              { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(0,0,0,0.12)', alignSelf: 'center', marginTop: 12, marginBottom: 24 },
-  filterHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 20 },
-  filterTitle:    { fontSize: 18, fontWeight: '700' },
-  filterPinCircle: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  sectionTitle:   { fontSize: 18, fontWeight: '800', paddingHorizontal: 24, marginBottom: 4 },
-  locationRow:    { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 14 },
-  locationIcon:   { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  filterHeader:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 20 },
+  filterTitle:         { fontSize: 18, fontWeight: '700' },
+  filterPinCircle:     { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  sectionTitle:        { fontSize: 18, fontWeight: '800', paddingHorizontal: 24, marginBottom: 4 },
+  locationRow:         { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 14 },
+  locationIcon:        { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
   locationText:        { flex: 1, fontSize: 17, fontWeight: '400', color: 'rgba(10,10,10,0.45)' },
   locationTextSet:     { fontWeight: '600', color: '#0a0a0a' },
   chevron:             { fontSize: 22, color: 'rgba(10,10,10,0.3)' },
@@ -866,15 +705,12 @@ const s = StyleSheet.create({
   setDatesBtnActive:   { borderWidth: 2, borderColor: '#0a0a0a' },
   setDatesText:        { fontSize: 15, fontWeight: '600', color: 'rgba(10,10,10,0.6)' },
   setDatesTextActive:  { fontWeight: '800', color: '#0a0a0a' },
-  datesHeader:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginTop: 8, marginBottom: 14 },
-  segmentTrack:   { flexDirection: 'row', marginHorizontal: 24, borderRadius: 28, padding: 4, marginBottom: 28 },
-  segmentBtn:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 24 },
-  segmentText:    { fontSize: 14, fontWeight: '600' },
-  doneRow:        { paddingHorizontal: 24, marginTop: 28 },
-  doneBtn:        { borderRadius: 16, paddingVertical: 17, alignItems: 'center' },
-  doneBtnText:    { fontWeight: '800', fontSize: 16, letterSpacing: 1 },
+  datesHeader:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginTop: 8, marginBottom: 14 },
+  doneRow:             { paddingHorizontal: 24, marginTop: 28 },
+  doneBtn:             { borderRadius: 16, paddingVertical: 17, alignItems: 'center' },
+  doneBtnText:         { fontWeight: '800', fontSize: 16, letterSpacing: 1 },
   fullScreen:          { flex: 1, backgroundColor: '#fff' },
-  hairline:       { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.25)' },
+  hairline:            { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.25)' },
   locTopBar:           { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, gap: 10 },
   locSearchBox:        { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(10,10,10,0.06)', borderRadius: 14, paddingHorizontal: 14, height: 46, borderWidth: 1.5, borderColor: 'transparent' },
   locSearchBoxFocused: { borderColor: '#ff2d55', backgroundColor: 'transparent' },
@@ -887,16 +723,17 @@ const s = StyleSheet.create({
   locRowText:          { flex: 1, fontSize: 16, fontWeight: '400', color: '#0a0a0a' },
   locRowTextSelected:  { fontWeight: '700', color: '#ff3c6e' },
   locProvinceRowText:  { fontWeight: '600' },
-  locProvinceTag: { fontSize: 11, fontWeight: '700', color: 'rgba(128,128,128,0.6)', letterSpacing: 0.8, textTransform: 'uppercase', marginLeft: 8 },
-  locRowCount:    { fontSize: 12, color: 'rgba(128,128,128,0.6)', marginLeft: 8 },  locDivider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.15)', marginLeft: 46 },
+  locProvinceTag:      { fontSize: 11, fontWeight: '700', color: 'rgba(128,128,128,0.6)', letterSpacing: 0.8, textTransform: 'uppercase', marginLeft: 8 },
+  locRowCount:         { fontSize: 12, color: 'rgba(128,128,128,0.6)', marginLeft: 8 },
+  locDivider:          { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.15)', marginLeft: 46 },
   locEmpty:            { textAlign: 'center', color: 'rgba(10,10,10,0.35)', fontSize: 14, marginTop: 48, lineHeight: 22 },
   currentLocBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 8 },
   currentLocText:      { fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
   calHeader:           { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(128,128,128,0.2)' },
   calHeaderColActive:  { borderBottomWidth: 2, borderBottomColor: '#ff2d55' },
   calHeaderLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: 'rgba(128,128,128,0.6)', marginBottom: 5 },
-  calHeaderDate:       { fontSize: 17, fontWeight: '800' },        // color set inline
-  calHeaderDateEmpty:  { fontWeight: '400' }, 
+  calHeaderDate:       { fontSize: 17, fontWeight: '800' },
+  calHeaderDateEmpty:  { fontWeight: '400' },
   calHeaderDivider:    { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.15)', marginVertical: 14 },
   calHeaderCol:        { flex: 1, paddingVertical: 16, paddingHorizontal: 24 },
   calDowRow:           { flexDirection: 'row', paddingHorizontal: 24, paddingTop: 14, paddingBottom: 8 },
