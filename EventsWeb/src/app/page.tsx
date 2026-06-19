@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   getHomeSections, loadMoreSectionEvents, getCategories, getCart, getCachedSessionId,
   type Event, type HomeSection,
@@ -88,20 +88,21 @@ function CartHeaderButton() {
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 function SkeletonCard() {
+  // ── CHANGE A: Skeleton matches new bigger card size ───────────────────────
   return (
-    <div className="w-[200px] shrink-0 animate-pulse">
-      <div className="w-full h-[130px] rounded-[14px] bg-white/10 mb-2" />
+    <div className="w-[260px] shrink-0 animate-pulse">
+      <div className="w-full h-[170px] rounded-[16px] bg-white/10 mb-2" />
       <div className="h-2 w-20 rounded bg-white/10 mb-1.5" />
-      <div className="h-3 w-36 rounded bg-white/10 mb-1.5" />
-      <div className="h-2 w-24 rounded bg-white/10" />
+      <div className="h-3 w-44 rounded bg-white/10 mb-1.5" />
+      <div className="h-2 w-28 rounded bg-white/10" />
     </div>
   );
 }
 function SkeletonSection() {
   return (
-    <div className="mt-7 px-5">
-      <div className="h-3 w-36 rounded bg-white/10 mb-4 animate-pulse" />
-      <div className="flex gap-3 overflow-hidden">
+    <div className="mt-8 px-5">
+      <div className="h-3 w-36 rounded bg-white/10 mb-5 animate-pulse" />
+      <div className="flex gap-4 overflow-hidden">
         {[0, 1, 2].map((i) => <SkeletonCard key={i} />)}
       </div>
     </div>
@@ -110,60 +111,111 @@ function SkeletonSection() {
 function SkeletonFeed() {
   return (
     <>
-      <div className="w-full h-[380px] bg-white/6 animate-pulse" />
+      <div className="w-full h-[420px] bg-white/6 animate-pulse" />
       <SkeletonSection /><SkeletonSection /><SkeletonSection />
     </>
   );
 }
 
-// ── Event Card ────────────────────────────────────────────────────────────────
+// ── CHANGE B: Arrow scroll hook — shared by SectionRow + EditorialSection ────
+function useScrollArrows() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft,  setCanScrollLeft]  = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    checkScroll();
+    el.addEventListener('scroll', checkScroll, { passive: true });
+    const ro = new ResizeObserver(checkScroll);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', checkScroll); ro.disconnect(); };
+  }, [checkScroll]);
+
+  const scrollLeft  = () => scrollRef.current?.scrollBy({ left: -540, behavior: 'smooth' });
+  const scrollRight = () => scrollRef.current?.scrollBy({ left:  540, behavior: 'smooth' });
+
+  return { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight };
+}
+
+// ── CHANGE C: Arrow button component ─────────────────────────────────────────
+function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick: () => void; colors: any }) {
+  return (
+    <button
+      onClick={onClick}
+      className="absolute top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-opacity duration-200 hover:opacity-90"
+      style={{
+        [dir === 'left' ? 'left' : 'right']: '8px',
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        border: `1px solid rgba(255,255,255,0.15)`,
+      }}
+      aria-label={dir === 'left' ? 'Scroll left' : 'Scroll right'}
+    >
+      {dir === 'left'
+        ? <ChevronLeft size={20} color="#ffffff" />
+        : <ChevronRight size={20} color="#ffffff" />
+      }
+    </button>
+  );
+}
+
+// ── CHANGE D: EventCard — larger dimensions (200→260 wide, 130→170 tall) ─────
 const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
-  <button onClick={onPress} className="w-[200px] shrink-0 text-left">
-    <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
+  <button onClick={onPress} className="w-[260px] shrink-0 text-left">
+    <div className="relative w-full h-[170px] rounded-[16px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       {(item.category?.toLowerCase().includes('music') || item.category?.toLowerCase().includes('concert')) && (
-       <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 py-1 flex items-center gap-1">
+       <div className="absolute top-3 left-3 bg-black/70 rounded-[6px] px-2.5 py-1 flex items-center gap-1">
           <div className="w-1.5 h-1.5 rounded-full bg-white" />
           <span className="text-white text-[9px] font-extrabold tracking-[1.2px]">LIVE</span>
         </div>
       )}
-      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
-        <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
+      <div className="absolute top-3 right-3 bg-black/60 rounded-[6px] px-2.5 py-1">
+        <span className="text-white text-[10px] font-bold">{formatPrice(item.price)}</span>
       </div>
     </div>
-    <div className="pt-2.5">
-      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-sm font-bold mb-1 leading-[18px] line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+    <div className="pt-3">
+      <p className="text-[10px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-[14px] font-bold leading-[19px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ));
 EventCard.displayName = 'EventCard';
 
+// ── CHANGE E: Top10Card — larger dimensions ───────────────────────────────────
 const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
-  <button onClick={onPress} className="w-[200px] shrink-0 text-left">
-    <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden">
+  <button onClick={onPress} className="w-[260px] shrink-0 text-left">
+    <div className="relative w-full h-[170px] rounded-[16px] overflow-hidden">
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.72), rgba(0,0,0,0.18), transparent)' }} />
-      <span className="absolute top-1.5 left-2.5 text-[52px] font-black text-white leading-none" style={{ textShadow: '0 2px 6px rgba(0,0,0,0.4)', letterSpacing: -2 }}>{rank}</span>
-      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
-        <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
+      <span className="absolute top-1.5 left-3 text-[60px] font-black text-white leading-none" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)', letterSpacing: -2 }}>{rank}</span>
+      <div className="absolute top-3 right-3 bg-black/60 rounded-[6px] px-2.5 py-1">
+        <span className="text-white text-[10px] font-bold">{formatPrice(item.price)}</span>
       </div>
     </div>
-    <div className="pt-2.5">
-      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-sm font-bold mb-1 leading-[18px] line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+    <div className="pt-3">
+      <p className="text-[10px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-[14px] font-bold leading-[19px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ));
 Top10Card.displayName = 'Top10Card';
 
-// ── Section Row ───────────────────────────────────────────────────────────────
+// ── CHANGE F: SectionRow — now has left/right arrows, no visible scrollbar ───
 const SectionRow = memo(({
   section, isTop10 = false, onEventPress, onViewAll, colors,
 }: {
@@ -173,6 +225,7 @@ const SectionRow = memo(({
   const [events,      setEvents]      = useState<Event[]>(section.events ?? []);
   const [nextCursor,  setNextCursor]  = useState(section.next_cursor ?? '');
   const [loadingMore, setLoadingMore] = useState(false);
+  const { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight } = useScrollArrows();
 
   useEffect(() => {
     setEvents(section.events ?? []);
@@ -198,22 +251,27 @@ const SectionRow = memo(({
   if (!events.length) return null;
 
   return (
-    <div className="mt-7">
-      <div className="px-5 mb-4 flex items-center justify-between">
-        <h2 className="text-[22px] font-black tracking-[0.5px]" style={{ color: colors.text }}>{section.title.toUpperCase()}</h2>
+    <div className="mt-8">
+      <div className="px-5 mb-3 flex items-center justify-between">
+        <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{section.title}</h2>
         <button onClick={() => onViewAll(section.id, section.title, events)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
       </div>
-      <div className="flex overflow-x-auto gap-3 px-5 pb-1 scrollbar-hide">
-        {events.map((item, index) =>
-          isTop10
-            ? <Top10Card key={item.id} item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
-            : <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />
-        )}
-        {nextCursor && (
-          <button onClick={handleLoadMore} disabled={loadingMore} className="shrink-0 w-14 flex items-center justify-center text-xs font-bold" style={{ color: colors.subText }}>
-            {loadingMore ? '...' : 'More'}
-          </button>
-        )}
+      {/* Scroll track + arrows */}
+      <div className="relative">
+        {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
+        {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
+        <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-2 scrollbar-hide">
+          {events.map((item, index) =>
+            isTop10
+              ? <Top10Card key={item.id} item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
+              : <EventCard  key={item.id} item={item}                  onPress={() => onEventPress(item)} colors={colors} />
+          )}
+          {nextCursor && (
+            <button onClick={handleLoadMore} disabled={loadingMore} className="shrink-0 w-14 flex items-center justify-center text-xs font-bold" style={{ color: colors.subText }}>
+              {loadingMore ? '...' : 'More'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -248,6 +306,30 @@ export default function HomePage() {
   const [featuredIndex,  setFeaturedIndex]  = useState(0);
   const featuredIndexRef = useRef(0);
 
+  // ── CHANGE G: Filter bar hide-on-scroll state ─────────────────────────────
+  const [filterBarVisible, setFilterBarVisible] = useState(true);
+  const lastScrollY = useRef(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentY = window.scrollY;
+      const delta    = currentY - lastScrollY.current;
+      // Hide when scrolling down more than 60px from top; show when scrolling up
+      if (delta > 6 && currentY > 80) {
+        setFilterBarVisible(false);
+      } else if (delta < -6) {
+        setFilterBarVisible(true);
+      }
+      lastScrollY.current = currentY;
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // ── CHANGE H: Spotlight carousel state ────────────────────────────────────
+  const [spotlightIndex, setSpotlightIndex] = useState(0);
+  const spotlightIndexRef = useRef(0);
+
   const isFiltered = !!(filterParams.city || filterParams.province || filterParams.lat || (filterParams.date && filterParams.date !== 'any'));
 
   const carouselEvents = useMemo<Event[]>(() => {
@@ -257,7 +339,6 @@ export default function HomePage() {
       ? rawFeatured.slice(0, 6)
       : [...rawFeatured, ...trendingPool.filter((e) => !rawFeatured.some((f) => f.id === e.id))].slice(0, 5);
   }, [homeSections]);
-
 
   const allEvents = useMemo(() => {
     const seen = new Set<string>();
@@ -280,9 +361,18 @@ export default function HomePage() {
   const galaEvents         = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('gala') || e.category?.toLowerCase().includes('exclusive')).slice(0, 10), [allEvents]);
   const techEvents         = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('tech')).slice(0, 10), [allEvents]);
   const foodEvents         = useMemo(() => allEvents.filter((e) => e.category?.toLowerCase().includes('food')).slice(0, 10), [allEvents]);
-  const spotlightEvents    = useMemo(() => { const p = allEvents.filter((e) => e.category?.toLowerCase().includes(spotlightConfig.category)).slice(0, 4); if (p.length) return p; for (const cfg of SPOTLIGHT_CONFIGS) { if (cfg.category === spotlightConfig.category) continue; const f = allEvents.filter((e) => e.category?.toLowerCase().includes(cfg.category)).slice(0, 4); if (f.length) return f; } return allEvents.slice(0, 4); }, [allEvents, spotlightConfig]);
-  const sportsBannerEvent  = spotlightEvents[0] ?? null;
-  const sportsListEvents   = spotlightEvents.slice(1);
+
+  // ── CHANGE I: Spotlight carousel events (up to 5 for multi-slide) ─────────
+  const spotlightEvents = useMemo(() => {
+    const p = allEvents.filter((e) => e.category?.toLowerCase().includes(spotlightConfig.category)).slice(0, 5);
+    if (p.length) return p;
+    for (const cfg of SPOTLIGHT_CONFIGS) {
+      if (cfg.category === spotlightConfig.category) continue;
+      const f = allEvents.filter((e) => e.category?.toLowerCase().includes(cfg.category)).slice(0, 5);
+      if (f.length) return f;
+    }
+    return allEvents.slice(0, 5);
+  }, [allEvents, spotlightConfig]);
 
   const recentlyViewedEvents = useMemo<Event[]>(() => {
     if (!authUserId || !recentlyViewedIds.length) return [];
@@ -302,7 +392,7 @@ export default function HomePage() {
     return ['All', ...cats.sort((a, b) => a.localeCompare(b))];
   }, [allEvents]);
 
-  // Auto-advance carousel
+  // Auto-advance hero carousel
   useEffect(() => {
     if (carouselEvents.length <= 1) return;
     const t = setInterval(() => {
@@ -312,6 +402,17 @@ export default function HomePage() {
     }, 5000);
     return () => clearInterval(t);
   }, [carouselEvents.length]);
+
+  // ── CHANGE J: Auto-advance spotlight carousel ──────────────────────────────
+  useEffect(() => {
+    if (spotlightEvents.length <= 1) return;
+    const t = setInterval(() => {
+      const next = (spotlightIndexRef.current + 1) % spotlightEvents.length;
+      spotlightIndexRef.current = next;
+      setSpotlightIndex(next);
+    }, 4500);
+    return () => clearInterval(t);
+  }, [spotlightEvents.length]);
 
   useEffect(() => { if (allEvents.length > 0) setAllEventsStore(allEvents); }, [allEvents]);
 
@@ -375,9 +476,9 @@ export default function HomePage() {
   }, [homeSections, fetchSections]);
 
   const handleEventPress = useCallback((event: Event) => {
-  setSelectedEvent(event);
-  router.push(`/events/${event.id}`);
-}, [setSelectedEvent, router]);
+    setSelectedEvent(event);
+    router.push(`/events/${event.id}`);
+  }, [setSelectedEvent, router]);
 
   const handleViewAll = useCallback((sectionId: string, title: string, events: Event[]) => {
     setSectionMeta({ title, sectionId, events });
@@ -398,94 +499,159 @@ export default function HomePage() {
       ? formatDateRangeLabel(filterParams.date_from, filterParams.date_to)
       : 'All dates';
 
+  // ── CHANGE K: EditorialSection now has arrow scroll ───────────────────────
   function EditorialSection({ title, events, filterKey, colors, onViewAll, onEventPress }: {
-  title: string; events: Event[]; filterKey: string; colors: any;
-  onViewAll: (filterKey: string, title: string) => void;
-  onEventPress: (event: Event) => void;
-}) {
-  if (!events.length) return null;
-  return (
-    <div className="mt-7">
-      <div className="px-5 mb-4 flex items-center justify-between">
-        <h2 className="text-[22px] font-black tracking-[0.5px]" style={{ color: colors.text }}>{title}</h2>
-        <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
+    title: string; events: Event[]; filterKey: string; colors: any;
+    onViewAll: (filterKey: string, title: string) => void;
+    onEventPress: (event: Event) => void;
+  }) {
+    const { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight } = useScrollArrows();
+    if (!events.length) return null;
+    return (
+      <div className="mt-8">
+        <div className="px-5 mb-3 flex items-center justify-between">
+          <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{title}</h2>
+          <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
+        </div>
+        <div className="relative">
+          {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
+          {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
+          <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-2 scrollbar-hide">
+            {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
+          </div>
+        </div>
       </div>
-      <div className="flex overflow-x-auto gap-3 px-5 pb-1 scrollbar-hide">
-        {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
-      </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }}>
 
-      {/* Location + filter bar */}
-      <div className="sticky top-16 z-40 flex items-center justify-between px-5 py-4" style={{ backgroundColor: colors.headerBg, borderBottom: `1px solid ${colors.dividerColor}` }}>
-        <button onClick={() => setFilterOpen(true)} className="text-left">
-          <p className="text-[22px] font-extrabold tracking-[0.3px]" style={{ color: colors.text }}>{locationLabel}</p>
-          <p className="text-[13px] font-extrabold" style={{ color: colors.subText }}>{dateLabelText}</p>
-        </button>
-        <CartHeaderButton />
+      {/* Filter bar — collapses via max-height so no ghost gap remains */}
+      <div
+        className="sticky top-16 z-40 overflow-hidden transition-all duration-300 ease-in-out"
+        style={{
+          maxHeight: filterBarVisible ? '80px' : '0px',
+          backgroundColor: colors.headerBg,
+          borderBottom: filterBarVisible ? `1px solid ${colors.dividerColor}` : 'none',
+        }}
+      >
+        <div className="flex items-center justify-between px-5 py-[15px]">
+          <button onClick={() => setFilterOpen(true)} className="text-left">
+            <p className="text-[20px] font-extrabold leading-tight" style={{ color: colors.text }}>{locationLabel}</p>
+            <p className="text-[12px] font-medium mt-0.5" style={{ color: colors.subText }}>{dateLabelText}</p>
+          </button>
+          <CartHeaderButton />
+        </div>
       </div>
 
       {/* Hero carousel */}
-      <div className="relative mt-4 mx-4 h-[380px] rounded-[14px] overflow-hidden">
+      <div className="relative mt-4 mx-4 h-[420px] rounded-[18px] overflow-hidden">
         {carouselEvents.length === 0 ? (
-          <div className="absolute inset-0 bg-gray-200" />
+          <div className="absolute inset-0 rounded-[18px] bg-white/10 animate-pulse" />
         ) : (
           <>
             {carouselEvents.map((evt, idx) => (
               <div
                 key={evt.id}
-                className="absolute inset-0 w-full h-full text-left transition-opacity duration-500"
+                className="absolute inset-0 w-full h-full transition-opacity duration-500"
                 style={{ opacity: idx === featuredIndex ? 1 : 0, pointerEvents: idx === featuredIndex ? 'auto' : 'none' }}
               >
+                {/* Background image */}
                 {(evt.banner_image_url ?? evt.cover_image_url) && (
-                  <img src={evt.banner_image_url ?? evt.cover_image_url!} alt={evt.title} className="absolute inset-0 w-full h-full object-cover" />
+                  <img
+                    src={evt.banner_image_url ?? evt.cover_image_url!}
+                    alt={evt.title}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
                 )}
-                {/* Clickable overlay behind the content — not a button, so no nesting issue */}
+                {/* Clickable gradient overlay */}
                 <div
                   className="absolute inset-0 cursor-pointer"
                   onClick={() => handleEventPress(evt)}
-                  style={{ background: 'linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.85) 30%, transparent 70%)' }}
+                  style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.75) 35%, rgba(0,0,0,0.1) 65%, transparent 100%)' }}
                 />
-                <div className="absolute bottom-0 left-0 right-0 p-5 pb-8 pointer-events-none">
-                  <p className="text-[11px] font-bold text-white/70 tracking-[2px] uppercase mb-2.5">✦ {evt.category ?? 'Featured'}</p>
-                  <h1 className="text-[42px] font-black text-white tracking-[2px] leading-[42px] mb-3 line-clamp-2">{evt.title.toUpperCase()}</h1>
-                  <p className="text-[13px] text-white/80 leading-5 mb-5 max-w-[300px] line-clamp-3">{evt.description}</p>
-                  <div className="flex gap-3 pointer-events-auto">
-                    <button onClick={() => handleEventPress(evt)} className="bg-[#FF2D55] px-[22px] py-3 rounded-sm text-white font-extrabold text-[11px] tracking-[1.5px]">🎟 GET TICKETS</button>
-                    <button onClick={() => handleEventPress(evt)} className="bg-[#1c2e61] px-[22px] py-3 rounded-sm text-white font-bold text-[11px] tracking-[1px]">VIEW DETAILS</button>
+                {/* Content — category badge, title, description, then buttons+dots on same row */}
+                <div className="absolute bottom-0 left-0 right-0 px-5 pb-5 pointer-events-none">
+                  {/* Category badge */}
+                  <span
+                    className="inline-flex items-center gap-1.5 mb-3 px-2.5 py-1 rounded-[5px] text-[9px] font-extrabold tracking-[1.8px] uppercase"
+                    style={{ backgroundColor: 'rgba(255,45,85,0.85)', color: '#fff' }}
+                  >
+                    ✦ {evt.category ?? 'Featured'}
+                  </span>
+                  {/* Title — 28px keeps it tight even at 2 lines */}
+                  <h1
+                    className="text-[28px] font-black text-white leading-[32px] mb-2 line-clamp-2"
+                    style={{ letterSpacing: '0.5px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}
+                  >
+                    {evt.title.toUpperCase()}
+                  </h1>
+                  {/* Description — 1 line only to keep it clean */}
+                  <p className="text-[12px] text-white/65 leading-[17px] mb-4 line-clamp-1">
+                    {evt.description}
+                  </p>
+                  {/* Bottom row: buttons left, dots right — no overlap possible */}
+                  <div className="flex items-center justify-between pointer-events-auto">
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        onClick={() => handleEventPress(evt)}
+                        className="flex items-center gap-1.5 bg-white text-black px-5 py-2.5 rounded-md font-extrabold text-[12px]"
+                      >
+                        ▶ GET TICKETS
+                      </button>
+                      <button
+                        onClick={() => handleEventPress(evt)}
+                        className="flex items-center gap-1 px-5 py-2.5 rounded-md font-semibold text-[12px] text-white"
+                        style={{ backgroundColor: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.25)' }}
+                      >
+                        More Info
+                      </button>
+                    </div>
+                    {/* Dots — right-aligned in same row as buttons */}
+                    {carouselEvents.length > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        {carouselEvents.map((_, i) => (
+                          <button
+                            key={i}
+                            onClick={() => { featuredIndexRef.current = i; setFeaturedIndex(i); }}
+                            className="h-1.5 rounded-full transition-all duration-300"
+                            style={{
+                              width: i === featuredIndex ? 18 : 6,
+                              backgroundColor: i === featuredIndex ? '#FF2D55' : 'rgba(255,255,255,0.4)',
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             ))}
-            {carouselEvents.length > 1 && (
-              <div className="absolute bottom-3.5 right-4 flex gap-1.5 z-10">
-                {carouselEvents.map((_, idx) => (
-                  <button key={idx} onClick={() => { featuredIndexRef.current = idx; setFeaturedIndex(idx); }}>
-                    <div className="h-1.5 rounded-full transition-all duration-300" style={{ width: idx === featuredIndex ? 18 : 6, backgroundColor: idx === featuredIndex ? '#FF2D55' : 'rgba(255,255,255,0.4)' }} />
-                  </button>
-                ))}
-              </div>
-            )}
           </>
         )}
       </div>
 
-      {/* Category filter */}
-      <div className="flex items-center px-5 py-3.5 gap-2.5">
+      {/* ── CHANGE M: Category filter tabs — bigger height + bolder style ── */}
+      <div className="flex items-center px-5 pt-5 pb-3 gap-3 overflow-x-auto scrollbar-hide">
         {activeCategory !== 'All' && (
-          <button onClick={() => setActiveCategory('All')} className="w-[34px] h-[34px] rounded-[2px] border flex items-center justify-center text-xs" style={{ borderColor: colors.dividerColor, color: colors.text }}>✕</button>
+          <button
+            onClick={() => setActiveCategory('All')}
+            className="h-[42px] w-[42px] shrink-0 rounded-[10px] border flex items-center justify-center text-sm font-bold"
+            style={{ borderColor: colors.dividerColor, color: colors.text }}
+          >
+            ✕
+          </button>
         )}
         <button
           onClick={() => setDropdownOpen(true)}
-          className="flex items-center px-4 py-2 rounded-[14px] border"
+          className="flex items-center px-5 h-[42px] rounded-[12px] border shrink-0"
           style={{ borderColor: colors.text }}
         >
-          <span className="text-[10px] font-extrabold tracking-[1.2px]" style={{ color: colors.text }}>{activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}</span>
-          <span className="text-[11px] ml-1" style={{ color: colors.text }}> ▾</span>
+          <span className="text-[11px] font-extrabold tracking-[1.2px]" style={{ color: colors.text }}>
+            {activeCategory === 'All' ? 'CATEGORIES' : activeCategory.toUpperCase()}
+          </span>
+          <span className="text-[13px] ml-1.5" style={{ color: colors.text }}> ▾</span>
         </button>
       </div>
 
@@ -516,9 +682,9 @@ export default function HomePage() {
 
       {/* Recently viewed */}
       {authUserId && recentlyViewedEvents.length > 0 && (
-        <div className="mt-7">
+        <div className="mt-8">
           <div className="px-5 mb-4"><h2 className="text-[22px] font-black tracking-[0.5px]" style={{ color: colors.text }}>RECENTLY VIEWED</h2></div>
-          <div className="flex overflow-x-auto gap-3 px-5 pb-1 scrollbar-hide">
+          <div className="flex overflow-x-auto gap-4 px-5 pb-2 scrollbar-hide">
             {recentlyViewedEvents.map((item) => <EventCard key={item.id} item={item} onPress={() => handleEventPress(item)} colors={colors} />)}
           </div>
         </div>
@@ -529,45 +695,72 @@ export default function HomePage() {
         <SectionRow key={section.id} section={section} isTop10={section.id === 'trending'} onEventPress={handleEventPress} onViewAll={handleViewAll} colors={colors} />
       ))}
 
-      {/* Spotlight section */}
-      {!loading && !isFiltered && sportsBannerEvent && (
-        <div className="mt-7">
-          <div className="px-5 mb-4 flex items-center justify-between">
-            <h2 className="text-[22px] font-black tracking-[0.5px]" style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</h2>
+      {/* ── CHANGE N: Spotlight section — now a full carousel ─────────────── */}
+      {!loading && !isFiltered && spotlightEvents.length > 0 && (
+        <div className="mt-8">
+          <div className="px-5 mb-3 flex items-center justify-between">
+            <h2 className="text-[17px] font-black tracking-[0.8px]" style={{ color: spotlightConfig.accentColor }}>
+              {spotlightConfig.title}
+            </h2>
             <button className="text-[10px] font-extrabold tracking-[1.5px]" style={{ color: spotlightConfig.accentColor }}>EXPLORE</button>
           </div>
-          <button onClick={() => handleEventPress(sportsBannerEvent)} className="relative mx-5 rounded-sm overflow-hidden min-h-[200px] w-[calc(100%-40px)] text-left" style={{ backgroundColor: spotlightConfig.bgColor }}>
-            {(sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url) && (
-              <img src={sportsBannerEvent.banner_image_url ?? sportsBannerEvent.cover_image_url!} alt={sportsBannerEvent.title} className="absolute inset-0 w-full h-full object-cover" />
-            )}
-            <div className="absolute inset-0" style={{ background: `linear-gradient(to right, ${spotlightConfig.gradientDark}, ${spotlightConfig.gradientLight})` }} />
-            <div className="absolute bottom-0 left-0 right-0 h-[3px] opacity-85" style={{ backgroundColor: spotlightConfig.accentColor }} />
-            <div className="relative z-10 p-6">
-              <p className="text-[10px] font-extrabold tracking-[2px] uppercase mb-1.5" style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.badge}</p>
-              <p className="text-[28px] font-black text-white tracking-[1px] mb-2">{sportsBannerEvent.title.toUpperCase()}</p>
-              <p className="text-xs text-white/50 mb-4 line-clamp-2">{sportsBannerEvent.description}</p>
-              <div className="border border-white/50 px-[22px] py-3 rounded-sm inline-block">
-                <span className="text-white font-bold text-[11px] tracking-[1px]">VIEW TICKETS</span>
-              </div>
-            </div>
-          </button>
-          {sportsListEvents.length > 0 && (
-            <div className="mt-4 px-5">
-              {sportsListEvents.map((sport) => (
-                <button key={sport.id} onClick={() => handleEventPress(sport)} className="flex items-center gap-3.5 py-3.5 w-full border-b last:border-0" style={{ borderColor: colors.dividerColor }}>
-                  <div className="relative w-32 h-16 rounded-[8px] shrink-0 overflow-hidden bg-gray-200">
-                    {sport.cover_image_url && <img src={sport.cover_image_url} alt={sport.title} className="absolute inset-0 w-full h-full object-cover" />}
+
+          {/* Full-width carousel */}
+          <div className="relative mx-4 rounded-[16px] overflow-hidden" style={{ height: 260 }}>
+            {spotlightEvents.map((evt, idx) => (
+              <button
+                key={evt.id}
+                onClick={() => handleEventPress(evt)}
+                className="absolute inset-0 w-full h-full text-left transition-opacity duration-500"
+                style={{ opacity: idx === spotlightIndex ? 1 : 0, pointerEvents: idx === spotlightIndex ? 'auto' : 'none', backgroundColor: spotlightConfig.bgColor }}
+              >
+                {(evt.banner_image_url ?? evt.cover_image_url) && (
+                  <img src={evt.banner_image_url ?? evt.cover_image_url!} alt={evt.title} className="absolute inset-0 w-full h-full object-cover" />
+                )}
+                <div className="absolute inset-0" style={{ background: `linear-gradient(to right, ${spotlightConfig.gradientDark}, ${spotlightConfig.gradientLight})` }} />
+                <div className="absolute bottom-0 left-0 right-0 h-[3px] opacity-85" style={{ backgroundColor: spotlightConfig.accentColor }} />
+                <div className="relative z-10 p-6">
+                  <p className="text-[10px] font-extrabold tracking-[2px] uppercase mb-1.5" style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.badge}</p>
+                  <p className="text-[28px] font-black text-white tracking-[1px] mb-2 line-clamp-2 leading-8">{evt.title.toUpperCase()}</p>
+                  <p className="text-xs text-white/50 mb-4 line-clamp-2">{evt.description}</p>
+                  <div className="border border-white/50 px-[22px] py-3 rounded-sm inline-block">
+                    <span className="text-white font-bold text-[11px] tracking-[1px]">VIEW TICKETS</span>
                   </div>
-                  <div className="flex-1 text-left">
-                    <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5" style={{ color: colors.subText }}>{sport.category}</p>
-                    <p className="text-sm font-semibold mb-0.5" style={{ color: colors.text }}>{sport.title}</p>
-                    <p className="text-[11px]" style={{ color: colors.subText }}>{sport.city}</p>
-                  </div>
-                  <span className="text-[20px]" style={{ color: spotlightConfig.accentColor }}>›</span>
+                </div>
+              </button>
+            ))}
+
+            {/* Spotlight prev/next arrows */}
+            {spotlightEvents.length > 1 && (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); const p = (spotlightIndexRef.current - 1 + spotlightEvents.length) % spotlightEvents.length; spotlightIndexRef.current = p; setSpotlightIndex(p); }}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)' }}
+                >
+                  <ChevronLeft size={18} color="#ffffff" />
                 </button>
-              ))}
-            </div>
-          )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); const n = (spotlightIndexRef.current + 1) % spotlightEvents.length; spotlightIndexRef.current = n; setSpotlightIndex(n); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)' }}
+                >
+                  <ChevronRight size={18} color="#ffffff" />
+                </button>
+              </>
+            )}
+
+            {/* Spotlight dots */}
+            {spotlightEvents.length > 1 && (
+              <div className="absolute bottom-3 right-4 flex gap-1.5 z-10">
+                {spotlightEvents.map((_, idx) => (
+                  <button key={idx} onClick={(e) => { e.stopPropagation(); spotlightIndexRef.current = idx; setSpotlightIndex(idx); }}>
+                    <div className="h-1.5 rounded-full transition-all duration-300" style={{ width: idx === spotlightIndex ? 16 : 5, backgroundColor: idx === spotlightIndex ? spotlightConfig.accentColor : 'rgba(255,255,255,0.35)' }} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
