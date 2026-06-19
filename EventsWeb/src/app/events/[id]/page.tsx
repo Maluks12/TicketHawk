@@ -252,7 +252,7 @@ export default function EventDetailPage() {
             </div>
           ) : (
             <button
-              onClick={() => router.push(`/event/${event.id}/purchase`)}
+              onClick={() => router.push(`/events/${event.id}/purchase`)}
               className="w-full py-4 rounded-sm text-white font-black text-sm tracking-[1.5px] mb-3"
               style={{ backgroundColor: '#FF2D55' }}
             >

@@ -52,8 +52,17 @@ const NAV_LINKS = [
 export default function NavBar() {
   const router   = useRouter();
   const pathname = usePathname();
-  const { user, logout }    = useAuthStore();
+  const { user, logout, loadUser } = useAuthStore();
   const { colors }          = useAppTheme();
+
+  useEffect(() => {
+    // Validate the stored access token on every page load.
+    // Without this, the web app never restores the session after a refresh —
+    // `user` resets to null in the Zustand store even though a valid token
+    // sits in localStorage, so the UI shows "signed out" until the person
+    // logs in again manually.
+    loadUser();
+  }, [loadUser]);
 
   const handleLogout = async () => {
     await logout();

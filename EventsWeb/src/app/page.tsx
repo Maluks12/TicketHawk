@@ -13,6 +13,7 @@ import FilterModal, {
   type FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl,
 } from '@/components/filterModal';
 import { useAppTheme } from '@/themes/colors';
+import { CoverImage } from '@/components/coverImage';
 
 // ── Spotlight configs ─────────────────────────────────────────────────────────
 const SPOTLIGHT_CONFIGS = [
@@ -120,7 +121,7 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
   <button onClick={onPress} className="w-[200px] shrink-0 text-left">
     <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
-        <img src={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
+        <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       {(item.category?.toLowerCase().includes('music') || item.category?.toLowerCase().includes('concert')) && (
        <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 py-1 flex items-center gap-1">
@@ -145,7 +146,7 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
   <button onClick={onPress} className="w-[200px] shrink-0 text-left">
     <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden">
       {item.cover_image_url && (
-        <img src={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
+        <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.72), rgba(0,0,0,0.18), transparent)' }} />
       <span className="absolute top-1.5 left-2.5 text-[52px] font-black text-white leading-none" style={{ textShadow: '0 2px 6px rgba(0,0,0,0.4)', letterSpacing: -2 }}>{rank}</span>
@@ -374,9 +375,9 @@ export default function HomePage() {
   }, [homeSections, fetchSections]);
 
   const handleEventPress = useCallback((event: Event) => {
-    setSelectedEvent(event);
-    router.push(`/event/${event.id}`);
-  }, [setSelectedEvent, router]);
+  setSelectedEvent(event);
+  router.push(`/events/${event.id}`);
+}, [setSelectedEvent, router]);
 
   const handleViewAll = useCallback((sectionId: string, title: string, events: Event[]) => {
     setSectionMeta({ title, sectionId, events });

@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User, ChevronRight, Heart, Sun, Moon, HelpCircle,
-  FileText, Shield, LogOut, Bell, Lock,
+  FileText, Shield, LogOut, Bell, Lock, LayoutDashboard,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore, type ThemeMode } from '@/store/themeStore';
@@ -189,6 +189,20 @@ export default function ProfilePage() {
                 icon={<Heart size={16} color={colors.iconColor} />}
                 label="Following Events"
                 onClick={() => router.push('/profile/following')}
+              />
+            </Section>
+
+            {/* Link out to the separate Organiser Studio web app — mirrors
+                EventsApp's profile entry into its in-app Studio dashboard. */}
+            <Section title="ORGANISE">
+              <Row
+                icon={<LayoutDashboard size={16} color={colors.iconColor} />}
+                label="Organiser Studio"
+                value="Manage your events"
+                onClick={() => window.open(
+                  process.env.NEXT_PUBLIC_ORGANISER_URL ?? 'https://organiser.example.com',
+                  '_blank',
+                )}
               />
             </Section>
 

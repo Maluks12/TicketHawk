@@ -92,10 +92,10 @@ export default function SearchPage() {
     setActiveSuggestion(null);
   };
 
-  const handleEventPress = (event: Event) => {
-    setSelectedEvent(event);
-    router.push(`/event/${event.id}`);
-  };
+ const handleEventPress = (event: Event) => {
+  setSelectedEvent(event);
+  router.push(`/events/${event.id}`);
+};
 
   return (
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }}>
