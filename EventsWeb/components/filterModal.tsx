@@ -59,7 +59,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
   if (!visible) return null;
 
-   const handleApply = () => {
+  const handleApply = () => {
     onApply({
       city:      nearbyMode ? undefined : (city.trim() || undefined),
       province:  nearbyMode ? undefined : (province.trim() || undefined),
@@ -90,7 +90,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
           <button onClick={onClose} className="text-xl font-bold">✕</button>
         </div>
 
-                {/* ── Nearby toggle ────────────────────────────────────────── */}
+        {/* ── Nearby toggle ────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-bold tracking-widest text-gray-400">NEARBY</p>
@@ -151,7 +151,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
             </div>
           </>
         )}
-        
+
         <div className="space-y-2">
           <label className="text-xs font-bold tracking-widest text-gray-400">DATE</label>
           <div className="flex flex-wrap gap-2">

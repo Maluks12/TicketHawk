@@ -609,14 +609,12 @@ export default function Index() {
       if (!res.ok) throw new Error(`Filter failed: ${res.status}`);
       const data = await res.json();
 
-      if (Array.isArray(data.sections) && data.sections.length > 0) {
-        setSections(data.sections);
-      } else if (Array.isArray(data.data) && data.data.length > 0) {
-        setSections(groupEventsIntoSections(data.data));
-      } else {
-        setSections(homeSections);
-        setError('No events found for that filter. Showing all events.');
-      }
+     if (Array.isArray(data.sections) && data.sections.length > 0) {
+          setSections(data.sections);
+        } else {
+          setSections([]);
+          setError('No events found for that filter.');
+        }
     } catch {
       setSections(homeSections);
     } finally {

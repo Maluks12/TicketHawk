@@ -160,7 +160,7 @@ interface CalendarMonthProps {
   from: string; to: string;
   todayStr: string;
   onDayPress: (iso: string) => void;
-  isDark: boolean;  
+  isDark: boolean;
 }
 
 function CalendarMonth({ year, month, from, to, todayStr, onDayPress, isDark }: CalendarMonthProps) {
@@ -294,57 +294,8 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
+  // FIX: single Screen state declaration (removed duplicate)
   const [screen, setScreen] = useState<Screen>('filter');
-  const [screen, setScreen] = useState<'filter' | 'location' | 'calendar'>('filter');
-  const [locQuery, setLocQuery]   = useState('');
-  const [locCities, setLocCities] = useState<{city: string; event_count: number}[]>([]);
-  const [locLoading, setLocLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const PROVINCE_CITIES: Record<string,string[]> = {
-    'Gauteng':       ['Johannesburg','Pretoria','Sandton','Soweto','Midrand','Centurion','Randburg','Roodepoort'],
-    'Western Cape':  ['Cape Town','Stellenbosch','Paarl','George','Knysna','Mossel Bay'],
-    'KwaZulu-Natal': ['Durban','Pietermaritzburg','Richards Bay','Newcastle','Umhlanga'],
-    'Eastern Cape':  ['Port Elizabeth','East London','Mthatha'],
-    'Limpopo':       ['Polokwane','Tzaneen','Phalaborwa'],
-    'Mpumalanga':    ['Nelspruit','Witbank','Secunda'],
-    'North West':    ['Rustenburg','Klerksdorp','Mafikeng'],
-    'Free State':    ['Bloemfontein','Welkom','Sasolburg'],
-    'Northern Cape': ['Kimberley','Upington','Springbok'],
-  };
-
-  async function loadCities(q: string) {
-    setLocLoading(true);
-    try {
-      const url = `${getBaseUrl()}/v1/cities${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      setLocCities(Array.isArray(json.cities) ? json.cities : []);
-    } catch { setLocCities([]); }
-    setLocLoading(false);
-  }
-
-  function handleLocQueryChange(q: string) {
-    setLocQuery(q);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!q.trim()) { setLocCities([]); return; }
-    debounceRef.current = setTimeout(() => loadCities(q), 280);
-  }
-
-  // Build flat list: provinces when empty, filtered cities+provinces when typing
-  function buildLocRows(q: string) {
-    if (!q) return Object.keys(PROVINCE_CITIES).sort().map(p => ({ type: 'province' as const, label: p }));
-    const ql = q.toLowerCase(); const rows: {type:'province'|'city'; label: string; count?: number}[] = [];
-    for (const [prov, cities] of Object.entries(PROVINCE_CITIES)) {
-      if (prov.toLowerCase().includes(ql)) {
-        rows.push({ type: 'province', label: prov });
-        cities.forEach(c => rows.push({ type: 'city', label: c }));
-      }
-    }
-    const added = new Set(rows.filter(r=>r.type==='city').map(r=>r.label.toLowerCase()));
-    locCities.forEach(c => { if (!added.has(c.city.toLowerCase())) rows.push({ type: 'city', label: c.city, count: Number(c.event_count ?? 0) }); });
-    return rows;
-  }
 
   const [selectedCity,     setSelectedCity]     = useState<string | null>(initialParams?.city     ?? null);
   const [selectedProvince, setSelectedProvince] = useState<string | null>(initialParams?.province ?? null);
@@ -362,6 +313,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
   const [query,       setQuery]       = useState('');
   const [cities,      setCities]      = useState<CityResult[]>([]);
   const [cityLoading, setCityLoading] = useState(false);
+  // FIX: single locLoading declaration (removed duplicate)
   const [locLoading,  setLocLoading]  = useState(false);
   const [locInputFocused, setLocInputFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -524,150 +476,78 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
     >
 
       {/* ══════════ FILTER SHEET ══════════ */}
-     {screen === 'filter' && (
-  <View style={s.filterRoot}>
-    <Pressable style={s.backdrop} onPress={onClose} />
-    <View style={[s.sheet, { backgroundColor: colors.background }]}>
-      <View style={[s.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)' }]} />
+      {screen === 'filter' && (
+        <View style={s.filterRoot}>
+          <Pressable style={s.backdrop} onPress={onClose} />
+          <View style={[s.sheet, { backgroundColor: colors.background }]}>
+            <View style={[s.handle, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.12)' }]} />
 
-      {/* ── Header ── */}
-      <View style={s.filterHeader}>
-        <Text style={[s.filterTitle, { color: colors.text }]}>Filters</Text>
-        <View style={[s.filterPinCircle, { backgroundColor: colors.ctaBg }]}>
-          <Ionicons name="location" size={16} color="#fff" />
+            {/* ── Header ── */}
+            <View style={s.filterHeader}>
+              <Text style={[s.filterTitle, { color: colors.text }]}>Filters</Text>
+              <View style={[s.filterPinCircle, { backgroundColor: colors.ctaBg }]}>
+                <Ionicons name="location" size={16} color="#fff" />
+              </View>
+            </View>
+
+            {/* ── Location row — opens location screen ── */}
+            <TouchableOpacity
+              style={s.locationRow}
+              onPress={() => setScreen('location')}
+              activeOpacity={0.7}
+            >
+              <View style={[s.locationIcon, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }]}>
+                <Ionicons name="location-outline" size={20} color={isDark ? 'rgba(255,255,255,0.6)' : 'rgba(10,10,10,0.5)'} />
+              </View>
+              <Text style={[s.locationText, locationIsSet && s.locationTextSet, { color: locationIsSet ? colors.text : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)') }]}>
+                {locationLabel}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)'} />
+            </TouchableOpacity>
+
+            <View style={[s.divider, { backgroundColor: colors.dividerColor }]} />
+
+            {/* ── Dates ── */}
+            <View style={s.datesHeader}>
+              <Text style={[s.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Dates</Text>
+              <Ionicons name="calendar-outline" size={22} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'} />
+            </View>
+
+            {/* Segmented toggle: Any date | Pick date */}
+            <View style={[s.segmentTrack, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }]}>
+              <TouchableOpacity
+                style={[s.segmentBtn, datePreset === 'any' && { backgroundColor: colors.ctaBg }]}
+                onPress={() => handleDatePreset('any')}
+                activeOpacity={0.8}
+              >
+                <Text style={[s.segmentText, { color: datePreset === 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
+                  Any date
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.segmentBtn, datePreset !== 'any' && { backgroundColor: isDark ? '#2a2a2a' : '#2a2a2a' }]}
+                onPress={() => handleDatePreset('custom')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="calendar-outline" size={14}
+                  color={datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)')}
+                  style={{ marginRight: 5 }}
+                />
+                <Text style={[s.segmentText, { color: datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
+                  {datePreset === 'custom' && dateFrom && dateTo ? formatDateRangeLabel(dateFrom, dateTo) : 'Pick date'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* ── Done ── */}
+            <View style={s.doneRow}>
+              <TouchableOpacity onPress={handleDone} style={[s.doneBtn, { backgroundColor: colors.secondaryBg }]} activeOpacity={0.85}>
+                <Text style={[s.doneBtnText, { color: colors.secondaryText }]}>DONE</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-      </View>
-
-     {/* Location row — opens sub-screen instead of inline input */}
-      <div onClick={() => { setLocQuery(''); setLocCities([]); setScreen('location'); }}
-        style={{ display: 'flex', alignItems: 'center', padding: '14px 0', cursor: 'pointer', borderBottom: `1px solid ${isDark ? '#2a2a2a' : '#eee'}` }}>
-        <div style={{ width: 44, height: 44, borderRadius: 22, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 14, flexShrink: 0 }}>
-          <span style={{ fontSize: 18 }}>📍</span>
-        </div>
-        <p style={{ margin: 0, flex: 1, fontSize: 17, color: city || province ? colors.text : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)'), fontWeight: city || province ? 600 : 400 }}>
-          {city || province || (nearbyMode ? 'Near me' : 'Anywhere')}
-        </p>
-        <span style={{ fontSize: 22, color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)' }}>›</span>
-      </div>
-
-      {/* ══ Location sub-screen ══ */}
-{screen === 'location' && (
-  <div style={{ position: 'fixed', inset: 0, background: isDark ? '#0a0a0a' : '#fff', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
-    {/* Search bar */}
-    <div style={{ padding: '16px 16px 10px', borderBottom: `1px solid ${isDark ? '#222' : '#eee'}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', borderRadius: 14, padding: '10px 14px' }}>
-        <span>🔍</span>
-        <input
-          autoFocus
-          value={locQuery}
-          onChange={e => handleLocQueryChange(e.target.value)}
-          placeholder="Search by city or province…"
-          style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: colors.text }}
-        />
-        {locQuery && <button onClick={() => { setLocQuery(''); setLocCities([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.subText }}>✕</button>}
-      </div>
-    </div>
-
-    {/* Results */}
-    <div style={{ flex: 1, overflowY: 'auto' }}>
-      {/* Anywhere row */}
-      <button onClick={() => { setCity(''); setProvince(''); setNearbyMode(false); setScreen('filter'); }}
-        style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '15px 20px', background: 'none', border: 'none', borderBottom: `1px solid ${isDark ? '#1a1a1a' : '#f0f0f0'}`, cursor: 'pointer', textAlign: 'left' }}>
-        <span style={{ marginRight: 12, fontSize: 16 }}>🌍</span>
-        <span style={{ fontSize: 16, color: !city && !province && !nearbyMode ? '#ff3c6e' : colors.text, fontWeight: !city && !province && !nearbyMode ? 700 : 400 }}>Anywhere</span>
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: colors.subText }}>All SA</span>
-      </button>
-
-      {locLoading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
-          <div style={{ width: 20, height: 20, border: '2px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'qr-spin 0.8s linear infinite' }} />
-        </div>
-      ) : (
-        buildLocRows(locQuery).map((row, i) => (
-          <button
-            key={i}
-            onClick={() => {
-              if (row.type === 'province') { setProvince(row.label); setCity(''); setNearbyMode(false); }
-              else { setCity(row.label); setProvince(''); setNearbyMode(false); }
-              setScreen('filter');
-            }}
-            style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '15px 20px', background: 'none', border: 'none', borderBottom: `1px solid ${isDark ? '#1a1a1a' : '#f0f0f0'}`, cursor: 'pointer', textAlign: 'left' }}>
-            <span style={{ marginRight: 12, fontSize: 16 }}>{row.type === 'province' ? '🗺' : '📍'}</span>
-            <span style={{ flex: 1, fontSize: 16, color: (city === row.label || province === row.label) ? '#ff3c6e' : colors.text, fontWeight: (city === row.label || province === row.label) ? 700 : 400 }}>
-              {row.label}
-            </span>
-            <span style={{ fontSize: 11, color: colors.subText }}>
-              {row.type === 'province' ? 'Province' : row.count ? `${row.count} events` : ''}
-            </span>
-          </button>
-        ))
       )}
-    </div>
-
-    {/* Use current location */}
-    <div style={{ borderTop: `1px solid ${isDark ? '#222' : '#eee'}` }}>
-      <button
-        onClick={async () => {
-          if (!navigator.geolocation) return;
-          navigator.geolocation.getCurrentPosition(pos => {
-            setNearbyMode(true); setCity(''); setProvince('');
-            setLat(pos.coords.latitude); setLng(pos.coords.longitude);
-            setScreen('filter');
-          });
-        }}
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: 18, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 600, color: colors.text }}>
-        📡 Use Current Location
-      </button>
-    </div>
-
-    {/* Cancel */}
-    <button onClick={() => setScreen('filter')} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.subText }}>✕</button>
-  </div>
-)}
-
-      <View style={[s.divider, { backgroundColor: colors.dividerColor }]} />
-
-      {/* ── Dates ── */}
-      <View style={s.datesHeader}>
-        <Text style={[s.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Dates</Text>
-        <Ionicons name="calendar-outline" size={22} color={isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'} />
-      </View>
-
-      {/* Segmented toggle: Any date | Pick date */}
-      <View style={[s.segmentTrack, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }]}>
-        <TouchableOpacity
-          style={[s.segmentBtn, datePreset === 'any' && { backgroundColor: colors.ctaBg }]}
-          onPress={() => handleDatePreset('any')}
-          activeOpacity={0.8}
-        >
-          <Text style={[s.segmentText, { color: datePreset === 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
-            Any date
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.segmentBtn, datePreset !== 'any' && { backgroundColor: isDark ? '#2a2a2a' : '#2a2a2a' }]}
-          onPress={() => handleDatePreset('custom')}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="calendar-outline" size={14}
-            color={datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)')}
-            style={{ marginRight: 5 }}
-          />
-          <Text style={[s.segmentText, { color: datePreset !== 'any' ? '#fff' : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)') }]}>
-            {datePreset === 'custom' && dateFrom && dateTo ? formatDateRangeLabel(dateFrom, dateTo) : 'Pick date'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Done ── */}
-      <View style={s.doneRow}>
-        <TouchableOpacity onPress={handleDone} style={[s.doneBtn, { backgroundColor: colors.secondaryBg }]} activeOpacity={0.85}>
-          <Text style={[s.doneBtnText, { color: colors.secondaryText }]}>DONE</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  </View>
-)}
 
       {/* ══════════ LOCATION SCREEN ══════════ */}
       {screen === 'location' && (
@@ -798,7 +678,7 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
 
       {/* ══════════ CALENDAR SCREEN ══════════ */}
       {screen === 'calendar' && (
-       <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
+        <View style={[s.fullScreen, { paddingTop: insets.top, backgroundColor: colors.background }]}>
           <View style={s.calHeader}>
             <TouchableOpacity style={[s.calHeaderCol, calStep === 'from' && s.calHeaderColActive]} onPress={() => setCalStep('from')} activeOpacity={0.7}>
               <Text style={s.calHeaderLabel}>FROM</Text>
@@ -888,15 +768,16 @@ const s = StyleSheet.create({
   locRowTextSelected:  { fontWeight: '700', color: '#ff3c6e' },
   locProvinceRowText:  { fontWeight: '600' },
   locProvinceTag: { fontSize: 11, fontWeight: '700', color: 'rgba(128,128,128,0.6)', letterSpacing: 0.8, textTransform: 'uppercase', marginLeft: 8 },
-  locRowCount:    { fontSize: 12, color: 'rgba(128,128,128,0.6)', marginLeft: 8 },  locDivider: { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.15)', marginLeft: 46 },
+  locRowCount:    { fontSize: 12, color: 'rgba(128,128,128,0.6)', marginLeft: 8 },
+  locDivider:     { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(128,128,128,0.15)', marginLeft: 46 },
   locEmpty:            { textAlign: 'center', color: 'rgba(10,10,10,0.35)', fontSize: 14, marginTop: 48, lineHeight: 22 },
   currentLocBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, gap: 8 },
   currentLocText:      { fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
   calHeader:           { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(128,128,128,0.2)' },
   calHeaderColActive:  { borderBottomWidth: 2, borderBottomColor: '#ff2d55' },
   calHeaderLabel:      { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, color: 'rgba(128,128,128,0.6)', marginBottom: 5 },
-  calHeaderDate:       { fontSize: 17, fontWeight: '800' },        // color set inline
-  calHeaderDateEmpty:  { fontWeight: '400' }, 
+  calHeaderDate:       { fontSize: 17, fontWeight: '800' },
+  calHeaderDateEmpty:  { fontWeight: '400' },
   calHeaderDivider:    { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(0,0,0,0.15)', marginVertical: 14 },
   calHeaderCol:        { flex: 1, paddingVertical: 16, paddingHorizontal: 24 },
   calDowRow:           { flexDirection: 'row', paddingHorizontal: 24, paddingTop: 14, paddingBottom: 8 },
