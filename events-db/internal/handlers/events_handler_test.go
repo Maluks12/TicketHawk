@@ -341,7 +341,7 @@ func buildEventsRouter(pool *pgxpool.Pool) *gin.Engine {
 		admin.POST("/events", handlers.CreateEventHandler(pool, nil))
 		admin.GET("/events/:id", handlers.GetEventByIDHandler(pool, nil))
 		admin.PUT("/events/:id", handlers.UpdateEventHandler(pool, nil))
-		admin.DELETE("/events/:id", handlers.DeleteEventHandler(pool))
+		admin.DELETE("/events/:id", handlers.DeleteEventHandler(pool, nil))
 	}
 
 	// Organiser routes — publish and cancel

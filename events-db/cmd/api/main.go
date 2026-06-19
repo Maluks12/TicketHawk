@@ -525,7 +525,7 @@ func main() {
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache))
 		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
 		admin.GET("/events/:id",     handlers.AdminGetEventByIDHandler(pool, eventCache))
-		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool))
+		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool,eventCache))
 		admin.GET("/events",         handlers.GetAdminEventsHandler(pool))
 		admin.GET("/stats",          handlers.GetAdminStatsHandler(pool))
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))
