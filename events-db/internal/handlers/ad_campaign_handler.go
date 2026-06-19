@@ -1,13 +1,7 @@
 package handlers
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"io"
 	"net/http"
-	"strconv"
 
 	"events-db/internal/models"
 	"events-db/internal/repository"
@@ -16,99 +10,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ── Payment method ────────────────────────────────────────────────────────────
-
-// RegisterPaymentMethodHandler — legacy endpoint, kept for compat.
-//
-// Flow:
-// New flow: use POST /organiser/ad-accounts/:id/payment-method instead.
-//
-// All future end-of-day billing debits happen automatically — no top-ups ever needed.
-//
-//	POST /organiser/ad-payment-method
-func RegisterPaymentMethodHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		orgID := c.GetString("user_id")
-
-		var dto models.RegisterPaymentMethodDTO
-		if err := c.ShouldBindJSON(&dto); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := repository.RegisterPaymentMethod(pool, orgID, &dto); err != nil {
-			if err == repository.ErrOrganizerNotFound {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Organizer not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register payment method"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Payment method registered successfully",
-			"status":  "active",
-			"note":    "Your campaigns will be billed automatically each morning for the previous day's ad spend. No top-ups required.",
-		})
-	}
-}
-
-// GetPaymentMethodStatusHandler returns whether the organiser has an active payment method.
-//
-//	GET /organiser/ad-payment-method
-func GetPaymentMethodStatusHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		orgID := c.GetString("user_id")
-
-		status, err := repository.GetPaymentMethodStatus(pool, orgID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch payment method status"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":      status,
-			"has_payment_method": status == "active",
-			"billing":     "Automatic daily debit — billed each morning for previous day's actual spend",
-		})
-	}
-}
-
-// GetBillingHistoryHandler returns the organiser's past daily ad bills.
-//
-//	GET /organiser/ad-billing?limit=30
-func GetBillingHistoryHandler(pool *pgxpool.Pool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		orgID := c.GetString("user_id")
-		limit := 30
-		if l := c.Query("limit"); l != "" {
-			if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 90 {
-				limit = n
-			}
-		}
-
-		records, err := repository.GetBillingHistory(pool, orgID, limit)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch billing history"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"billing_history": records,
-			"count":           len(records),
-		})
-	}
-}
-
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
 // CreateCampaignHandler creates a boost campaign for a published event.
 //
-// Post-pay: campaign starts as 'active' immediately — no wallet required.
-// Organiser must have a payment method (card) registered on the ad account first.
+// Pre-paid wallet model: the campaign starts 'active' immediately but only
+// serves while the organiser's ad wallet has a positive balance. No card is
+// stored on the ad account.
 //
 //	POST /organiser/events/:id/campaigns
-//	Body: { "daily_budget": 200, "end_date": "2026-12-31" }
+//	Body: { "ad_account_id": "...", "daily_budget": 200, "end_date": "2026-12-31" }
 func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		orgID := c.GetString("user_id")
@@ -132,21 +43,30 @@ func CreateCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 					"error": "This event already has an active campaign",
 					"note":  "Pause or end the existing campaign before creating a new one",
 				})
-			case repository.ErrNoPaymentMethod:
-				c.JSON(http.StatusPaymentRequired, gin.H{
-					"error": "No payment method on file",
-					"note":  "Add a payment method to your ad account via the Campaigns > Ad Accounts tab",
-				})
 			default:
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			}
 			return
 		}
 
+		// Surface the wallet so the UI can prompt a top-up if the balance is low.
+		wallet, _ := repository.GetOrCreateAdWallet(pool, orgID)
+		balance := 0.0
+		if wallet != nil {
+			balance = wallet.Balance
+		}
+
 		c.JSON(http.StatusCreated, gin.H{
-			"campaign": campaign,
-			"message":  "Campaign is active and serving impressions",
-			"billing":  "You will be billed automatically each morning for yesterday's actual spend",
+			"campaign":       campaign,
+			"message":        "Campaign created.",
+			"wallet_balance": balance,
+			"serving":        balance > 0,
+			"note": func() string {
+				if balance > 0 {
+					return "Campaign is active and serving impressions, funded by your ad wallet."
+				}
+				return "Campaign is active but will not serve until you top up your ad wallet."
+			}(),
 			"pricing": gin.H{
 				"cpm_rate":             campaign.CPMRate,
 				"cost_per_impression":  campaign.CostPerImpression(),
@@ -239,7 +159,7 @@ func EndCampaignHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 // AdminGetCampaignsHandler returns all campaigns across all organisers.
 //
-//	GET /admin/campaigns?status=payment_failed
+//	GET /admin/campaigns?status=active
 func AdminGetCampaignsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		campaigns, err := repository.GetAllCampaigns(pool, c.Query("status"))
@@ -248,73 +168,5 @@ func AdminGetCampaignsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"campaigns": campaigns, "count": len(campaigns)})
-	}
-}
-
-// ── Webhook ───────────────────────────────────────────────────────────────────
-
-// AdBillingWebhookHandler handles payment provider confirmations for end-of-day ad billing debits.
-//
-// Called by the payment provider when the nightly charge completes or fails.
-// On success: billing record marked completed, spend rows flagged billed, payment_failed campaigns resume.
-// On failure: billing record marked failed, active campaigns paused as payment_failed.
-//
-//	POST /webhooks/stitch-ads
-func AdBillingWebhookHandler(pool *pgxpool.Pool, webhookSecret string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Unreadable body"})
-			return
-		}
-
-		// Verify HMAC signature — same pattern as the main StitchWebhookHandler.
-		sig := c.GetHeader("X-Stitch-Signature")
-		mac := hmac.New(sha256.New, []byte(webhookSecret))
-		mac.Write(body)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		if !hmac.Equal([]byte(sig), []byte(expected)) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid signature"})
-			return
-		}
-
-		var payload struct {
-			Data struct {
-				Node struct {
-					ID     string `json:"id"`
-					Status string `json:"status"`
-					Reason string `json:"reason"`
-				} `json:"node"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(body, &payload); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
-			return
-		}
-
-		requestID := payload.Data.Node.ID
-		status := payload.Data.Node.Status
-
-		switch status {
-		case "Completed":
-			if err := repository.ConfirmBilling(pool, requestID); err != nil {
-				// Already processed — return 200 to stop Stitch retrying.
-				c.JSON(http.StatusOK, gin.H{"received": true})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"received": true, "billed": true})
-
-		case "Failed", "Cancelled", "Declined":
-			reason := payload.Data.Node.Reason
-			if reason == "" {
-				reason = status
-			}
-			_ = repository.FailBilling(pool, requestID, reason)
-			c.JSON(http.StatusOK, gin.H{"received": true, "failed": true})
-
-		default:
-			// Unknown/intermediate status — acknowledge to prevent Stitch retrying.
-			c.JSON(http.StatusOK, gin.H{"received": true})
-		}
 	}
 }

@@ -62,9 +62,9 @@ func authTestConfig() *config.Config {
 		JWTSecret:           "test-secret-that-is-at-least-32-chars!!",
 		//FrontendURLs:         "http://localhost:3000",
 		SendGridAPIKey:      "SG.test",
-		StitchClientID:      "test-client",
-		StitchClientSecret:  "test-secret",
-		StitchWebhookSecret: "whsec_test",
+		//StitchClientID:      "test-client",
+		//StitchClientSecret:  "test-secret",
+		//StitchWebhookSecret: "whsec_test",
 		EmailFromAddress:    "noreply@test.com",
 		EmailFromName:       "Test",
 	}

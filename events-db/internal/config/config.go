@@ -35,10 +35,23 @@ type Config struct {
 	EnableEmailVerification bool
 	EnableWaitlist          bool
 
-	StitchClientID      string
-	StitchClientSecret  string
-	StitchWebhookSecret string
-	StitchEnvironment   string
+	// ── Paystack (cards + Apple Pay) ──────────────────────────────────────────
+	// SecretKey authenticates every server-to-server call (Bearer) and is also
+	// the HMAC-SHA512 key Paystack uses to sign webhooks.
+	PaystackSecretKey   string
+	PaystackPublicKey   string
+	PaystackEnvironment string // "test" | "live" (used only for logging/sanity)
+
+	// ── PayPal (Orders v2) ────────────────────────────────────────────────────
+	PayPalClientID     string
+	PayPalClientSecret string
+	PayPalWebhookID    string // configured in the PayPal dashboard; needed to verify webhooks
+	PayPalEnvironment  string // "sandbox" | "live" — selects the api-m base URL
+
+	// PaymentCallbackURL is where the gateway redirects the customer back to
+	// after a hosted payment completes (e.g. https://api.yourdomain.com/payments/return
+	// or a deep link bridge). Both gateways append their reference/token.
+	PaymentCallbackURL string
 
 	// Fix 3: booking expiry window — defaults to 15 minutes
 	BookingExpiryMinutes int
@@ -74,10 +87,16 @@ func Load() (*Config, error) {
 		EnableEmailVerification: os.Getenv("ENABLE_EMAIL_VERIFICATION") == "true",
 		EnableWaitlist:          os.Getenv("ENABLE_WAITLIST") == "true",
 
-		StitchClientID:      os.Getenv("STITCH_CLIENT_ID"),
-		StitchClientSecret:  os.Getenv("STITCH_CLIENT_SECRET"),
-		StitchWebhookSecret: os.Getenv("STITCH_WEBHOOK_SECRET"),
-		StitchEnvironment:   os.Getenv("STITCH_ENVIRONMENT"),
+		PaystackSecretKey:   os.Getenv("PAYSTACK_SECRET_KEY"),
+		PaystackPublicKey:   os.Getenv("PAYSTACK_PUBLIC_KEY"),
+		PaystackEnvironment: os.Getenv("PAYSTACK_ENVIRONMENT"),
+
+		PayPalClientID:     os.Getenv("PAYPAL_CLIENT_ID"),
+		PayPalClientSecret: os.Getenv("PAYPAL_CLIENT_SECRET"),
+		PayPalWebhookID:    os.Getenv("PAYPAL_WEBHOOK_ID"),
+		PayPalEnvironment:  os.Getenv("PAYPAL_ENVIRONMENT"),
+
+		PaymentCallbackURL: os.Getenv("PAYMENT_CALLBACK_URL"),
 	}
 
 	// FIX: validate required fields at startup so the server never silently
@@ -90,8 +109,11 @@ func Load() (*Config, error) {
 	if cfg.Port == "" {
 		cfg.Port = "8080"
 	}
-	if cfg.StitchEnvironment == "" {
-		cfg.StitchEnvironment = "sandbox"
+	if cfg.PaystackEnvironment == "" {
+		cfg.PaystackEnvironment = "test"
+	}
+	if cfg.PayPalEnvironment == "" {
+		cfg.PayPalEnvironment = "sandbox"
 	}
 
 	cfg.BookingExpiryMinutes = 15
@@ -102,6 +124,14 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// PayPalBaseURL returns the api-m host for the configured environment.
+func (c *Config) PayPalBaseURL() string {
+	if strings.EqualFold(c.PayPalEnvironment, "live") {
+		return "https://api-m.paypal.com"
+	}
+	return "https://api-m.sandbox.paypal.com"
 }
 
 func (c *Config) validate() error {
@@ -116,14 +146,28 @@ func (c *Config) validate() error {
 	if len(c.JWTSecret) < 32 {
 		return errors.New("JWT_SECRET must be at least 32 characters")
 	}
-	if c.StitchClientID == "" {
-		missing = append(missing, "STITCH_CLIENT_ID")
+
+	// Paystack — cards + Apple Pay for tickets, merch, listing fees, and wallet top-ups.
+	if c.PaystackSecretKey == "" {
+		missing = append(missing, "PAYSTACK_SECRET_KEY")
 	}
-	if c.StitchClientSecret == "" {
-		missing = append(missing, "STITCH_CLIENT_SECRET")
+	if c.PaystackPublicKey == "" {
+		missing = append(missing, "PAYSTACK_PUBLIC_KEY")
 	}
-	if c.StitchWebhookSecret == "" {
-		missing = append(missing, "STITCH_WEBHOOK_SECRET")
+
+	// PayPal — consumer ticket/merch payments only (not wallet top-ups).
+	if c.PayPalClientID == "" {
+		missing = append(missing, "PAYPAL_CLIENT_ID")
+	}
+	if c.PayPalClientSecret == "" {
+		missing = append(missing, "PAYPAL_CLIENT_SECRET")
+	}
+	if c.PayPalWebhookID == "" {
+		missing = append(missing, "PAYPAL_WEBHOOK_ID")
+	}
+
+	if c.PaymentCallbackURL == "" {
+		missing = append(missing, "PAYMENT_CALLBACK_URL")
 	}
 	if len(c.FrontendURLs) == 0 || c.FrontendURLs[0] == "" {
 		missing = append(missing, "FRONTEND_URLS")

@@ -129,8 +129,8 @@ func main() {
 	rotatingQRService := services.NewRotatingQRService(cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
-	workers.StartAdWorker(pool, paymentService, ctx)
-	log.Info().Msg("ad worker started (post-pay billing, per-account mode)")
+	workers.StartAdWorker(pool, ctx)
+	log.Info().Msg("ad worker started (pre-paid wallet mode)")
 	imgService := services.NewImageService(cfg)
 
 	// ==========================================
@@ -192,7 +192,7 @@ func main() {
 	})
 
 	// ==========================================
-	// Webhook Routes (intentionally not versioned — Stitch calls these)
+	// Webhook Routes (intentionally not versioned — Paystack and PayPal call these)
 	// ==========================================
 	webhooks := router.Group("/webhooks")
 	if rateLimitManager != nil {
@@ -201,8 +201,8 @@ func main() {
 			"webhooks"))
 	}
 	{
-		webhooks.POST("/stitch",     handlers.StitchWebhookHandler(paymentService, cfg.StitchWebhookSecret))
-		webhooks.POST("/stitch-ads", handlers.AdBillingWebhookHandler(pool, cfg.StitchWebhookSecret))
+		webhooks.POST("/paystack", handlers.PaystackWebhookHandler(paymentService))
+		webhooks.POST("/paypal",   handlers.PayPalWebhookHandler(paymentService))
 	}
 
 	// ==========================================
@@ -415,15 +415,13 @@ func main() {
 			paymentRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
 				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
 				"payments"))
-			paymentRoutes.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
+			paymentRoutes.POST("/:id/payment",       handlers.CreatePaymentHandler(pool, paymentService))
 			paymentRoutes.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			paymentRoutes.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
-			bookings.GET("/:id/payment/page", handlers.PaymentPageHandler())
 		} else {
-			bookings.POST("/:id/payment",       handlers.CreateStitchPayment(pool, paymentService))
+			bookings.POST("/:id/payment",       handlers.CreatePaymentHandler(pool, paymentService))
 			bookings.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
 			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
-			bookings.GET("/:id/payment/page",   handlers.PaymentPageHandler())
 		}
 	}
 
@@ -624,8 +622,7 @@ func main() {
 
 		// ── Ad Accounts ───────────────────────────────────────────────────────
 		// Ad account routes get tighter rate limiting than the general organiser
-		// bucket — creating accounts and registering payment methods are
-		// low-frequency, sensitive operations.
+		// bucket — creating and managing ad accounts are low-frequency operations.
 		adAccountRoutes := orgRoutes.Group("")
 		if rateLimitManager != nil {
 			adAccountRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
@@ -637,8 +634,6 @@ func main() {
 			adAccountRoutes.GET("/ad-accounts",                     handlers.GetAdAccountsHandler(pool))
 			adAccountRoutes.GET("/ad-accounts/:id",                 handlers.GetAdAccountHandler(pool))
 			adAccountRoutes.PATCH("/ad-accounts/:id",               handlers.UpdateAdAccountHandler(pool))
-			adAccountRoutes.POST("/ad-accounts/:id/payment-method", handlers.RegisterAdAccountPaymentMethodHandler(pool))
-			adAccountRoutes.GET("/ad-accounts/:id/payment-method",  handlers.GetAdAccountPaymentMethodHandler(pool))
 		}
 
 		// ── Ad Campaigns ──────────────────────────────────────────────────────
@@ -657,12 +652,11 @@ func main() {
 		}
 		orgRoutes.GET("/campaigns",    handlers.GetMyCampaignsHandler(pool))
 		orgRoutes.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
-		orgRoutes.GET("/ad-billing",   handlers.GetBillingHistoryHandler(pool))
 
-		// Backward compat — old organizer-level payment method endpoints.
-		// Remove once events-organizer frontend fully migrates to /ad-accounts/:id/payment-method.
-		orgRoutes.POST("/ad-payment-method", handlers.RegisterPaymentMethodHandler(pool))
-		orgRoutes.GET("/ad-payment-method",  handlers.GetPaymentMethodStatusHandler(pool))
+		// ── Ad Wallet (pre-paid; card top-ups via Paystack) ───────────────────
+		orgRoutes.GET("/ad-wallet",        handlers.GetWalletBalanceHandler(pool))
+		orgRoutes.POST("/ad-wallet/topup", handlers.InitiateWalletTopupHandler(pool, paymentService))
+		orgRoutes.GET("/ad-wallet/topups", handlers.GetWalletTopupHistoryHandler(pool))
 
 		// ── Dashboard ─────────────────────────────────────────────────────────
 		orgRoutes.GET("/dashboard/stats",               handlers.GetOrganizerDashboardStatsHandler(pool))
