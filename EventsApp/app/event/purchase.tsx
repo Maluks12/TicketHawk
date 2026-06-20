@@ -25,6 +25,7 @@ import {
   createBooking,
   type TicketType,
 } from '../../lib/api';
+import { startBookingPayment } from '../../lib/payments';
 import SeatingMap, { detectVenueType, MapLegend } from '../../components/seatingmap';
 import { sheet as ss, PRIMARY } from '../../styles/purchase';
 
@@ -249,14 +250,38 @@ export default function TicketPurchaseScreen() {
         return;
       }
 
+      const bookingId = (booking as any).booking_id;
+
+      // Resolve the gateway checkout URL.
+      //  • Authenticated users: start a payment with the selected method so the
+      //    backend returns a method-specific hosted-checkout URL (card / PayPal /
+      //    Apple Pay).
+      //  • Guests: there is no method-aware start route, so fall back to the
+      //    card authorization_url returned at booking creation.
+      let authorizationUrl: string;
+      let usedMethod: 'card' | 'paypal' | 'apple_pay' = 'card';
+      if (user) {
+        const started = await startBookingPayment(bookingId, paymentMethod);
+        authorizationUrl = started.authorization_url;
+        usedMethod = paymentMethod;
+      } else {
+        authorizationUrl = (booking as any).client_token;
+      }
+
+      if (!authorizationUrl) {
+        Alert.alert('Payment unavailable', 'We couldn’t start the payment. Please try again.');
+        return;
+      }
+
       // Navigate to the payment WebView screen
       router.push({
         pathname: '/payment/[id]',
         params: {
-          id:       (booking as any).booking_id,
-          token:    booking.client_token,
-          amount:   String(booking.total_amount),
-          currency: booking.currency,
+          id:       bookingId,
+          url:      encodeURIComponent(authorizationUrl),
+          amount:   String((booking as any).total_amount),
+          currency: (booking as any).currency,
+          method:   usedMethod,
         },
       });
     } catch (err: any) {
