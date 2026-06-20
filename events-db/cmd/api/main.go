@@ -204,6 +204,7 @@ func main() {
 		webhooks.POST("/paystack", handlers.PaystackWebhookHandler(paymentService))
 		webhooks.POST("/paypal",   handlers.PayPalWebhookHandler(paymentService))
 	}
+	router.GET("/payments/return", handlers.PaymentReturnHandler(paymentService))
 
 	// ==========================================
 	// API v1

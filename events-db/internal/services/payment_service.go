@@ -265,7 +265,7 @@ func (s *PaymentService) ProcessRefund(bookingID string) error {
 	if _, err := s.pool.Exec(ctx, `
 		UPDATE payments
 		SET refund_id       = $1,
-		    status          = $2,
+		    status          = $2::payment_status,
 		    refunded_amount = amount,
 		    refunded_at     = CURRENT_TIMESTAMP,
 		    updated_at      = CURRENT_TIMESTAMP
@@ -335,7 +335,7 @@ func (s *PaymentService) applyBookingPayment(ctx context.Context, v *VerifyResul
 
 	if err := s.pool.QueryRow(ctx, `
 		UPDATE payments
-		SET status         = $1::text,
+		SET status         = $1::payment_status,
 		    payment_method = $2::payment_method_type,
 		    transaction_id = COALESCE($3, transaction_id),
 		    webhook_received = TRUE,
@@ -399,8 +399,8 @@ func (s *PaymentService) syncAllCartBookings(ctx context.Context, cartID, primar
 
 	rows, err := s.pool.Query(ctx, `
 		UPDATE bookings
-		SET booking_status = $1::text,
-		    payment_status = $2::text,
+		SET booking_status = $1::booking_status,
+		    payment_status = $2::payment_status,
 		    confirmed_at   = CASE WHEN $1::text = 'confirmed' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
 		    updated_at     = CURRENT_TIMESTAMP
 		WHERE cart_id = $3
@@ -427,7 +427,7 @@ func (s *PaymentService) syncAllCartBookings(ctx context.Context, cartID, primar
 func (s *PaymentService) syncBookingStatus(ctx context.Context, bookingID string, status models.PaymentStatus) error {
 	if _, err := s.pool.Exec(ctx, `
 		UPDATE bookings
-		SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
+		SET payment_status = $1::payment_status, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2
 	`, string(status), bookingID); err != nil {
 		return err
@@ -445,7 +445,7 @@ func (s *PaymentService) syncBookingStatus(ctx context.Context, bookingID string
 
 	_, err := s.pool.Exec(ctx, `
 		UPDATE bookings
-		SET booking_status = $1::text,
+		SET booking_status = $1::booking_status,
 		    confirmed_at   = CASE WHEN $1::text = 'confirmed' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
 		    updated_at     = CURRENT_TIMESTAMP
 		WHERE id = $2

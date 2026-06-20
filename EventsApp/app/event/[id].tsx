@@ -104,7 +104,7 @@ export default function EventDetail() {
     });
 
     return () => task.cancel();
-  }, [id, event?.id]);
+  }, [id]);
 
   // ── Recently viewed (deferred, same pattern as before) ────────────────────
   useEffect(() => {
@@ -129,7 +129,7 @@ export default function EventDetail() {
       } catch { /* default to not-following — no disruption to the UI */ }
     })();
     return () => { cancelled = true; };
-  }, [event?.id, authUser]);
+  }, [event?.id, authUser?.id]);
 
   // ── Toggle follow ─────────────────────────────────────────────────────────
   const handleFollow = useCallback(async () => {
