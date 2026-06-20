@@ -229,12 +229,24 @@ const SectionRow = memo(({
   if (!events.length) return null;
 
   return (
-    <div className="mt-12">
+    <div className="mt-14">
+      {/* Section title + VIEW ALL */}
+      <div className="px-5 mb-4 flex items-center justify-between">
+        <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>
+          {section.title}
+        </h2>
+        <button
+          onClick={() => onViewAll(section.id, section.title, events)}
+          className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]"
+        >
+          VIEW ALL
+        </button>
+      </div>
       {/* Scroll track + arrows */}
       <div className="relative">
         {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
         {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-        <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-2 scrollbar-hide">
+        <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-6 scrollbar-hide">
           {events.map((item, index) =>
             isTop10
               ? <Top10Card key={item.id} item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
@@ -470,15 +482,15 @@ export default function HomePage() {
     const { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight } = useScrollArrows();
     if (!events.length) return null;
     return (
-      <div className="mt-12">
-        <div className="px-5 mb-3 flex items-center justify-between">
+      <div className="mt-14">
+        <div className="px-5 mb-4 flex items-center justify-between">
           <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{title}</h2>
           <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
         </div>
         <div className="relative">
           {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
           {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-          <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-2 scrollbar-hide">
+          <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-6 scrollbar-hide">
             {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
           </div>
         </div>
@@ -578,7 +590,7 @@ export default function HomePage() {
       </div>
 
       {/* Category filter tabs */}
-      <div className="flex items-center px-5 pt-9 pb-4 gap-3 overflow-x-auto scrollbar-hide">
+      <div className="flex items-center px-5 pt-8 pb-8 gap-3 overflow-x-auto scrollbar-hide">
         {activeCategory !== 'All' && (
           <button
             onClick={() => setActiveCategory('All')}
@@ -627,11 +639,11 @@ export default function HomePage() {
 
       {/* Recently viewed */}
       {authUserId && recentlyViewedEvents.length > 0 && (
-        <div className="mt-12">
-          <div className="px-5 mb-3 flex items-center justify-between">
+        <div className="mt-14">
+          <div className="px-5 mb-4 flex items-center justify-between">
             <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>RECENTLY VIEWED</h2>
           </div>
-          <div className="flex overflow-x-auto gap-4 px-5 pb-2 scrollbar-hide">
+          <div className="flex overflow-x-auto gap-4 px-5 pb-6 scrollbar-hide">
             {recentlyViewedEvents.map((item) => <EventCard key={item.id} item={item} onPress={() => handleEventPress(item)} colors={colors} />)}
           </div>
         </div>
@@ -642,70 +654,154 @@ export default function HomePage() {
         <SectionRow key={section.id} section={section} isTop10={section.id === 'trending'} onEventPress={handleEventPress} onViewAll={handleViewAll} colors={colors} />
       ))}
 
-      {/* Spotlight section — extra top margin separates it from the feed rows above */}
+      {/* Spotlight section */}
       {!loading && !isFiltered && spotlightEvents.length > 0 && (
-        <div className="mt-14">
-          <div className="px-5 mb-3 flex items-center justify-between">
-            <h2 className="text-[17px] font-black tracking-[0.8px]" style={{ color: spotlightConfig.accentColor }}>
-              {spotlightConfig.title}
-            </h2>
-            <button className="text-[10px] font-extrabold tracking-[1.5px]" style={{ color: spotlightConfig.accentColor }}>EXPLORE</button>
-          </div>
+        <div className="mt-14 px-4">
 
-          {/* Full-width carousel */}
-          <div className="relative mx-4 rounded-[16px] overflow-hidden" style={{ height: 260 }}>
+          {/* Banner carousel — taller, content anchored to bottom */}
+          <div className="relative rounded-[20px] overflow-hidden" style={{ height: 340 }}>
             {spotlightEvents.map((evt, idx) => (
-              <button
+              <div
                 key={evt.id}
                 onClick={() => handleEventPress(evt)}
-                className="absolute inset-0 w-full h-full text-left transition-opacity duration-500"
-                style={{ opacity: idx === spotlightIndex ? 1 : 0, pointerEvents: idx === spotlightIndex ? 'auto' : 'none', backgroundColor: spotlightConfig.bgColor }}
+                className="absolute inset-0 w-full h-full text-left transition-opacity duration-500 cursor-pointer"
+                style={{
+                  opacity: idx === spotlightIndex ? 1 : 0,
+                  pointerEvents: idx === spotlightIndex ? 'auto' : 'none',
+                  backgroundColor: spotlightConfig.bgColor,
+                }}
               >
+                {/* Background image */}
                 {(evt.banner_image_url ?? evt.cover_image_url) && (
-                  <img src={evt.banner_image_url ?? evt.cover_image_url!} alt={evt.title} className="absolute inset-0 w-full h-full object-cover" />
+                  <img
+                    src={evt.banner_image_url ?? evt.cover_image_url!}
+                    alt={evt.title}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
                 )}
-                <div className="absolute inset-0" style={{ background: `linear-gradient(to right, ${spotlightConfig.gradientDark}, ${spotlightConfig.gradientLight})` }} />
-                <div className="absolute bottom-0 left-0 right-0 h-[3px] opacity-85" style={{ backgroundColor: spotlightConfig.accentColor }} />
-                <div className="relative z-10 p-6">
-                  <p className="text-[10px] font-extrabold tracking-[2px] uppercase mb-1.5" style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.badge}</p>
-                  <p className="text-[28px] font-black text-white tracking-[1px] mb-2 line-clamp-2 leading-8">{evt.title.toUpperCase()}</p>
-                  <p className="text-xs text-white/50 mb-4 line-clamp-2">{evt.description}</p>
-                  <div className="border border-white/50 px-[22px] py-3 rounded-sm inline-block">
-                    <span className="text-white font-bold text-[11px] tracking-[1px]">VIEW TICKETS</span>
+
+                {/* Strong bottom-up gradient so text is always readable */}
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: `linear-gradient(to top,
+                      rgba(0,0,0,0.97) 0%,
+                      rgba(0,0,0,0.82) 35%,
+                      rgba(0,0,0,0.35) 65%,
+                      transparent 100%)`,
+                  }}
+                />
+
+                {/* Thin accent colour bar on the left edge */}
+                <div
+                  className="absolute top-0 left-0 w-[4px] h-full"
+                  style={{ backgroundColor: spotlightConfig.accentColor }}
+                />
+
+                {/* ── Bottom content ───────────────────────────────────── */}
+                <div className="absolute bottom-0 left-0 right-0 px-6 pb-6 pointer-events-none">
+
+                  {/* Badge pill */}
+                  <div
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] mb-3"
+                    style={{
+                      backgroundColor: `${spotlightConfig.accentColor}28`,
+                      border: `1px solid ${spotlightConfig.accentColor}70`,
+                    }}
+                  >
+                    <span
+                      className="text-[10px] font-extrabold tracking-[1.8px] uppercase"
+                      style={{ color: spotlightConfig.accentColor }}
+                    >
+                      {spotlightConfig.badge}
+                    </span>
+                  </div>
+
+                  {/* Event title */}
+                  <h2
+                    className="text-[30px] font-black text-white leading-[34px] mb-2 line-clamp-2"
+                    style={{ textShadow: '0 2px 12px rgba(0,0,0,0.6)', letterSpacing: '0.4px' }}
+                  >
+                    {evt.title.toUpperCase()}
+                  </h2>
+
+                  {/* Description */}
+                  <p className="text-[12px] leading-[18px] mb-5 line-clamp-2 max-w-[520px]" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                    {evt.description}
+                  </p>
+
+                  {/* Action row: button | section label | dots */}
+                  <div className="flex items-center justify-between pointer-events-auto">
+                    <div className="flex items-center gap-4">
+                      {/* Solid accent-coloured CTA */}
+                      <button
+                        onClick={() => handleEventPress(evt)}
+                        className="px-6 py-[11px] rounded-[8px] font-extrabold text-[12px] tracking-[1px]"
+                        style={{
+                          backgroundColor: spotlightConfig.accentColor,
+                          color: '#000',
+                          boxShadow: `0 0 18px ${spotlightConfig.accentColor}55`,
+                        }}
+                      >
+                        GET TICKETS
+                      </button>
+
+                      {/* Section name label next to button */}
+                      <span
+                        className="hidden sm:block text-[11px] font-black tracking-[2px] uppercase"
+                        style={{ color: spotlightConfig.accentColor }}
+                      >
+                        {spotlightConfig.title}
+                      </span>
+                    </div>
+
+                    {/* Dot indicators */}
+                    {spotlightEvents.length > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        {spotlightEvents.map((_, i) => (
+                          <button
+                            key={i}
+                            onClick={(e) => { e.stopPropagation(); spotlightIndexRef.current = i; setSpotlightIndex(i); }}
+                            className="h-[5px] rounded-full transition-all duration-300"
+                            style={{
+                              width: i === spotlightIndex ? 18 : 5,
+                              backgroundColor: i === spotlightIndex
+                                ? spotlightConfig.accentColor
+                                : 'rgba(255,255,255,0.3)',
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </button>
+
+                {/* Thin accent line at very bottom edge */}
+                <div
+                  className="absolute bottom-0 left-0 right-0 h-[2px]"
+                  style={{ backgroundColor: spotlightConfig.accentColor, opacity: 0.7 }}
+                />
+              </div>
             ))}
 
-            {/* Spotlight prev/next arrows */}
+            {/* Prev / next arrows */}
             {spotlightEvents.length > 1 && (
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); const p = (spotlightIndexRef.current - 1 + spotlightEvents.length) % spotlightEvents.length; spotlightIndexRef.current = p; setSpotlightIndex(p); }}
                   className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)' }}
+                  style={{ backgroundColor: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.15)' }}
                 >
                   <ChevronLeft size={18} color="#ffffff" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); const n = (spotlightIndexRef.current + 1) % spotlightEvents.length; spotlightIndexRef.current = n; setSpotlightIndex(n); }}
                   className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)' }}
+                  style={{ backgroundColor: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.15)' }}
                 >
                   <ChevronRight size={18} color="#ffffff" />
                 </button>
               </>
-            )}
-
-            {/* Spotlight dots */}
-            {spotlightEvents.length > 1 && (
-              <div className="absolute bottom-3 right-4 flex gap-1.5 z-10">
-                {spotlightEvents.map((_, idx) => (
-                  <button key={idx} onClick={(e) => { e.stopPropagation(); spotlightIndexRef.current = idx; setSpotlightIndex(idx); }}>
-                    <div className="h-1.5 rounded-full transition-all duration-300" style={{ width: idx === spotlightIndex ? 16 : 5, backgroundColor: idx === spotlightIndex ? spotlightConfig.accentColor : 'rgba(255,255,255,0.35)' }} />
-                  </button>
-                ))}
-              </div>
             )}
           </div>
         </div>
