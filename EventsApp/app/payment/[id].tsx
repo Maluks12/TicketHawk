@@ -55,11 +55,38 @@ export default function PaymentScreen() {
 
   const authorizationUrl = decodeURIComponent(url ?? '');
 
+  const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Return to the Tickets tab WITHOUT remounting the tab group. event → purchase
+  // → payment live in the ROOT stack on top of (tabs); a plain
+  // router.replace('/(tabs)/tickets') swaps in a FRESH (tabs) instance, which
+  // remounts Home (it then refetches every event) and corrupts the back stack
+  // (the "GO_BACK was not handled" glitch). Instead pop this stack back to the
+  // already-mounted (tabs), then just switch the active tab.
+  const goToTickets = useCallback(() => {
+    if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
+    try { if (router.canDismiss()) router.dismissAll(); } catch {}
+    router.navigate('/(tabs)/tickets');
+  }, [router]);
+
+  // Back to checkout, guarded so we never dispatch GO_BACK on an empty stack.
+  const leaveToCheckout = useCallback(() => {
+    if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
+    if (router.canGoBack()) router.back();
+    else goToTickets();
+  }, [router, goToTickets]);
+
+  // If the user leaves before the success redirect fires, cancel it so we never
+  // navigate from an unmounted screen.
+  useEffect(() => () => {
+    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+  }, []);
+
   const finishFromStatus = useCallback((status: PaymentStatus | null, cancelledFallback: boolean) => {
     if (status?.payment_status === 'completed') {
       setPhase('done');
       setMessage('Payment confirmed! 🎟');
-      setTimeout(() => router.replace('/(tabs)/tickets'), 1400);
+      doneTimerRef.current = setTimeout(goToTickets, 1400);
     } else if (status?.payment_status === 'failed') {
       setPhase('failed');
       setMessage('Your payment didn’t go through. You can try again.');
@@ -70,7 +97,7 @@ export default function PaymentScreen() {
       setPhase('failed');
       setMessage('We’re still confirming your payment. Your ticket may arrive shortly — check the Tickets tab.');
     }
-  }, [router]);
+  }, [goToTickets]);
 
   const run = useCallback(async () => {
     if (!authorizationUrl) {
@@ -162,10 +189,10 @@ export default function PaymentScreen() {
             >
               <Text style={styles.primaryText}>Try again</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={leaveToCheckout}>
               <Text style={styles.secondaryText}>Back to checkout</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.linkBtn} onPress={() => router.replace('/(tabs)/tickets')}>
+            <TouchableOpacity style={styles.linkBtn} onPress={goToTickets}>
               <Text style={styles.linkText}>Check Tickets tab</Text>
             </TouchableOpacity>
           </>
