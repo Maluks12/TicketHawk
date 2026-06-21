@@ -245,7 +245,8 @@ export default function TicketPurchaseScreen() {
 
       // Free ticket — booking is already confirmed server-side, no payment step needed.
       if ((booking as any).total_amount === 0) {
-        router.replace('/(tabs)/tickets');
+        try { if (router.canDismiss()) router.dismissAll(); } catch {}
+        router.navigate('/(tabs)/tickets');
         Alert.alert('You\'re in! 🎟', 'Your free ticket has been confirmed. Check the Tickets tab.');
         return;
       }

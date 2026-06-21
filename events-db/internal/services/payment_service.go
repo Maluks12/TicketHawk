@@ -486,6 +486,54 @@ func (s *PaymentService) GetPaymentByBookingID(ctx context.Context, bookingID st
 	return &p, nil
 }
 
+// ReconcilePendingPayment returns the booking's payment, but if it is still
+// pending/processing it first asks the gateway for the authoritative status
+// and applies it. This makes the status endpoint self-healing: when a user
+// declines and closes the hosted checkout, the gateway never redirects to
+// /payments/return, so without this the stored status would stay 'pending'
+// forever. A gateway Verify() reports 'failed'/'abandoned' for such attempts,
+// which maps to PaymentFailed — so the app learns the payment didn't go through.
+func (s *PaymentService) ReconcilePendingPayment(ctx context.Context, bookingID string) (*models.Payment, error) {
+	p, err := s.GetPaymentByBookingID(ctx, bookingID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Already settled — nothing to reconcile.
+	if p.Status == models.PaymentCompleted || p.Status == models.PaymentFailed || p.Status == models.PaymentRefunded {
+		return p, nil
+	}
+	if p.GatewayReference == nil || *p.GatewayReference == "" {
+		return p, nil
+	}
+
+	res, vErr := s.gatewayByName(p.PaymentGateway).Verify(ctx, *p.GatewayReference)
+	if vErr != nil {
+		log.Warn().Err(vErr).Str("booking_id", bookingID).Str("reference", *p.GatewayReference).
+			Msg("payment status: gateway verify failed; returning stored status")
+		return p, nil
+	}
+
+	// Only a terminal verdict flips the record; an in-progress verify is a no-op.
+	if res.Status == models.PaymentCompleted || res.Status == models.PaymentFailed {
+		if aErr := s.ApplyVerifiedPayment(ctx, res); aErr != nil {
+			log.Warn().Err(aErr).Str("booking_id", bookingID).Msg("payment status: apply after verify failed")
+		}
+		if fresh, rErr := s.GetPaymentByBookingID(ctx, bookingID); rErr == nil {
+			return fresh, nil
+		}
+	}
+	return p, nil
+}
+
+// GetPaymentStatusReconciled is GetPaymentStatus plus an on-demand gateway
+// reconciliation for non-terminal payments. Used by the status endpoint.
+func (s *PaymentService) GetPaymentStatusReconciled(bookingID string) (*models.Payment, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return s.ReconcilePendingPayment(ctx, bookingID)
+}
+
 // EnqueueJob sends a confirmed booking ID to the booking worker pipeline.
 // Used for free bookings that bypass the payment flow.
 func (s *PaymentService) EnqueueJob(bookingID string) {

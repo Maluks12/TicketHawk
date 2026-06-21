@@ -121,7 +121,7 @@ func GetPaymentStatusHandler(pool *pgxpool.Pool, paymentService *services.Paymen
 			return
 		}
 
-		payment, err := paymentService.GetPaymentStatus(bookingID)
+		payment, err := paymentService.GetPaymentStatusReconciled(bookingID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Payment record not found"})
 			return
