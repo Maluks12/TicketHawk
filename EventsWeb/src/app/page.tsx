@@ -73,8 +73,8 @@ function SkeletonCard() {
 function SkeletonSection() {
   return (
     <div className="mt-8 px-5">
-      <div className="h-3 w-36 rounded bg-white/10 mb-5 animate-pulse" />
-      <div className="flex gap-4 overflow-hidden">
+      <div className="h-3 w-36 rounded bg-white/10 mb-1.5 animate-pulse" />
+      <div className="flex gap-4 overflow-hidden pb-4">
         {[0, 1, 2].map((i) => <SkeletonCard key={i} />)}
       </div>
     </div>
@@ -163,9 +163,9 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
       </div>
     </div>
     <div className="pt-3">
-      <p className="text-[10px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-[14px] font-bold leading-[19px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
-      <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
+      <p className="text-[11px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-[16px] font-bold leading-[22px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-[12.5px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ));
@@ -185,9 +185,9 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       </div>
     </div>
     <div className="pt-3">
-      <p className="text-[10px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-[14px] font-bold leading-[19px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
-      <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
+      <p className="text-[11px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-[16px] font-bold leading-[22px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-[12.5px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ));
@@ -229,9 +229,9 @@ const SectionRow = memo(({
   if (!events.length) return null;
 
   return (
-    <div className="mt-14">
+    <div className="mt-8">
       {/* Section title + VIEW ALL */}
-      <div className="px-5 mb-4 flex items-center justify-between">
+      <div className="px-5 mb-1.5 flex items-center justify-between">
         <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>
           {section.title}
         </h2>
@@ -246,7 +246,7 @@ const SectionRow = memo(({
       <div className="relative">
         {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
         {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-        <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-6 scrollbar-hide">
+        <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-4 scrollbar-hide">
           {events.map((item, index) =>
             isTop10
               ? <Top10Card key={item.id} item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
@@ -482,15 +482,15 @@ export default function HomePage() {
     const { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight } = useScrollArrows();
     if (!events.length) return null;
     return (
-      <div className="mt-14">
-        <div className="px-5 mb-4 flex items-center justify-between">
+      <div className="mt-8">
+        <div className="px-5 mb-1.5 flex items-center justify-between">
           <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{title}</h2>
           <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
         </div>
         <div className="relative">
           {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
           {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-          <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-6 scrollbar-hide">
+          <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-4 scrollbar-hide">
             {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
           </div>
         </div>
@@ -502,7 +502,7 @@ export default function HomePage() {
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }}>
 
       {/* Hero carousel */}
-      <div className="relative mt-4 mx-4 h-[420px] rounded-[18px] overflow-hidden">
+      <div className="relative mt-4 mx-4 mb-2 h-[420px] rounded-[18px] overflow-hidden">
         {carouselEvents.length === 0 ? (
           <div className="absolute inset-0 rounded-[18px] bg-white/10 animate-pulse" />
         ) : (
@@ -590,7 +590,7 @@ export default function HomePage() {
       </div>
 
       {/* Category filter tabs */}
-      <div className="flex items-center px-5 pt-8 pb-8 gap-3 overflow-x-auto scrollbar-hide">
+      <div className="flex items-center px-5 pt-1 pb-3 gap-3 overflow-x-auto scrollbar-hide">
         {activeCategory !== 'All' && (
           <button
             onClick={() => setActiveCategory('All')}
@@ -639,11 +639,11 @@ export default function HomePage() {
 
       {/* Recently viewed */}
       {authUserId && recentlyViewedEvents.length > 0 && (
-        <div className="mt-14">
-          <div className="px-5 mb-4 flex items-center justify-between">
+        <div className="mt-8">
+          <div className="px-5 mb-1.5 flex items-center justify-between">
             <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>RECENTLY VIEWED</h2>
           </div>
-          <div className="flex overflow-x-auto gap-4 px-5 pb-6 scrollbar-hide">
+          <div className="flex overflow-x-auto gap-4 px-5 pb-4 scrollbar-hide">
             {recentlyViewedEvents.map((item) => <EventCard key={item.id} item={item} onPress={() => handleEventPress(item)} colors={colors} />)}
           </div>
         </div>
@@ -656,7 +656,7 @@ export default function HomePage() {
 
       {/* Spotlight section */}
       {!loading && !isFiltered && spotlightEvents.length > 0 && (
-        <div className="mt-14 px-4">
+        <div className="mt-8 mb-3 px-4">
 
           {/* Banner carousel — taller, content anchored to bottom */}
           <div className="relative rounded-[20px] overflow-hidden" style={{ height: 340 }}>
@@ -807,12 +807,10 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Editorial sections — mt-10 on first to breathe after spotlight */}
+      {/* Editorial sections — each carries its own top margin (mt-8) */}
       {!loading && !isFiltered && (
         <>
-          <div className="mt-10">
-            <EditorialSection title="FREE EVENTS"         events={freeEvents}    filterKey="free"         colors={colors} onViewAll={handleViewAllEditorial} onEventPress={handleEventPress} />
-          </div>
+          <EditorialSection title="FREE EVENTS"         events={freeEvents}    filterKey="free"         colors={colors} onViewAll={handleViewAllEditorial} onEventPress={handleEventPress} />
           <EditorialSection title="PREMIUM & EXCLUSIVE" events={premiumEvents} filterKey="premium"      colors={colors} onViewAll={handleViewAllEditorial} onEventPress={handleEventPress} />
           <EditorialSection title="COMING NEXT MONTH"   events={comingUp}      filterKey="coming_up"    colors={colors} onViewAll={handleViewAllEditorial} onEventPress={handleEventPress} />
           <EditorialSection title="AROUND THE COUNTRY"  events={otherCities}   filterKey="other_cities" colors={colors} onViewAll={handleViewAllEditorial} onEventPress={handleEventPress} />

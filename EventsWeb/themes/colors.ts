@@ -18,9 +18,16 @@ export const darkColors: typeof lightColors = {
 };
 
 export function useAppTheme() {
-  const { mode } = useThemeStore();
+  const { mode, loadMode } = useThemeStore();
 
   const [systemDark, setSystemDark] = useState(false);
+
+  // FIX: loadMode() existed in the store but was never called anywhere,
+  // so a saved 'light' or 'dark' choice was silently dropped on every
+  // refresh/navigation and the app fell back to 'auto' (system) instead.
+  useEffect(() => {
+    loadMode();
+  }, [loadMode]);
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
