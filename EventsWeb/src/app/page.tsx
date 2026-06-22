@@ -55,10 +55,10 @@ const fmtCardDate = (iso?: string | null) => {
 };
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
-// Card width formula: show exactly 3 full cards + ~15% peek of the 4th.
+// Card width formula: ~15% smaller than the original baseline overall
+// (3.15 → 3.5 → 3.68, the last step being a further 5% reduction).
 // Breakdown of the 56px offset: 20px left padding (px-5) + 2 gaps × 16px + 4px buffer = 56px.
-// The 3.15 divisor = 3 full cards + 0.15 partial card.
-const CARD_W = 'calc((100vw - 56px) / 3.15)';
+const CARD_W = 'calc((100vw - 56px) / 3.68)';
 
 function SkeletonCard() {
   return (
@@ -246,7 +246,7 @@ const SectionRow = memo(({
       <div className="relative">
         {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
         {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-        <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-4 scrollbar-hide">
+        <div ref={scrollRef} className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
           {events.map((item, index) =>
             isTop10
               ? <Top10Card key={item.id} item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
@@ -490,7 +490,7 @@ export default function HomePage() {
         <div className="relative">
           {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
           {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-          <div ref={scrollRef} className="flex overflow-x-auto gap-4 px-5 pb-4 scrollbar-hide">
+          <div ref={scrollRef} className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
             {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
           </div>
         </div>
@@ -499,10 +499,10 @@ export default function HomePage() {
   }
 
   return (
-    <div style={{ backgroundColor: colors.background, minHeight: '100vh' }}>
+    <div style={{ backgroundColor: colors.background, minHeight: '100vh' }} className="pt-4">
 
       {/* Hero carousel */}
-      <div className="relative mt-4 mx-4 mb-2 h-[420px] rounded-[18px] overflow-hidden">
+      <div className="relative mx-4 mb-2 h-[420px] rounded-[18px] overflow-hidden">
         {carouselEvents.length === 0 ? (
           <div className="absolute inset-0 rounded-[18px] bg-white/10 animate-pulse" />
         ) : (
@@ -643,7 +643,7 @@ export default function HomePage() {
           <div className="px-5 mb-1.5 flex items-center justify-between">
             <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>RECENTLY VIEWED</h2>
           </div>
-          <div className="flex overflow-x-auto gap-4 px-5 pb-4 scrollbar-hide">
+          <div className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
             {recentlyViewedEvents.map((item) => <EventCard key={item.id} item={item} onPress={() => handleEventPress(item)} colors={colors} />)}
           </div>
         </div>
