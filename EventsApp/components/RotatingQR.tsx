@@ -22,11 +22,13 @@ interface Props {
   assignmentId: string;
   /** Outer size in px — matches the existing qrImage width (SW - 96). */
   size: number;
+  /** When present, fetch via the guest QR endpoint (no auth token required). */
+  guest?: { bookingNumber: string; email: string };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function RotatingQR({ assignmentId, size }: Props) {
+export function RotatingQR({ assignmentId, size, guest }: Props) {
   const [token,     setToken]     = useState<string | null>(null);
   const [windowSec, setWindowSec] = useState(30);
   const [secsLeft,  setSecsLeft]  = useState(30);
@@ -66,7 +68,12 @@ export function RotatingQR({ assignmentId, size }: Props) {
   // ── Fetch a new token ──────────────────────────────────────────────────────
   const fetchToken = useCallback(async () => {
     try {
-      const res = await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
+      const res = guest
+        ? await api.get<RotatingQRToken>(
+            `/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}/assignments/${assignmentId}/qr`,
+            { params: { email: guest.email } },
+          )
+        : await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
       if (!mountedRef.current) return;
 
       const { token, expires_at, window_sec } = res.data;
@@ -103,7 +110,7 @@ export function RotatingQR({ assignmentId, size }: Props) {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = setTimeout(fetchToken, 5000);
     }
-  }, [assignmentId, animateBar]);
+  }, [assignmentId, animateBar, guest?.bookingNumber, guest?.email]);
 
   // ── Mount / unmount ────────────────────────────────────────────────────────
   useEffect(() => {

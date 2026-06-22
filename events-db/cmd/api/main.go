@@ -373,6 +373,7 @@ func main() {
 		guest.POST("/bookings",                              handlers.CreateGuestBookingHandler(pool, paymentService))
 		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool, rdb))
 		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber/assignments/:assignmentId/qr", handlers.GetGuestRotatingQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/payment",        handlers.GuestPaymentStatusHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
 	}
