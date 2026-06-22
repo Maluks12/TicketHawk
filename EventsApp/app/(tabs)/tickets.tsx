@@ -152,7 +152,19 @@ const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: n
     <View>
       {bookings.map((b, i) => (
         <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-          <TicketCard booking={b} index={offset + i} onPress={() => router.push(`/booking/${b.id}` as any)} />
+          <TicketCard booking={b} index={offset + i} onPress={() => {
+            // Guest bookings have no auth token — route with booking number +
+            // email so the detail screen fetches via the /guest/ endpoints.
+            const em = (b as any).attendee_email;
+            if ((b as any).is_guest && em) {
+              router.push({
+                pathname: '/booking/[id]',
+                params: { id: b.id, bookingNumber: (b as any).booking_number, email: em },
+              } as any);
+            } else {
+              router.push(`/booking/${b.id}` as any);
+            }
+          }} />
         </View>
       ))}
     </View>

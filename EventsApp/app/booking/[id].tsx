@@ -408,7 +408,11 @@ const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, on
 export default function BookingDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, bookingNumber, email } = useLocalSearchParams<{ id: string; bookingNumber?: string; email?: string }>();
+
+  // A guest reaches this screen from the Tickets-tab lookup. With no auth token
+  // their booking is addressed by booking number + email via the /guest/ routes.
+  const guest = bookingNumber && email ? { bookingNumber, email } : undefined;
   const { user } = useAuthStore();
   const [booking, setBooking]               = useState<BookingDetail | null>(null);
   const [assignments, setAssignments]       = useState<TicketAssignment[]>([]);
@@ -459,15 +463,18 @@ export default function BookingDetailScreen() {
         setLoading(false);
         return;
       }
-      if (!user) { setLoading(false); return; }
+      if (!user && !guest) { setLoading(false); return; }
       try {
         // Retry transient failures (esp. 429 rate-limit / network blips) with
         // backoff so a momentary limit doesn't render as "Booking not found".
-        // A genuine 404 bails immediately.
+        // A genuine 404 bails immediately. Guests use the /guest/ routes.
         let bookingDetail: any = null;
         for (let attempt = 0; attempt < 4; attempt++) {
           try {
-            bookingDetail = await getBookingDetail(id as string);
+            bookingDetail = guest
+              ? (await api.get(`/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}`,
+                  { params: { email: guest.email } })).data
+              : await getBookingDetail(id as string);
             break;
           } catch (e: any) {
             if (e?.response?.status === 404) throw e;
@@ -475,13 +482,18 @@ export default function BookingDetailScreen() {
             await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
           }
         }
-        const assignments = await getTicketAssignments(id as string).catch(() => []);
+        const assignments = guest
+          ? await api.get(`/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}/assignments`,
+              { params: { email: guest.email } })
+              .then(r => (r.data?.data ?? r.data ?? []) as TicketAssignment[])
+              .catch(() => [])
+          : await getTicketAssignments(id as string).catch(() => []);
         setBooking(bookingDetail);
         setAssignments(assignments);
       } catch {} finally { setLoading(false); }
     };
     load();
-  }, [id]);
+  }, [id, bookingNumber, email]);
 
   const heroOpacity = scrollY.interpolate({ inputRange: [0, 180], outputRange: [1, 0.4], extrapolate: 'clamp' });
   const headerBg    = scrollY.interpolate({ inputRange: [140, 200], outputRange: ['rgba(10,10,10,0)', 'rgba(10,10,10,1)'], extrapolate: 'clamp' });
