@@ -1,14 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
  ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
-import { api, clearCart } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
@@ -58,6 +58,17 @@ const PALETTES = [
 const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 const isUpcoming = (b: Booking) => !!b.event?.start_time && new Date(b.event.start_time) > new Date();
+
+// A "real" ticket is one the buyer actually holds: booking confirmed/refunded,
+// or payment completed/refunded. Pending and failed bookings are NOT shown.
+const isRealTicket = (b: Booking) =>
+  b.booking_status === 'confirmed' || b.booking_status === 'refunded' ||
+  b.payment_status === 'completed' || b.payment_status === 'refunded';
+
+// Upcoming = future-dated AND still active. Cancelled/refunded bookings drop to
+// the Past tab even when the event date is still ahead.
+const isUpcomingActive = (b: Booking) =>
+  isUpcoming(b) && b.booking_status !== 'cancelled' && b.booking_status !== 'refunded';
 const daysUntil  = (iso: string) => Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
 const dedup = (list: Booking[]) => { const seen = new Set<string>(); return list.filter(b => { if (seen.has(b.booking_number)) return false; seen.add(b.booking_number); return true; }); };
 
@@ -141,7 +152,19 @@ const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: n
     <View>
       {bookings.map((b, i) => (
         <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
-          <TicketCard booking={b} index={offset + i} onPress={() => router.push(`/booking/${b.id}` as any)} />
+          <TicketCard booking={b} index={offset + i} onPress={() => {
+            // Guest bookings have no auth token — route with booking number +
+            // email so the detail screen fetches via the /guest/ endpoints.
+            const em = (b as any).attendee_email;
+            if ((b as any).is_guest && em) {
+              router.push({
+                pathname: '/booking/[id]',
+                params: { id: b.id, bookingNumber: (b as any).booking_number, email: em },
+              } as any);
+            } else {
+              router.push(`/booking/${b.id}` as any);
+            }
+          }} />
         </View>
       ))}
     </View>
@@ -243,9 +266,9 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
-  const all      = dedup([...apiBookings]).filter(b => b.booking_status !== 'pending');
-  const upcoming = all.filter(isUpcoming);
-  const past     = all.filter(b => !isUpcoming(b));
+  const all      = dedup([...apiBookings]).filter(isRealTicket);
+  const upcoming = all.filter(isUpcomingActive);
+  const past     = all.filter(b => !isUpcomingActive(b));
 
   const [activeTab,   setActiveTab]   = useState<'upcoming' | 'past'>('upcoming');
   const [tabBarWidth, setTabBarWidth] = useState(0);
@@ -313,13 +336,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
             >
               Upcoming
             </Text>
-            {upcoming.length > 0 && (
-              <View style={[sheet.tabBadge, { backgroundColor: activeTab === 'upcoming' ? badgeBgActive : badgeBg }]}>
-                <Text style={[sheet.tabBadgeText, { color: activeTab === 'upcoming' ? colors.text : subTextColor }]}>
-                  {upcoming.length}
-                </Text>
-              </View>
-            )}
           </TouchableOpacity>
 
           <TouchableOpacity style={sheet.tabItem} activeOpacity={0.75} onPress={() => switchTab('past')}>
@@ -329,13 +345,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
             >
               Past
             </Text>
-            {past.length > 0 && (
-              <View style={[sheet.tabBadge, { backgroundColor: activeTab === 'past' ? badgeBgActive : badgeBg }]}>
-                <Text style={[sheet.tabBadgeText, { color: activeTab === 'past' ? colors.text : subTextColor }]}>
-                  {past.length}
-                </Text>
-              </View>
-            )}
           </TouchableOpacity>
         </View>
 
@@ -400,17 +409,8 @@ export default function TicketsScreen() {
   const [loading, setLoading]         = useState(false);
   const [refreshing, setRefreshing]   = useState(false);
   const [error, setError]             = useState<string | null>(null);
-  const [resetting, setResetting]     = useState(false);
 
   useEffect(() => {}, []);
-
-  const handleReset = async () => {
-    setResetting(true);
-    try { await clearCart(); } catch (_) {}
-    setApiBookings([]);
-    await load();
-    setResetting(false);
-  };
 
   const fetchApiBookings = useCallback(async () => {
     if (!user) return;
@@ -434,22 +434,24 @@ export default function TicketsScreen() {
 
   useEffect(() => { load(); }, [user]);
 
-  const totalCount = dedup([...apiBookings]).filter(b => b.booking_status !== 'pending').length;
+  // Re-fetch when the tab regains focus (e.g. returning here right after a
+  // purchase) so a freshly-confirmed booking shows up immediately. The first
+  // focus is skipped because the mount effect above already does the spinner
+  // load; subsequent focuses refetch silently (no spinner flash).
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) { focusedOnce.current = true; return; }
+      if (user) fetchApiBookings();
+    }, [user, fetchApiBookings]),
+  );
+
   const showGuestLookup = !user;
 
   return (
     <View className={s.root} style={{ backgroundColor: colors.background }}>
       <View className={s.header} style={{ paddingTop: insets.top + 10, backgroundColor: colors.background }}>
         <Text className={s.headerTitle} style={{ color: colors.text }}>My Tickets</Text>
-        {totalCount > 0 && (
-          <View style={sheet.countPill}><Text style={sheet.countText}>{totalCount}</Text></View>
-        )}
-        <TouchableOpacity onPress={handleReset} disabled={resetting} style={{ marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', marginRight: 4 }}>
-          {resetting
-            ? <ActivityIndicator size='small' color='rgba(255,255,255,0.5)' />
-            : <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 }}>RESET</Text>
-          }
-        </TouchableOpacity>
       </View>
 
       {showGuestLookup ? (

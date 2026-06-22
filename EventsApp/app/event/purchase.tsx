@@ -243,6 +243,16 @@ export default function TicketPurchaseScreen() {
       console.log('[PAY] endpoint:', endpoint, 'payload:', JSON.stringify(payload));
       const { data: booking } = await api.post(endpoint, payload);
 
+      // For guest checkouts, surface the booking number + email so you can look
+      // the ticket up in the Tickets tab's guest lookup while testing.
+      if (!user) {
+        console.log(
+          '[PAY] guest booking created →',
+          'bookingNumber:', (booking as any).booking_number,
+          '| email:', email,
+        );
+      }
+
       // Free ticket — booking is already confirmed server-side, no payment step needed.
       if ((booking as any).total_amount === 0) {
         try { if (router.canDismiss()) router.dismissAll(); } catch {}
@@ -261,11 +271,22 @@ export default function TicketPurchaseScreen() {
       //    card authorization_url returned at booking creation.
       let authorizationUrl: string;
       let usedMethod: 'card' | 'paypal' | 'apple_pay' = 'card';
-      if (user) {
+      if (user && paymentMethod === 'card' && (booking as any).client_token) {
+        // PERF: POST /v1/bookings already initialised a Paystack card checkout
+        // and returned its URL. For card (the default), reuse it instead of
+        // initialising the gateway a second time — saves a full round-trip and
+        // gets the user to the payment sheet noticeably faster.
+        authorizationUrl = (booking as any).client_token;
+        usedMethod = 'card';
+      } else if (user) {
+        // Non-card method (PayPal / Apple Pay) needs a fresh, method-specific
+        // gateway init via the method-aware start route.
         const started = await startBookingPayment(bookingId, paymentMethod);
         authorizationUrl = started.authorization_url;
         usedMethod = paymentMethod;
       } else {
+        // Guests: no method-aware start route — use the card authorization_url
+        // returned at booking creation.
         authorizationUrl = (booking as any).client_token;
       }
 
@@ -283,6 +304,12 @@ export default function TicketPurchaseScreen() {
           amount:   String((booking as any).total_amount),
           currency: (booking as any).currency,
           method:   usedMethod,
+          // Guests have no auth token — pass booking number + email so the
+          // payment screen can poll status and retry via the /v1/guest/* routes.
+          ...(user ? {} : {
+            bookingNumber: String((booking as any).booking_number ?? ''),
+            email,
+          }),
         },
       });
     } catch (err: any) {

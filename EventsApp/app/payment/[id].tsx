@@ -21,7 +21,7 @@
  *        closed; otherwise treat as cancelled.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, ActivityIndicator, TouchableOpacity, StyleSheet, StatusBar,
 } from 'react-native';
@@ -29,9 +29,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   openGatewayCheckout,
+  startBookingPayment,
+  retryGuestPayment,
   pollPayment,
   fetchPaymentStatus,
   type PaymentStatus,
+  type PaymentMethod,
 } from '../../lib/payments';
 
 type Phase = 'opening' | 'in_browser' | 'confirming' | 'done' | 'failed' | 'cancelled';
@@ -45,9 +48,18 @@ const METHOD_LABEL: Record<string, string> = {
 export default function PaymentScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { id: bookingId, url, amount, currency, method } = useLocalSearchParams<{
+  const { id: bookingId, url, amount, currency, method, bookingNumber, email } = useLocalSearchParams<{
     id: string; url: string; amount: string; currency: string; method?: string;
+    bookingNumber?: string; email?: string;
   }>();
+
+  // Guests have no auth token; their payment is addressed by booking number +
+  // email against the /v1/guest/* routes. Present only for guest checkouts
+  // (set by purchase.tsx).
+  const guest = useMemo(
+    () => (bookingNumber && email ? { bookingNumber, email } : undefined),
+    [bookingNumber, email],
+  );
 
   const [phase, setPhase]     = useState<Phase>('opening');
   const [message, setMessage] = useState('Opening secure checkout…');
@@ -99,8 +111,8 @@ export default function PaymentScreen() {
     }
   }, [goToTickets]);
 
-  const run = useCallback(async () => {
-    if (!authorizationUrl) {
+  const run = useCallback(async (checkoutUrl: string) => {
+    if (!checkoutUrl) {
       setPhase('failed');
       setMessage('Missing checkout link. Please go back and try again.');
       return;
@@ -109,7 +121,7 @@ export default function PaymentScreen() {
     setPhase('in_browser');
     setMessage('Complete your payment in the secure window…');
 
-    const outcome = await openGatewayCheckout(authorizationUrl);
+    const outcome = await openGatewayCheckout(checkoutUrl);
 
     setPhase('confirming');
     setMessage('Confirming your payment…');
@@ -117,7 +129,7 @@ export default function PaymentScreen() {
     if (outcome.type === 'returned') {
       // Gateway redirected back through our scheme — they most likely paid.
       try {
-        const status = await pollPayment(bookingId, 2500, 150_000);
+        const status = await pollPayment(bookingId, 2500, 150_000, guest);
         finishFromStatus(status, false);
       } catch {
         finishFromStatus(null, false);
@@ -127,25 +139,43 @@ export default function PaymentScreen() {
       // the backend verifies Paystack synchronously on return, so a real payment
       // resolves fast. Otherwise treat as cancelled.
       try {
-        const status = await pollPayment(bookingId, 1500, 9_000);
+        const status = await pollPayment(bookingId, 1500, 9_000, guest);
         finishFromStatus(status, true);
       } catch {
         // brief poll timed out → one last direct read, else cancelled
         try {
-          const status = await fetchPaymentStatus(bookingId);
+          const status = await fetchPaymentStatus(bookingId, guest);
           finishFromStatus(status, true);
         } catch {
           finishFromStatus(null, true);
         }
       }
     }
-  }, [authorizationUrl, bookingId, finishFromStatus]);
+  }, [bookingId, finishFromStatus, guest]);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    run();
-  }, [run]);
+    run(authorizationUrl);
+  }, [run, authorizationUrl]);
+
+  // Retry re-initialises the payment so we get a FRESH gateway order and the
+  // payment record resets to pending. Reusing the old order would just resolve
+  // to failed again — a cancelled/declined order can't be re-approved, and the
+  // backend short-circuits a payment that's already in a terminal state.
+  const retry = useCallback(async () => {
+    setPhase('opening');
+    setMessage('Restarting secure checkout…');
+    try {
+      const started = guest
+        ? await retryGuestPayment(guest.bookingNumber, guest.email)
+        : await startBookingPayment(bookingId, (method as PaymentMethod) || 'card');
+      run(started.authorization_url);
+    } catch {
+      setPhase('failed');
+      setMessage('Couldn’t restart checkout. Please go back and start over.');
+    }
+  }, [bookingId, method, guest, run]);
 
   const fmtAmount = () => {
     const n = parseFloat(amount ?? '0');
@@ -180,12 +210,7 @@ export default function PaymentScreen() {
           <>
             <TouchableOpacity
               style={styles.primaryBtn}
-              onPress={() => {
-                startedRef.current = false;
-                setPhase('opening');
-                setMessage('Reopening secure checkout…');
-                run();
-              }}
+              onPress={retry}
             >
               <Text style={styles.primaryText}>Try again</Text>
             </TouchableOpacity>

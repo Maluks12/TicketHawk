@@ -243,7 +243,7 @@ func GetGuestBooking(pool *pgxpool.Pool, bookingNumber string, email string) (*m
 			b.booking_status, b.payment_status, b.qr_code_url,
 			b.attendee_first_name, b.attendee_last_name, b.attendee_email,
 			b.created_at, b.confirmed_at,
-			e.title, e.start_time
+			e.title, e.start_time, e.venue_name, e.city, e.address, e.cover_image_url
 		FROM bookings b
 		LEFT JOIN events e ON b.event_id = e.id
 		WHERE b.booking_number = $1
@@ -258,7 +258,7 @@ func GetGuestBooking(pool *pgxpool.Pool, bookingNumber string, email string) (*m
 		&booking.BookingStatus, &booking.PaymentStatus, &booking.QRCodeURL,
 		&booking.AttendeeFirstName, &booking.AttendeeLastName, &booking.AttendeeEmail,
 		&booking.CreatedAt, &booking.ConfirmedAt,
-		&event.Title, &event.StartTime,
+		&event.Title, &event.StartTime, &event.VenueName, &event.City, &event.Address, &event.CoverImageURL,
     )
 
 	if err != nil {

@@ -12,6 +12,16 @@ import (
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 )
 
+// EmailAPIError is returned when the email provider (SendGrid) responds with a
+// non-2xx status. A 401/403 means the API key is invalid or the sender isn't
+// verified — a permanent misconfiguration that retrying cannot fix.
+type EmailAPIError struct{ StatusCode int }
+
+func (e *EmailAPIError) Error() string { return fmt.Sprintf("email API error: %d", e.StatusCode) }
+
+// IsPermanent reports a non-retryable auth/permission failure.
+func (e *EmailAPIError) IsPermanent() bool { return e.StatusCode == 401 || e.StatusCode == 403 }
+
 type EmailService struct {
 	client *sendgrid.Client
 	cfg    *config.Config
@@ -43,7 +53,7 @@ func (s *EmailService) SendBookingConfirmation(booking *models.Booking, event *m
 	}
 
 	if response.StatusCode >= 400 {
-		return fmt.Errorf("email API error: %d", response.StatusCode)
+		return &EmailAPIError{StatusCode: response.StatusCode}
 	}
 	return nil
 }
@@ -623,7 +633,7 @@ func (s *EmailService) SendBookingConfirmationWithQR(
 		return fmt.Errorf("failed to send email: %w", err)
 	}
 	if response.StatusCode >= 400 {
-		return fmt.Errorf("email API error: %d", response.StatusCode)
+		return &EmailAPIError{StatusCode: response.StatusCode}
 	}
 	return nil
 }

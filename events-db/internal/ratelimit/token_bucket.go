@@ -49,8 +49,8 @@ var (
 	}
 
 	GlobalIPBucket = BucketConfig{
-		Capacity:   200,
-		RefillRate: 5.0,
+		Capacity:   500,
+		RefillRate: 15.0,
 		TTL:        1 * time.Hour,
 	}
 )

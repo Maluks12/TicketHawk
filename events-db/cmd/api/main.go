@@ -363,7 +363,10 @@ func main() {
 	guest := v1.Group("/guest")
 	if rateLimitManager != nil {
 		guest.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			// Guests poll GET /guest/bookings/:bn/payment every ~2.5s during
+			// checkout, so this bucket must support sustained polling (matches
+			// the authed "payments" bucket) rather than the old 10/1-per-minute.
+			ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 			"guest-bookings"))
 	}
 	{
@@ -398,7 +401,7 @@ func main() {
 	bookings.Use(middleware.AuthMiddleware(cfg))
 	if rateLimitManager != nil {
 		bookings.Use(middleware.RateLimitByUser(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			ratelimit.BucketConfig{Capacity: 120, RefillRate: 5.0, TTL: 15 * time.Minute},
 			"bookings"))
 	}
 	{
@@ -414,7 +417,7 @@ func main() {
 		if rateLimitManager != nil {
 			paymentRoutes := bookings.Group("")
 			paymentRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
-				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+				ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 				"payments"))
 			paymentRoutes.POST("/:id/payment",       handlers.CreatePaymentHandler(pool, paymentService))
 			paymentRoutes.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))

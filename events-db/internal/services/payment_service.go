@@ -405,7 +405,7 @@ func (s *PaymentService) syncAllCartBookings(ctx context.Context, cartID, primar
 		    updated_at     = CURRENT_TIMESTAMP
 		WHERE cart_id = $3
 		  AND id      != $4
-		  AND booking_status = 'pending'
+		  AND booking_status IN ('pending', 'cancelled')
 		RETURNING id
 	`, string(bookingStatus), string(status), cartID, primaryBookingID)
 	if err != nil {
@@ -484,6 +484,19 @@ func (s *PaymentService) GetPaymentByBookingID(ctx context.Context, bookingID st
 		return nil, fmt.Errorf("payment not found for booking %s: %w", bookingID, err)
 	}
 	return &p, nil
+}
+
+// MarkPayPalCancelled flips a PayPal payment (and its booking) to failed when
+// the payer abandons the approval and PayPal redirects to the cancel URL.
+// Without it, the order stays CREATED/non-terminal and the app would poll until
+// timeout. Idempotent: a later webhook/verify with the same result is harmless.
+func (s *PaymentService) MarkPayPalCancelled(ctx context.Context, orderID string) error {
+	return s.ApplyVerifiedPayment(ctx, &VerifyResult{
+		Gateway:   GatewayPayPal,
+		Reference: orderID,
+		Status:    models.PaymentFailed,
+		Method:    models.PaymentPayPal,
+	})
 }
 
 // ReconcilePendingPayment returns the booking's payment, but if it is still

@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +66,37 @@ func NewPayPalGateway(clientID, clientSecret, webhookID, baseURL string) *PayPal
 }
 
 func (g *PayPalGateway) Name() PaymentGatewayName { return GatewayPayPal }
+
+// appendCancelMarker tags the PayPal cancel_url so PaymentReturnHandler can
+// distinguish an abandoned approval from a successful return.
+func appendCancelMarker(rawURL string) string {
+	if strings.Contains(rawURL, "?") {
+		return rawURL + "&pp_cancel=1"
+	}
+	return rawURL + "?pp_cancel=1"
+}
+
+// PayPal cannot transact in ZAR (the app's pricing currency). For ZAR we present
+// the PayPal order in USD, converted at PAYPAL_USD_ZAR_RATE (ZAR per 1 USD;
+// default 18.5). The booking and our payment record stay in the original
+// currency — only the PayPal order and its capture happen in USD. Any other
+// currency is passed through unchanged.
+func paypalPresentmentAmount(currency string, amountCents int64) (string, int64) {
+	if !strings.EqualFold(currency, "ZAR") {
+		return strings.ToUpper(currency), amountCents
+	}
+	rate := 18.5
+	if v := strings.TrimSpace(os.Getenv("PAYPAL_USD_ZAR_RATE")); v != "" {
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil && parsed > 0 {
+			rate = parsed
+		}
+	}
+	usdCents := int64(math.Round(float64(amountCents) / rate))
+	if usdCents < 1 {
+		usdCents = 1
+	}
+	return "USD", usdCents
+}
 
 func (g *PayPalGateway) token(ctx context.Context) (string, error) {
 	g.tokenMu.Lock()
@@ -217,12 +251,16 @@ func (g *PayPalGateway) Initialize(ctx context.Context, in InitInput) (*InitResu
 	body.PurchaseUnits[0].ReferenceID = in.Reference
 	body.PurchaseUnits[0].CustomID = in.Reference
 	body.PurchaseUnits[0].Description = in.Description
+	curr, amountCents := paypalPresentmentAmount(in.Currency, in.AmountCents)
 	body.PurchaseUnits[0].Amount = paypalAmount{
-		CurrencyCode: in.Currency,
-		Value:        centsToDecimal(in.AmountCents),
+		CurrencyCode: curr,
+		Value:        centsToDecimal(amountCents),
 	}
 	body.ApplicationContext.ReturnURL = in.CallbackURL
-	body.ApplicationContext.CancelURL = in.CallbackURL
+	// Distinct cancel URL so the return handler can tell an abandoned approval
+	// from a completed one and fail it immediately — otherwise the app polls a
+	// never-terminal CREATED order until timeout.
+	body.ApplicationContext.CancelURL = appendCancelMarker(in.CallbackURL)
 	body.ApplicationContext.UserAction = "PAY_NOW"
 
 	var order paypalOrder
