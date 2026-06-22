@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"events-db/internal/models"
@@ -94,6 +95,104 @@ func GetRotatingQRTokenHandler(
 				"error":          "Booking is no longer valid",
 				"booking_status": bookingStatus,
 			})
+			return
+		}
+
+		eid := ""
+		if eventID != nil {
+			eid = *eventID
+		}
+
+		token, err := rotatingQR.GenerateToken(assignmentID, bookingID, eid, slotNumber)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate QR token"})
+			return
+		}
+
+		c.JSON(http.StatusOK, token)
+	}
+}
+
+// GetGuestRotatingQRTokenHandler issues a rotating QR token for a guest's
+// claimed ticket, authenticated by booking number + email instead of a JWT.
+// It returns the exact same token format as the authed endpoint so guest
+// tickets scan identically at the gate.
+//
+//	GET /v1/guest/bookings/:bookingNumber/assignments/:assignmentId/qr?email=
+func GetGuestRotatingQRTokenHandler(
+	pool *pgxpool.Pool,
+	rotatingQR *services.RotatingQRService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bookingNumber := c.Param("bookingNumber")
+		assignmentID := c.Param("assignmentId")
+		email := strings.TrimSpace(c.Query("email"))
+
+		if email == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required"})
+			return
+		}
+		if _, err := uuid.Parse(assignmentID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assignment ID"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		var (
+			bookingID       string
+			eventID         *string // nullable — merch-only bookings have no event
+			slotNumber      int
+			assignStatus    string
+			bookingStatus   string
+			bookingNumberDB string
+			attendeeEmail   *string
+			isGuest         bool
+		)
+
+		err := pool.QueryRow(ctx, `
+			SELECT
+				ta.booking_id,
+				b.event_id,
+				ta.slot_number,
+				ta.status,
+				b.booking_status,
+				b.booking_number,
+				b.attendee_email,
+				b.is_guest
+			FROM ticket_assignments ta
+			JOIN bookings b ON ta.booking_id = b.id
+			WHERE ta.id = $1
+		`, assignmentID).Scan(
+			&bookingID,
+			&eventID,
+			&slotNumber,
+			&assignStatus,
+			&bookingStatus,
+			&bookingNumberDB,
+			&attendeeEmail,
+			&isGuest,
+		)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
+			return
+		}
+
+		// Guest auth: the assignment's booking must be a guest booking whose
+		// number + email match what the caller supplied.
+		if !isGuest || bookingNumberDB != bookingNumber ||
+			attendeeEmail == nil || !strings.EqualFold(*attendeeEmail, email) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+
+		if assignStatus != string(models.AssignmentClaimed) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Ticket is not yet active", "status": assignStatus})
+			return
+		}
+		if bookingStatus != string(models.BookingConfirmed) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Booking is no longer valid", "booking_status": bookingStatus})
 			return
 		}
 

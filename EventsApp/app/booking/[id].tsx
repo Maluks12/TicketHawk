@@ -598,7 +598,7 @@ export default function BookingDetailScreen() {
                   )}
 
                   {isClaimed ? (
-                    <RotatingQR assignmentId={slot.id} size={SW - 96} />
+                    <RotatingQR assignmentId={slot.id} size={SW - 96} guest={guest} />
                   ) : (
                     <View style={sheet.pendingQR}>
                       <Ionicons
