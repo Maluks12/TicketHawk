@@ -18,16 +18,17 @@ export const darkColors: typeof lightColors = {
 };
 
 export function useAppTheme() {
-  const { mode, loadMode } = useThemeStore();
+  const mode     = useThemeStore((s) => s.mode);
+  const loadMode = useThemeStore((s) => s.loadMode);
 
   const [systemDark, setSystemDark] = useState(false);
 
-  // FIX: loadMode() existed in the store but was never called anywhere,
-  // so a saved 'light' or 'dark' choice was silently dropped on every
-  // refresh/navigation and the app fell back to 'auto' (system) instead.
+  // Empty deps: loadMode only needs to run once on mount to read localStorage.
+  // [loadMode] caused an infinite loop: loadMode calls set() which triggers
+  // a re-render, which re-runs the effect, which calls set() again forever.
   useEffect(() => {
     loadMode();
-  }, [loadMode]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
