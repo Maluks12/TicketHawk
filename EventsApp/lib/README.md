@@ -36,7 +36,31 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
+    const status = error.response?.status;
+
+    // ── 429 Too Many Requests: retry with backoff ──────────────────────────
+    // A 429 means the request was rejected by the rate limiter *before* being
+    // processed, so replaying it is safe for any HTTP method. We wait — honouring
+    // a Retry-After header when present, otherwise exponential backoff + jitter —
+    // and replay up to MAX_429_RETRIES times before surfacing the error. This
+    // keeps read-heavy screens (tickets, booking detail) and payment polls from
+    // failing on a momentary limit.
+    if (status === 429 && original) {
+      const MAX_429_RETRIES = 4;
+      original._retry429 = (original._retry429 ?? 0) + 1;
+      if (original._retry429 <= MAX_429_RETRIES) {
+        const retryAfterHeader = Number(error.response?.headers?.['retry-after']);
+        const backoffMs =
+          Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+            ? retryAfterHeader * 1000
+            : Math.min(500 * 2 ** (original._retry429 - 1), 4000) + Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        return api(original);
+      }
+    }
+
+    // ── 401 Unauthorized: refresh the access token once, then replay ───────
+    if (status === 401 && !original._retry) {
       original._retry = true;
       const refresh = await SecureStore.getItemAsync('refresh_token');
       if (!refresh) throw error;

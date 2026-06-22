@@ -8,7 +8,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
-import { api, clearCart } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
@@ -243,9 +243,22 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
-  const all      = dedup([...apiBookings]).filter(b => b.booking_status !== 'pending');
-  const upcoming = all.filter(isUpcoming);
-  const past     = all.filter(b => !isUpcoming(b));
+  // A booking only becomes a real ticket once payment goes through (or it's a
+  // free, server-confirmed booking). Failed, declined, abandoned and still-
+  // pending payments never produce a ticket, so they're excluded entirely.
+  // Tickets that were paid and later cancelled or refunded still show (Past).
+  const isRealTicket = (b: Booking) =>
+    b.booking_status === 'confirmed' ||
+    b.booking_status === 'refunded' ||
+    b.payment_status === 'completed' ||
+    b.payment_status === 'refunded';
+  const all      = dedup([...apiBookings]).filter(isRealTicket);
+  // Cancelled / refunded bookings move out of Upcoming and live under Past,
+  // regardless of their event date.
+  const isUpcomingActive = (b: Booking) =>
+    isUpcoming(b) && b.booking_status !== 'cancelled' && b.booking_status !== 'refunded';
+  const upcoming = all.filter(isUpcomingActive);
+  const past     = all.filter(b => !isUpcomingActive(b));
 
   const [activeTab,   setActiveTab]   = useState<'upcoming' | 'past'>('upcoming');
   const [tabBarWidth, setTabBarWidth] = useState(0);
@@ -262,8 +275,7 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   };
 
   const subTextColor  = colors.subText;
-  const badgeBg       = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-  const badgeBgActive = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
+
   const iconTint      = isDark ? 'rgba(255,255,255,0.1)'  : 'rgba(0,0,0,0.1)';
 
   if (loading) return (
@@ -313,13 +325,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
             >
               Upcoming
             </Text>
-            {upcoming.length > 0 && (
-              <View style={[sheet.tabBadge, { backgroundColor: activeTab === 'upcoming' ? badgeBgActive : badgeBg }]}>
-                <Text style={[sheet.tabBadgeText, { color: activeTab === 'upcoming' ? colors.text : subTextColor }]}>
-                  {upcoming.length}
-                </Text>
-              </View>
-            )}
           </TouchableOpacity>
 
           <TouchableOpacity style={sheet.tabItem} activeOpacity={0.75} onPress={() => switchTab('past')}>
@@ -329,13 +334,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
             >
               Past
             </Text>
-            {past.length > 0 && (
-              <View style={[sheet.tabBadge, { backgroundColor: activeTab === 'past' ? badgeBgActive : badgeBg }]}>
-                <Text style={[sheet.tabBadgeText, { color: activeTab === 'past' ? colors.text : subTextColor }]}>
-                  {past.length}
-                </Text>
-              </View>
-            )}
           </TouchableOpacity>
         </View>
 
@@ -400,17 +398,8 @@ export default function TicketsScreen() {
   const [loading, setLoading]         = useState(false);
   const [refreshing, setRefreshing]   = useState(false);
   const [error, setError]             = useState<string | null>(null);
-  const [resetting, setResetting]     = useState(false);
 
   useEffect(() => {}, []);
-
-  const handleReset = async () => {
-    setResetting(true);
-    try { await clearCart(); } catch (_) {}
-    setApiBookings([]);
-    await load();
-    setResetting(false);
-  };
 
   const fetchApiBookings = useCallback(async () => {
     if (!user) return;
@@ -434,22 +423,12 @@ export default function TicketsScreen() {
 
   useEffect(() => { load(); }, [user]);
 
-  const totalCount = dedup([...apiBookings]).filter(b => b.booking_status !== 'pending').length;
   const showGuestLookup = !user;
 
   return (
     <View className={s.root} style={{ backgroundColor: colors.background }}>
       <View className={s.header} style={{ paddingTop: insets.top + 10, backgroundColor: colors.background }}>
         <Text className={s.headerTitle} style={{ color: colors.text }}>My Tickets</Text>
-        {totalCount > 0 && (
-          <View style={sheet.countPill}><Text style={sheet.countText}>{totalCount}</Text></View>
-        )}
-        <TouchableOpacity onPress={handleReset} disabled={resetting} style={{ marginLeft: 'auto', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)', marginRight: 4 }}>
-          {resetting
-            ? <ActivityIndicator size='small' color='rgba(255,255,255,0.5)' />
-            : <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600', letterSpacing: 0.5 }}>RESET</Text>
-          }
-        </TouchableOpacity>
       </View>
 
       {showGuestLookup ? (

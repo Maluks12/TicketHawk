@@ -461,11 +461,22 @@ export default function BookingDetailScreen() {
       }
       if (!user) { setLoading(false); return; }
       try {
-        const [booking, assignments] = await Promise.all([
-          getBookingDetail(id as string),
-          getTicketAssignments(id as string).catch(() => []),
-        ]);
-        setBooking(booking);
+        // Retry transient failures (esp. 429 rate-limit / network blips) with
+        // backoff so a momentary limit doesn't render as "Booking not found".
+        // A genuine 404 bails immediately.
+        let bookingDetail: any = null;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            bookingDetail = await getBookingDetail(id as string);
+            break;
+          } catch (e: any) {
+            if (e?.response?.status === 404) throw e;
+            if (attempt === 3) throw e;
+            await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+          }
+        }
+        const assignments = await getTicketAssignments(id as string).catch(() => []);
+        setBooking(bookingDetail);
         setAssignments(assignments);
       } catch {} finally { setLoading(false); }
     };

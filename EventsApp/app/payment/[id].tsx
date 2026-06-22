@@ -29,9 +29,11 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   openGatewayCheckout,
+  startBookingPayment,
   pollPayment,
   fetchPaymentStatus,
   type PaymentStatus,
+  type PaymentMethod,
 } from '../../lib/payments';
 
 type Phase = 'opening' | 'in_browser' | 'confirming' | 'done' | 'failed' | 'cancelled';
@@ -99,8 +101,8 @@ export default function PaymentScreen() {
     }
   }, [goToTickets]);
 
-  const run = useCallback(async () => {
-    if (!authorizationUrl) {
+  const run = useCallback(async (checkoutUrl: string) => {
+    if (!checkoutUrl) {
       setPhase('failed');
       setMessage('Missing checkout link. Please go back and try again.');
       return;
@@ -109,7 +111,7 @@ export default function PaymentScreen() {
     setPhase('in_browser');
     setMessage('Complete your payment in the secure window…');
 
-    const outcome = await openGatewayCheckout(authorizationUrl);
+    const outcome = await openGatewayCheckout(checkoutUrl);
 
     setPhase('confirming');
     setMessage('Confirming your payment…');
@@ -139,13 +141,29 @@ export default function PaymentScreen() {
         }
       }
     }
-  }, [authorizationUrl, bookingId, finishFromStatus]);
+  }, [bookingId, finishFromStatus]);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    run();
-  }, [run]);
+    run(authorizationUrl);
+  }, [run, authorizationUrl]);
+
+  // Retry re-initialises the payment so we get a FRESH gateway order and the
+  // payment record resets to pending. Reusing the old order would just resolve
+  // to failed again — a cancelled/declined order can't be re-approved, and the
+  // backend short-circuits a payment that's already in a terminal state.
+  const retry = useCallback(async () => {
+    setPhase('opening');
+    setMessage('Restarting secure checkout…');
+    try {
+      const started = await startBookingPayment(bookingId, (method as PaymentMethod) || 'card');
+      run(started.authorization_url);
+    } catch {
+      setPhase('failed');
+      setMessage('Couldn’t restart checkout. Please go back and start over.');
+    }
+  }, [bookingId, method, run]);
 
   const fmtAmount = () => {
     const n = parseFloat(amount ?? '0');
@@ -180,12 +198,7 @@ export default function PaymentScreen() {
           <>
             <TouchableOpacity
               style={styles.primaryBtn}
-              onPress={() => {
-                startedRef.current = false;
-                setPhase('opening');
-                setMessage('Reopening secure checkout…');
-                run();
-              }}
+              onPress={retry}
             >
               <Text style={styles.primaryText}>Try again</Text>
             </TouchableOpacity>
