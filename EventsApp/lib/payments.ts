@@ -113,10 +113,38 @@ export async function retryBookingPayment(
   return normaliseStart(res.data);
 }
 
-/** fetchPaymentStatus reads the current payment state for a booking. */
-export async function fetchPaymentStatus(bookingId: string): Promise<PaymentStatus> {
+/**
+ * A guest has no auth token, so their payment is addressed by booking number +
+ * email against the /v1/guest/* routes instead of the signed-in /v1/bookings/*
+ * routes.
+ */
+export interface GuestRef {
+  bookingNumber: string;
+  email: string;
+}
+
+/** fetchPaymentStatus reads the current payment state for a booking (guest-aware). */
+export async function fetchPaymentStatus(bookingId: string, guest?: GuestRef): Promise<PaymentStatus> {
+  if (guest) {
+    const res = await api.get(
+      `/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}/payment`,
+      { params: { email: guest.email } },
+    );
+    // The guest endpoint returns booking_number, not booking_id — backfill it.
+    return { ...(res.data as PaymentStatus), booking_id: bookingId };
+  }
   const res = await api.get(`/v1/bookings/${bookingId}/payment`);
   return res.data as PaymentStatus;
+}
+
+/** retryGuestPayment re-initialises a guest's (card) payment by booking number. */
+export async function retryGuestPayment(bookingNumber: string, email: string): Promise<StartPaymentResult> {
+  const res = await api.post(
+    `/v1/guest/bookings/${encodeURIComponent(bookingNumber)}/payment/retry`,
+    {},
+    { params: { email } },
+  );
+  return normaliseStart(res.data);
 }
 
 /**
@@ -127,12 +155,13 @@ export async function pollPayment(
   bookingId: string,
   intervalMs = 2500,
   timeoutMs = 150_000,
+  guest?: GuestRef,
 ): Promise<PaymentStatus> {
   const deadline = Date.now() + timeoutMs;
   let last: PaymentStatus | null = null;
   while (Date.now() < deadline) {
     try {
-      last = await fetchPaymentStatus(bookingId);
+      last = await fetchPaymentStatus(bookingId, guest);
       if (
         last.payment_status === 'completed' ||
         last.payment_status === 'failed' ||

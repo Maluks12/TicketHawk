@@ -363,7 +363,10 @@ func main() {
 	guest := v1.Group("/guest")
 	if rateLimitManager != nil {
 		guest.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			// Guests poll GET /guest/bookings/:bn/payment every ~2.5s during
+			// checkout, so this bucket must support sustained polling (matches
+			// the authed "payments" bucket) rather than the old 10/1-per-minute.
+			ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 			"guest-bookings"))
 	}
 	{

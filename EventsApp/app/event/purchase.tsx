@@ -243,6 +243,16 @@ export default function TicketPurchaseScreen() {
       console.log('[PAY] endpoint:', endpoint, 'payload:', JSON.stringify(payload));
       const { data: booking } = await api.post(endpoint, payload);
 
+      // For guest checkouts, surface the booking number + email so you can look
+      // the ticket up in the Tickets tab's guest lookup while testing.
+      if (!user) {
+        console.log(
+          '[PAY] guest booking created →',
+          'bookingNumber:', (booking as any).booking_number,
+          '| email:', email,
+        );
+      }
+
       // Free ticket — booking is already confirmed server-side, no payment step needed.
       if ((booking as any).total_amount === 0) {
         try { if (router.canDismiss()) router.dismissAll(); } catch {}
