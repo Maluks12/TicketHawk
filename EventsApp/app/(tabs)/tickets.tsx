@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
  ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
@@ -58,6 +58,17 @@ const PALETTES = [
 const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 const isUpcoming = (b: Booking) => !!b.event?.start_time && new Date(b.event.start_time) > new Date();
+
+// A "real" ticket is one the buyer actually holds: booking confirmed/refunded,
+// or payment completed/refunded. Pending and failed bookings are NOT shown.
+const isRealTicket = (b: Booking) =>
+  b.booking_status === 'confirmed' || b.booking_status === 'refunded' ||
+  b.payment_status === 'completed' || b.payment_status === 'refunded';
+
+// Upcoming = future-dated AND still active. Cancelled/refunded bookings drop to
+// the Past tab even when the event date is still ahead.
+const isUpcomingActive = (b: Booking) =>
+  isUpcoming(b) && b.booking_status !== 'cancelled' && b.booking_status !== 'refunded';
 const daysUntil  = (iso: string) => Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
 const dedup = (list: Booking[]) => { const seen = new Set<string>(); return list.filter(b => { if (seen.has(b.booking_number)) return false; seen.add(b.booking_number); return true; }); };
 
@@ -243,20 +254,7 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
 
-  // A booking only becomes a real ticket once payment goes through (or it's a
-  // free, server-confirmed booking). Failed, declined, abandoned and still-
-  // pending payments never produce a ticket, so they're excluded entirely.
-  // Tickets that were paid and later cancelled or refunded still show (Past).
-  const isRealTicket = (b: Booking) =>
-    b.booking_status === 'confirmed' ||
-    b.booking_status === 'refunded' ||
-    b.payment_status === 'completed' ||
-    b.payment_status === 'refunded';
   const all      = dedup([...apiBookings]).filter(isRealTicket);
-  // Cancelled / refunded bookings move out of Upcoming and live under Past,
-  // regardless of their event date.
-  const isUpcomingActive = (b: Booking) =>
-    isUpcoming(b) && b.booking_status !== 'cancelled' && b.booking_status !== 'refunded';
   const upcoming = all.filter(isUpcomingActive);
   const past     = all.filter(b => !isUpcomingActive(b));
 
@@ -275,7 +273,8 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   };
 
   const subTextColor  = colors.subText;
-
+  const badgeBg       = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  const badgeBgActive = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)';
   const iconTint      = isDark ? 'rgba(255,255,255,0.1)'  : 'rgba(0,0,0,0.1)';
 
   if (loading) return (
@@ -422,6 +421,18 @@ export default function TicketsScreen() {
   const refresh = useCallback(async () => { setRefreshing(true); await fetchApiBookings(); setRefreshing(false); }, [fetchApiBookings]);
 
   useEffect(() => { load(); }, [user]);
+
+  // Re-fetch when the tab regains focus (e.g. returning here right after a
+  // purchase) so a freshly-confirmed booking shows up immediately. The first
+  // focus is skipped because the mount effect above already does the spinner
+  // load; subsequent focuses refetch silently (no spinner flash).
+  const focusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!focusedOnce.current) { focusedOnce.current = true; return; }
+      if (user) fetchApiBookings();
+    }, [user, fetchApiBookings]),
+  );
 
   const showGuestLookup = !user;
 

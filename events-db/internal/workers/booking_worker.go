@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"events-db/internal/config"
 	"events-db/internal/models"
 	"events-db/internal/repository"
@@ -12,6 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
+
+// isPermanentEmailErr reports whether an email send failure is a non-retryable
+// auth/config problem (invalid SENDGRID_API_KEY or unverified sender). Retrying
+// such a failure is pointless — it only churns the queue and the logs.
+func isPermanentEmailErr(err error) bool {
+	var apiErr *services.EmailAPIError
+	return errors.As(err, &apiErr) && apiErr.IsPermanent()
+}
 
 // retryBackoffs defines the wait duration before each successive retry attempt.
 // Attempt 0 → 30 s, attempt 1 → 2 min, attempt 2 → 10 min, attempt 3 → 30 min,
@@ -165,6 +174,15 @@ func processBookingJob(
 	}
 
 	if err := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); err != nil {
+		// A permanent auth/config failure (bad SENDGRID_API_KEY / unverified
+		// sender) won't fix itself on retry. Tickets are already issued, so
+		// just log it once and skip the retry queue to avoid endless churn.
+		if isPermanentEmailErr(err) {
+			log.Error().Err(err).Str("booking_id", bookingID).
+				Msg("booking worker: email rejected (auth/config) — NOT queuing retry; set a valid SENDGRID_API_KEY. Tickets were still issued.")
+			return
+		}
+
 		log.Error().Err(err).Str("booking_id", bookingID).
 			Msg("booking worker: email failed — persisting to retry queue")
 
@@ -307,6 +325,14 @@ func retryEmailSend(
 	newAttempts := attempts + 1
 
 	if sendErr := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); sendErr != nil {
+		// A permanent auth/config failure won't resolve on retry — mark it
+		// failed now so it stops draining every cycle.
+		if isPermanentEmailErr(sendErr) {
+			log.Error().Err(sendErr).Str("booking_id", bookingID).Str("retry_id", retryID).
+				Msg("booking worker: email permanently rejected (auth/config) — marking failed, no further retries")
+			return markRetryFailed(pool, retryID, fmt.Sprintf("permanent: %v", sendErr))
+		}
+
 		// Check whether we've hit the attempt cap.
 		updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
