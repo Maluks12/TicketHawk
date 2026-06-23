@@ -5,7 +5,6 @@ import { useRouter, useParams } from 'next/navigation';
 import { api, type Event } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtPrice(p: number) {
   if (p === 0) return 'Free';
   return `R${Math.round(p).toLocaleString('en-ZA')}`;
@@ -17,9 +16,8 @@ function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
 export default function EventDetailPage() {
-  const router = useRouter();
+  const router   = useRouter();
   const { id: eventId } = useParams<{ id: string }>();
   const { colors, isDark } = useAppTheme();
 
@@ -30,20 +28,18 @@ export default function EventDetailPage() {
 
   useEffect(() => {
     if (!eventId) return;
-    api
-      .get(`/v1/events/${eventId}`)
+    api.get(`/v1/events/${eventId}`)
       .then(({ data: res }) => setEvent(res.data ?? res))
       .catch(() => setEvent(null))
       .finally(() => setLoading(false));
-    // Track view — fire and forget
     api.post(`/v1/events/${eventId}/view`).catch(() => {});
   }, [eventId]);
 
-  const bg     = isDark ? '#0a0a0a' : '#f5f5f7';
-  const cardBg = isDark ? '#111'    : '#fff';
-  const border = isDark ? '#222'    : '#e5e5e5';
+  const bg      = isDark ? '#0a0a0a' : '#f2f2f5';
+  const cardBg  = isDark ? '#161616' : '#fff';
+  const border  = isDark ? '#242424' : '#e8e8ec';
+  const subtle  = isDark ? '#1e1e1e' : '#f0f0f3';
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) return (
     <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: 32, height: 32, border: '3px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -51,7 +47,6 @@ export default function EventDetailPage() {
     </div>
   );
 
-  // ── Not found ────────────────────────────────────────────────────────────────
   if (!event) return (
     <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
       <span style={{ fontSize: 40 }}>⚠️</span>
@@ -60,209 +55,292 @@ export default function EventDetailPage() {
     </div>
   );
 
-  const heroImage  = event.banner_image_url ?? event.cover_image_url;
-  const isSoldOut  = event.is_sold_out ?? false;
-  const tags       = [...(((event as any).teams) ?? []), ...(((event as any).performers) ?? [])];
-  const desc       = event.description ?? '';
-  const shortDesc  = desc.slice(0, 220);
-  const hasMore    = desc.length > 220;
+  const heroImage = event.banner_image_url ?? event.cover_image_url;
+  const isSoldOut = event.is_sold_out ?? false;
+  const tags      = [...(((event as any).teams) ?? []), ...(((event as any).performers) ?? [])];
+  const desc      = event.description ?? '';
+  const shortDesc = desc.slice(0, 280);
+  const hasMore   = desc.length > 280;
+  const avail     = (event as any).available_tickets;
+  const isLow     = avail != null && avail < 20;
+
+  const handleGetTickets = () => {
+    sessionStorage.setItem(`event_detail_visited_${eventId}`, '1');
+    router.push(`/events/${eventId}/purchase`);
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: bg }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        * { box-sizing: border-box; }
 
-      {/* ── Sticky header ────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 16px 12px', borderBottom: `1px solid ${border}`, background: bg, position: 'sticky', top: 0, zIndex: 40 }}>
+        .ed-header {
+          display: flex; align-items: center; gap: 12px;
+          padding: 0 32px; height: 60px;
+          background: ${bg}; border-bottom: 1px solid ${border};
+          position: sticky; top: 0; z-index: 40;
+          backdrop-filter: blur(12px);
+        }
+        .ed-hero {
+          width: 100%; aspect-ratio: 21/9;
+          min-height: 240px; max-height: 460px;
+          position: relative; background: #111; overflow: hidden;
+        }
+        .ed-body {
+          max-width: 1320px; margin: 0 auto;
+          padding: 36px 40px 80px;
+          display: grid; grid-template-columns: 1fr 340px; gap: 28px; align-items: start;
+        }
+        .ed-left { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+        .ed-sidebar { position: sticky; top: 76px; display: flex; flex-direction: column; gap: 12px; }
+        .ed-mobile-cta { display: none; }
+
+        .info-row { display: flex; align-items: center; gap: 10px; }
+        .info-row + .info-row { border-top: 1px solid ${border}; padding-top: 14px; margin-top: 0; }
+
+        .tag-chip {
+          font-size: 13px; font-weight: 600; color: ${colors.text};
+          background: ${subtle}; border-radius: 20px; padding: 6px 14px;
+        }
+
+        .get-tickets-btn {
+          width: 100%; background: #ff2d55; color: #fff;
+          border: none; border-radius: 12px; padding: 15px;
+          font-size: 15px; font-weight: 800; cursor: pointer;
+          transition: opacity 0.15s, transform 0.1s;
+          letter-spacing: 0.3px;
+        }
+        .get-tickets-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .get-tickets-btn:active { opacity: 1; transform: translateY(0); }
+
+        @media (max-width: 900px) {
+          .ed-header { padding: 0 16px; }
+          .ed-hero { aspect-ratio: 16/9; max-height: 240px; }
+          .ed-body { grid-template-columns: 1fr; padding: 20px 16px 120px; gap: 16px; }
+          .ed-sidebar { display: none; }
+          .ed-mobile-cta {
+            display: flex; position: fixed; bottom: 0; left: 0; right: 0;
+            background: ${bg}; border-top: 1px solid ${border};
+            padding: 12px 16px 28px; align-items: center; gap: 14px; z-index: 40;
+          }
+        }
+      `}</style>
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="ed-header">
         <button
           onClick={() => router.back()}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.text, padding: 0 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.text, padding: '6px 8px 6px 0', fontSize: 20, lineHeight: 1, flexShrink: 0 }}
         >←</button>
-        <h1 style={{ flex: 1, margin: 0, fontSize: 18, fontWeight: 800, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          Event Details
-        </h1>
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {event.title}
+        </span>
         {event.is_featured && (
-          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#ff2d55', background: 'rgba(255,45,85,0.12)', padding: '3px 8px', borderRadius: 5 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#ff2d55', background: 'rgba(255,45,85,0.1)', padding: '4px 10px', borderRadius: 20, flexShrink: 0 }}>
             🔥 TRENDING
           </span>
         )}
       </div>
 
-      <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px 120px' }}>
+      {/* ── Hero ───────────────────────────────────────────────────────────── */}
+      <div className="ed-hero">
+        {heroImage && !imgErr ? (
+          <img src={heroImage} alt={event.title} onError={() => setImgErr(true)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#1c1c1e,#2c2c2e)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 64, opacity: 0.2 }}>🎟️</span>
+          </div>
+        )}
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 55%)', pointerEvents: 'none' }} />
 
-        {/* ── Hero image ───────────────────────────────────────────────────── */}
-        <div style={{ margin: '16px 0', borderRadius: 16, overflow: 'hidden', position: 'relative', height: 220, background: '#111' }}>
-          {heroImage && !imgErr ? (
-            <img
-              src={heroImage}
-              alt={event.title}
-              onError={() => setImgErr(true)}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            />
-          ) : (
-            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#1a1a1a 0%,#2a2a2a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 48, opacity: 0.3 }}>🎟️</span>
-            </div>
-          )}
-
-          {/* Gradient overlay */}
-          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%)', pointerEvents: 'none' }} />
-
-          {/* Sold out badge */}
-          {isSoldOut && (
-            <div style={{ position: 'absolute', top: 12, right: 12, background: '#ff2d55', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: 1.5, padding: '4px 10px', borderRadius: 6 }}>
-              SOLD OUT
-            </div>
-          )}
-
-          {/* Views */}
-          {event.views > 0 && (
-            <div style={{ position: 'absolute', bottom: 12, left: 14, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontSize: 12 }}>👁</span>
-              <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>
-                {event.views.toLocaleString('en-ZA')} VIEWS
-              </span>
-            </div>
-          )}
-
-          {/* Category pill */}
-          <div style={{ position: 'absolute', bottom: 12, right: 14 }}>
-            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#ff2d55', background: 'rgba(0,0,0,0.6)', padding: '3px 9px', borderRadius: 5, backdropFilter: 'blur(6px)' }}>
-              ✦ {event.category?.toUpperCase()}
+        {isSoldOut && (
+          <div style={{ position: 'absolute', top: 16, right: 16, background: '#ff2d55', color: '#fff', fontSize: 11, fontWeight: 800, letterSpacing: 1.5, padding: '5px 12px', borderRadius: 6 }}>
+            SOLD OUT
+          </div>
+        )}
+        {event.views > 0 && (
+          <div style={{ position: 'absolute', bottom: 16, left: 20, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <span style={{ fontSize: 12 }}>👁</span>
+            <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 700, letterSpacing: 0.8 }}>
+              {event.views.toLocaleString('en-ZA')} views
             </span>
           </div>
-        </div>
-
-        {/* ── Title strip ──────────────────────────────────────────────────── */}
-        <div style={{ padding: '4px 0 16px', borderBottom: `1px solid ${border}` }}>
-          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text, lineHeight: 1.25 }}>{event.title}</p>
-          <p style={{ margin: '6px 0 0', fontSize: 13, color: colors.subText }}>
-            {fmtDate(event.start_time)} · {fmtTime(event.start_time)}
-          </p>
-          {event.venue_name && (
-            <p style={{ margin: '2px 0 0', fontSize: 13, color: colors.subText }}>
-              {event.venue_name}{event.city ? `, ${event.city}` : ''}
-            </p>
-          )}
-        </div>
-
-        {/* ── Date / Venue / Price meta cards ──────────────────────────────── */}
-        <div style={{ paddingTop: 16, paddingBottom: 4 }}>
-          <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>EVENT INFO</p>
-
-          {[
-            { icon: '📅', label: 'Date',  value: fmtDate(event.start_time) },
-            { icon: '🕐', label: 'Time',  value: fmtTime(event.start_time) },
-            { icon: '📍', label: 'Venue', value: `${event.venue_name}${event.city ? `, ${event.city}` : ''}` },
-            ...(event.address ? [{ icon: '🗺️', label: 'Address', value: event.address }] : []),
-          ].map(({ icon, label, value }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, marginBottom: 10, background: cardBg, border: `1px solid ${border}`, borderRadius: 14 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: isDark ? '#1e1e1e' : '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-                {icon}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ margin: 0, fontSize: 10, fontWeight: 800, letterSpacing: 1.2, color: colors.subText }}>{label.toUpperCase()}</p>
-                <p style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 600, color: colors.text }}>{value}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* ── Price card ───────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, marginBottom: 10, background: cardBg, border: `1px solid ${border}`, borderRadius: 14 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: isDark ? '#1e1e1e' : '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-            🎟️
+        )}
+        {event.category && (
+          <div style={{ position: 'absolute', bottom: 16, right: 20, fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: '#fff', background: 'rgba(255,45,85,0.85)', padding: '4px 10px', borderRadius: 20, backdropFilter: 'blur(8px)' }}>
+            {event.category}
           </div>
-          <div style={{ flex: 1 }}>
-            <p style={{ margin: 0, fontSize: 10, fontWeight: 800, letterSpacing: 1.2, color: colors.subText }}>TICKETS FROM</p>
-            <p style={{ margin: '2px 0 0', fontSize: 20, fontWeight: 800, color: colors.text }}>{fmtPrice(event.price)}</p>
-          </div>
-          {(event as any).available_tickets != null && !isSoldOut && (
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: (event as any).available_tickets < 20 ? '#ff9500' : colors.subText }}>
-              {(event as any).available_tickets < 20
-                ? `⚡ Only ${(event as any).available_tickets} left`
-                : `${(event as any).available_tickets.toLocaleString()} available`}
-            </p>
-          )}
-        </div>
+        )}
+      </div>
 
-        {/* ── Description ──────────────────────────────────────────────────── */}
-        {desc && (
-          <div style={{ marginBottom: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>ABOUT THIS EVENT</p>
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16 }}>
-              <p style={{ margin: 0, fontSize: 14, color: colors.text, lineHeight: 1.7 }}>
-                {expanded ? desc : (shortDesc + (hasMore ? '…' : ''))}
-              </p>
-              {hasMore && (
-                <button
-                  onClick={() => setExpanded(e => !e)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ff2d55', fontSize: 13, fontWeight: 700, padding: '8px 0 0', display: 'block' }}
-                >
-                  {expanded ? 'Show less' : 'Read more'}
-                </button>
+      {/* ── Body ───────────────────────────────────────────────────────────── */}
+      <div className="ed-body">
+
+        {/* ══ LEFT ══════════════════════════════════════════════════════════ */}
+        <div className="ed-left">
+
+          {/* Title block */}
+          <div>
+            <h1 style={{ margin: '0 0 10px', fontSize: 26, fontWeight: 800, color: colors.text, lineHeight: 1.25 }}>
+              {event.title}
+            </h1>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 20px' }}>
+              <span style={{ fontSize: 14, color: colors.subText }}>
+                📅 {fmtDate(event.start_time)} · {fmtTime(event.start_time)}
+              </span>
+              {event.venue_name && (
+                <span style={{ fontSize: 14, color: colors.subText }}>
+                  📍 {event.venue_name}{event.city ? `, ${event.city}` : ''}
+                </span>
               )}
             </div>
           </div>
-        )}
 
-        {/* ── Performers / Teams ───────────────────────────────────────────── */}
-        {tags.length > 0 && (
-          <div style={{ marginBottom: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>
-              {event.category?.toLowerCase() === 'sports' ? 'TEAMS' : 'PERFORMERS'}
-            </p>
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {tags.map((tag: string) => (
-                <span key={tag} style={{ fontSize: 13, fontWeight: 600, color: colors.text, background: isDark ? '#1e1e1e' : '#f0f0f0', borderRadius: 20, padding: '6px 14px' }}>
-                  {tag}
-                </span>
+          {/* Divider */}
+          <div style={{ height: 1, background: border }} />
+
+          {/* Event details — clean list rows instead of cards */}
+          <div style={{ background: cardBg, borderRadius: 16, border: `1px solid ${border}`, overflow: 'hidden' }}>
+            {[
+              { icon: '📅', label: 'Date',    value: fmtDate(event.start_time) },
+              { icon: '🕐', label: 'Time',    value: fmtTime(event.start_time) },
+              { icon: '📍', label: 'Venue',   value: `${event.venue_name ?? ''}${event.city ? `, ${event.city}` : ''}` },
+              ...(event.address ? [{ icon: '🗺️', label: 'Address', value: event.address }] : []),
+            ].map(({ icon, label, value }, i, arr) => (
+              <div key={label} style={{
+                display: 'flex', alignItems: 'center', gap: 14,
+                padding: '14px 20px',
+                borderBottom: i < arr.length - 1 ? `1px solid ${border}` : 'none',
+              }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: subtle, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, flexShrink: 0 }}>
+                  {icon}
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 1.1, color: colors.subText, textTransform: 'uppercase' }}>{label}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 600, color: colors.text }}>{value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* About */}
+          {desc && (
+            <div style={{ background: cardBg, borderRadius: 16, border: `1px solid ${border}`, padding: '20px 22px' }}>
+              <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: colors.subText, textTransform: 'uppercase' }}>About this event</p>
+              <p style={{ margin: 0, fontSize: 14, color: colors.text, lineHeight: 1.8 }}>
+                {expanded ? desc : shortDesc + (hasMore ? '…' : '')}
+              </p>
+              {hasMore && (
+                <button onClick={() => setExpanded(e => !e)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ff2d55', fontSize: 13, fontWeight: 700, padding: '10px 0 0', display: 'block' }}>
+                  {expanded ? 'Show less ↑' : 'Read more ↓'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Performers / Teams */}
+          {tags.length > 0 && (
+            <div style={{ background: cardBg, borderRadius: 16, border: `1px solid ${border}`, padding: '20px 22px' }}>
+              <p style={{ margin: '0 0 12px', fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: colors.subText, textTransform: 'uppercase' }}>
+                {event.category?.toLowerCase() === 'sports' ? 'Teams' : 'Performers'}
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {tags.map((tag: string) => (
+                  <span key={tag} className="tag-chip">{tag}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Trust row */}
+          <div style={{ background: cardBg, borderRadius: 16, border: `1px solid ${border}`, overflow: 'hidden' }}>
+            {[
+              { icon: '✅', label: 'Official Ticket Marketplace', sub: 'Reviewed and verified by the venue' },
+              { icon: '🔒', label: 'Secure Checkout', sub: 'Your payment and personal data are protected' },
+            ].map(({ icon, label, sub }, i) => (
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: i === 0 ? `1px solid ${border}` : 'none' }}>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
+                <div>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{label}</p>
+                  <p style={{ margin: '1px 0 0', fontSize: 12, color: colors.subText }}>{sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ══ SIDEBAR ═══════════════════════════════════════════════════════ */}
+        <div className="ed-sidebar">
+          <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 20, overflow: 'hidden' }}>
+
+            {/* Price header */}
+            <div style={{ padding: '22px 22px 18px', borderBottom: `1px solid ${border}` }}>
+              <p style={{ margin: '0 0 2px', fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: colors.subText, textTransform: 'uppercase' }}>Tickets from</p>
+              <p style={{ margin: 0, fontSize: 34, fontWeight: 800, color: colors.text, letterSpacing: -1 }}>{fmtPrice(event.price)}</p>
+              {avail != null && !isSoldOut && (
+                <p style={{ margin: '6px 0 0', fontSize: 12, fontWeight: 700, color: isLow ? '#ff9500' : colors.subText }}>
+                  {isLow ? `⚡ Only ${avail} left` : `${avail.toLocaleString()} tickets available`}
+                </p>
+              )}
+            </div>
+
+            {/* Date + venue rows */}
+            <div style={{ padding: '4px 0' }}>
+              {[
+                { icon: '📅', text: `${fmtDate(event.start_time)} · ${fmtTime(event.start_time)}` },
+                { icon: '📍', text: `${event.venue_name ?? ''}${event.city ? `, ${event.city}` : ''}` },
+              ].map(({ icon, text }) => (
+                <div key={icon} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 22px' }}>
+                  <span style={{ fontSize: 14, marginTop: 1, flexShrink: 0 }}>{icon}</span>
+                  <p style={{ margin: 0, fontSize: 13, color: colors.subText, lineHeight: 1.45 }}>{text}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* CTA */}
+            <div style={{ padding: '6px 16px 20px' }}>
+              {isSoldOut ? (
+                <button disabled style={{ width: '100%', background: subtle, color: colors.subText, border: 'none', borderRadius: 12, padding: '15px', fontSize: 15, fontWeight: 800, cursor: 'not-allowed' }}>
+                  Sold Out
+                </button>
+              ) : (
+                <button className="get-tickets-btn" onClick={handleGetTickets}>
+                  Get Tickets
+                </button>
+              )}
+            </div>
+
+            {/* Trust footer inside card */}
+            <div style={{ borderTop: `1px solid ${border}`, padding: '14px 22px', display: 'flex', gap: 16 }}>
+              {[['✅', 'Official'], ['🔒', 'Secure']].map(([icon, label]) => (
+                <div key={label} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 13 }}>{icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: colors.subText }}>{label}</span>
+                </div>
               ))}
             </div>
           </div>
-        )}
-
-        {/* ── Trust badges (matching purchase page style) ───────────────── */}
-        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 10 }}>
-          {[
-            ['✅', 'Official Ticket Marketplace', 'Tickets are reviewed and verified by the venue.'],
-            ['🔒', 'Secure Checkout', 'Your payment and personal data are always protected.'],
-          ].map(([icon, title, body]) => (
-            <div key={title} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <span>{icon}</span>
-              <div>
-                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{title}</p>
-                <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>{body}</p>
-              </div>
-            </div>
-          ))}
         </div>
-
       </div>
 
-      {/* ── Sticky CTA bar (same as purchase page) ───────────────────────── */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, zIndex: 40 }}>
-        <div style={{ maxWidth: 640, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}>
-          <div>
-            <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>From</p>
-            <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>{fmtPrice(event.price)}</p>
-          </div>
-          {isSoldOut ? (
-            <button disabled style={{ flex: 1, background: isDark ? '#222' : '#e5e5e5', color: isDark ? '#555' : '#aaa', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'not-allowed' }}>
-              SOLD OUT
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                // ── Set referral token so purchase page knows we came from here ──
-                sessionStorage.setItem(`event_detail_visited_${eventId}`, '1');
-                router.push(`/events/${eventId}/purchase`);
-              }}
-              style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}
-            >
-              Get Tickets
-            </button>
-          )}
+      {/* ── Mobile CTA ─────────────────────────────────────────────────────── */}
+      <div className="ed-mobile-cta">
+        <div>
+          <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>From</p>
+          <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>{fmtPrice(event.price)}</p>
         </div>
+        {isSoldOut ? (
+          <button disabled style={{ flex: 1, background: subtle, color: colors.subText, border: 'none', borderRadius: 12, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'not-allowed' }}>
+            Sold Out
+          </button>
+        ) : (
+          <button className="get-tickets-btn" style={{ flex: 1 }} onClick={handleGetTickets}>
+            Get Tickets
+          </button>
+        )}
       </div>
     </div>
   );
