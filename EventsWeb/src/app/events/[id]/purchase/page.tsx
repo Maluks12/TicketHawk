@@ -300,7 +300,7 @@ return (
             </div>
           )}
         </div>
-      )
+      )}
 
         {/* ══ STEP: Checkout summary ════════════════════════════════════ */}
         {step === 'summary' && selectedType && (
