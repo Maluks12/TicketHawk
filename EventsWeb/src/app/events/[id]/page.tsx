@@ -1,11 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
-import { useAuthStore } from '@/store/authStore';
+import { api, type Event } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
-import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtPrice(p: number) {
@@ -18,119 +16,34 @@ function fmtDate(iso: string) {
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
-function availLabel(tt: TicketType): string {
-  const av = tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - tt.reserved_count : null);
-  if (av === null) return 'Available';
-  if (av === 0) return 'Sold out';
-  if (av < 10) return `${av} left`;
-  return `${av.toLocaleString()} available`;
-}
-function isSoldOut(tt: TicketType): boolean {
-  const av = tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - tt.reserved_count : null);
-  return av !== null && av === 0;
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-export default function EventPurchasePage() {
+export default function EventDetailPage() {
   const router = useRouter();
   const { id: eventId } = useParams<{ id: string }>();
-  const { user } = useAuthStore();
   const { colors, isDark } = useAppTheme();
 
-  const [event,          setEvent]          = useState<Event | null>(null);
-  const [ticketTypes,    setTicketTypes]    = useState<TicketType[]>([]);
-  const [loading,        setLoading]        = useState(true);
-  const [selectedId,     setSelectedId]     = useState<string | null>(null);
-  const [quantity,       setQuantity]       = useState(1);
-  const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
-  const [adding,         setAdding]         = useState(false);
-  const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal' | 'apple_pay'>('card');
-  const [paySheetOpen,   setPaySheetOpen]   = useState(false);
-  const [contactOpen,    setContactOpen]    = useState(false);
-  const [guestName,      setGuestName]      = useState('');
-  const [guestEmail,     setGuestEmail]     = useState('');
-  const [error,          setError]          = useState('');
+  const [event,    setEvent]   = useState<Event | null>(null);
+  const [loading,  setLoading] = useState(true);
+  const [imgErr,   setImgErr]  = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const { data: evRes } = await api.get(`/v1/events/${eventId}`);
-        const ev: Event = evRes.data ?? evRes;
-        setEvent(ev);
-
-        const types = await getTicketTypes(eventId);
-        if (types.length === 0 && ev?.price != null) {
-          const fallback: TicketType = {
-            id: 'ga-fallback', event_id: eventId, name: 'GENERAL ADMISSION',
-            description: null, price: ev.price, capacity: null, tickets_sold: 0,
-            reserved_count: 0, sort_order: 0, is_visible: true,
-            sale_starts_at: null, sale_ends_at: null, created_at: '', updated_at: '',
-          };
-          setTicketTypes([fallback]);
-          setSelectedId('ga-fallback');
-        } else {
-          setTicketTypes(types);
-          const first = types.find((t) => !isSoldOut(t));
-          if (first) setSelectedId(first.id);
-        }
-      } catch {
-        setError('Failed to load event.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    if (!eventId) return;
+    api
+      .get(`/v1/events/${eventId}`)
+      .then(({ data: res }) => setEvent(res.data ?? res))
+      .catch(() => setEvent(null))
+      .finally(() => setLoading(false));
+    // Track view — fire and forget
+    api.post(`/v1/events/${eventId}/view`).catch(() => {});
   }, [eventId]);
-
-  const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
-  const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  const platformFee  = Math.ceil(totalAmount * 0.05);
-  const grandTotal   = totalAmount + platformFee;
-  const venueType = (() => {
-  if (!event) return 'none' as const;
-  const override = (event as any).venue_type as string | undefined;
-  if (override && override !== 'auto') return override as 'stadium' | 'auditorium' | 'none';
-  return detectVenueType(event.category ?? '', event.venue_name);
-})();
-
-  const handleAddToCart = async () => {
-    if (!selectedType || !event) return;
-    if (!user) {
-      if (!guestName.trim()) { setError('Please enter your name.'); return; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) { setError('Please enter a valid email.'); return; }
-    }
-    setAdding(true);
-    setError('');
-    try {
-      const nameParts  = guestName.trim().split(' ');
-      const firstName  = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');
-      const lastRaw    = user ? String((user as any).last_name  ?? '') : nameParts.slice(1).join(' ');
-      const lastName   = lastRaw.trim() || firstName;
-      const email      = user ? String((user as any).email ?? '') : guestEmail.trim();
-      const endpoint   = user ? '/v1/bookings' : '/v1/guest/bookings';
-
-      const payload = {
-        event_id:            event.id,
-        ticket_type_id:      selectedId !== 'ga-fallback' ? selectedId : undefined,
-        ticket_quantity:     quantity,
-        attendee_first_name: firstName,
-        attendee_last_name:  lastName,
-        attendee_email:      email,
-      };
-
-      const { data: booking } = await api.post(endpoint, payload);
-      router.push(`/payment/${(booking as any).booking_id ?? booking.id}?token=${booking.client_token}&amount=${booking.total_amount}&currency=${booking.currency ?? 'ZAR'}`);
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Failed to create booking. Please try again.');
-    } finally {
-      setAdding(false);
-    }
-  };
 
   const bg     = isDark ? '#0a0a0a' : '#f5f5f7';
   const cardBg = isDark ? '#111'    : '#fff';
   const border = isDark ? '#222'    : '#e5e5e5';
 
+  // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) return (
     <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ width: 32, height: 32, border: '3px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -138,6 +51,7 @@ export default function EventPurchasePage() {
     </div>
   );
 
+  // ── Not found ────────────────────────────────────────────────────────────────
   if (!event) return (
     <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
       <span style={{ fontSize: 40 }}>⚠️</span>
@@ -146,332 +60,210 @@ export default function EventPurchasePage() {
     </div>
   );
 
-const steps = venueType !== 'none'
-  ? (['select', 'map', 'summary'] as const)
-  : (['select', 'summary'] as const);
-const stepIndex = (steps as readonly string[]).indexOf(step);
+  const heroImage  = event.banner_image_url ?? event.cover_image_url;
+  const isSoldOut  = event.is_sold_out ?? false;
+  const tags       = [...(((event as any).teams) ?? []), ...(((event as any).performers) ?? [])];
+  const desc       = event.description ?? '';
+  const shortDesc  = desc.slice(0, 220);
+  const hasMore    = desc.length > 220;
 
-return (
-  <div style={{ minHeight: '100vh', background: bg }}>
-    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  return (
+    <div style={{ minHeight: '100vh', background: bg }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
-    {/* Header */}
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 16px 12px', borderBottom: `1px solid ${border}`, background: bg, position: 'sticky', top: 0, zIndex: 40 }}>
-      <button
-        onClick={() => {
-          if (step === 'summary') setStep(venueType !== 'none' ? 'map' : 'select');
-          else if (step === 'map') setStep('select');
-          else router.back();
-        }}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.text, padding: 0 }}>←</button>
-      <h1 style={{ flex: 1, margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>
-        {step === 'select' ? 'Select Tickets' : step === 'map' ? 'Choose Seats' : 'Checkout'}
-      </h1>
-      <div style={{ display: 'flex', gap: 5 }}>
-        {steps.map((_, i) => (
-          <div key={i} style={{ width: i === stepIndex ? 18 : 6, height: 6, borderRadius: 3, background: i === stepIndex ? '#ff2d55' : (isDark ? '#444' : '#ccc'), transition: 'width 0.2s' }} />
-        ))}
-      </div>
-    </div>
-
-    <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px 100px' }}>
-
-      {/* Event title strip — unchanged */}
-      <div style={{ padding: '16px 0 12px', borderBottom: `1px solid ${border}` }}>
-        <p style={{ margin: 0, fontSize: 20, fontWeight: 800, color: colors.text }}>{event.title}</p>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: colors.subText }}>
-          {fmtDate(event.start_time)} · {fmtTime(event.start_time)}
-        </p>
-        {event.venue_name && (
-          <p style={{ margin: '2px 0 0', fontSize: 13, color: colors.subText }}>
-            {event.venue_name}{event.city ? `, ${event.city}` : ''}
-          </p>
+      {/* ── Sticky header ────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 16px 12px', borderBottom: `1px solid ${border}`, background: bg, position: 'sticky', top: 0, zIndex: 40 }}>
+        <button
+          onClick={() => router.back()}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: colors.text, padding: 0 }}
+        >←</button>
+        <h1 style={{ flex: 1, margin: 0, fontSize: 18, fontWeight: 800, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          Event Details
+        </h1>
+        {event.is_featured && (
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#ff2d55', background: 'rgba(255,45,85,0.12)', padding: '3px 8px', borderRadius: 5 }}>
+            🔥 TRENDING
+          </span>
         )}
       </div>
 
-        {/* ══ STEP: Select ticket type ══════════════════════════════════ */}
-        {step === 'select' && (
-          <div style={{ paddingTop: 16 }}>
-            <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>AVAILABLE TICKETS</p>
+      <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px 120px' }}>
 
-            {ticketTypes.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '48px 0', color: colors.subText }}>
-                <p style={{ fontSize: 40, margin: '0 0 8px' }}>🎫</p>
-                <p style={{ margin: 0 }}>No tickets currently on sale</p>
-              </div>
-            ) : (
-              ticketTypes.map((tt, idx) => {
-                const sold      = isSoldOut(tt);
-                const selected  = tt.id === selectedId;
-                const isPremium = idx === ticketTypes.length - 1 && ticketTypes.length > 1;
-                return (
-                  <div
-                    key={tt.id}
-                    onClick={() => !sold && setSelectedId(tt.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 14, padding: 16, marginBottom: 10,
-                      background: cardBg, border: `${selected ? 2 : 1}px solid ${selected ? '#ff2d55' : border}`,
-                      borderRadius: 14, cursor: sold ? 'default' : 'pointer', opacity: sold ? 0.5 : 1,
-                      transition: 'border-color 0.15s',
-                    }}
-                  >
-                    {/* Radio */}
-                    <div style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${selected ? '#ff2d55' : (isDark ? '#555' : '#ccc')}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {selected && <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ff2d55' }} />}
-                    </div>
-
-                    {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                        <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>{tt.name}</p>
-                        {isPremium && !sold && <span style={{ fontSize: 10, fontWeight: 800, color: '#ff9500', background: 'rgba(255,149,0,0.12)', padding: '2px 7px', borderRadius: 4 }}>⭐ VIP</span>}
-                      </div>
-                      <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>
-                        {sold ? 'Sold out' : (tt.description ?? availLabel(tt))}
-                      </p>
-                    </div>
-
-                    {/* Price */}
-                    <div style={{ textAlign: 'right' }}>
-                      <p style={{ margin: 0, fontSize: 17, fontWeight: 800, color: sold ? colors.subText : colors.text }}>{fmtPrice(tt.price)}</p>
-                      <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>incl. fees</p>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-
-            {/* Quantity picker */}
-            {selectedType && !isSoldOut(selectedType) && (() => {
-              const maxPer = typeof (event as any)?.max_tickets_per_user === 'number'
-                ? (event as any).max_tickets_per_user : Infinity;
-              if (maxPer === 1) return null;
-              const maxVisible = Math.min(isFinite(maxPer) ? maxPer : 6, 6);
-              return (
-                <div style={{ marginTop: 8 }}>
-                  <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: colors.subText, margin: '0 0 10px' }}>HOW MANY TICKETS?</p>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {Array.from({ length: maxVisible }, (_, i) => i + 1).map((n) => (
-                      <button
-                        key={n}
-                        onClick={() => setQuantity(n)}
-                        style={{
-                          width: 44, height: 44, borderRadius: 10, border: `${quantity === n ? 2 : 1}px solid ${quantity === n ? '#ff2d55' : border}`,
-                          background: quantity === n ? 'rgba(255,45,85,0.1)' : cardBg,
-                          color: quantity === n ? '#ff2d55' : colors.text,
-                          fontWeight: 800, fontSize: 15, cursor: 'pointer',
-                        }}
-                      >
-                        {n === maxVisible && !isFinite(maxPer) ? '6+' : n}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-              {/* ══ STEP: Seating Map ══ */}
-      {step === 'map' && venueType !== 'none' && (
-        <div style={{ paddingTop: 16 }}>
-          <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 8px' }}>CHOOSE YOUR SECTION</p>
-          <p style={{ fontSize: 13, color: colors.subText, margin: '0 0 16px' }}>Tap a section to select your tier</p>
-          <div style={{ marginBottom: 16 }}>
-            <MapLegend ticketTypes={ticketTypes} selectedTypeId={selectedId} />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'center', overflowX: 'auto' }}>
-            <SeatingMap
-              venueType={venueType}
-              ticketTypes={ticketTypes}
-              selectedTypeId={selectedId}
-              onSelectType={setSelectedId}
+        {/* ── Hero image ───────────────────────────────────────────────────── */}
+        <div style={{ margin: '16px 0', borderRadius: 16, overflow: 'hidden', position: 'relative', height: 220, background: '#111' }}>
+          {heroImage && !imgErr ? (
+            <img
+              src={heroImage}
+              alt={event.title}
+              onError={() => setImgErr(true)}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             />
-          </div>
-          {selectedType && (
-            <div style={{ marginTop: 16, background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>{selectedType.name.toUpperCase()}</p>
-                <p style={{ margin: '2px 0 0', fontSize: 12, color: colors.subText }}>{quantity} ticket{quantity !== 1 ? 's' : ''} · {selectedType.price === 0 ? 'Free' : `R${Math.round(selectedType.price).toLocaleString('en-ZA')}`} each</p>
-              </div>
-              <p style={{ margin: 0, fontSize: 17, fontWeight: 800, color: colors.text }}>
-                {totalAmount === 0 ? 'Free' : `R${Math.round(totalAmount).toLocaleString('en-ZA')}`}
-              </p>
+          ) : (
+            <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#1a1a1a 0%,#2a2a2a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: 48, opacity: 0.3 }}>🎟️</span>
             </div>
           )}
+
+          {/* Gradient overlay */}
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%)', pointerEvents: 'none' }} />
+
+          {/* Sold out badge */}
+          {isSoldOut && (
+            <div style={{ position: 'absolute', top: 12, right: 12, background: '#ff2d55', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: 1.5, padding: '4px 10px', borderRadius: 6 }}>
+              SOLD OUT
+            </div>
+          )}
+
+          {/* Views */}
+          {event.views > 0 && (
+            <div style={{ position: 'absolute', bottom: 12, left: 14, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontSize: 12 }}>👁</span>
+              <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: 700, letterSpacing: 1 }}>
+                {event.views.toLocaleString('en-ZA')} VIEWS
+              </span>
+            </div>
+          )}
+
+          {/* Category pill */}
+          <div style={{ position: 'absolute', bottom: 12, right: 14 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: '#ff2d55', background: 'rgba(0,0,0,0.6)', padding: '3px 9px', borderRadius: 5, backdropFilter: 'blur(6px)' }}>
+              ✦ {event.category?.toUpperCase()}
+            </span>
+          </div>
         </div>
-      )}
 
-        {/* ══ STEP: Checkout summary ════════════════════════════════════ */}
-        {step === 'summary' && selectedType && (
-          <div style={{ paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* ── Title strip ──────────────────────────────────────────────────── */}
+        <div style={{ padding: '4px 0 16px', borderBottom: `1px solid ${border}` }}>
+          <p style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text, lineHeight: 1.25 }}>{event.title}</p>
+          <p style={{ margin: '6px 0 0', fontSize: 13, color: colors.subText }}>
+            {fmtDate(event.start_time)} · {fmtTime(event.start_time)}
+          </p>
+          {event.venue_name && (
+            <p style={{ margin: '2px 0 0', fontSize: 13, color: colors.subText }}>
+              {event.venue_name}{event.city ? `, ${event.city}` : ''}
+            </p>
+          )}
+        </div>
 
-            {/* Contact row */}
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, overflow: 'hidden' }}>
-              <div
-                onClick={() => !user && setContactOpen(true)}
-                style={{ display: 'flex', alignItems: 'center', padding: '14px 16px', cursor: !user ? 'pointer' : 'default', borderBottom: `1px solid ${border}` }}
-              >
-                <p style={{ margin: 0, fontSize: 13, color: colors.subText, width: 100 }}>Contact</p>
-                <div style={{ flex: 1 }}>
-                  {!user && !guestName && !guestEmail ? (
-                    <p style={{ margin: 0, fontSize: 13, color: '#ff2d55', fontWeight: 600 }}>Add contact info ›</p>
-                  ) : (
-                    <p style={{ margin: 0, fontSize: 13, color: colors.text, fontWeight: 600 }}>
-                      {user ? (`${(user as any).first_name ?? ''} ${(user as any).last_name ?? ''}`.trim() || (user as any).email) : (guestName || guestEmail)}
-                    </p>
-                  )}
-                </div>
+        {/* ── Date / Venue / Price meta cards ──────────────────────────────── */}
+        <div style={{ paddingTop: 16, paddingBottom: 4 }}>
+          <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>EVENT INFO</p>
+
+          {[
+            { icon: '📅', label: 'Date',  value: fmtDate(event.start_time) },
+            { icon: '🕐', label: 'Time',  value: fmtTime(event.start_time) },
+            { icon: '📍', label: 'Venue', value: `${event.venue_name}${event.city ? `, ${event.city}` : ''}` },
+            ...(event.address ? [{ icon: '🗺️', label: 'Address', value: event.address }] : []),
+          ].map(({ icon, label, value }) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, marginBottom: 10, background: cardBg, border: `1px solid ${border}`, borderRadius: 14 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: isDark ? '#1e1e1e' : '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                {icon}
               </div>
-
-              <div
-                onClick={() => setPaySheetOpen(true)}
-                style={{ display: 'flex', alignItems: 'center', padding: '14px 16px', cursor: 'pointer' }}
-              >
-                <p style={{ margin: 0, fontSize: 13, color: colors.subText, width: 100 }}>Payment</p>
-                <p style={{ margin: 0, flex: 1, fontSize: 13, color: colors.text, fontWeight: 600 }}>
-                  {paymentMethod === 'apple_pay' ? '🍎 Apple Pay' : paymentMethod === 'paypal' ? '🅿️ PayPal' : '💳 Credit / Debit Card'} ›
-                </p>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 10, fontWeight: 800, letterSpacing: 1.2, color: colors.subText }}>{label.toUpperCase()}</p>
+                <p style={{ margin: '2px 0 0', fontSize: 13, fontWeight: 600, color: colors.text }}>{value}</p>
               </div>
             </div>
+          ))}
+        </div>
 
-            {/* Order details */}
+        {/* ── Price card ───────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: 14, marginBottom: 10, background: cardBg, border: `1px solid ${border}`, borderRadius: 14 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: isDark ? '#1e1e1e' : '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+            🎟️
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 10, fontWeight: 800, letterSpacing: 1.2, color: colors.subText }}>TICKETS FROM</p>
+            <p style={{ margin: '2px 0 0', fontSize: 20, fontWeight: 800, color: colors.text }}>{fmtPrice(event.price)}</p>
+          </div>
+          {(event as any).available_tickets != null && !isSoldOut && (
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: (event as any).available_tickets < 20 ? '#ff9500' : colors.subText }}>
+              {(event as any).available_tickets < 20
+                ? `⚡ Only ${(event as any).available_tickets} left`
+                : `${(event as any).available_tickets.toLocaleString()} available`}
+            </p>
+          )}
+        </div>
+
+        {/* ── Description ──────────────────────────────────────────────────── */}
+        {desc && (
+          <div style={{ marginBottom: 10 }}>
+            <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>ABOUT THIS EVENT</p>
             <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16 }}>
-              <p style={{ margin: '0 0 12px', fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: colors.subText }}>ORDER DETAILS</p>
-              {[
-                ['Ticket type', selectedType.name],
-                ['Quantity', `${quantity} ticket${quantity > 1 ? 's' : ''}`],
-                ['Delivery', 'Mobile ticket · Access in app'],
-              ].map(([label, val]) => (
-                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${border}` }}>
-                  <p style={{ margin: 0, fontSize: 13, color: colors.subText }}>{label}</p>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: colors.text }}>{val}</p>
-                </div>
-              ))}
+              <p style={{ margin: 0, fontSize: 14, color: colors.text, lineHeight: 1.7 }}>
+                {expanded ? desc : (shortDesc + (hasMore ? '…' : ''))}
+              </p>
+              {hasMore && (
+                <button
+                  onClick={() => setExpanded(e => !e)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ff2d55', fontSize: 13, fontWeight: 700, padding: '8px 0 0', display: 'block' }}
+                >
+                  {expanded ? 'Show less' : 'Read more'}
+                </button>
+              )}
             </div>
-
-            {/* Trust badges */}
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {[['✅', 'Official Ticket Marketplace', 'Tickets are reviewed and verified by the venue.'], ['🔒', 'Every ticket protected', 'Secure payment processing.']].map(([icon, title, body]) => (
-                <div key={title as string} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <span>{icon}</span>
-                  <div>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{title as string}</p>
-                    <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>{body as string}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Price breakdown */}
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16 }}>
-              <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: colors.subText }}>PRICE BREAKDOWN</p>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                <p style={{ margin: 0, fontSize: 14, color: colors.text }}>{selectedType.name} × {quantity}</p>
-                <p style={{ margin: 0, fontSize: 14, color: colors.text }}>{fmtPrice(totalAmount)}</p>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                <p style={{ margin: 0, fontSize: 14, color: colors.subText }}>Service Fee (5%)</p>
-                <p style={{ margin: 0, fontSize: 14, color: colors.subText }}>{fmtPrice(platformFee)}</p>
-              </div>
-              <div style={{ height: 1, background: border, margin: '8px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: colors.text }}>Total Amount</p>
-                <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: colors.text }}>{fmtPrice(grandTotal)}</p>
-              </div>
-            </div>
-
-            {error && <p style={{ color: '#ff3c6e', fontSize: 13, margin: 0 }}>{error}</p>}
           </div>
         )}
-      </div>
 
-       {/* CTA bar */}
-    {selectedType && !isSoldOut(selectedType) && (
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, maxWidth: 640, margin: '0 auto' }}>
-        <div>
-          <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>Total</p>
-          <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>
-            {(step === 'summary' ? grandTotal : totalAmount) === 0 ? 'Free' : `R${Math.round(step === 'summary' ? grandTotal : totalAmount).toLocaleString('en-ZA')}`}
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            if (step === 'select') {
-              if (!selectedId) { setError('Please choose a ticket type to continue.'); return; }
-              setStep(venueType !== 'none' ? 'map' : 'summary');
-            } else if (step === 'map') {
-              setStep('summary');
-            } else {
-              handleAddToCart();
-            }
-          }}
-          disabled={adding}
-          style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer', opacity: adding ? 0.6 : 1 }}
-        >
-          {adding ? 'Processing…' : step === 'select' ? (venueType !== 'none' ? 'Choose Seats' : 'Review Order') : step === 'map' ? 'Review Order' : 'Pay Now'}
-        </button>
-      </div>
-    )}
-
-      {/* ── Guest contact sheet ──────────────────────────────────────── */}
-      {contactOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setContactOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
-            <h3 style={{ margin: '0 0 16px', color: colors.text }}>Contact info</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <input
-                placeholder="Email address"
-                type="email"
-                value={guestEmail}
-                onChange={(e) => setGuestEmail(e.target.value)}
-                style={{ background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px', fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box' }}
-              />
-              <input
-                placeholder="Full name"
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                style={{ background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px', fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box' }}
-              />
+        {/* ── Performers / Teams ───────────────────────────────────────────── */}
+        {tags.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: colors.subText, margin: '0 0 12px' }}>
+              {event.category?.toLowerCase() === 'sports' ? 'TEAMS' : 'PERFORMERS'}
+            </p>
+            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {tags.map((tag: string) => (
+                <span key={tag} style={{ fontSize: 13, fontWeight: 600, color: colors.text, background: isDark ? '#1e1e1e' : '#f0f0f0', borderRadius: 20, padding: '6px 14px' }}>
+                  {tag}
+                </span>
+              ))}
             </div>
-            <p style={{ margin: '12px 0', fontSize: 12, color: colors.subText }}>Your email will be used for ticket delivery and purchase confirmation.</p>
+          </div>
+        )}
+
+        {/* ── Trust badges (matching purchase page style) ───────────────── */}
+        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 10 }}>
+          {[
+            ['✅', 'Official Ticket Marketplace', 'Tickets are reviewed and verified by the venue.'],
+            ['🔒', 'Secure Checkout', 'Your payment and personal data are always protected.'],
+          ].map(([icon, title, body]) => (
+            <div key={title} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span>{icon}</span>
+              <div>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{title}</p>
+                <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>{body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+      </div>
+
+      {/* ── Sticky CTA bar (same as purchase page) ───────────────────────── */}
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, zIndex: 40 }}>
+        <div style={{ maxWidth: 640, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 11, color: colors.subText }}>From</p>
+            <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: colors.text }}>{fmtPrice(event.price)}</p>
+          </div>
+          {isSoldOut ? (
+            <button disabled style={{ flex: 1, background: isDark ? '#222' : '#e5e5e5', color: isDark ? '#555' : '#aaa', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'not-allowed' }}>
+              SOLD OUT
+            </button>
+          ) : (
             <button
               onClick={() => {
-                if (!guestName.trim()) { setError('Please enter your name.'); return; }
-                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) { setError('Please enter a valid email.'); return; }
-                setContactOpen(false);
+                // ── Set referral token so purchase page knows we came from here ──
+                sessionStorage.setItem(`event_detail_visited_${eventId}`, '1');
+                router.push(`/events/${eventId}/purchase`);
               }}
-              style={{ width: '100%', background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}
+              style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer' }}
             >
-              Done
+              Get Tickets
             </button>
-          </div>
+          )}
         </div>
-      )}
-
-      {/* ── Payment method sheet ──────────────────────────────────────── */}
-      {paySheetOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setPaySheetOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
-            <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payments</h3>
-            {([
-              { id: 'apple_pay',  icon: '🍎', label: 'Apple Pay' },
-              { id: 'paypal',     icon: '🅿️', label: 'PayPal' },
-              { id: 'card',       icon: '💳', label: 'Credit / Debit Card' },
-            ] as const).map(({ id, icon, label }) => (
-              <div
-                key={id}
-                onClick={() => { setPaymentMethod(id); setPaySheetOpen(false); }}
-                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: `1px solid ${border}`, cursor: 'pointer' }}
-              >
-                <span style={{ fontSize: 22 }}>{icon}</span>
-                <p style={{ flex: 1, margin: 0, fontSize: 15, fontWeight: 500, color: colors.text }}>{label}</p>
-                {paymentMethod === id && <span style={{ fontSize: 18, color: colors.text }}>✓</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

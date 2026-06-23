@@ -51,7 +51,17 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
   const [guestEmail,     setGuestEmail]     = useState('');
   const [error,          setError]          = useState('');
 
+  // ── Gate: redirect to details if not navigated from there ─────────────
   useEffect(() => {
+    const hasVisited = sessionStorage.getItem(`event_detail_visited_${eventId}`);
+    if (!hasVisited) {
+      router.replace(`/events/${eventId}`);
+      return;
+    }
+    sessionStorage.removeItem(`event_detail_visited_${eventId}`);
+  }, [eventId, router]);
+
+    useEffect(() => {
     const load = async () => {
       try {
         const { data: evRes } = await api.get(`/v1/events/${eventId}`);
