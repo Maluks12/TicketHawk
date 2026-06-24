@@ -186,10 +186,10 @@ export default function EventDetailPage() {
         .ed-body {
           padding: 24px 32px 80px;
           display: grid; grid-template-columns: 1fr 340px; gap: 20px;
-          align-items: start;
+          align-items: stretch;
         }
         .ed-left    { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-        .ed-sidebar { position: sticky; top: 66px; }
+        .ed-sidebar { display: flex; flex-direction: column; }
 
         /* ── Shared card ── */
         .ed-card {
@@ -235,9 +235,10 @@ export default function EventDetailPage() {
           background: ${isDark ? 'rgba(255,45,85,0.08)' : 'rgba(255,45,85,0.04)'};
           border-bottom: 1px solid ${border};
         }
-        .sb-org   { padding: 16px 22px; border-bottom: 1px solid ${border}; display: flex; align-items: center; gap: 11px; }
-        .sb-cta   { padding: 14px 18px 18px; }
-        .sb-trust { padding: 13px 22px; display: flex; gap: 18px; }
+        .sb-org      { padding: 16px 22px; border-bottom: 1px solid ${border}; display: flex; align-items: center; gap: 11px; }
+        .sb-cta      { padding: 14px 18px 10px; }
+        .sb-payment  { padding: 0 18px 16px; }
+        .sb-trust    { padding: 12px 22px; border-top: 1px solid ${border}; display: flex; gap: 18px; }
         .org-avatar {
           width: 38px; height: 38px; border-radius: 10px;
           background: ${subtle}; border: 1px solid ${border};
@@ -430,7 +431,7 @@ export default function EventDetailPage() {
 
         {/* Sidebar ─────────────────────────────────────────── */}
         <div className="ed-sidebar">
-          <div className="ed-card">
+          <div className="ed-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
             {/* Price */}
             <div className="sb-price">
@@ -458,12 +459,54 @@ export default function EventDetailPage() {
               </div>
             )}
 
+            {/* Spacer */}
+            <div style={{ flex: 1, minHeight: 20 }} />
+
             {/* CTA */}
             <div className="sb-cta">
               {isSoldOut
                 ? <button disabled className="sold-out-btn">Sold Out</button>
                 : <button className="get-tickets-btn" onClick={handleGetTickets}>Get Tickets</button>
               }
+            </div>
+
+            {/* Payment methods */}
+            <div className="sb-payment">
+              <p style={{ margin: '0 0 10px', fontSize: 10, fontWeight: 700, letterSpacing: 0.9, textTransform: 'uppercase', color: colors.subText }}>
+                Accepted payment methods
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                {/* Visa */}
+                <div style={{ background: '#1a1f71', borderRadius: 5, padding: '3px 9px' }}>
+                  <span style={{ fontSize: 11, fontWeight: 900, color: '#fff', fontStyle: 'italic', letterSpacing: -0.5 }}>VISA</span>
+                </div>
+                {/* Mastercard */}
+                <div style={{ background: isDark ? '#2a2a2a' : '#f0f0f0', borderRadius: 5, padding: '5px 7px', display: 'flex', alignItems: 'center' }}>
+                  <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#eb001b', flexShrink: 0 }} />
+                  <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#f79e1b', flexShrink: 0, marginLeft: -6 }} />
+                </div>
+                {/* PayPal */}
+                <div style={{ background: '#003087', borderRadius: 5, padding: '4px 8px', display: 'flex', alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: '#fff' }}>Pay</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: '#009cde' }}>Pal</span>
+                </div>
+                {/* Amex */}
+                <div style={{ background: '#016fcb', borderRadius: 5, padding: '4px 7px' }}>
+                  <span style={{ fontSize: 9, fontWeight: 900, color: '#fff', letterSpacing: 0.4 }}>AMEX</span>
+                </div>
+                {/* Apple Pay */}
+                <div style={{ background: isDark ? '#fff' : '#000', borderRadius: 5, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <svg width="10" height="12" viewBox="0 0 10 12" fill={isDark ? '#000' : '#fff'}>
+                    <path d="M8.3 3.1c-.7.8-1.8.7-1.8.7s-.2-1 .5-1.8c.7-.8 1.9-.8 1.9-.8s.1 1.1-.6 1.9zM5.1 4c.4 0 1.1-.5 2-.5.9 0 1.6.5 1.6.5s-1.4.8-1.4 2.3c0 1.7 1.5 2.3 1.5 2.3s-1 2.4-2.4 2.4c-.6 0-1.2-.4-1.6-.4-.4 0-1 .4-1.6.4C1.9 11 .5 8.9.5 6.8c0-2 1.3-3.1 2.5-3.1.6 0 1.2.4 1.5.4.3 0 .2-.1.6-.1z"/>
+                  </svg>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: isDark ? '#000' : '#fff' }}>Pay</span>
+                </div>
+                {/* Google Pay */}
+                <div style={{ background: isDark ? '#2a2a2a' : '#f0f0f0', borderRadius: 5, padding: '4px 7px', display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: '#4285f4' }}>G</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: isDark ? '#e8e8e8' : '#3c4043' }}>Pay</span>
+                </div>
+              </div>
             </div>
 
             {/* Trust footer */}
