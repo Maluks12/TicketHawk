@@ -87,6 +87,7 @@ func GetAssignmentsByBooking(
 		SELECT id, booking_id, slot_number, status,
 		       assignee_name, assignee_email,
 		       assigned_at, expires_at, claimed_at, revoked_at,
+		       qr_scanned_at,
 		       qr_code_url, created_at, updated_at
 		FROM ticket_assignments
 		WHERE booking_id = $1
@@ -104,6 +105,7 @@ func GetAssignmentsByBooking(
 			&a.ID, &a.BookingID, &a.SlotNumber, &a.Status,
 			&a.AssigneeName, &a.AssigneeEmail,
 			&a.AssignedAt, &a.ExpiresAt, &a.ClaimedAt, &a.RevokedAt,
+			&a.QRScannedAt,
 			&a.QRCodeURL, &a.CreatedAt, &a.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)

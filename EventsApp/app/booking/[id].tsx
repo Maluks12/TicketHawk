@@ -528,9 +528,10 @@ export default function BookingDetailScreen() {
   const claimedSlots   = assignments.filter(a => a.status === 'claimed');
   const showQRs        = status === 'confirmed' || status === 'pending';
 
-  // Pool model: unassigned slots form the buyer's group pass; pending/claimed
-  // slots have been peeled off to other people and show as an assigned list.
-  const poolSlots      = assignments.filter(a => a.status === 'unassigned');
+  // Pool model: unassigned AND not-yet-admitted slots are the buyer's assignable
+  // group. A slot that's already been scanned at the gate stays unassigned but
+  // can't be assigned, so it's excluded here (qr_scanned_at comes from the API).
+  const poolSlots      = assignments.filter(a => a.status === 'unassigned' && !(a as any).qr_scanned_at);
   const assignedSlots  = assignments.filter(a => a.status === 'pending' || a.status === 'claimed');
   const poolCount      = poolSlots.length;
   const firstUnassigned = poolSlots[0] ?? null;
