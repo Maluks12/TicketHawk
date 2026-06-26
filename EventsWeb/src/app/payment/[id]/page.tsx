@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { pollPaymentStatus } from '@/lib/api';
 
 type Phase = 'loading' | 'paying' | 'confirming' | 'done' | 'failed';
 
-export default function PaymentPage({ params }: { params: { id: string } }) {
+export default function PaymentPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const bookingId = params.id;
+  const { id: bookingId } = use(params);
   const clientToken = searchParams.get('token') ?? '';
   const amount = searchParams.get('amount') ?? '0';
   const currency = searchParams.get('currency') ?? 'ZAR';

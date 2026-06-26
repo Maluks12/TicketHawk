@@ -62,7 +62,7 @@ const EDITORIAL_FILTERS: Record<string, (e: Event) => boolean> = {
 
 export default function SectionPage() {
   const router  = useRouter();
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const { sectionMeta, allEvents, dbCategories, setSelectedEvent } = useEventStore();
 
   const [events,  setEvents]  = useState<Event[]>([]);
@@ -117,7 +117,7 @@ export default function SectionPage() {
         <button onClick={() => router.back()} className="w-10 h-10 flex items-center justify-center">
           <span style={{ color: colors.text }} className="text-3xl leading-none font-light">‹</span>
         </button>
-        <div className="flex-1 text-center">
+        <div className="flex-1 text-center md:text-left md:ml-2">
           <p className="font-bold text-base" style={{ color: colors.text }}>{label}</p>
           <p className="text-xs" style={{ color: colors.subText }}>
             {loading ? 'Loading…' : `${events.length} event${events.length !== 1 ? 's' : ''}`}
@@ -138,38 +138,95 @@ export default function SectionPage() {
           <p className="text-sm" style={{ color: colors.subText }}>There are no events in this section right now.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-4 px-4 py-4 max-w-2xl mx-auto">
-          {events.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
-              className="relative rounded-xl overflow-hidden w-full text-left shadow-lg"
-              style={{ aspectRatio: '1.92' }}
-            >
-              {item.cover_image_url ? (
-                <img src={item.cover_image_url} alt={item.title}
-                     className="absolute inset-0 w-full h-full object-cover" />
-              ) : (
-                <div className="absolute inset-0 bg-neutral-800" />
-              )}
-              <div className="absolute inset-0"
-                   style={{ background: 'linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.35) 62%, rgba(0,0,0,0.86))' }} />
-              <div className="absolute top-3 right-3 bg-black/60 rounded px-2.5 py-1">
-                <span className="text-white text-xs font-bold">{formatPrice(item.price)}</span>
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 p-3.5">
-                <p className="text-white font-extrabold text-base leading-snug mb-1 line-clamp-2">{item.title}</p>
-                <p className="text-white/80 text-xs font-medium mb-0.5">
-                  {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
-                </p>
-                {item.venue_name && (
-                  <p className="text-white/65 text-xs truncate">
-                    {item.venue_name}{item.city ? `, ${item.city}` : ''}
-                  </p>
+        <div className="px-4 md:px-8 py-4">
+
+          {/* ── MOBILE: single-column stacked cards with image overlay ── */}
+          <div className="flex flex-col gap-4 max-w-2xl mx-auto md:hidden">
+            {events.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
+                className="relative rounded-xl overflow-hidden w-full text-left shadow-lg"
+                style={{ aspectRatio: '1.92' }}
+              >
+                {item.cover_image_url ? (
+                  <img src={item.cover_image_url} alt={item.title}
+                       className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  <div className="absolute inset-0 bg-neutral-800" />
                 )}
-              </div>
-            </button>
-          ))}
+                <div
+                  className="absolute inset-0"
+                  style={{ background: 'linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.35) 62%, rgba(0,0,0,0.86))' }}
+                />
+                <div className="absolute top-3 right-3 bg-black/60 rounded px-2.5 py-1">
+                  <span className="text-white text-xs font-bold">{formatPrice(item.price)}</span>
+                </div>
+                <div className="absolute bottom-0 left-0 right-0 p-3.5">
+                  <p className="text-white font-extrabold text-base leading-snug mb-1 line-clamp-2">{item.title}</p>
+                  <p className="text-white/80 text-xs font-medium mb-0.5">
+                    {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
+                  </p>
+                  {item.venue_name && (
+                    <p className="text-white/65 text-xs truncate">
+                      {item.venue_name}{item.city ? `, ${item.city}` : ''}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* ── DESKTOP: YouTube Explore-style grid ── */}
+          <div className="hidden md:grid grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-10">
+            {events.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
+                className="text-left w-full group"
+              >
+                {/* Thumbnail */}
+                <div
+                  className="relative w-full aspect-video rounded-xl overflow-hidden mb-3"
+                  style={{ backgroundColor: colors.sectionCardBg }}
+                >
+                  {item.cover_image_url ? (
+                    <img
+                      src={item.cover_image_url}
+                      alt={item.title}
+                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-neutral-800" />
+                  )}
+                  {/* Price badge */}
+                  <div className="absolute bottom-2 right-2 bg-black/80 rounded px-2 py-0.5">
+                    <span className="text-white text-[11px] font-bold">{formatPrice(item.price)}</span>
+                  </div>
+                </div>
+
+                {/* Text below thumbnail — YouTube style */}
+                <div className="px-0.5">
+                  <p
+                    className="font-semibold text-[15px] leading-[21px] line-clamp-2 mb-1"
+                    style={{ color: colors.text }}
+                  >
+                    {item.title}
+                  </p>
+                  <p className="text-[13px] leading-[19px]" style={{ color: colors.subText }}>
+                    {formatCardDate(item.start_time)}
+                    {item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
+                  </p>
+                  {item.venue_name && (
+                    <p className="text-[13px] leading-[19px] truncate" style={{ color: colors.subText }}>
+                      {item.venue_name}{item.city ? `, ${item.city}` : ''}
+                    </p>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>
+
         </div>
       )}
     </div>

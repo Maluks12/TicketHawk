@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -31,11 +31,11 @@ function isSoldOut(tt: TicketType): boolean {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-export default function EventPurchasePage({ params }: { params: { id: string } }) {
+export default function EventPurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { user } = useAuthStore();
   const { colors, isDark } = useAppTheme();
-  const eventId = params.id;
+  const { id: eventId } = use(params);
 
   const [event,          setEvent]          = useState<Event | null>(null);
   const [ticketTypes,    setTicketTypes]    = useState<TicketType[]>([]);
@@ -52,13 +52,19 @@ export default function EventPurchasePage({ params }: { params: { id: string } }
   const [error,          setError]          = useState('');
 
   // ── Gate: redirect to details if not navigated from there ─────────────
+  // Use a ref so this check only runs once, even if the component re-renders
+  // (e.g. due to React.use() Suspense cycles unwrapping params).
+  const gateChecked = useRef(false);
   useEffect(() => {
-    const hasVisited = sessionStorage.getItem(`event_detail_visited_${eventId}`);
+    if (gateChecked.current) return;
+    gateChecked.current = true;
+    const key = `event_detail_visited_${eventId}`;
+    const hasVisited = sessionStorage.getItem(key);
     if (!hasVisited) {
       router.replace(`/events/${eventId}`);
       return;
     }
-    sessionStorage.removeItem(`event_detail_visited_${eventId}`);
+    sessionStorage.removeItem(key);
   }, [eventId, router]);
 
     useEffect(() => {

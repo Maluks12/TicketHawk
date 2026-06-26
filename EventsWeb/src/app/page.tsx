@@ -231,7 +231,7 @@ const SectionRow = memo(({
   return (
     <div className="mt-8">
       {/* Section title + VIEW ALL */}
-      <div className="px-5 mb-1.5 flex items-center justify-between">
+      <div className="px-5 md:px-8 mb-1.5 flex items-center justify-between">
         <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>
           {section.title}
         </h2>
@@ -246,7 +246,7 @@ const SectionRow = memo(({
       <div className="relative">
         {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
         {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-        <div ref={scrollRef} className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
+        <div ref={scrollRef} className="flex overflow-x-auto gap-5 md:gap-7 px-5 md:px-8 pb-4 scrollbar-hide">
           {events.map((item, index) =>
             isTop10
               ? <Top10Card key={item.id} item={item} rank={index + 1} onPress={() => onEventPress(item)} colors={colors} />
@@ -500,9 +500,10 @@ export default function HomePage() {
 
   return (
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }} className="pt-4">
+      
 
       {/* Hero carousel */}
-      <div className="relative mx-4 mb-2 h-[420px] rounded-[18px] overflow-hidden">
+      <div className="relative mb-2 md:mx-4 rounded-none md:rounded-[18px] overflow-hidden" style={{ height: "clamp(320px, 45vw, 560px)" }}>
         {carouselEvents.length === 0 ? (
           <div className="absolute inset-0 rounded-[18px] bg-white/10 animate-pulse" />
         ) : (
@@ -589,8 +590,33 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* Category filter tabs */}
-      <div className="flex items-center px-5 pt-1 pb-3 gap-3 overflow-x-auto scrollbar-hide">
+      {/* ── Category bar: pill tabs on desktop, dropdown on mobile ── */}
+      {/* Desktop pill tabs */}
+      <div className="hidden md:flex items-center gap-2 px-8 pt-3 pb-4 overflow-x-auto scrollbar-hide">
+        {categories.map((item) => {
+          const isActive = activeCategory === item;
+          return (
+            <button
+              key={item}
+              onClick={() => {
+                if (item === 'All') { setActiveCategory('All'); }
+                else { setActiveCategory(item); router.push(`/category/${encodeURIComponent(item)}`); }
+              }}
+              className="shrink-0 px-5 h-[40px] rounded-full text-[13px] font-bold tracking-[0.3px] transition-all duration-150 whitespace-nowrap"
+              style={{
+                backgroundColor: isActive ? '#FF2D55' : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'),
+                color: isActive ? '#fff' : colors.text,
+                border: isActive ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+              }}
+            >
+              {item}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Mobile dropdown trigger */}
+      <div className="flex md:hidden items-center px-5 pt-1 pb-3 gap-3 overflow-x-auto scrollbar-hide">
         {activeCategory !== 'All' && (
           <button
             onClick={() => setActiveCategory('All')}
@@ -612,9 +638,9 @@ export default function HomePage() {
         </button>
       </div>
 
-      {/* Category dropdown */}
+      {/* Mobile category dropdown overlay */}
       {dropdownOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col" onClick={() => setDropdownOpen(false)}>
+        <div className="fixed inset-0 z-50 flex flex-col md:hidden" onClick={() => setDropdownOpen(false)}>
           <div className="flex-1 w-full pt-16 pb-10 flex flex-col items-center backdrop-blur-2xl bg-black/60" onClick={(e) => e.stopPropagation()}>
             <div className="flex-1 w-full overflow-y-auto">
               {categories.map((item) => (
