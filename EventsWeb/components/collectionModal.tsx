@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { type MerchandiseItem, addMerchToCart, getCachedSessionId } from '@/lib/api';
@@ -226,13 +226,36 @@ interface CollectionModalProps {
 export function CollectionModal({ collectionName, description, items, onSelectItem, onClose }: CollectionModalProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [detailItem, setDetailItem] = useState<MerchandiseItem | null>(null);
+  const [slideDir, setSlideDir] = useState<'left' | 'right'>('right');
+  const [animKey, setAnimKey] = useState(0);
+  const dragStartX = useRef<number | null>(null);
 
   const activeItem = items[activeIndex] ?? items[0];
   const { bg, text: tc } = activeItem ? paletteFor(activeItem) : PALETTE.default;
   const isLive = activeItem?.sale_status === 'live';
 
-  const prev = useCallback(() => setActiveIndex((i) => Math.max(0, i - 1)), []);
-  const next = useCallback(() => setActiveIndex((i) => Math.min(items.length - 1, i + 1)), [items.length]);
+  const prev = useCallback(() => {
+    setSlideDir('left');
+    setAnimKey((k) => k + 1);
+    setActiveIndex((i) => Math.max(0, i - 1));
+  }, []);
+
+  const next = useCallback(() => {
+    setSlideDir('right');
+    setAnimKey((k) => k + 1);
+    setActiveIndex((i) => Math.min(items.length - 1, i + 1));
+  }, [items.length]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') prev();
+      else if (e.key === 'ArrowRight') next();
+      else if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [prev, next, onClose]);
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
@@ -240,14 +263,32 @@ export function CollectionModal({ collectionName, description, items, onSelectIt
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)' }} onClick={onClose} />
 
       {/* Sheet */}
-      <div style={{
-        position: 'relative', width: '100%', maxWidth: 520, background: bg,
-        borderRadius: '20px 20px 0 0', maxHeight: '92vh', overflow: 'hidden',
-        display: 'flex', flexDirection: 'column', animation: 'slideUp 0.25s ease-out',
-      }}>
+      <div
+        style={{
+          position: 'relative', width: '100%', maxWidth: 520, background: bg,
+          borderRadius: '20px 20px 0 0', maxHeight: '92vh', overflow: 'hidden',
+          display: 'flex', flexDirection: 'column', animation: 'slideUp 0.25s ease-out',
+        }}
+        onTouchStart={(e) => { dragStartX.current = e.touches[0].clientX; }}
+        onTouchEnd={(e) => {
+          if (dragStartX.current === null) return;
+          const delta = dragStartX.current - e.changedTouches[0].clientX;
+          if (Math.abs(delta) > 50) { delta > 0 ? next() : prev(); }
+          dragStartX.current = null;
+        }}
+        onMouseDown={(e) => { dragStartX.current = e.clientX; }}
+        onMouseUp={(e) => {
+          if (dragStartX.current === null) return;
+          const delta = dragStartX.current - e.clientX;
+          if (Math.abs(delta) > 60) { delta > 0 ? next() : prev(); }
+          dragStartX.current = null;
+        }}
+      >
         <style>{`
           @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
           @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+          @keyframes carouselFromRight { from { transform: translateX(48px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+          @keyframes carouselFromLeft  { from { transform: translateX(-48px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         `}</style>
 
         {/* Handle + header */}
@@ -269,7 +310,7 @@ export function CollectionModal({ collectionName, description, items, onSelectIt
         </div>
 
         {/* Carousel */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 80px', position: 'relative' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 80px', position: 'relative', userSelect: 'none' }}>
           {activeItem && (() => {
             const images = parseImages(activeItem.images);
             const heroImage = images[0];
@@ -280,34 +321,57 @@ export function CollectionModal({ collectionName, description, items, onSelectIt
               .map((v) => { try { return Object.values(JSON.parse(v.attributes)).join('/'); } catch { return v.sku; } });
 
             return (
-              <div onClick={() => setDetailItem(activeItem)}
-                style={{ background: cardBg, borderRadius: 18, overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.15s', marginBottom: 14 }}>
-                <div style={{ position: 'relative', paddingTop: '100%' }}>
-                  {heroImage
-                    ? <img src={heroImage} alt={activeItem.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-                    : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>📦</div>
-                  }
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 60, background: `linear-gradient(transparent, ${cardBg})` }} />
-                </div>
-                <div style={{ padding: 14 }}>
-                  <p style={{ margin: '0 0 4px', fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: `${cardTc}70` }}>{(activeItem.category ?? 'DROP').toUpperCase()}</p>
-                  <p style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 700, color: cardTc, lineHeight: 1.3 }}>{activeItem.name}</p>
-                  {variantLabels.length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
-                      {variantLabels.map((lbl, i) => (
-                        <span key={i} style={{ border: `1px solid ${cardTc}35`, padding: '2px 7px', borderRadius: 2, fontSize: 8, fontWeight: 700, letterSpacing: 0.8, color: `${cardTc}aa` }}>
-                          {String(lbl).toUpperCase()}
-                        </span>
-                      ))}
+              <div
+                key={animKey}
+                style={{ animation: `${slideDir === 'right' ? 'carouselFromRight' : 'carouselFromLeft'} 0.22s cubic-bezier(0.4,0,0.2,1)` }}
+              >
+                <div onClick={() => setDetailItem(activeItem)}
+                  style={{ background: cardBg, borderRadius: 18, overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.15s', marginBottom: 14 }}>
+                  <div style={{ position: 'relative', paddingTop: '100%' }}>
+                    {heroImage
+                      ? <img src={heroImage} alt={activeItem.name} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>📦</div>
+                    }
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 60, background: `linear-gradient(transparent, ${cardBg})` }} />
+                  </div>
+                  <div style={{ padding: 14 }}>
+                    <p style={{ margin: '0 0 4px', fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: `${cardTc}70` }}>{(activeItem.category ?? 'DROP').toUpperCase()}</p>
+                    <p style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 700, color: cardTc, lineHeight: 1.3 }}>{activeItem.name}</p>
+                    {variantLabels.length > 0 && (
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+                        {variantLabels.map((lbl, i) => (
+                          <span key={i} style={{ border: `1px solid ${cardTc}35`, padding: '2px 7px', borderRadius: 2, fontSize: 8, fontWeight: 700, letterSpacing: 0.8, color: `${cardTc}aa` }}>
+                            {String(lbl).toUpperCase()}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <p style={{ margin: 0, flex: 1, fontSize: 20, fontWeight: 900, color: cardTc }}>{fmtPrice(activeItem.effective_price)}</p>
+                      <span style={{ border: `1px solid ${cardTc}60`, padding: '6px 14px', borderRadius: 2, fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: cardTc }}>
+                        {isLive ? 'VIEW' : 'ALERT'}
+                      </span>
                     </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <p style={{ margin: 0, flex: 1, fontSize: 20, fontWeight: 900, color: cardTc }}>{fmtPrice(activeItem.effective_price)}</p>
-                    <span style={{ border: `1px solid ${cardTc}60`, padding: '6px 14px', borderRadius: 2, fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: cardTc }}>
-                      {isLive ? 'VIEW' : 'ALERT'}
-                    </span>
                   </div>
                 </div>
+
+                {/* Dot indicators */}
+                {items.length > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 5, marginTop: 4 }}>
+                    {items.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => { setSlideDir(i > activeIndex ? 'right' : 'left'); setAnimKey((k) => k + 1); setActiveIndex(i); }}
+                        style={{
+                          height: 4, width: i === activeIndex ? 20 : 6, borderRadius: 2,
+                          background: i === activeIndex ? tc : `${tc}40`,
+                          border: 'none', cursor: 'pointer', padding: 0,
+                          transition: 'width 0.2s, background 0.2s',
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })()}
