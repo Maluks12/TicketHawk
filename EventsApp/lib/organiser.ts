@@ -144,6 +144,28 @@ export interface ScanSuccess {
   scanned_at?: string;
 }
 
+/**
+ * Unified result from POST /v1/tickets/scan. The endpoint accepts any rotating
+ * token and reports its type:
+ *   - individual → admitted:1 with slot_number
+ *   - pool + peek → remaining (nothing admitted yet; show the headcount picker)
+ *   - pool admit → admitted (count) + remaining (after)
+ */
+export interface ScanResult {
+  type: 'individual' | 'pool';
+  message?: string;
+  peek?: boolean;
+  idempotent?: boolean;
+  admitted?: number;
+  remaining?: number;
+  slot_number?: number;
+  slot_numbers?: number[];
+  assignment_id?: string;
+  booking_id?: string;
+  booking_number?: string;
+  event_title?: string;
+}
+
 // ── API calls (read-only + scan) ──────────────────────────────────────────────
 export const getOrgStats = () =>
   api.get<OrgStats>('/v1/organiser/dashboard/stats').then((r) => r.data);
@@ -194,6 +216,36 @@ export const scanTicket = (assignmentId: string, token: string) =>
   api
     .post<ScanSuccess>(`/v1/tickets/${assignmentId}/scan`, { token })
     .then((r) => r.data);
+
+/**
+ * Unified door scan. Send the raw token from the QR:
+ *   - no count        → admit an individual ticket, or PEEK a pool (returns remaining)
+ *   - count + key     → admit `count` heads from a pool (idempotent on key)
+ * The backend dispatches on the token type, so the scanner doesn't need to parse it.
+ */
+export const scanToken = (
+  token: string,
+  opts?: { count?: number; idempotencyKey?: string },
+) =>
+  api
+    .post<ScanResult>('/v1/tickets/scan', {
+      token,
+      count: opts?.count,
+      idempotency_key: opts?.idempotencyKey,
+    })
+    .then((r) => r.data);
+
+/**
+ * Fresh UUID v4 for a pool-admit idempotency key (one per physical "Admit"
+ * action). Math.random is fine here — this is a dedupe token, not a secret.
+ * The backend stores it as a UUID, so it must be a valid v4 string.
+ */
+export function newScanKey(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 // ── Token parsing ─────────────────────────────────────────────────────────────
 // Rotating QR token format: base64url(jsonPayload).<hmacSig>

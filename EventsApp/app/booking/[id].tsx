@@ -421,6 +421,7 @@ export default function BookingDetailScreen() {
   const [refunded, setRefunded]             = useState(false);
   const [assignTarget, setAssignTarget]     = useState<TicketAssignment | null>(null);
   const [revoking, setRevoking]             = useState<string | null>(null); // assignmentId being revoked
+  const [poolRemaining, setPoolRemaining]   = useState<number | null>(null); // live remaining from the pool QR
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const refreshAssignments = useCallback(async () => {
@@ -527,6 +528,14 @@ export default function BookingDetailScreen() {
   const claimedSlots   = assignments.filter(a => a.status === 'claimed');
   const showQRs        = status === 'confirmed' || status === 'pending';
 
+  // Pool model: unassigned AND not-yet-admitted slots are the buyer's assignable
+  // group. A slot that's already been scanned at the gate stays unassigned but
+  // can't be assigned, so it's excluded here (qr_scanned_at comes from the API).
+  const poolSlots      = assignments.filter(a => a.status === 'unassigned' && !(a as any).qr_scanned_at);
+  const assignedSlots  = assignments.filter(a => a.status === 'pending' || a.status === 'claimed');
+  const poolCount      = poolSlots.length;
+  const firstUnassigned = poolSlots[0] ?? null;
+
   return (
     <View className={s.root}>
       {/* Floating header */}
@@ -563,7 +572,7 @@ export default function BookingDetailScreen() {
           </View>
         </Animated.View>
 
-        {/* QR Codes — one card per ticket slot */}
+        {/* Entry passes — group pool pass + assigned tickets */}
         <View className={s.qrSection}>
           <Text className={s.sectionLabel}>
             {booking.ticket_quantity > 1
@@ -578,91 +587,111 @@ export default function BookingDetailScreen() {
               <Text className={s.qrHint}>This ticket has been refunded</Text>
             </View>
           ) : hasAssignments ? (
-            assignments.map((slot) => {
-              const isClaimed   = slot.status === 'claimed';
-              const isPending   = slot.status === 'pending';
-              const isUnassigned = slot.status === 'unassigned';
-              const isInactive  = slot.status === 'cancelled' || slot.status === 'revoked';
-              const isMySlot    = slot.slot_number === 1; // buyer's own slot
-              const isRevoking  = revoking === slot.id;
-
-              return (
-                <View key={slot.id} style={[sheet.qrCard, { marginBottom: 12, opacity: isInactive ? 0.35 : 1 }]}>
+            <>
+              {/* Group pool pass — one QR covering everyone still with the buyer */}
+              {poolCount > 0 && showQRs && (
+                <View style={[sheet.qrCard, { marginBottom: 12 }]}>
                   {booking.ticket_quantity > 1 && (
                     <View style={sheet.slotBadge}>
-                      <Text style={sheet.slotBadgeText}>
-                        TICKET {slot.slot_number} OF {booking.ticket_quantity}
-                        {isMySlot ? '  ·  YOURS' : ''}
-                      </Text>
+                      <Text style={sheet.slotBadgeText}>GROUP PASS</Text>
                     </View>
                   )}
-
-                  {isClaimed ? (
-                    <RotatingQR assignmentId={slot.id} size={SW - 96} guest={guest} />
-                  ) : (
-                    <View style={sheet.pendingQR}>
-                      <Ionicons
-                        name={isInactive ? 'close-circle-outline' : isPending ? 'mail-outline' : 'ticket-outline'}
-                        size={48}
-                        color="rgba(255,255,255,0.2)"
-                      />
-                      <Text style={sheet.pendingText}>
-                        {isInactive    ? 'Ticket invalidated'
-                         : isPending   ? 'Invite sent — awaiting claim'
-                         : isUnassigned ? 'Not yet assigned'
-                         : 'QR not available'}
-                      </Text>
-                    </View>
-                  )}
-
-                  {slot.assignee_name ? (
-                    <Text style={sheet.assigneeName}>{slot.assignee_name}</Text>
-                  ) : null}
-
-                  <Text className={s.qrNumber}>#{booking.booking_number}</Text>
-                  <Text className={s.qrHint}>
-                    {isClaimed    ? 'Live QR — present at the venue entrance'
-                     : isPending  ? `Claim link sent to ${slot.assignee_email ?? 'recipient'}`
-                     : isInactive ? 'This slot is no longer valid'
-                     : 'Assign this ticket to send someone their entry pass'}
+                  <RotatingQR
+                    size={SW - 96}
+                    pool={{ bookingId: guest ? undefined : (id as string) }}
+                    guest={guest}
+                    onRemaining={setPoolRemaining}
+                  />
+                  <Text style={sheet.assigneeName}>
+                    {(() => {
+                      const n = poolRemaining != null ? poolRemaining : poolCount;
+                      return `Covers your group · ${n} admission${n === 1 ? '' : 's'}`;
+                    })()}
                   </Text>
-
-                  {/* Assign button — only on unassigned slots the buyer doesn't own */}
-                  {isUnassigned && !isMySlot && status === 'confirmed' && (
-                    <TouchableOpacity
-                      style={sheet.assignBtn}
-                      onPress={() => setAssignTarget(slot)}
-                      activeOpacity={0.8}
-                    >
-                      <Feather name="send" size={14} color="#0a0a0a" />
-                      <Text style={sheet.assignBtnText}>Assign ticket</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {/* Revoke button — only on pending slots */}
-                  {isPending && status === 'confirmed' && (
-                    <TouchableOpacity
-                      style={[sheet.revokeBtn, isRevoking && { opacity: 0.5 }]}
-                      onPress={() => handleRevoke(slot.id)}
-                      disabled={isRevoking}
-                      activeOpacity={0.8}
-                    >
-                      {isRevoking
-                        ? <ActivityIndicator size="small" color="#ff6b6b" />
-                        : (
-                          <>
-                            <Feather name="x" size={14} color="#ff6b6b" />
-                            <Text style={sheet.revokeBtnText}>Revoke invite</Text>
-                          </>
-                        )
-                      }
-                    </TouchableOpacity>
-                  )}
+                  <Text className={s.qrNumber}>#{booking.booking_number}</Text>
+                  <Text className={s.qrHint}>Live QR — one scan admits your group at the entrance</Text>
                 </View>
-              );
-            })
+              )}
+
+              {/* Pool fully assigned away */}
+              {poolCount === 0 && assignedSlots.length > 0 && showQRs && (
+                <View style={[sheet.qrCard, { marginBottom: 12 }]}>
+                  <View style={sheet.pendingQR}>
+                    <Ionicons name="people-outline" size={48} color="rgba(255,255,255,0.2)" />
+                    <Text style={sheet.pendingText}>You&apos;ve assigned all your tickets</Text>
+                  </View>
+                  <Text className={s.qrHint}>Everyone below has their own pass</Text>
+                </View>
+              )}
+
+              {/* Assigned tickets list */}
+              {assignedSlots.length > 0 && (
+                <>
+                  <Text style={poolStyles.assignedHeader}>ASSIGNED ({assignedSlots.length})</Text>
+                  {assignedSlots.map((slot) => {
+                    const isClaimed  = slot.status === 'claimed';
+                    const isPending  = slot.status === 'pending';
+                    const isRevoking = revoking === slot.id;
+                    return (
+                      <View key={slot.id} style={poolStyles.assignedRow}>
+                        <View
+                          style={[
+                            poolStyles.assignedIcon,
+                            { backgroundColor: isClaimed ? 'rgba(0,229,160,0.12)' : 'rgba(255,184,48,0.14)' },
+                          ]}
+                        >
+                          <Ionicons
+                            name={isClaimed ? 'checkmark' : 'mail-outline'}
+                            size={16}
+                            color={isClaimed ? '#00e5a0' : '#ffb830'}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={poolStyles.assignedName} numberOfLines={1}>
+                            {slot.assignee_name ?? 'Guest'}
+                          </Text>
+                          <Text
+                            style={[poolStyles.assignedStatus, { color: isClaimed ? '#00e5a0' : '#c79249' }]}
+                            numberOfLines={1}
+                          >
+                            {isClaimed
+                              ? 'Claimed · has their ticket'
+                              : `Invite sent · ${slot.assignee_email ?? 'awaiting claim'}`}
+                          </Text>
+                        </View>
+                        {isPending && status === 'confirmed' && !guest && (
+                          <TouchableOpacity onPress={() => handleRevoke(slot.id)} disabled={isRevoking} hitSlop={8}>
+                            {isRevoking
+                              ? <ActivityIndicator size="small" color="#ff6b6b" />
+                              : <Feather name="x" size={18} color="rgba(255,255,255,0.4)" />}
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Assign a ticket — peel one off the pool (authed buyer only) */}
+              {poolCount > 0 && status === 'confirmed' && !guest && firstUnassigned && (
+                <TouchableOpacity
+                  style={poolStyles.assignRow}
+                  onPress={() => setAssignTarget(firstUnassigned)}
+                  activeOpacity={0.8}
+                >
+                  <View style={poolStyles.assignRowIcon}>
+                    <Feather name="send" size={15} color="rgba(255,255,255,0.8)" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={poolStyles.assignRowTitle}>Assign a ticket</Text>
+                    <Text style={poolStyles.assignRowSub}>Send one to someone arriving separately</Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.3)" />
+                </TouchableOpacity>
+              )}
+            </>
           ) : (
-            /* Fallback for older bookings without per-assignment QR codes */
+            /* Fallback for older bookings without per-assignment rows */
             <View style={sheet.qrCard}>
               {booking.qr_code_url ? (
                 <Image source={{ uri: booking.qr_code_url }} style={sheet.qrImage} resizeMode="contain" />
@@ -670,9 +699,7 @@ export default function BookingDetailScreen() {
                 <View style={sheet.pendingQR}>
                   <Ionicons name="time-outline" size={48} color="rgba(255,255,255,0.2)" />
                   <Text style={sheet.pendingText}>
-                    {status === 'confirmed'
-                      ? 'QR code is being generated…'
-                      : 'Ticket not yet confirmed'}
+                    {status === 'confirmed' ? 'QR code is being generated…' : 'Ticket not yet confirmed'}
                   </Text>
                 </View>
               )}
@@ -790,3 +817,59 @@ export default function BookingDetailScreen() {
     </View>
   );
 }
+// ─── Pool model styles ────────────────────────────────────────────────────────
+
+const poolStyles = StyleSheet.create({
+  assignedHeader: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 4,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  assignedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: '#141414',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+    marginBottom: 8,
+  },
+  assignedIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignedName: { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
+  assignedStatus: { fontSize: 11.5, marginTop: 2 },
+  assignRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: '#141414',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    marginTop: 4,
+  },
+  assignRowIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignRowTitle: { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
+  assignRowSub: { color: 'rgba(255,255,255,0.4)', fontSize: 11.5, marginTop: 2 },
+});

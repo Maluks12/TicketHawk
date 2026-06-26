@@ -84,6 +84,8 @@ func AssignTicketHandler(
 				c.JSON(http.StatusNotFound, gin.H{"error": "Assignment not found"})
 			case errors.Is(err, repository.ErrAlreadyClaimed):
 				c.JSON(http.StatusConflict, gin.H{"error": "This ticket has already been claimed"})
+			case errors.Is(err, repository.ErrAlreadyAdmitted):
+				c.JSON(http.StatusConflict, gin.H{"error": "This ticket has already been admitted at the gate and can't be assigned"})
 			case errors.Is(err, repository.ErrNotAssignmentOwner):
 				c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 			default:

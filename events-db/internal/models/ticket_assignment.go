@@ -29,6 +29,10 @@ type TicketAssignment struct {
 	ClaimedAt  *time.Time `json:"claimed_at,omitempty"  db:"claimed_at"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"  db:"revoked_at"`
 
+	// QRScannedAt is set once this ticket has been admitted at the gate. Exposed
+	// so the app can tell an assignable pool ticket from one already walked in.
+	QRScannedAt *time.Time `json:"qr_scanned_at,omitempty" db:"qr_scanned_at"`
+
 	// Per-ticket QR — data is never serialised; URL is.
 	QRCodeData *string `json:"-" db:"qr_code_data"`
 	QRCodeURL  *string `json:"qr_code_url,omitempty" db:"qr_code_url"`
