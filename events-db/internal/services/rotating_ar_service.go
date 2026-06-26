@@ -35,13 +35,24 @@ func NewRotatingQRService(cfg *config.Config) *RotatingQRService {
 // RotatingQRPayload is the data embedded inside the QR code.
 // Short JSON keys keep the QR code data density low so it scans faster.
 type RotatingQRPayload struct {
-	AssignmentID string `json:"aid"` // ticket_assignments.id
-	BookingID    string `json:"bid"` // bookings.id
-	EventID      string `json:"eid"` // events.id
-	SlotNumber   int    `json:"sn"`  // seat/slot number
-	Window       int64  `json:"w"`   // unix_time / QRWindowSeconds
-	Version      int    `json:"v"`   // token version for future migrations
+	// Type distinguishes an individual ticket token ("" / "i") from a group
+	// pool token ("p"). A pool token admits one-or-more heads from a booking's
+	// unassigned pool; an individual token admits one specific assignment.
+	Type         string `json:"t,omitempty"`
+	AssignmentID string `json:"aid,omitempty"` // ticket_assignments.id (individual tokens)
+	BookingID    string `json:"bid"`           // bookings.id
+	EventID      string `json:"eid"`           // events.id
+	SlotNumber   int    `json:"sn,omitempty"`  // seat/slot number (individual tokens)
+	Window       int64  `json:"w"`             // unix_time / QRWindowSeconds
+	Version      int    `json:"v"`             // token version for future migrations
 }
+
+// TokenTypePool marks a group pool token. Anything else (incl. empty) is treated
+// as an individual ticket token, preserving backward compatibility.
+const TokenTypePool = "p"
+
+// IsPool reports whether the payload is a group pool token.
+func (p *RotatingQRPayload) IsPool() bool { return p.Type == TokenTypePool }
 
 // RotatingQRToken is returned to the app. The app renders Token as a QR code
 // and refreshes when ExpiresAt is reached (or every ~25s for smooth UX).
@@ -76,6 +87,42 @@ func (s *RotatingQRService) GenerateToken(
 
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
 	sig := s.sign(assignmentID, w)
+	token := payloadB64 + "." + sig
+
+	now := time.Now()
+	return &RotatingQRToken{
+		Token:     token,
+		ExpiresAt: windowExpiry(w),
+		WindowSec: QRWindowSeconds,
+		IssuedAt:  now,
+	}, nil
+}
+
+// GeneratePoolToken creates a fresh HMAC-signed GROUP token for a booking's
+// unassigned pool. It carries the booking (not a specific assignment); the
+// scanner resolves "how many remain" from the DB and admits a chosen headcount.
+// The signature input is namespaced ("pool:…") so a pool token can never be
+// mistaken for, or forged from, an individual ticket token.
+func (s *RotatingQRService) GeneratePoolToken(
+	bookingID, eventID string,
+) (*RotatingQRToken, error) {
+	w := currentWindow()
+
+	payload := RotatingQRPayload{
+		Type:      TokenTypePool,
+		BookingID: bookingID,
+		EventID:   eventID,
+		Window:    w,
+		Version:   1,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pool payload: %w", err)
+	}
+
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig := s.signPool(bookingID, w)
 	token := payloadB64 + "." + sig
 
 	now := time.Now()
@@ -130,7 +177,14 @@ func (s *RotatingQRService) VerifyToken(token string) (*RotatingQRPayload, error
 	}
 
 	// ── Verify HMAC in constant time ─────────────────────────────────────────
-	expectedSig := s.sign(payload.AssignmentID, payload.Window)
+	// Pool and individual tokens sign different, namespaced inputs, so the
+	// signature itself enforces the type — a token can't be cross-cast.
+	var expectedSig string
+	if payload.IsPool() {
+		expectedSig = s.signPool(payload.BookingID, payload.Window)
+	} else {
+		expectedSig = s.sign(payload.AssignmentID, payload.Window)
+	}
 	if !hmac.Equal([]byte(gotSig), []byte(expectedSig)) {
 		return nil, fmt.Errorf("invalid token signature")
 	}
@@ -144,6 +198,15 @@ func (s *RotatingQRService) VerifyToken(token string) (*RotatingQRPayload, error
 func (s *RotatingQRService) sign(assignmentID string, window int64) string {
 	mac := hmac.New(sha256.New, []byte(s.cfg.QRHMACSecret))
 	mac.Write([]byte(fmt.Sprintf("%s:%d", assignmentID, window)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// signPool computes the HMAC for a group pool token. The "pool:" namespace keeps
+// it in a separate signature space from individual tokens, so the two can never
+// collide or be forged from one another even at the same window.
+func (s *RotatingQRService) signPool(bookingID string, window int64) string {
+	mac := hmac.New(sha256.New, []byte(s.cfg.QRHMACSecret))
+	mac.Write([]byte(fmt.Sprintf("pool:%s:%d", bookingID, window)))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 

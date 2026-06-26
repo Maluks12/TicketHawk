@@ -16,6 +16,7 @@ var ErrAlreadyClaimed        = errors.New("ticket has already been claimed")
 var ErrAssignmentNotPending  = errors.New("ticket is not in a pending state")
 var ErrClaimTokenExpired     = errors.New("claim link has expired")
 var ErrNotAssignmentOwner    = errors.New("you do not own this booking")
+var ErrAlreadyAdmitted       = errors.New("ticket has already been admitted at the gate")
 
 const assignmentRevocationWindow = 24 * time.Hour
 
@@ -38,30 +39,21 @@ func CreateTicketAssignments(
 	}
 	defer tx.Rollback(ctx)
 
-	now := time.Now()
+	// Pool model: every ticket starts UNASSIGNED, forming the buyer's group
+	// pool. The buyer admits themselves and anyone with them straight from the
+	// pool (their group QR), and assigns a ticket only to peel one off for
+	// someone arriving separately. No slot is auto-claimed. (buyerName/buyerEmail
+	// are retained on the signature for callers but no longer used here.)
+	_ = buyerName
+	_ = buyerEmail
 
 	for slot := 1; slot <= quantity; slot++ {
-		var (
-			status        = models.AssignmentUnassigned
-			assigneeName  *string
-			assigneeEmail *string
-			claimedAt     *time.Time
-		)
-
-		// Slot 1 is auto-claimed by the buyer.
-		if slot == 1 {
-			status = models.AssignmentClaimed
-			assigneeName = &buyerName
-			assigneeEmail = &buyerEmail
-			claimedAt = &now
-		}
-
 		_, err = tx.Exec(ctx, `
 			INSERT INTO ticket_assignments
-				(booking_id, slot_number, status, assignee_name, assignee_email, claimed_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
+				(booking_id, slot_number, status)
+			VALUES ($1, $2, 'unassigned')
 			ON CONFLICT (booking_id, slot_number) DO NOTHING
-		`, bookingID, slot, status, assigneeName, assigneeEmail, claimedAt)
+		`, bookingID, slot)
 
 		if err != nil {
 			return fmt.Errorf("insert slot %d: %w", slot, err)
@@ -133,14 +125,17 @@ func AssignTicket(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Ownership check + fetch current status in one query.
+	// Ownership check + fetch current status (and whether it's already been
+	// admitted at the gate) in one query.
 	var status models.AssignmentStatus
 	var ownerCount int
+	var scannedAt *time.Time
 	err = pool.QueryRow(ctx, `
-		SELECT ta.status, (SELECT COUNT(1) FROM bookings WHERE id = ta.booking_id AND user_id = $3)
+		SELECT ta.status, ta.qr_scanned_at,
+		       (SELECT COUNT(1) FROM bookings WHERE id = ta.booking_id AND user_id = $3)
 		FROM ticket_assignments ta
 		WHERE ta.id = $1 AND ta.booking_id = $2
-	`, assignmentID, bookingID, userID).Scan(&status, &ownerCount)
+	`, assignmentID, bookingID, userID).Scan(&status, &scannedAt, &ownerCount)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrAssignmentNotFound
@@ -153,6 +148,10 @@ func AssignTicket(
 	}
 	if status == models.AssignmentClaimed {
 		return "", ErrAlreadyClaimed
+	}
+	// Can't peel a ticket out of the pool if it's already walked someone in.
+	if scannedAt != nil {
+		return "", ErrAlreadyAdmitted
 	}
 
 	now := time.Now()

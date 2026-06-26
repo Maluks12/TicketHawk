@@ -374,6 +374,7 @@ func main() {
 		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool, rdb))
 		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
 		guest.GET("/bookings/:bookingNumber/assignments/:assignmentId/qr", handlers.GetGuestRotatingQRTokenHandler(pool, rotatingQRService))
+		guest.GET("/bookings/:bookingNumber/pool-qr",                      handlers.GetGuestPoolQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/payment",        handlers.GuestPaymentStatusHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
 	}
@@ -411,6 +412,7 @@ func main() {
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
 		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
 		bookings.GET("/:id/assignments",                  handlers.GetTicketAssignmentsHandler(pool))
+		bookings.GET("/:id/pool-qr",                      handlers.GetPoolQRTokenHandler(pool, rotatingQRService))
 		bookings.POST("/:id/assignments/:assignmentId",   handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURLs[0]))
 		bookings.DELETE("/:id/assignments/:assignmentId", handlers.RevokeAssignmentHandler(pool))
 		bookings.POST("/:id/verify",                      handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))
@@ -454,6 +456,7 @@ func main() {
 		}
 		authTickets.GET("/:assignmentId/qr",   handlers.GetRotatingQRTokenHandler(pool, rotatingQRService))
 		authTickets.POST("/:assignmentId/scan", handlers.ScanRotatingQRHandler(pool, rotatingQRService))
+		authTickets.POST("/scan",               handlers.ScanHandler(pool, rotatingQRService))
 	}
 
 	// ==========================================

@@ -16,19 +16,28 @@ interface RotatingQRToken {
   expires_at: string;
   window_sec: number;
   issued_at:  string;
+  remaining?: number; // pool tokens only — admissions left in the pool
 }
 
 interface Props {
-  assignmentId: string;
   /** Outer size in px — matches the existing qrImage width (SW - 96). */
   size: number;
-  /** When present, fetch via the guest QR endpoint (no auth token required). */
+  /** Individual ticket mode: the assignment to render a QR for. */
+  assignmentId?: string;
+  /** When present, fetch via the guest endpoints (no auth token required). */
   guest?: { bookingNumber: string; email: string };
+  /**
+   * Pool mode: render the buyer's GROUP pass instead of a single ticket.
+   * Authed buyer → pass { bookingId }. Guest buyer → pass {} and supply `guest`.
+   */
+  pool?: { bookingId?: string };
+  /** Pool mode only: reports admissions remaining each refresh. */
+  onRemaining?: (n: number) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function RotatingQR({ assignmentId, size, guest }: Props) {
+export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Props) {
   const [token,     setToken]     = useState<string | null>(null);
   const [windowSec, setWindowSec] = useState(30);
   const [secsLeft,  setSecsLeft]  = useState(30);
@@ -68,15 +77,27 @@ export function RotatingQR({ assignmentId, size, guest }: Props) {
   // ── Fetch a new token ──────────────────────────────────────────────────────
   const fetchToken = useCallback(async () => {
     try {
-      const res = guest
-        ? await api.get<RotatingQRToken>(
-            `/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}/assignments/${assignmentId}/qr`,
-            { params: { email: guest.email } },
-          )
-        : await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
+      // Resolve the endpoint by mode: pool vs individual, guest vs authed.
+      let res;
+      if (pool) {
+        res = guest
+          ? await api.get<RotatingQRToken>(
+              `/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}/pool-qr`,
+              { params: { email: guest.email } },
+            )
+          : await api.get<RotatingQRToken>(`/v1/bookings/${pool.bookingId}/pool-qr`);
+      } else {
+        res = guest
+          ? await api.get<RotatingQRToken>(
+              `/v1/guest/bookings/${encodeURIComponent(guest.bookingNumber)}/assignments/${assignmentId}/qr`,
+              { params: { email: guest.email } },
+            )
+          : await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
+      }
       if (!mountedRef.current) return;
 
-      const { token, expires_at, window_sec } = res.data;
+      const { token, expires_at, window_sec, remaining } = res.data;
+      if (pool && typeof remaining === 'number') onRemaining?.(remaining);
       const exp   = new Date(expires_at).getTime();
       const now   = Date.now();
       const msLeft = Math.max(exp - now, 0);
@@ -110,7 +131,7 @@ export function RotatingQR({ assignmentId, size, guest }: Props) {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       refreshTimerRef.current = setTimeout(fetchToken, 5000);
     }
-  }, [assignmentId, animateBar, guest?.bookingNumber, guest?.email]);
+  }, [assignmentId, animateBar, guest?.bookingNumber, guest?.email, pool, pool?.bookingId, onRemaining]);
 
   // ── Mount / unmount ────────────────────────────────────────────────────────
   useEffect(() => {

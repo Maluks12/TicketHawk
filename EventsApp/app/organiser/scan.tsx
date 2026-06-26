@@ -13,20 +13,24 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { STUDIO } from '../../components/studio/theme';
-import { extractAssignmentId, scanTicket, fmtTime } from '../../lib/organiser';
+import { scanToken, newScanKey, fmtTime } from '../../lib/organiser';
 
 type Phase =
   | 'ready'
   | 'processing'
   | 'admitted'
   | 'already_used'
-  | 'invalid';
+  | 'invalid'
+  | 'pool_headcount';
 
 interface Result {
-  phase: 'admitted' | 'already_used' | 'invalid';
+  phase: 'admitted' | 'already_used' | 'invalid' | 'pool_headcount';
   slotNumber?: number;
   firstScanAt?: string;
   message?: string;
+  admitted?: number;   // pool admit: how many just went in
+  remaining?: number;  // pool: how many remain after
+  token?: string;      // pool headcount: the raw token to admit against
 }
 
 const FINDER = 244;
@@ -40,6 +44,7 @@ export default function StudioScan() {
   const [phase, setPhase] = useState<Phase>('ready');
   const [result, setResult] = useState<Result | null>(null);
   const [admitted, setAdmitted] = useState(0);
+  const [headcount, setHeadcount] = useState(1); // selected count in the picker
 
   // Ignore repeated decodes of the same code while a result is on screen.
   const cooldownRef = useRef<number>(0);
@@ -84,46 +89,89 @@ export default function StudioScan() {
       if (Date.now() < cooldownRef.current) return;
       cooldownRef.current = Date.now() + 5000;
 
-      let assignmentId: string;
-      try {
-        assignmentId = extractAssignmentId(raw);
-      } catch {
-        setResult({ phase: 'invalid', message: 'Not a valid ticket QR code' });
-        setPhase('invalid');
-        scheduleReset();
-        return;
-      }
-
       setPhase('processing');
       try {
-        const res = await scanTicket(assignmentId, raw);
-        setResult({ phase: 'admitted', slotNumber: res.slot_number });
-        setPhase('admitted');
-        setAdmitted((n) => n + 1);
-      } catch (err: unknown) {
-        const ax = err as {
-          response?: { status?: number; data?: { error?: string; first_scan_at?: string } };
-        };
-        const status = ax.response?.status;
-        const data = ax.response?.data;
-        if (status === 409 && data?.error === 'Ticket already scanned') {
-          setResult({ phase: 'already_used', firstScanAt: data.first_scan_at });
-          setPhase('already_used');
-        } else {
-          setResult({
-            phase: 'invalid',
-            message: data?.error ?? 'Ticket could not be verified',
-          });
-          setPhase('invalid');
+        // No count: admits an individual ticket, or PEEKs a pool.
+        const res = await scanToken(raw);
+
+        if (res.type === 'pool' && res.peek) {
+          const remaining = res.remaining ?? 0;
+          if (remaining <= 0) {
+            setResult({ phase: 'already_used', message: 'Everyone on this pass is already in' });
+            setPhase('already_used');
+            scheduleReset();
+            return;
+          }
+          // Default the picker to admitting the whole group.
+          setHeadcount(remaining);
+          setResult({ phase: 'pool_headcount', remaining, token: raw });
+          setPhase('pool_headcount');
+          return; // wait for the staff to confirm a headcount — no auto-reset
         }
+
+        // Individual ticket admitted.
+        setResult({ phase: 'admitted', slotNumber: res.slot_number, admitted: res.admitted ?? 1 });
+        setPhase('admitted');
+        setAdmitted((n) => n + (res.admitted ?? 1));
+        scheduleReset();
+      } catch (err: unknown) {
+        handleScanError(err);
+        scheduleReset();
+      }
+    },
+    [scheduleReset],
+  );
+
+  // Confirm a pool admission for the selected headcount.
+  const confirmAdmit = useCallback(
+    async (token: string, count: number) => {
+      cooldownRef.current = Date.now() + 5000;
+      setPhase('processing');
+      try {
+        const res = await scanToken(token, { count, idempotencyKey: newScanKey() });
+        const justAdmitted = res.admitted ?? count;
+        setResult({ phase: 'admitted', admitted: justAdmitted, remaining: res.remaining });
+        setPhase('admitted');
+        setAdmitted((n) => n + justAdmitted);
+      } catch (err: unknown) {
+        handleScanError(err);
       }
       scheduleReset();
     },
     [scheduleReset],
   );
 
+  const cancelHeadcount = useCallback(() => {
+    setResult(null);
+    setPhase('ready');
+    cooldownRef.current = 0;
+  }, []);
+
+  // Shared error → result mapping.
+  const handleScanError = useCallback((err: unknown) => {
+    const ax = err as {
+      response?: { status?: number; data?: { error?: string; first_scan_at?: string } };
+    };
+    const status = ax.response?.status;
+    const data = ax.response?.data;
+    if (status === 409 && data?.error === 'Ticket already scanned') {
+      setResult({ phase: 'already_used', firstScanAt: data.first_scan_at });
+      setPhase('already_used');
+    } else if (status === 409) {
+      // e.g. pool fully admitted, outside admission window, booking invalid
+      setResult({ phase: 'already_used', message: data?.error });
+      setPhase('already_used');
+    } else {
+      setResult({ phase: 'invalid', message: data?.error ?? 'Ticket could not be verified' });
+      setPhase('invalid');
+    }
+  }, []);
+
   const showingResult =
     phase === 'admitted' || phase === 'already_used' || phase === 'invalid';
+  const showingHeadcount = phase === 'pool_headcount';
+  // Pause decoding while a result, the headcount picker, or a verify is on screen.
+  const cameraIdle = showingResult || showingHeadcount || phase === 'processing';
 
   // ── Permission gates ────────────────────────────────────────────────────────
   if (!permission) {
@@ -169,7 +217,7 @@ export default function StudioScan() {
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         onBarcodeScanned={
-          showingResult ? undefined : ({ data }) => handleScan(data)
+          cameraIdle ? undefined : ({ data }) => handleScan(data)
         }
       />
 
@@ -182,7 +230,7 @@ export default function StudioScan() {
       </View>
 
       {/* Viewfinder */}
-      {!showingResult && (
+      {!showingResult && !showingHeadcount && (
         <View style={styles.finderWrap} pointerEvents="none">
           <View style={styles.finder}>
             {CORNERS.map((c, i) => (
@@ -205,10 +253,14 @@ export default function StudioScan() {
             {result.phase === 'admitted' && (
               <>
                 <Badge color={STUDIO.green} bg={STUDIO.greenSoft} icon="check" />
-                <Text style={[styles.resultTitle, { color: STUDIO.green }]}>Admitted</Text>
-                {result.slotNumber != null && (
+                <Text style={[styles.resultTitle, { color: STUDIO.green }]}>
+                  {result.admitted && result.admitted > 1 ? `Admitted ${result.admitted}` : 'Admitted'}
+                </Text>
+                {result.remaining != null && result.remaining > 0 ? (
+                  <Text style={styles.resultSub}>{result.remaining} more left on this pass</Text>
+                ) : result.slotNumber != null ? (
                   <Text style={styles.resultSub}>Ticket slot #{result.slotNumber}</Text>
-                )}
+                ) : null}
               </>
             )}
             {result.phase === 'already_used' && (
@@ -232,6 +284,56 @@ export default function StudioScan() {
               </>
             )}
             <Text style={styles.resumeTxt}>Resuming scanner…</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Pool headcount picker — interactive, no auto-reset */}
+      {showingHeadcount && result?.phase === 'pool_headcount' && (
+        <View style={styles.resultWrap}>
+          <View style={styles.resultCard}>
+            <Badge color={STUDIO.accent} bg={STUDIO.accentSoft} icon="users" />
+            <Text style={[styles.resultTitle, { color: '#fff', fontSize: 22 }]}>Group pass</Text>
+            <Text style={styles.resultSub}>
+              {result.remaining} admission{result.remaining === 1 ? '' : 's'} remaining
+            </Text>
+
+            <View style={styles.stepper}>
+              <TouchableOpacity
+                style={[styles.stepBtn, headcount <= 1 && styles.stepBtnDisabled]}
+                onPress={() => setHeadcount((c) => Math.max(1, c - 1))}
+                disabled={headcount <= 1}
+                hitSlop={8}
+              >
+                <Feather name="minus" size={22} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.stepValue}>{headcount}</Text>
+              <TouchableOpacity
+                style={[styles.stepBtn, headcount >= (result.remaining ?? 1) && styles.stepBtnDisabled]}
+                onPress={() => setHeadcount((c) => Math.min(result.remaining ?? 1, c + 1))}
+                disabled={headcount >= (result.remaining ?? 1)}
+                hitSlop={8}
+              >
+                <Feather name="plus" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.stepHint}>
+              {headcount === result.remaining
+                ? 'Admitting the whole group'
+                : 'Tap − / + if fewer are entering now'}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.admitBtn}
+              onPress={() => confirmAdmit(result.token!, headcount)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.admitBtnTxt}>Admit {headcount}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={cancelHeadcount} hitSlop={8}>
+              <Text style={styles.cancelBtnTxt}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -390,6 +492,49 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   resumeTxt: { color: STUDIO.faint, fontSize: 12, marginTop: 18 },
+
+  // ── Pool headcount picker ───────────────────────────────────────────────────
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 22,
+    marginTop: 20,
+  },
+  stepBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: STUDIO.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnDisabled: { opacity: 0.3 },
+  stepValue: {
+    color: '#fff',
+    fontSize: 40,
+    fontWeight: '800',
+    minWidth: 54,
+    textAlign: 'center',
+  },
+  stepHint: {
+    color: STUDIO.faint,
+    fontSize: 12.5,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  admitBtn: {
+    marginTop: 22,
+    backgroundColor: STUDIO.green,
+    borderRadius: 14,
+    paddingVertical: 15,
+    width: '100%',
+    alignItems: 'center',
+  },
+  admitBtnTxt: { color: '#03281c', fontSize: 16, fontWeight: '800' },
+  cancelBtn: { marginTop: 12, paddingVertical: 6 },
+  cancelBtnTxt: { color: STUDIO.sub, fontSize: 14, fontWeight: '600' },
 
   // Permission
   permWrap: { backgroundColor: STUDIO.bg },
