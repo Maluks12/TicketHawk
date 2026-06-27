@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShoppingCart, X, ChevronRight } from 'lucide-react';
+import { ShoppingCart, X, ChevronRight, ChevronLeft } from 'lucide-react';
 import {
   getDropsFeed, addMerchToCart, getCachedSessionId,
   type MerchandiseItem,
@@ -274,9 +274,29 @@ function DetailDrawer({ item, onClose }: { item: MerchandiseItem; onClose: () =>
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
+  const imgDragStart = useCallback((x: number) => { (window as any).__imgDragX = x; }, []);
+  const imgDragEnd = useCallback((x: number) => {
+    const start = (window as any).__imgDragX;
+    if (start == null) return;
+    const delta = start - x;
+    if (delta > 50 && imgIdx < images.length - 1) setImgIdx((i) => i + 1);
+    else if (delta < -50 && imgIdx > 0) setImgIdx((i) => i - 1);
+    (window as any).__imgDragX = null;
+  }, [imgIdx, images.length]);
   const remain = useCountdown(item.seconds_remain ?? 0);
   const until  = useCountdown(item.seconds_until ?? 0);
   const isLive = item.sale_status === 'live';
+
+  // Keyboard navigation for images & close
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft')  setImgIdx((i) => Math.max(0, i - 1));
+      if (e.key === 'ArrowRight') setImgIdx((i) => Math.min(images.length - 1, i + 1));
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [images.length, onClose]);
 
   const displayPrice = selectedVariant?.price_override != null
     ? selectedVariant.price_override : item.effective_price;
@@ -342,8 +362,34 @@ function DetailDrawer({ item, onClose }: { item: MerchandiseItem; onClose: () =>
           {/* Images */}
           {images.length > 0 && (
             <div className="mb-4">
-              <div className="w-full aspect-[4/3] rounded-[12px] overflow-hidden">
+              <div
+                className="w-full aspect-[4/3] rounded-[12px] overflow-hidden relative select-none"
+                onMouseDown={(e) => imgDragStart(e.clientX)}
+                onMouseUp={(e) => imgDragEnd(e.clientX)}
+                onTouchStart={(e) => imgDragStart(e.touches[0].clientX)}
+                onTouchEnd={(e) => imgDragEnd(e.changedTouches[0].clientX)}
+              >
                 <img src={images[imgIdx]} alt={item.name} className="w-full h-full object-cover" />
+                {images.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => setImgIdx((i) => Math.max(0, i - 1))}
+                      disabled={imgIdx === 0}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-opacity"
+                      style={{ background: `${bg}cc`, border: `1px solid ${tc}30`, opacity: imgIdx === 0 ? 0.2 : 0.85 }}
+                    >
+                      <ChevronLeft size={16} color={tc} />
+                    </button>
+                    <button
+                      onClick={() => setImgIdx((i) => Math.min(images.length - 1, i + 1))}
+                      disabled={imgIdx === images.length - 1}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-opacity"
+                      style={{ background: `${bg}cc`, border: `1px solid ${tc}30`, opacity: imgIdx === images.length - 1 ? 0.2 : 0.85 }}
+                    >
+                      <ChevronRight size={16} color={tc} />
+                    </button>
+                  </>
+                )}
               </div>
               {images.length > 1 && (
                 <div className="flex gap-2 mt-2 justify-center">
