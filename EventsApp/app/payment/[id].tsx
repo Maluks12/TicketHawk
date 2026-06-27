@@ -37,7 +37,7 @@ import {
   type PaymentMethod,
 } from '../../lib/payments';
 
-type Phase = 'opening' | 'in_browser' | 'confirming' | 'done' | 'failed' | 'cancelled';
+type Phase = 'opening' | 'in_browser' | 'confirming' | 'done' | 'failed' | 'cancelled' | 'pending';
 
 const METHOD_LABEL: Record<string, string> = {
   card: 'Card',
@@ -102,6 +102,15 @@ export default function PaymentScreen() {
     } else if (status?.payment_status === 'failed') {
       setPhase('failed');
       setMessage('Your payment didn’t go through. You can try again.');
+    } else if (status?.payment_status === 'pending' && !cancelledFallback) {
+      // EFT and other bank-rail methods can sit in "pending" after the gateway
+      // hands back — the transfer is initiated but the bank hasn't confirmed yet.
+      // This is NOT a failure: when it settles, Paystack's webhook completes the
+      // booking and issues tickets. Show a calm processing state with no Retry so
+      // the customer doesn't pay a second time. (Only when the gateway actually
+      // redirected back — a plain browser-dismiss still reads as cancelled below.)
+      setPhase('pending');
+      setMessage('Your EFT is processing. We’ll email your tickets the moment your bank confirms — usually within a few minutes. No need to pay again.');
     } else if (cancelledFallback) {
       setPhase('cancelled');
       setMessage('Payment cancelled. You can try again whenever you’re ready.');
@@ -203,8 +212,15 @@ export default function PaymentScreen() {
         {phase === 'done' && <Text style={styles.bigIcon}>✅</Text>}
         {phase === 'failed' && <Text style={styles.bigIcon}>⚠️</Text>}
         {phase === 'cancelled' && <Text style={styles.bigIcon}>↩️</Text>}
+        {phase === 'pending' && <Text style={styles.bigIcon}>⏳</Text>}
 
         <Text style={[styles.message, phase === 'done' && styles.successText]}>{message}</Text>
+
+        {phase === 'pending' && (
+          <TouchableOpacity style={styles.primaryBtn} onPress={goToTickets}>
+            <Text style={styles.primaryText}>Go to my tickets</Text>
+          </TouchableOpacity>
+        )}
 
         {canRetry && (
           <>

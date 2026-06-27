@@ -79,7 +79,7 @@ export default function TicketPurchaseScreen() {
   const [guestEmail, setGuestEmail]       = useState('');
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal' | 'apple_pay'>('card');
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal' | 'apple_pay' | 'instant_eft'>('card');
   const modalSlide = useRef(new Animated.Value(300)).current;
   const paymentSlide = useRef(new Animated.Value(400)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -106,7 +106,7 @@ export default function TicketPurchaseScreen() {
     });
   }
 
-  function selectPaymentMethod(method: 'card' | 'paypal' | 'apple_pay') {
+  function selectPaymentMethod(method: 'card' | 'paypal' | 'apple_pay' | 'instant_eft') {
     setPaymentMethod(method);
     closePaymentSheet();
   }
@@ -270,7 +270,7 @@ export default function TicketPurchaseScreen() {
       //  • Guests: there is no method-aware start route, so fall back to the
       //    card authorization_url returned at booking creation.
       let authorizationUrl: string;
-      let usedMethod: 'card' | 'paypal' | 'apple_pay' = 'card';
+      let usedMethod: 'card' | 'paypal' | 'apple_pay' | 'instant_eft' = 'card';
       if (user && paymentMethod === 'card' && (booking as any).client_token) {
         // PERF: POST /v1/bookings already initialised a Paystack card checkout
         // and returned its URL. For card (the default), reuse it instead of
@@ -586,10 +586,10 @@ export default function TicketPurchaseScreen() {
                     <Text style={ss.detailLabel}>Payment</Text>
                     <View style={ss.detailRight}>
                       <Text style={{ fontSize: 15 }}>
-                        {paymentMethod === 'apple_pay' ? '🍎' : paymentMethod === 'paypal' ? '🅿️' : '💳'}
+                        {paymentMethod === 'apple_pay' ? '🍎' : paymentMethod === 'paypal' ? '🅿️' : paymentMethod === 'instant_eft' ? '🏦' : '💳'}
                       </Text>
                       <Text style={ss.detailValue}>
-                        {paymentMethod === 'apple_pay' ? 'Apple Pay' : paymentMethod === 'paypal' ? 'PayPal' : 'Credit / Debit Card'}
+                        {paymentMethod === 'apple_pay' ? 'Apple Pay' : paymentMethod === 'paypal' ? 'PayPal' : paymentMethod === 'instant_eft' ? 'Instant EFT' : 'Credit / Debit Card'}
                       </Text>
                       <Text style={ss.chevron}>›</Text>
                     </View>
@@ -812,6 +812,22 @@ export default function TicketPurchaseScreen() {
           <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>PayPal</Text>
           {paymentMethod === 'paypal' && <Text style={{ fontSize: 18, color: '#0a0a0a' }}>✓</Text>}
         </TouchableOpacity>
+
+        {/* Instant EFT (Paystack/Ozow) — signed-in users only for now;
+            guest checkout is card-only until a method-aware guest route exists. */}
+        {user && (
+          <TouchableOpacity onPress={() => selectPaymentMethod('instant_eft')} activeOpacity={0.7}
+            style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
+            <View style={{ width: 52, height: 34, borderRadius: 8, backgroundColor: '#1a7f5a', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff', letterSpacing: -0.3 }}>EFT</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>Instant EFT</Text>
+              <Text style={{ fontSize: 12, color: '#888', marginTop: 1 }}>Pay from your bank · instant confirmation</Text>
+            </View>
+            {paymentMethod === 'instant_eft' && <Text style={{ fontSize: 18, color: '#0a0a0a' }}>✓</Text>}
+          </TouchableOpacity>
+        )}
 
         {/* Credit Card */}
         <TouchableOpacity onPress={() => selectPaymentMethod('card')} activeOpacity={0.7}

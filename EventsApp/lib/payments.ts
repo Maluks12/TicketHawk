@@ -24,7 +24,7 @@
 import * as WebBrowser from 'expo-web-browser';
 import { api } from './api';
 
-export type PaymentMethod = 'card' | 'paypal' | 'apple_pay';
+export type PaymentMethod = 'card' | 'paypal' | 'apple_pay' | 'instant_eft';
 
 export type PaymentStatusValue =
   | 'pending'

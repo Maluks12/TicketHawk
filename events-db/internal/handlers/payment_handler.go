@@ -30,6 +30,8 @@ func parsePaymentMethod(c *gin.Context) models.PaymentMethod {
 		return models.PaymentApplePay
 	case "paypal":
 		return models.PaymentPayPal
+	case "instant_eft", "eft":
+		return models.PaymentInstantEFT
 	default:
 		return models.PaymentCreditCard
 	}
