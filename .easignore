@@ -1,0 +1,18 @@
+# Sibling projects in the monorepo — not part of the mobile app build
+events-admin/
+events-db/
+events-organizer/
+EventsWeb/
+
+# Heavy / regenerated folders anywhere in the tree
+**/node_modules/
+**/.git/
+**/.expo/
+**/android/
+**/ios/
+**/dist/
+**/build/
+
+# Misc
+**/.DS_Store
+**/*.log
