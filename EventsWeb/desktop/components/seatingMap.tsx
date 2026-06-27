@@ -1,3 +1,5 @@
+'use client';
+
 import { useMemo } from 'react';
 import type { TicketType } from '@/lib/api';
 

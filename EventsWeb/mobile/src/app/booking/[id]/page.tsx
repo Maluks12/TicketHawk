@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import { api } from '@/lib/api';
@@ -48,11 +48,11 @@ function PriceLine({ label, value, bold, accent }: { label: string; value: strin
   );
 }
 
-export default function BookingDetailPage({ params }: { params: { id: string } }) {
+export default function BookingDetailPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { colors, isDark } = useAppTheme();
-  const { id } = params;
+  const { id } = useParams<{ id: string }>();
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [assignments, setAssignments] = useState<TicketAssignment[]>([]);
@@ -149,16 +149,15 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 <div style={{ marginTop: 24 }}>
   <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: 'rgba(128,128,128,0.6)', margin: '0 0 12px' }}>ENTRY PASSES</p>
 
-  {booking.status === 'refunded' || booking.status === 'cancelled' ? (
+  {status === 'refunded' || status === 'cancelled' ? (
     <div style={{ textAlign: 'center', padding: 24, background: 'rgba(255,255,255,0.03)', borderRadius: 12, opacity: 0.4 }}>
-      <p style={{ margin: 0, fontSize: 13, color: '#888' }}>This ticket has been {booking.status}</p>
+      <p style={{ margin: 0, fontSize: 13, color: '#888' }}>This ticket has been {status}</p>
     </div>
   ) : assignments.length > 0 ? (
     assignments.map((slot: any) => {
       const isClaimed  = slot.status === 'claimed';
       const isPending  = slot.status === 'pending';
       const isInactive = slot.status === 'inactive' || slot.status === 'revoked';
-      const status     = booking.status;
       const showQR     = (status === 'confirmed' || status === 'pending') && !isInactive;
 
       return (
@@ -167,7 +166,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#aaa' }}>
               {isPending ? `Invite sent to ${slot.assignee_email ?? 'recipient'}` : isClaimed ? 'Assigned' : isInactive ? 'Invalidated' : 'Unassigned'}
             </p>
-            <span style={{ fontSize: 10, fontWeight: 800, color: STATUS_COLOR[booking.status] ?? '#888', letterSpacing: 1 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: STATUS_COLOR[status] ?? '#888', letterSpacing: 1 }}>
               #{booking.booking_number}
             </span>
           </div>
@@ -197,7 +196,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         : <span style={{ fontSize: 48 }}>⏳</span>
       }
       <p style={{ margin: '8px 0 0', fontSize: 12, color: '#888', textAlign: 'center' }}>
-        {booking.status === 'confirmed'
+        {status === 'confirmed'
           ? (booking.qr_code_url ? 'Present this at the venue entrance' : 'QR code is being generated…')
           : 'Complete payment to activate your ticket'}
       </p>

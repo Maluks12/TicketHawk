@@ -183,7 +183,7 @@ export default function CartCheckoutPage() {
                 const sub = cartItemSubtitle(item);
                 const lineTotal = (item as any).unit_price_snapshot * item.quantity + ((item as any).delivery_fee_snapshot ?? 0);
                 return (
-                  <div key={item.id} style={{ display: 'flex', gap: 10, paddingVertical: 8, borderTop: `1px solid ${border}`, padding: '8px 0', alignItems: 'flex-start' }}>
+                  <div key={item.id} style={{ display: 'flex', gap: 10, borderTop: `1px solid ${border}`, padding: '8px 0', alignItems: 'flex-start' }}>
                     <div style={{ width: 26, height: 26, borderRadius: 7, background: item.item_type === 'ticket' ? '#ff2d55' : '#1c2e61', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12 }}>{item.item_type === 'ticket' ? '🎟' : '👜'}</div>
                     <div style={{ flex: 1 }}>
                       <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>{cartItemLabel(item)}</p>
