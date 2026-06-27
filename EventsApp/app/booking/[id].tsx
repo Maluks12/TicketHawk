@@ -517,7 +517,6 @@ export default function BookingDetailScreen() {
 
   const status    = refunded ? 'refunded' : booking.booking_status;
   const statusCol = STATUS_COLOR[status] ?? '#888';
-  const canRefund = status === 'confirmed' && !refunded && !!user;
   const isMock    = !booking.unit_price;
 
   // Determine which slots to show QR codes for.
@@ -792,15 +791,7 @@ export default function BookingDetailScreen() {
           )}
         </View>
 
-        {/* Actions */}
-        {canRefund && (
-          <View className={s.actions}>
-            <TouchableOpacity className={s.refundBtn} onPress={() => setRefundOpen(true)} activeOpacity={0.8}>
-              <Feather name="rotate-ccw" size={15} color="#ff4d4d" />
-              <Text className={s.refundBtnText}>Request refund</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* Refund action removed per product decision. */}
       </Animated.ScrollView>
 
       <RefundModal visible={refundOpen} bookingId={booking.id}
