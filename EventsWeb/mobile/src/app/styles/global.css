@@ -41,3 +41,12 @@ button { font-family: var(--font-sans); cursor: pointer; }
 
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* FIX: Mobile bottom tab bar safe-area support.
+   env(safe-area-inset-bottom) handles notched/home-indicator devices.
+   The viewport-fit=cover meta tag in layout.tsx enables this. */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

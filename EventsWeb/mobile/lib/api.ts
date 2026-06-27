@@ -1,11 +1,11 @@
 import axios from 'axios';
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080',
+  baseURL: process.env.NEXT_PUBLIC_API_URL ?? '/api',
   withCredentials: true,
 });
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? '/api';
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 export function getAccessToken() {

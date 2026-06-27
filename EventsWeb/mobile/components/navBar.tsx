@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useFilterStore } from '@/store/filterStore';
 import { useAppTheme } from '@/themes/colors';
 import {
-  ShoppingCart, Menu, X, MapPin, ChevronDown,
+  ShoppingCart, MapPin, ChevronDown,
   Home, ShoppingBag, Search, Ticket, User,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
@@ -54,28 +54,63 @@ const NAV_LINKS = [
   { href: '/profile', label: 'Profile', Icon: User        },
 ];
 
+// ── Mobile bottom tab bar ──────────────────────────────────────────────────────
+// FIX: This was the missing piece. layout.tsx always reserved pb-[60px] for a
+// bottom tab bar, but the bar itself was never rendered — only a hamburger
+// overlay existed. On mobile there was no way to navigate between pages.
+function BottomTabBar() {
+  const pathname   = usePathname();
+  const { colors } = useAppTheme();
+
+  return (
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden h-[60px] items-center"
+      style={{
+        backgroundColor: colors.headerBg,
+        borderTop: `1px solid ${colors.dividerColor}`,
+        // Pad below the tabs on notched/home-indicator devices.
+        // Requires viewport-fit=cover (set in layout.tsx).
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
+    >
+      {NAV_LINKS.map(({ href, label, Icon }) => {
+        const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+        return (
+          <Link
+            key={href}
+            href={href}
+            className="relative flex-1 flex flex-col items-center justify-center gap-[3px] h-full"
+          >
+            {/* Active top-edge indicator */}
+            <div
+              className="absolute top-0 h-[2px] w-[28px] rounded-full transition-opacity duration-200"
+              style={{ backgroundColor: '#FF2D55', opacity: active ? 1 : 0 }}
+            />
+            <Icon size={22} color={active ? '#FF2D55' : colors.iconColor} />
+            <span
+              className="text-[9px] font-bold tracking-[0.5px]"
+              style={{ color: active ? '#FF2D55' : colors.iconColor }}
+            >
+              {label.toUpperCase()}
+            </span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 // ── NavBar ─────────────────────────────────────────────────────────────────────
 export default function NavBar() {
-  const router   = useRouter();
   const pathname = usePathname();
-  const { user, logout, loadUser } = useAuthStore();
-  const { colors }                 = useAppTheme();
+  const { colors } = useAppTheme();
 
-  // shared filter state — written by page.tsx, read here for display
+  const { user, logout, loadUser } = useAuthStore();
   const { locationLabel, dateLabelText, setFilterOpen } = useFilterStore();
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const router = useRouter();
 
   useEffect(() => { loadUser(); }, [loadUser]);
-
-  // Close mobile overlay on route change
-  useEffect(() => { setMenuOpen(false); }, [pathname]);
-
-  // Lock body scroll while mobile menu is open
-  useEffect(() => {
-    document.body.style.overflow = menuOpen ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
-  }, [menuOpen]);
 
   const handleLogout = async () => {
     await logout();
@@ -117,20 +152,16 @@ export default function NavBar() {
                 >
                   {label.toUpperCase()}
                 </span>
-                {/* active indicator dot */}
                 <div
                   className="h-[3px] w-[3px] rounded-full transition-opacity duration-200"
-                  style={{
-                    backgroundColor: '#FF2D55',
-                    opacity: active ? 1 : 0,
-                  }}
+                  style={{ backgroundColor: '#FF2D55', opacity: active ? 1 : 0 }}
                 />
               </Link>
             );
           })}
         </nav>
 
-        {/* RIGHT: filter pill + cart + mobile hamburger ────────────────── */}
+        {/* RIGHT: cart + filter pill ───────────────────────────────────── */}
         <div className="flex-none flex items-center gap-3 ml-auto md:ml-0">
 
           {/* Filter pill — desktop only */}
@@ -149,92 +180,35 @@ export default function NavBar() {
             <ChevronDown size={12} color={colors.subText} />
           </button>
 
+          {/* Filter pill — mobile only (compact, in top header) */}
+          <button
+            onClick={() => setFilterOpen(true)}
+            className="md:hidden flex items-center gap-[5px] h-8 px-[10px] rounded-full text-[11px] font-semibold"
+            style={{
+              backgroundColor: colors.sectionCardBg,
+              border: `1px solid ${colors.dividerColor}`,
+            }}
+          >
+            <MapPin size={11} color={colors.subText} />
+            <span style={{ color: colors.subText }}>{locationLabel}</span>
+          </button>
+
           <CartButton />
 
-          {/* Hamburger — mobile only */}
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className="md:hidden p-1.5 rounded-sm"
-            aria-label="Toggle menu"
-          >
-            {menuOpen
-              ? <X    size={23} color={colors.text} />
-              : <Menu size={23} color={colors.text} />
-            }
-          </button>
-        </div>
-      </header>
-
-      {/* ── Mobile full-screen overlay ─────────────────────────────────────── */}
-      {menuOpen && (
-        <div
-          className="fixed inset-0 top-16 z-40 flex flex-col md:hidden"
-          style={{ backgroundColor: colors.headerBg }}
-        >
-          <nav className="flex-1 flex flex-col pt-4 px-8 overflow-y-auto">
-
-            {/* Filter row at top of mobile menu */}
-            <button
-              onClick={() => { setMenuOpen(false); setFilterOpen(true); }}
-              className="flex items-center gap-4 py-5 border-b"
-              style={{ borderColor: colors.dividerColor }}
-            >
-              <MapPin size={24} color={colors.iconColor} />
-              <div className="text-left">
-                <p className="text-[17px] font-bold leading-tight" style={{ color: colors.text }}>
-                  {locationLabel}
-                </p>
-                <p className="text-[12px] mt-0.5" style={{ color: colors.subText }}>
-                  {dateLabelText}
-                </p>
-              </div>
-              <ChevronDown size={16} color={colors.subText} className="ml-auto" />
-            </button>
-
-            {/* Nav links */}
-            {NAV_LINKS.map(({ href, label, Icon }) => {
-              const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex items-center gap-5 py-5 border-b"
-                  style={{ borderColor: colors.dividerColor }}
-                >
-                  <Icon size={25} color={active ? '#FF2D55' : colors.iconColor} />
-                  <span
-                    className="text-[21px] font-bold"
-                    style={{ color: active ? '#FF2D55' : colors.text }}
-                  >
-                    {label}
-                  </span>
-                  {active && (
-                    <div className="ml-auto w-[7px] h-[7px] rounded-full bg-[#FF2D55]" />
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Auth row at bottom */}
-          <div className="px-8 py-6 border-t" style={{ borderColor: colors.dividerColor }}>
+          {/* Desktop: auth actions */}
+          <div className="hidden md:flex items-center gap-2">
             {user ? (
-              <div className="flex items-center justify-between">
-                <span className="text-[15px] font-semibold" style={{ color: colors.text }}>
-                  {user.first_name ?? user.name}
-                </span>
-                <button
-                  onClick={handleLogout}
-                  className="px-5 py-2.5 text-[13px] font-bold rounded-[6px]"
-                  style={{ backgroundColor: colors.sectionCardBg, color: colors.text }}
-                >
-                  Sign out
-                </button>
-              </div>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 text-[12px] font-bold rounded-[6px]"
+                style={{ backgroundColor: colors.sectionCardBg, color: colors.text }}
+              >
+                Sign out
+              </button>
             ) : (
               <Link
                 href="/auth/login"
-                className="block w-full text-center py-3.5 text-[15px] font-bold rounded-[6px]"
+                className="px-4 py-2 text-[12px] font-bold rounded-[6px]"
                 style={{ backgroundColor: '#FF2D55', color: '#fff' }}
               >
                 Sign in
@@ -242,7 +216,10 @@ export default function NavBar() {
             )}
           </div>
         </div>
-      )}
+      </header>
+
+      {/* ── Mobile bottom tab bar ─────────────────────────────────────────────── */}
+      <BottomTabBar />
     </>
   );
 }
