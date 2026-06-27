@@ -58,6 +58,8 @@ func (pm PaymentMethod) PaystackChannels() []string {
 	switch pm {
 	case PaymentApplePay, PaymentCreditCard:
 		return []string{"card"}
+	case PaymentInstantEFT:
+		return []string{"eft"}
 	default:
 		return []string{"card"}
 	}

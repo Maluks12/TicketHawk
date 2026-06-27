@@ -284,6 +284,8 @@ func paystackChannelToMethod(channel string) models.PaymentMethod {
 		return models.PaymentApplePay
 	case "card":
 		return models.PaymentCreditCard
+	case "eft":
+		return models.PaymentInstantEFT
 	default:
 		return models.PaymentCreditCard
 	}
