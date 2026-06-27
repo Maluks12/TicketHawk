@@ -308,6 +308,32 @@ export default function EventDetailPage() {
         .trust-txt   { font-size: 11px; font-weight: 600; color: ${colors.subText}; }
         .trust-row   { display: flex; align-items: center; gap: 13px; padding: 14px 20px; }
 
+        /* ── Action buttons (Follow / Share) ── */
+        .ed-action-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 10px;
+        }
+        .btn-action {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 5px;
+          border: 1px solid;
+          background: none;
+          border-radius: 10px;
+          padding: 10px 14px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 1px;
+          cursor: pointer;
+          font-family: inherit;
+          transition: opacity 0.15s;
+          white-space: nowrap;
+        }
+        .btn-action:hover:not(:disabled) { opacity: 0.7; }
+        .btn-action:disabled { cursor: not-allowed; opacity: 0.5; }
+
         /* ── Mobile CTA ── */
         .ed-mobile-cta { display: none; }
 

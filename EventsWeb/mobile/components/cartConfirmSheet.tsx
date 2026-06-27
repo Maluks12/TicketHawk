@@ -34,8 +34,17 @@ export function CartConfirmSheet({ item, selectedVariant, onClose, onAddToCart }
 
         {/* Variant info */}
         <div className="flex gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-          {selectedVariant.attributes && <span>{selectedVariant.attributes}</span>}
-          <span className="ml-auto">R{(selectedVariant.price_override ?? 0).toLocaleString('en-ZA')}</span>
+          {(() => {
+            try {
+              const attrs = JSON.parse(selectedVariant.attributes) as Record<string, string>;
+              return Object.entries(attrs).map(([k, v]) => (
+                <span key={k}>{k.charAt(0).toUpperCase() + k.slice(1)}: {v}</span>
+              ));
+            } catch {
+              return selectedVariant.sku ? <span>{selectedVariant.sku}</span> : null;
+            }
+          })()}
+          <span className="ml-auto">R{(selectedVariant.price_override ?? item.effective_price).toLocaleString('en-ZA')}</span>
         </div>
 
         {/* Quantity */}
@@ -51,7 +60,7 @@ export function CartConfirmSheet({ item, selectedVariant, onClose, onAddToCart }
 
         <button onClick={handleAdd} disabled={loading}
                 className="w-full bg-[#FF2D55] text-white font-extrabold text-xs tracking-[1.5px] py-3 rounded-md disabled:opacity-50">
-          {loading ? 'Adding…' : `ADD TO CART — R${((selectedVariant.price_override ?? 0) * qty).toLocaleString('en-ZA')}`}
+          {loading ? 'Adding…' : `ADD TO CART — R${((selectedVariant.price_override ?? item.effective_price) * qty).toLocaleString('en-ZA')}`}
         </button>
       </div>
     </div>
