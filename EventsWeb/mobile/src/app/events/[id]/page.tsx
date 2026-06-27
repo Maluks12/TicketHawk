@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { api, type Event } from '@/lib/api';
+import { api, type Event, toggleFollow, getFollowStatus } from '@/lib/api';
+import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 
 function fmtPrice(p: number) {
@@ -78,10 +79,13 @@ export default function EventDetailPage() {
   const { id: eventId } = useParams<{ id: string }>();
   const { colors, isDark } = useAppTheme();
 
-  const [event,    setEvent]   = useState<Event | null>(null);
-  const [loading,  setLoading] = useState(true);
-  const [imgErr,   setImgErr]  = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const { user } = useAuthStore();
+  const [event,         setEvent]        = useState<Event | null>(null);
+  const [loading,       setLoading]      = useState(true);
+  const [imgErr,        setImgErr]       = useState(false);
+  const [expanded,      setExpanded]     = useState(false);
+  const [isFollowing,   setIsFollowing]  = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
 
   useEffect(() => {
     if (!eventId) return;
@@ -91,6 +95,44 @@ export default function EventDetailPage() {
       .finally(() => setLoading(false));
     api.post(`/v1/events/${eventId}/view`).catch(() => {});
   }, [eventId]);
+
+  // ── Fetch follow status on mount ────────────────────────────────────────
+  useEffect(() => {
+    if (!eventId || !user) return;
+    let cancelled = false;
+    getFollowStatus(eventId)
+      .then((res) => { if (!cancelled) setIsFollowing(res.following); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [eventId, user?.id]);
+
+  // ── Toggle follow (optimistic) ──────────────────────────────────────────
+  const handleFollow = useCallback(async () => {
+    if (!user) { router.push('/auth/login'); return; }
+    if (!eventId || followLoading) return;
+    setIsFollowing((prev) => !prev);
+    setFollowLoading(true);
+    try {
+      const res = await toggleFollow(eventId);
+      setIsFollowing(res.following);
+    } catch {
+      setIsFollowing((prev) => !prev);
+    } finally {
+      setFollowLoading(false);
+    }
+  }, [user, eventId, followLoading, router]);
+
+  // ── Share (Web Share API with clipboard fallback) ───────────────────────
+  const handleShare = useCallback(async () => {
+    if (!event) return;
+    const url  = window.location.href;
+    const text = `Check out ${event.title} at ${event.venue_name ?? ''}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: event.title, text, url }); } catch {}
+    } else {
+      try { await navigator.clipboard.writeText(url); alert('Link copied!'); } catch {}
+    }
+  }, [event]);
 
   /* Design tokens */
   const bg      = isDark ? '#0a0a0a' : '#f4f4f7';
@@ -468,6 +510,27 @@ export default function EventDetailPage() {
                 ? <button disabled className="sold-out-btn">Sold Out</button>
                 : <button className="get-tickets-btn" onClick={handleGetTickets}>Get Tickets</button>
               }
+              <div className="ed-action-row">
+                <button
+                  className="btn-action"
+                  onClick={handleFollow}
+                  disabled={followLoading}
+                  style={isFollowing
+                    ? { color: '#b57bee', borderColor: '#b57bee', background: 'rgba(181,123,238,0.1)' }
+                    : { color: colors.text, borderColor: border }}
+                >
+                  <span>{isFollowing ? '💜' : '🤍'}</span>
+                  <span>{followLoading ? '...' : isFollowing ? 'FOLLOWING' : 'FOLLOW'}</span>
+                </button>
+                <button
+                  className="btn-action"
+                  onClick={handleShare}
+                  style={{ color: colors.text, borderColor: border }}
+                >
+                  <span>↑</span>
+                  <span>SHARE</span>
+                </button>
+              </div>
             </div>
 
             {/* Payment methods */}
@@ -526,6 +589,23 @@ export default function EventDetailPage() {
           <p style={{ margin: 0, fontSize: 10, color: colors.subText, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600 }}>From</p>
           <p style={{ margin: 0, fontSize: 19, fontWeight: 800, color: colors.text, letterSpacing: -0.5 }}>{fmtPrice(event.price)}</p>
         </div>
+        <button
+          className="btn-action"
+          onClick={handleFollow}
+          disabled={followLoading}
+          style={isFollowing
+            ? { color: '#b57bee', borderColor: '#b57bee', background: 'rgba(181,123,238,0.1)', borderRadius: 10, padding: '10px 14px' }
+            : { color: colors.text, borderColor: border, borderRadius: 10, padding: '10px 14px' }}
+        >
+          <span>{isFollowing ? '💜' : '🤍'}</span>
+        </button>
+        <button
+          className="btn-action"
+          onClick={handleShare}
+          style={{ color: colors.text, borderColor: border, borderRadius: 10, padding: '10px 14px' }}
+        >
+          <span>↑</span>
+        </button>
         {isSoldOut
           ? <button disabled className="sold-out-btn" style={{ flex: 1 }}>Sold Out</button>
           : <button className="get-tickets-btn" style={{ flex: 1 }} onClick={handleGetTickets}>Get Tickets</button>

@@ -1,15 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import type { MerchandiseItem, CartItem } from '@/lib/api';
-
-interface Variant { id: string; size?: string; color?: string; stock_quantity: number; price: number; }
+import type { MerchandiseItem, MerchandiseVariant } from '@/lib/api';
 
 interface CartConfirmSheetProps {
   item: MerchandiseItem | null;
-  selectedVariant: Variant | null;
+  selectedVariant: MerchandiseVariant | null;
   onClose: () => void;
-  onAddToCart: (variant: Variant, quantity: number) => Promise<void>;
+  onAddToCart: (variant: MerchandiseVariant, quantity: number) => Promise<void>;
 }
 
 export function CartConfirmSheet({ item, selectedVariant, onClose, onAddToCart }: CartConfirmSheetProps) {
@@ -36,9 +34,8 @@ export function CartConfirmSheet({ item, selectedVariant, onClose, onAddToCart }
 
         {/* Variant info */}
         <div className="flex gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
-          {selectedVariant.size  && <span>Size: {selectedVariant.size}</span>}
-          {selectedVariant.color && <span>Color: {selectedVariant.color}</span>}
-          <span className="ml-auto">R{selectedVariant.price.toLocaleString('en-ZA')}</span>
+          {selectedVariant.attributes && <span>{selectedVariant.attributes}</span>}
+          <span className="ml-auto">R{(selectedVariant.price_override ?? 0).toLocaleString('en-ZA')}</span>
         </div>
 
         {/* Quantity */}
@@ -54,7 +51,7 @@ export function CartConfirmSheet({ item, selectedVariant, onClose, onAddToCart }
 
         <button onClick={handleAdd} disabled={loading}
                 className="w-full bg-[#FF2D55] text-white font-extrabold text-xs tracking-[1.5px] py-3 rounded-md disabled:opacity-50">
-          {loading ? 'Adding…' : `ADD TO CART — R${(selectedVariant.price * qty).toLocaleString('en-ZA')}`}
+          {loading ? 'Adding…' : `ADD TO CART — R${((selectedVariant.price_override ?? 0) * qty).toLocaleString('en-ZA')}`}
         </button>
       </div>
     </div>

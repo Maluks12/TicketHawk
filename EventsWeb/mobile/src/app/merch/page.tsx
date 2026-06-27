@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import { ShoppingCart, X, ChevronRight, ChevronLeft } from 'lucide-react';
 import {
   getDropsFeed, addMerchToCart, getCachedSessionId,
-  type MerchandiseItem,
+  type MerchandiseItem, type MerchandiseVariant,
 } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import { CollectionModal } from '@/components/collectionModal';
+import { CartConfirmSheet } from '@/components/cartConfirmSheet';
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 const PALETTE: Record<string, { bg: string; text: string }> = {
@@ -273,6 +274,7 @@ function DetailDrawer({ item, onClose }: { item: MerchandiseItem; onClose: () =>
   const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
+  const [showCartConfirm, setShowCartConfirm] = useState(false);
   const [imgIdx, setImgIdx] = useState(0);
   const imgDragStart = useCallback((x: number) => { (window as any).__imgDragX = x; }, []);
   const imgDragEnd = useCallback((x: number) => {
@@ -305,19 +307,24 @@ function DetailDrawer({ item, onClose }: { item: MerchandiseItem; onClose: () =>
   const hasVariants = variants.length > 0;
   const buyDisabled = isLive && hasVariants && !selectedVariant;
 
-  const handleBuy = async () => {
+  const handleBuy = () => {
     if (!user) { router.push('/auth/login'); return; }
+    setShowCartConfirm(true);
+  };
+
+  const handleConfirmAddToCart = async (variant: MerchandiseVariant, qty: number) => {
     setAdding(true);
     try {
       const sid = await getCachedSessionId();
       await addMerchToCart({
         item_type: 'merchandise',
         event_id: item.event_id,
-        merchandise_variant_id: selectedVariant?.id,
-        quantity: 1,
+        merchandise_variant_id: variant.id,
+        quantity: qty,
         fulfillment_method: 'pickup',
       }, sid);
       setAdded(true);
+      setShowCartConfirm(false);
       setTimeout(() => { setAdded(false); onClose(); router.push('/cart'); }, 900);
     } catch { setAdding(false); }
   };
@@ -495,6 +502,14 @@ function DetailDrawer({ item, onClose }: { item: MerchandiseItem; onClose: () =>
           </button>
         </div>
       </div>
+    {showCartConfirm && (
+      <CartConfirmSheet
+        item={item}
+        selectedVariant={selectedVariant}
+        onClose={() => setShowCartConfirm(false)}
+        onAddToCart={handleConfirmAddToCart}
+      />
+    )}
     </div>
   );
 }
