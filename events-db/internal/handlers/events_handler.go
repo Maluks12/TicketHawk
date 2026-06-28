@@ -35,20 +35,21 @@ func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 			return
 		}
 
-		if ec != nil {
-			ec.BustOnPublish(c.Request.Context())
-		}
-
-		event, err := repository.CreateEvent(pool, &dto, userID.(string))
+		// Admin-created events go live immediately and are exempt from the
+		// listing fee, so they appear on the home feed like any normal event.
+		event, err := repository.CreateEvent(pool, &dto, userID.(string), models.EventPublished, true)
 		if err != nil {
 			utils.InternalError(c, err, "failed to create event")
 			return
 		}
 
+		if ec != nil {
+			ec.BustOnPublish(c.Request.Context())
+		}
+
 		c.JSON(http.StatusCreated, gin.H{
-			"message": "Event created as draft",
+			"message": "Event created and published to the home page",
 			"event":   event,
-			"note":    "Publish the event to make it visible to attendees",
 		})
 	}
 }
@@ -784,7 +785,7 @@ func OrgCreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			return
 		}
  
-		event, err := repository.CreateEvent(pool, &dto, userID.(string))
+		event, err := repository.CreateEvent(pool, &dto, userID.(string), models.EventDraft, false)
 		if err != nil {
 			utils.InternalError(c, err, "failed to create event")
 			return

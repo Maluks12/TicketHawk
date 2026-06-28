@@ -255,18 +255,33 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
 ));
 
 // ─── PERF: React.memo — section rows skip re-render unless section data changes
+// Removes entries with a duplicate `id`, keeping first occurrence and order.
+// React keys must be unique within a list; backend feeds can occasionally repeat
+// an event (organic + sponsored copy of the same id), which would otherwise warn.
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const it of items) {
+    if (!seen.has(it.id)) { seen.add(it.id); out.push(it); }
+  }
+  return out;
+}
+
 const SectionRow = memo(({
   section, isTop10 = false, marginTop = false, onEventPress, onViewAll, colors,
 }: {
   section: HomeSection; isTop10?: boolean; marginTop?: boolean;
   onEventPress: (event: Event) => void; onViewAll: (sectionId: string, title: string, events: Event[]) => void; colors: any;
 }) => {
-  const [events,      setEvents]      = useState<Event[]>(section.events ?? []);
+  // Guard against a section arriving with the same event id twice (e.g. an event
+  // present organically AND woven in as its sponsored card). React requires keys
+  // to be unique within a list, so de-dupe before rendering.
+  const [events,      setEvents]      = useState<Event[]>(dedupeById(section.events ?? []));
   const [nextCursor,  setNextCursor]  = useState<string>(section.next_cursor ?? '');
   const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
-    setEvents(section.events ?? []);
+    setEvents(dedupeById(section.events ?? []));
     setNextCursor(section.next_cursor ?? '');
   }, [section]);
 

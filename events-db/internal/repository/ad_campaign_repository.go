@@ -422,8 +422,30 @@ func InjectPreFetched(organic []models.Event, sponsored []SponsoredEvent, maxAds
 		return organic
 	}
 
-	adPositions := make([]int, 0, maxAds)
-	for i := 0; i < maxAds; i++ {
+	// Only the first maxAds cards are actually woven in.
+	if len(sponsored) > maxAds {
+		sponsored = sponsored[:maxAds]
+	}
+
+	// Drop any organic copy of an event we're about to inject as a sponsored
+	// card. Without this the same event id can appear twice in one section —
+	// once organically and once as its sponsored card — which renders fine
+	// server-side but trips React's "two children with the same key" guard on
+	// the client.
+	adIDs := make(map[string]bool, len(sponsored))
+	for _, s := range sponsored {
+		adIDs[s.ID] = true
+	}
+	filtered := make([]models.Event, 0, len(organic))
+	for _, e := range organic {
+		if !adIDs[e.ID] {
+			filtered = append(filtered, e)
+		}
+	}
+	organic = filtered
+
+	adPositions := make([]int, 0, len(sponsored))
+	for i := 0; i < len(sponsored); i++ {
 		adPositions = append(adPositions, 2+i*4)
 	}
 
@@ -441,7 +463,11 @@ func InjectPreFetched(organic []models.Event, sponsored []SponsoredEvent, maxAds
 			result = append(result, organic[orgIdx])
 			orgIdx++
 		} else {
-			break
+			// Organic exhausted before every ad position was reached (short
+			// section, or dedup removed organic items) — append the remaining
+			// sponsored cards so a promoted/sponsored event is never dropped.
+			result = append(result, sponsored[sponIdx].Event)
+			sponIdx++
 		}
 	}
 	return result
@@ -459,30 +485,14 @@ func InjectSponsored(pool *pgxpool.Pool, organic []models.Event, userID *string,
 		return organic
 	}
 
-	adPositions := make([]int, 0, maxAds)
-	for i := 0; i < maxAds; i++ {
-		adPositions = append(adPositions, 2+i*4)
+	// Reuse the shared weaving logic so the organic/sponsored de-duplication
+	// (and the duplicate-key fix) lives in exactly one place.
+	result := InjectPreFetched(organic, sponsored, maxAds)
+
+	shown := sponsored
+	if len(shown) > maxAds {
+		shown = shown[:maxAds]
 	}
-
-	result := make([]models.Event, 0, len(organic)+len(sponsored))
-	orgIdx, sponIdx, posIdx := 0, 0, 0
-
-	for orgIdx < len(organic) || sponIdx < len(sponsored) {
-		if sponIdx < len(sponsored) &&
-			posIdx < len(adPositions) &&
-			len(result) == adPositions[posIdx] {
-			result = append(result, sponsored[sponIdx].Event)
-			sponIdx++
-			posIdx++
-		} else if orgIdx < len(organic) {
-			result = append(result, organic[orgIdx])
-			orgIdx++
-		} else {
-			break
-		}
-	}
-
-	shown := sponsored[:sponIdx]
 	go RecordImpressions(pool, shown)
 	return result
 }
