@@ -51,6 +51,7 @@ interface EventDetail {
   terms_and_conditions: string | null;
   organizer_id: string | null;
   created_at: string;
+  admin_promoted?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -152,6 +153,21 @@ export default function ApprovalsPage() {
       setSelectedId(next?.id ?? null);
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to approve event';
+      toast(msg, 'error');
+    } finally { setSubmitting(false); }
+  }
+
+  // Approve + place on the home page as a free (admin-granted) sponsored card.
+  async function approveAndPromote(id: string) {
+    setSubmitting(true);
+    try {
+      await api.put(`/admin/events/${id}/promote`);
+      toast('Event published and added to the home page!', 'success');
+      const next = queue.find(e => e.id !== id);
+      await loadQueue();
+      setSelectedId(next?.id ?? null);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to add event to the home page';
       toast(msg, 'error');
     } finally { setSubmitting(false); }
   }
@@ -400,6 +416,15 @@ export default function ApprovalsPage() {
                   disabled={submitting}
                   style={{ borderColor: '#fa3e3e', color: '#fa3e3e', fontWeight: 600 }}
                 >✕ Deny</button>
+                <button
+                  className="btn"
+                  onClick={() => approveAndPromote(detail.id)}
+                  disabled={submitting}
+                  title="Approve and feature this event on the home page as a sponsored card — no ad spend required."
+                  style={{ background: '#1877f2', borderColor: '#1877f2', color: '#fff', fontWeight: 600 }}
+                >
+                  {submitting ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Processing…</> : '★ Approve & Add to Home'}
+                </button>
                 <button
                   className="btn"
                   onClick={() => approve(detail.id)}

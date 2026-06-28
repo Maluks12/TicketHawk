@@ -100,10 +100,70 @@ func AdminRejectEventHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
+// AdminPromoteEventHandler places an event on the home feed as a free, admin-
+// granted sponsored card. If the event is still pending review (or a draft), it
+// is approved/published in the same action — so an admin can approve-and-promote
+// a non-advertised event in one click. Busts the feed cache so it appears now.
+//
+//	PUT /admin/events/:id/promote
+func AdminPromoteEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventID := c.Param("id")
+
+		if err := repository.AdminPromoteEvent(pool, eventID); err != nil {
+			if err == repository.ErrEventNotPublishable {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": "Event not found, or it is cancelled/completed and cannot be promoted",
+				})
+				return
+			}
+			utils.InternalError(c, err, "failed to promote event")
+			return
+		}
+
+		if ec != nil {
+			ec.BustOnPublish(context.Background())
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "Event published and added to the home page",
+			"event_id": eventID,
+		})
+	}
+}
+
+// AdminUnpromoteEventHandler removes an event's admin promotion. The event stays
+// published; it just no longer appears organically on the home feed (for a free
+// event with no listing fee paid).
+//
+//	PUT /admin/events/:id/unpromote
+func AdminUnpromoteEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventID := c.Param("id")
+
+		if err := repository.AdminUnpromoteEvent(pool, eventID); err != nil {
+			if err == repository.ErrEventNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to unpromote event")
+			return
+		}
+
+		if ec != nil {
+			ec.BustOnPublish(context.Background())
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "Event removed from the home page",
+			"event_id": eventID,
+		})
+	}
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Admin: Merch Approval
 // ════════════════════════════════════════════════════════════════════════════
-
 // AdminGetPendingMerchHandler returns all merch items awaiting admin review.
 //
 //	GET /admin/merch/pending

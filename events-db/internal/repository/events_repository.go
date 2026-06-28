@@ -39,12 +39,24 @@ type OrganizerEventSummary struct {
 // CreateEvent inserts a new event in draft status and returns the created row.
 // The slug is generated client-side from the title and a pre-generated UUID so
 // it can be included in the single INSERT — no second round-trip needed.
-func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID string) (*models.Event, error) {
+// CreateEvent inserts a new event. Organisers create drafts (status =
+// EventDraft, listingFeePaid = false) that go through review; admins create
+// events that are published immediately and exempt from the listing fee
+// (status = EventPublished, listingFeePaid = true) so they appear on the home
+// feed straight away.
+func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID string, status models.EventStatus, listingFeePaid bool) (*models.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	id := uuid.New().String()
 	slug := utils.GenerateSlug(dto.Title, id)
+
+	// Stamp published_at when the event is going live on creation (admin path).
+	var publishedAt *time.Time
+	if status == models.EventPublished {
+		now := time.Now()
+		publishedAt = &now
+	}
 
 	query := `
         INSERT INTO events (
@@ -55,9 +67,9 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             category_id, price, currency, max_capacity, allow_waitlist,
             max_tickets_per_user, venue_type,
             refund_policy, terms_and_conditions, tags, performers, teams,
-            organizer_id, status
+            organizer_id, status, listing_fee_paid, published_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
         RETURNING id, slug, title, description, cover_image_url, start_time, end_time,
                   price, currency, max_capacity, tickets_sold, status, organizer_id, created_at, updated_at
     `
@@ -71,7 +83,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		dto.CategoryID, dto.Price, dto.Currency, dto.MaxCapacity, dto.AllowWaitlist,
 		dto.MaxTicketsPerUser, dto.VenueType,
 		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags, dto.Performers, dto.Teams,
-		organizerID, models.EventDraft,
+		organizerID, status, listingFeePaid, publishedAt,
 	).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
 		&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
@@ -153,6 +165,64 @@ func AdminApproveEvent(pool *pgxpool.Pool, eventID string) error {
 	return nil
 }
 
+// AdminPromoteEvent places an event on the home feed organically (as a normal
+// event card in the regular rows — NOT a sponsored card). The admin_promoted
+// flag makes the event clear the home-feed eligibility gate even when it is a
+// free event with no listing fee paid. If the event is still a draft / pending
+// review / rejected, it is also published in the same statement so an admin can
+// approve-and-promote in one click. Cancelled/completed events cannot be promoted.
+func AdminPromoteEvent(pool *pgxpool.Pool, eventID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE events
+		SET    admin_promoted    = TRUE,
+		       admin_promoted_at = NOW(),
+		       status = CASE
+		                  WHEN status IN ('draft','pending_review','rejected')
+		                  THEN 'published'::event_status
+		                  ELSE status
+		                END,
+		       published_at = CASE
+		                  WHEN status IN ('draft','pending_review','rejected')
+		                  THEN COALESCE(published_at, CURRENT_TIMESTAMP)
+		                  ELSE published_at
+		                END,
+		       rejection_reason = NULL,
+		       updated_at = NOW()
+		WHERE  id = $1
+		  AND  status NOT IN ('cancelled','completed')
+	`, eventID)
+	if err != nil {
+		return fmt.Errorf("AdminPromoteEvent: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrEventNotPublishable
+	}
+	return nil
+}
+
+// AdminUnpromoteEvent removes an event's admin promotion. It only clears the
+// home-feed promotion flag and does not change the event's published status.
+func AdminUnpromoteEvent(pool *pgxpool.Pool, eventID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd, err := pool.Exec(ctx, `
+		UPDATE events
+		SET    admin_promoted = FALSE, admin_promoted_at = NULL, updated_at = NOW()
+		WHERE  id = $1
+	`, eventID)
+	if err != nil {
+		return fmt.Errorf("AdminUnpromoteEvent: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrEventNotFound
+	}
+	return nil
+}
+
 // AdminRejectEvent rejects a pending_review event with a reason.
 // The organiser can revise and resubmit (calls PublishEvent again).
 func AdminRejectEvent(pool *pgxpool.Pool, eventID string, reason string) error {
@@ -181,7 +251,8 @@ func AdminGetPendingEvents(pool *pgxpool.Pool) ([]models.Event, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT e.id, e.slug, e.title, e.description, e.status,
 		       e.start_time, e.end_time, e.price, e.currency,
-		       e.venue_name, e.city, e.organizer_id, e.created_at
+		       e.venue_name, e.city, e.organizer_id, e.created_at,
+		       e.admin_promoted
 		FROM events e
 		WHERE e.status = $1
 		ORDER BY e.created_at ASC
@@ -198,6 +269,7 @@ func AdminGetPendingEvents(pool *pgxpool.Pool) ([]models.Event, error) {
 			&ev.ID, &ev.Slug, &ev.Title, &ev.Description, &ev.Status,
 			&ev.StartTime, &ev.EndTime, &ev.Price, &ev.Currency,
 			&ev.VenueName, &ev.City, &ev.OrganizerID, &ev.CreatedAt,
+			&ev.AdminPromoted,
 		); err != nil {
 			return nil, fmt.Errorf("AdminGetPendingEvents scan: %w", err)
 		}
@@ -1226,14 +1298,14 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
 	args := []interface{}{models.EventPublished, category_id}
 	where := `
 		WHERE e.status = $1
-		AND category_id = $2
+		AND e.category_id = $2
 	`
 
 	if cursor != nil {
 		where += `
 			AND (
-				start_time < $3
-				or (start_time = $3 AND id < $4)
+				e.start_time < $3
+				or (e.start_time = $3 AND e.id < $4)
 			)
 		`
 		args = append(args, cursor.StartTime, cursor.ID)
@@ -1252,7 +1324,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
         FROM events e
 		JOIN categories c ON e.category_id = c.id
 	` + where + `
-		ORDER BY start_time DESC, id DESC
+		ORDER BY e.start_time DESC, e.id DESC
 		LIMIT $` + strconv.Itoa(limitPlaceholder)
 
 	rows, err := pool.Query(ctx, query, args...)

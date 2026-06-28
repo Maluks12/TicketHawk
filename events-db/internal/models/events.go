@@ -54,6 +54,10 @@ type Event struct {
 	VenueType           *string     `json:"venue_type,omitempty" db:"venue_type"`
 	IsFeatured     bool        `json:"is_featured" db:"is_featured"`
 	FeaturedUntil  *time.Time  `json:"featured_until,omitempty" db:"featured_until"`
+	// AdminPromoted is set by an admin to place the event on the home feed as a
+	// zero-cost sponsored card, without the organiser running a paid campaign.
+	AdminPromoted   bool       `json:"admin_promoted" db:"admin_promoted"`
+	AdminPromotedAt *time.Time `json:"admin_promoted_at,omitempty" db:"admin_promoted_at"`
 	Status         EventStatus `json:"status" db:"status"`
 	PublishedAt      *time.Time  `json:"published_at,omitempty" db:"published_at"`
 	RejectionReason  *string     `json:"rejection_reason,omitempty" db:"rejection_reason"`

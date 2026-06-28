@@ -557,6 +557,8 @@ func main() {
 		admin.GET("/events/pending",     handlers.AdminGetPendingEventsHandler(pool))
 		admin.PUT("/events/:id/approve", handlers.AdminApproveEventHandler(pool, eventCache))
 		admin.PUT("/events/:id/reject",  handlers.AdminRejectEventHandler(pool))
+		admin.PUT("/events/:id/promote",   handlers.AdminPromoteEventHandler(pool, eventCache))
+		admin.PUT("/events/:id/unpromote", handlers.AdminUnpromoteEventHandler(pool, eventCache))
 
 		// Merch approval queue
 		admin.GET("/merch/pending",    handlers.AdminGetPendingMerchHandler(pool))
