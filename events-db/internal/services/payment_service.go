@@ -115,7 +115,7 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 	}
 
 	if err := s.createPaymentRecord(ctx, booking, gw.Name(), res.Reference, &res.RedirectURL, method, nil); err != nil {
-		log.Warn().Err(err).Str("booking_id", booking.ID).Msg("payment: failed to persist payment record")
+		return "", "", fmt.Errorf("persisting payment record for booking %s: %w", booking.ID, err)
 	}
 	return res.RedirectURL, res.Reference, nil
 }
@@ -146,7 +146,7 @@ func (s *PaymentService) CreateCartPaymentIntentWithMethod(primaryBooking *model
 	}
 
 	if err := s.createPaymentRecord(ctx, primaryBooking, gw.Name(), res.Reference, &res.RedirectURL, method, &cartID); err != nil {
-		log.Warn().Err(err).Str("cart_id", cartID).Msg("payment: failed to persist cart payment record")
+		return "", "", fmt.Errorf("persisting payment record for cart %s: %w", cartID, err)
 	}
 	return res.RedirectURL, res.Reference, nil
 }
