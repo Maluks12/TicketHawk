@@ -551,6 +551,9 @@ export default function Index() {
   const authReady = useAuthStore((state) => state.authReady);
   const didInitialFetch = useRef(false);
   const prevAuthUserId = useRef<string | null>(null);
+  // Monotonic token: only the most recent filter apply is allowed to write to
+  // `sections`, so a slow earlier request can never clobber a newer one.
+  const filterReqId = useRef(0);
 
   useEffect(() => {
     if (!authReady || didInitialFetch.current) return;
@@ -592,15 +595,20 @@ export default function Index() {
     const hasLocation = !!(params.city || params.province || params.lat);
     const hasDate     = !!(params.date && params.date !== 'any');
 
-    // Re-fetch home sections with the chosen city so near_you updates dynamically
-    if (params.city) fetchSections(params.city);
-    else if (!params.city && !params.province && !params.lat) fetchSections();
-
+    // No filter at all → restore the baseline (Anywhere / Any date) home feed.
     if (!hasLocation && !hasDate) {
+      filterReqId.current += 1;        // invalidate any in-flight filter request
+      setError(null);
       setSections(homeSections);
       return;
     }
 
+    // Active filter → /v1/events/filter is the SINGLE source of truth for what's
+    // shown. We deliberately do NOT also call fetchSections() here: it writes to
+    // the same `sections` state, and whichever request happened to resolve last
+    // would win — so the unfiltered home feed could overwrite the filtered list,
+    // making the location/date filter look like it did nothing.
+    const reqId = ++filterReqId.current;
     try {
       setLoading(true);
       setError(null);
@@ -609,16 +617,24 @@ export default function Index() {
       if (!res.ok) throw new Error(`Filter failed: ${res.status}`);
       const data = await res.json();
 
+      // A newer apply started while we were awaiting — discard this stale result.
+      if (reqId !== filterReqId.current) return;
+
       if (Array.isArray(data.sections) && data.sections.length > 0) {
         setSections(data.sections);
       } else {
-          setSections([]);
-          setError('No events found for that filter.');
+        setSections([]);
+        setError('No events found for that filter.');
       }
     } catch {
-      setSections(homeSections);
+      if (reqId !== filterReqId.current) return;
+      // Surface the failure instead of silently falling back to the unfiltered
+      // feed, which previously made a failed filter look like a working-but-
+      // ignored one.
+      setSections([]);
+      setError('Could not load filtered events. Pull down to refresh and try again.');
     } finally {
-      setLoading(false);
+      if (reqId === filterReqId.current) setLoading(false);
     }
   }, [homeSections, headerAnim]);
 

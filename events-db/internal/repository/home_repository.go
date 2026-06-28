@@ -557,7 +557,7 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	now := time.Now()
+	now := saNow()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	var weekendStart, weekendEnd time.Time
