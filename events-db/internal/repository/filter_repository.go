@@ -7,10 +7,39 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ── South African time zone ───────────────────────────────────────────────────
+//
+// All date-window math — "today", "tomorrow", "this weekend", custom ranges —
+// MUST be computed in SA local time (SAST, UTC+2, no DST), never the server's
+// zone. In Docker the API process runs in UTC, so building day boundaries from
+// time.Now().Location() shifts every window by two hours and can roll the
+// weekend onto the wrong day near midnight. The result is a filter that returns
+// the wrong events, or none at all.
+var (
+	saLocOnce sync.Once
+	saLocVal  *time.Location
+)
+
+func saLocation() *time.Location {
+	saLocOnce.Do(func() {
+		if loc, err := time.LoadLocation("Africa/Johannesburg"); err == nil {
+			saLocVal = loc
+			return
+		}
+		// tzdata unavailable in the image — SAST is a fixed UTC+2 offset, no DST.
+		saLocVal = time.FixedZone("SAST", 2*60*60)
+	})
+	return saLocVal
+}
+
+// saNow returns the current instant expressed in South African local time.
+func saNow() time.Time { return time.Now().In(saLocation()) }
 
 // EventFilter holds all optional filter parameters. Zero-values mean "no filter".
 // DatePreset and DateFrom/DateTo are mutually exclusive — if DatePreset is set,
@@ -79,6 +108,19 @@ func FilterEvents(
 	args := []interface{}{models.EventPublished}
 	clauses := []string{"e.status = $1"}
 
+	// ── Upcoming-only baseline ────────────────────────────────────────────────
+	// Every other feed in the app (home, trending, near-you, weekend) only ever
+	// returns events whose start_time is in the future. The filter previously had
+	// no such baseline, so "Any date" surfaced long-past events and — because the
+	// ordering is start_time ASC — sorted those stale rows to the very top, making
+	// the filter look broken. Constrain to upcoming events to match the rest of
+	// the app and to keep custom ranges from reaching into the past.
+	now := saNow()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	args = append(args, now)
+	clauses = append(clauses, fmt.Sprintf("e.start_time > $%d", len(args)))
+
 	// ── Location filter ───────────────────────────────────────────────────────
 
 	if f.City != "" {
@@ -128,11 +170,19 @@ func FilterEvents(
 	}
 
 	// ── Date filter ───────────────────────────────────────────────────────────
-
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// now/today were computed above (in SAST) for the upcoming-only baseline and
+	// are reused here so every window agrees on what "today" means.
 
 	switch strings.ToLower(f.DatePreset) {
+	case "today":
+		tomorrow := today.AddDate(0, 0, 1)
+		args = append(args, today, tomorrow)
+		fromIdx := len(args) - 1
+		toIdx := len(args)
+		clauses = append(clauses,
+			fmt.Sprintf("e.start_time >= $%d AND e.start_time < $%d", fromIdx, toIdx),
+		)
+
 	case "tomorrow":
 		tomorrow := today.AddDate(0, 0, 1)
 		dayAfter := today.AddDate(0, 0, 2)
@@ -166,11 +216,20 @@ func FilterEvents(
 
 	case "custom":
 		if f.DateFrom != nil && f.DateTo != nil {
+			// The handler parses date_from/date_to as bare YYYY-MM-DD, which Go
+			// reads as UTC midnight. Re-anchor them to SA calendar days so a range
+			// like 1–3 Aug covers those days as a South African user means them,
+			// not shifted two hours by the server's UTC clock.
+			loc := saLocation()
+			dateFromStart := time.Date(
+				f.DateFrom.Year(), f.DateFrom.Month(), f.DateFrom.Day(),
+				0, 0, 0, 0, loc,
+			)
 			dateToEndOfDay := time.Date(
 				f.DateTo.Year(), f.DateTo.Month(), f.DateTo.Day(),
-				23, 59, 59, 0, f.DateTo.Location(),
+				23, 59, 59, 0, loc,
 			)
-			args = append(args, *f.DateFrom, dateToEndOfDay)
+			args = append(args, dateFromStart, dateToEndOfDay)
 			fromIdx := len(args) - 1
 			toIdx := len(args)
 			clauses = append(clauses,
