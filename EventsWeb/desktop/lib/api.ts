@@ -291,8 +291,8 @@ export const getTrendingEvents = (limit = 50) =>
 export const getActiveEvents = (limit = 50) =>
   api.get<{ data: Event[] }>('/v1/events/active', { params: { limit } });
 
-export const getEventsByCategory = (category: string | number, limit = 50) =>
-  api.get<{ data: Event[] }>('/v1/events', { params: { category, limit } });
+export const getEventsByCategory = (categoryId: number, limit = 50) =>
+  api.get<{ data: Event[] }>(`/v1/events/category/${categoryId}`, { params: { limit } });
 
 export async function getEventsByIds(ids: string[]): Promise<Event[]> {
   if (!ids.length) return [];

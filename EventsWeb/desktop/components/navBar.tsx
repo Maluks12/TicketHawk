@@ -136,17 +136,17 @@ export default function NavBar() {
           {/* Filter pill — desktop only */}
           <button
             onClick={() => setFilterOpen(true)}
-            className="hidden md:flex items-center gap-[7px] h-9 px-[14px] rounded-full text-[12px] font-semibold transition-opacity duration-150 hover:opacity-75"
+            className="hidden md:flex items-center gap-2 h-11 px-4 rounded-full text-[13px] font-semibold transition-all duration-150 hover:opacity-80 hover:scale-[1.02]"
             style={{
               backgroundColor: colors.sectionCardBg,
               border: `1px solid ${colors.dividerColor}`,
             }}
           >
-            <MapPin size={13} color={colors.subText} />
+            <MapPin size={18} color="#FF2D55" />
             <span style={{ color: colors.text }}>{locationLabel}</span>
             <span className="opacity-30" style={{ color: colors.text }}>·</span>
             <span style={{ color: colors.subText }}>{dateLabelText}</span>
-            <ChevronDown size={12} color={colors.subText} />
+            <ChevronDown size={15} color={colors.subText} />
           </button>
 
           <CartButton />

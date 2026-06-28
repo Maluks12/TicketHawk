@@ -60,6 +60,167 @@ const EDITORIAL_FILTERS: Record<string, (e: Event) => boolean> = {
   food:         (e) => !!(e.category?.toLowerCase().includes('food')),
 };
 
+function SkeletonCard({ large = false }: { large?: boolean }) {
+  return (
+    <div
+      className="animate-pulse rounded-2xl overflow-hidden"
+      style={{ aspectRatio: large ? '16 / 4' : '16 / 9', backgroundColor: 'rgba(255,255,255,0.05)' }}
+    />
+  );
+}
+
+function HeroCard({ item, onPress, colors, label }: { item: Event; onPress: (e: Event) => void; colors: any; label?: string }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={() => onPress(item)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="relative w-full text-left overflow-hidden rounded-2xl"
+      style={{ aspectRatio: '16 / 4' }}
+    >
+      {item.cover_image_url ? (
+        <img
+          src={item.cover_image_url}
+          alt={item.title}
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700"
+          style={{ transform: hovered ? 'scale(1.04)' : 'scale(1)' }}
+        />
+      ) : (
+        <div className="absolute inset-0 rounded-2xl" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }} />
+      )}
+      <div
+        className="absolute inset-0"
+        style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.04) 0%, rgba(0,0,0,0.18) 45%, rgba(0,0,0,0.88) 100%)' }}
+      />
+      <div
+        className="absolute top-4 right-4 rounded-lg px-3 py-1.5"
+        style={{ backgroundColor: formatPrice(item.price) === 'Free' ? '#22c55e' : '#ff2d55' }}
+      >
+        <span className="text-white text-xs font-black tracking-wide">{formatPrice(item.price)}</span>
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          {label && (
+            <div
+              className="flex items-center gap-1 text-[10px] font-black tracking-[0.12em] uppercase px-2.5 py-1 rounded"
+              style={{ backgroundColor: 'rgba(255,45,85,0.9)', color: '#fff' }}
+            >
+              🔥 {label}
+            </div>
+          )}
+          {item.category && (
+            <div
+              className="text-[10px] font-black tracking-[0.12em] uppercase px-2.5 py-1 rounded"
+              style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', color: 'rgba(255,255,255,0.85)' }}
+            >
+              {item.category}
+            </div>
+          )}
+        </div>
+        <p
+          className="text-white font-black text-lg leading-tight mb-1"
+          style={{ textShadow: '0 2px 16px rgba(0,0,0,0.7)' }}
+        >
+          {item.title}
+        </p>
+        <p className="text-white/70 text-sm font-medium">
+          {formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
+        </p>
+        {item.venue_name && (
+          <p className="text-white/45 text-xs mt-1 truncate">
+            {item.venue_name}{item.city ? `, ${item.city}` : ''}
+          </p>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function GridCard({
+  item, onPress, colors, isDark, rank,
+}: {
+  item: Event; onPress: (e: Event) => void; colors: any; isDark: boolean; rank?: number;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={() => onPress(item)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="text-left w-full relative"
+    >
+      {/* Netflix-style rank number */}
+      {rank !== undefined && (
+        <div
+          className="absolute -left-2 bottom-[calc(100%-68px)] z-10 font-black select-none pointer-events-none leading-none"
+          style={{
+            fontSize: '5.5rem',
+            color: 'transparent',
+            WebkitTextStroke: isDark ? '1.5px rgba(255,255,255,0.13)' : '1.5px rgba(0,0,0,0.1)',
+          }}
+        >
+          {rank}
+        </div>
+      )}
+      <div
+        className="relative w-full aspect-video rounded-xl overflow-hidden mb-2.5"
+        style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}
+      >
+        {item.cover_image_url ? (
+          <img
+            src={item.cover_image_url}
+            alt={item.title}
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-300"
+            style={{ transform: hovered ? 'scale(1.06)' : 'scale(1)' }}
+          />
+        ) : (
+          <div className="absolute inset-0" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }} />
+        )}
+        <div
+          className="absolute inset-0 transition-opacity duration-200"
+          style={{ backgroundColor: 'rgba(0,0,0,0.28)', opacity: hovered ? 1 : 0 }}
+        />
+        <div
+          className="absolute bottom-2 left-2 rounded-md px-2 py-0.5"
+          style={{ backgroundColor: formatPrice(item.price) === 'Free' ? '#22c55e' : 'rgba(0,0,0,0.82)', backdropFilter: 'blur(4px)' }}
+        >
+          <span className="text-white text-[10px] font-black tracking-wide">{formatPrice(item.price)}</span>
+        </div>
+        <div
+          className="absolute inset-0 flex items-center justify-center transition-opacity duration-200"
+          style={{ opacity: hovered ? 1 : 0 }}
+        >
+          <div
+            className="w-11 h-11 rounded-full flex items-center justify-center"
+            style={{ backgroundColor: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="white">
+              <path d="M4 2.5l10 5.5-10 5.5V2.5z" />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div style={{ paddingLeft: rank !== undefined ? '1.25rem' : 0 }}>
+        <p
+          className="font-semibold text-[14px] leading-[20px] line-clamp-2 mb-1 transition-colors duration-150"
+          style={{ color: hovered ? '#ff2d55' : colors.text }}
+        >
+          {item.title}
+        </p>
+        <p className="text-[12px] leading-[18px]" style={{ color: colors.subText }}>
+          {formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
+        </p>
+        {item.venue_name && (
+          <p className="text-[12px] leading-[18px] truncate" style={{ color: colors.subText }}>
+            {item.venue_name}{item.city ? `, ${item.city}` : ''}
+          </p>
+        )}
+      </div>
+    </button>
+  );
+}
+
 export default function SectionPage() {
   const router  = useRouter();
   const { colors, isDark } = useAppTheme();
@@ -67,8 +228,17 @@ export default function SectionPage() {
 
   const [events,  setEvents]  = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scrolled, setScrolled] = useState(false);
 
-  const label = sectionMeta?.title ?? '';
+  const label      = sectionMeta?.title ?? '';
+  const isTrending = sectionMeta?.sectionId === 'trending';
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   useEffect(() => {
     if (!sectionMeta) { setLoading(false); return; }
@@ -82,7 +252,7 @@ export default function SectionPage() {
     }
 
     if (sectionId?.startsWith('cat-')) {
-      const slug = sectionId.replace(/^cat-/, '');
+      const slug  = sectionId.replace(/^cat-/, '');
       const match = dbCategories.find(
         (c) => c.name.toLowerCase().replace(/\s+/g, '-') === slug || c.slug?.toLowerCase() === slug
       );
@@ -109,124 +279,68 @@ export default function SectionPage() {
     setLoading(false);
   }, [sectionMeta, allEvents, dbCategories]);
 
+  const handlePress = (item: Event) => { setSelectedEvent(item); router.push(`/events/${item.id}`); };
+
+  const [hero, ...rest] = events;
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: colors.background }}>
+
       {/* Header */}
-      <div className="sticky top-0 z-10 flex items-center px-4 py-3 border-b"
-           style={{ backgroundColor: colors.background, borderColor: colors.dividerColor }}>
-        <button onClick={() => router.back()} className="w-10 h-10 flex items-center justify-center">
-          <span style={{ color: colors.text }} className="text-3xl leading-none font-light">‹</span>
+      <div
+        className="sticky top-0 z-20 flex items-center px-6 py-3 transition-all duration-200"
+        style={{
+          backgroundColor: scrolled
+            ? (isDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)')
+            : colors.background,
+          backdropFilter: scrolled ? 'blur(16px)' : 'none',
+          borderBottom: `1px solid ${scrolled ? colors.dividerColor : 'transparent'}`,
+        }}
+      >
+        <button onClick={() => router.back()} className="flex items-center gap-1.5" style={{ color: colors.text }}>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          <span className="text-sm font-medium" style={{ color: colors.subText }}>Back</span>
         </button>
-        <div className="flex-1 text-center md:text-left md:ml-2">
-          <p className="font-bold text-base" style={{ color: colors.text }}>{label}</p>
-          <p className="text-xs" style={{ color: colors.subText }}>
-            {loading ? 'Loading…' : `${events.length} event${events.length !== 1 ? 's' : ''}`}
-          </p>
+        <div className="flex-1 text-center">
+          <p className="font-black text-base tracking-tight" style={{ color: colors.text }}>{label}</p>
         </div>
-        <div className="w-10" />
+        <span className="text-xs font-semibold w-16 text-right" style={{ color: colors.subText }}>
+          {!loading && `${events.length} events`}
+        </span>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-32">
-          <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-               style={{ borderColor: colors.text }} />
+        <div className="px-6 pt-6 pb-12">
+          <div className="mb-6"><SkeletonCard large /></div>
+          <div className="grid grid-cols-4 gap-x-5 gap-y-8">
+            {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
         </div>
+
       ) : events.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-32 px-8 text-center gap-3">
-          <span className="text-4xl">🎟</span>
-          <p className="font-bold text-lg" style={{ color: colors.text }}>No events found</p>
+        <div className="flex flex-col items-center justify-center py-40 px-8 text-center gap-3">
+          <span className="text-5xl">🎟</span>
+          <p className="font-bold text-xl" style={{ color: colors.text }}>No events found</p>
           <p className="text-sm" style={{ color: colors.subText }}>There are no events in this section right now.</p>
         </div>
+
       ) : (
-        <div className="px-4 md:px-8 py-4">
-
-          {/* ── MOBILE: single-column stacked cards with image overlay ── */}
-          <div className="flex flex-col gap-4 max-w-2xl mx-auto md:hidden">
-            {events.map((item) => (
-              <button
+        <div className="px-6 pt-6 pb-16">
+          {hero && <div className="mb-8"><HeroCard item={hero} onPress={handlePress} colors={colors} label={label} /></div>}
+          <div className="grid grid-cols-4 gap-x-5 gap-y-8">
+            {rest.map((item, i) => (
+              <GridCard
                 key={item.id}
-                onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
-                className="relative rounded-xl overflow-hidden w-full text-left shadow-lg"
-                style={{ aspectRatio: '1.92' }}
-              >
-                {item.cover_image_url ? (
-                  <img src={item.cover_image_url} alt={item.title}
-                       className="absolute inset-0 w-full h-full object-cover" />
-                ) : (
-                  <div className="absolute inset-0 bg-neutral-800" />
-                )}
-                <div
-                  className="absolute inset-0"
-                  style={{ background: 'linear-gradient(to bottom, transparent 30%, rgba(0,0,0,0.35) 62%, rgba(0,0,0,0.86))' }}
-                />
-                <div className="absolute top-3 right-3 bg-black/60 rounded px-2.5 py-1">
-                  <span className="text-white text-xs font-bold">{formatPrice(item.price)}</span>
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 p-3.5">
-                  <p className="text-white font-extrabold text-base leading-snug mb-1 line-clamp-2">{item.title}</p>
-                  <p className="text-white/80 text-xs font-medium mb-0.5">
-                    {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
-                  </p>
-                  {item.venue_name && (
-                    <p className="text-white/65 text-xs truncate">
-                      {item.venue_name}{item.city ? `, ${item.city}` : ''}
-                    </p>
-                  )}
-                </div>
-              </button>
+                item={item}
+                rank={isTrending ? i + 2 : undefined}
+                onPress={handlePress}
+                colors={colors}
+                isDark={isDark}
+              />
             ))}
           </div>
-
-          {/* ── DESKTOP: YouTube Explore-style grid ── */}
-          <div className="hidden md:grid grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-10">
-            {events.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
-                className="text-left w-full group"
-              >
-                {/* Thumbnail */}
-                <div
-                  className="relative w-full aspect-video rounded-xl overflow-hidden mb-3"
-                  style={{ backgroundColor: colors.sectionCardBg }}
-                >
-                  {item.cover_image_url ? (
-                    <img
-                      src={item.cover_image_url}
-                      alt={item.title}
-                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 bg-neutral-800" />
-                  )}
-                  {/* Price badge */}
-                  <div className="absolute bottom-2 right-2 bg-black/80 rounded px-2 py-0.5">
-                    <span className="text-white text-[11px] font-bold">{formatPrice(item.price)}</span>
-                  </div>
-                </div>
-
-                {/* Text below thumbnail — YouTube style */}
-                <div className="px-0.5">
-                  <p
-                    className="font-semibold text-[15px] leading-[21px] line-clamp-2 mb-1"
-                    style={{ color: colors.text }}
-                  >
-                    {item.title}
-                  </p>
-                  <p className="text-[13px] leading-[19px]" style={{ color: colors.subText }}>
-                    {formatCardDate(item.start_time)}
-                    {item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
-                  </p>
-                  {item.venue_name && (
-                    <p className="text-[13px] leading-[19px] truncate" style={{ color: colors.subText }}>
-                      {item.venue_name}{item.city ? `, ${item.city}` : ''}
-                    </p>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-
         </div>
       )}
     </div>
