@@ -7,6 +7,7 @@ import {
   getCart, checkoutBegin, checkoutConfirm, checkoutHeartbeat, checkoutAbandon,
   cartItemLabel, cartItemSubtitle, fmtZAR, getCachedSessionId,
 } from '@/lib/api';
+import { startBookingPayment, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 
@@ -31,7 +32,7 @@ export default function CartCheckoutPage() {
   const [phase, setPhase] = useState<Phase>('review');
   const [reservations, setReservations] = useState<any[]>([]);
   const [initialSecs, setInitialSecs] = useState(600);
-  const [payMethod, setPayMethod] = useState<'card' | 'eft'>('card');
+  const [payMethod, setPayMethod] = useState<'card' | 'paypal' | 'instant_eft'>('card');
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
 
@@ -102,7 +103,37 @@ export default function CartCheckoutPage() {
     abandonedRef.current = true;
     try {
       const data: any = await checkoutConfirm(sidRef.current);
-      router.push(`/payment/${data.primary_booking_id}?token=${encodeURIComponent(data.client_token)}&amount=${data.total_amount}&currency=${data.currency ?? 'ZAR'}`);
+      const primaryId = data.primary_booking_id;
+
+      // Resolve the gateway checkout URL.
+      // • Card: booking creation already initialised a Paystack checkout and
+      //   returned its URL in client_token. Reuse it to save a round-trip.
+      // • PayPal / Instant EFT: initialise a method-specific checkout via the
+      //   payment start route.
+      let authorizationUrl: string;
+      let usedMethod: PaymentMethod = payMethod as PaymentMethod;
+
+      if (payMethod === 'card' && data.client_token) {
+        authorizationUrl = data.client_token;
+      } else {
+        const started = await startBookingPayment(primaryId, payMethod as PaymentMethod);
+        authorizationUrl = started.authorization_url;
+      }
+
+      if (!authorizationUrl) {
+        abandonedRef.current = false;
+        setPhase('reserved');
+        alert('Payment setup failed — no checkout URL returned. Please try again.');
+        return;
+      }
+
+      const params = new URLSearchParams({
+        url:      encodeURIComponent(authorizationUrl),
+        method:   usedMethod,
+        amount:   String(data.total_amount ?? 0),
+        currency: data.currency ?? 'ZAR',
+      });
+      router.push(`/payment/${primaryId}?${params.toString()}`);
     } catch (err: any) {
       abandonedRef.current = false;
       setPhase('reserved');
@@ -161,7 +192,11 @@ export default function CartCheckoutPage() {
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
           <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>PAYMENT</p>
           <div style={{ display: 'flex', gap: 10 }}>
-            {[{ id: 'card', emoji: '💳', label: 'Credit / Debit Card' }, { id: 'eft', emoji: '🏦', label: 'EFT / Instant Pay' }].map((opt) => (
+            {[
+              { id: 'card',        emoji: '💳', label: 'Credit / Debit Card' },
+              { id: 'paypal',      emoji: '🅿️', label: 'PayPal'              },
+              { id: 'instant_eft', emoji: '🏦', label: 'Instant EFT'         },
+            ].map((opt) => (
               <button key={opt.id} onClick={() => setPayMethod(opt.id as any)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: `2px solid ${payMethod === opt.id ? '#ff2d55' : border}`, background: payMethod === opt.id ? (isDark ? '#1a0008' : '#fff0f3') : cardBg, cursor: 'pointer' }}>
                 <span style={{ fontSize: 20 }}>{opt.emoji}</span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{opt.label}</span>

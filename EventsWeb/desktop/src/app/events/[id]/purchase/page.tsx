@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
+import { startBookingPayment, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -44,7 +45,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [quantity,       setQuantity]       = useState(1);
   const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
   const [adding,         setAdding]         = useState(false);
-  const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal' | 'apple_pay'>('card');
+  const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal' | 'instant_eft'>('card');
   const [paySheetOpen,   setPaySheetOpen]   = useState(false);
   const [contactOpen,    setContactOpen]    = useState(false);
   const [guestName,      setGuestName]      = useState('');
@@ -135,7 +136,55 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       };
 
       const { data: booking } = await api.post(endpoint, payload);
-      router.push(`/payment/${(booking as any).booking_id ?? booking.id}?token=${booking.client_token}&amount=${booking.total_amount}&currency=${booking.currency ?? 'ZAR'}`);
+      const bookingId = (booking as any).booking_id ?? booking.id;
+
+      // Free ticket — booking is already confirmed server-side.
+      if ((booking as any).total_amount === 0) {
+        router.replace('/tickets');
+        return;
+      }
+
+      // Resolve the gateway checkout URL.
+      // • Card (default): the booking creation already initialised a Paystack
+      //   card checkout and returned its URL in client_token. Reuse it to skip
+      //   a round-trip (same optimisation as the mobile app).
+      // • PayPal / Instant EFT: call startBookingPayment to get a
+      //   method-specific hosted-checkout URL.
+      // • Guests: no method-aware start route — always use the card URL from
+      //   booking creation.
+      let authorizationUrl: string;
+      let usedMethod: PaymentMethod = 'card';
+
+      if (user && paymentMethod === 'card' && (booking as any).client_token) {
+        authorizationUrl = (booking as any).client_token;
+        usedMethod = 'card';
+      } else if (user && (paymentMethod === 'paypal' || paymentMethod === 'instant_eft')) {
+        const started = await startBookingPayment(bookingId, paymentMethod);
+        authorizationUrl = started.authorization_url;
+        usedMethod = paymentMethod;
+      } else {
+        // Guest checkout: card only via client_token.
+        authorizationUrl = (booking as any).client_token ?? '';
+        usedMethod = 'card';
+      }
+
+      if (!authorizationUrl) {
+        setError('Payment unavailable. Please try again.');
+        return;
+      }
+
+      const params = new URLSearchParams({
+        url:      encodeURIComponent(authorizationUrl),
+        method:   usedMethod,
+        amount:   String((booking as any).total_amount ?? 0),
+        currency: (booking as any).currency ?? 'ZAR',
+      });
+      // Pass booking number + email so the payment page can poll via guest routes.
+      if (!user) {
+        params.set('bookingNumber', String((booking as any).booking_number ?? ''));
+        params.set('email', email);
+      }
+      router.push(`/payment/${bookingId}?${params.toString()}`);
     } catch (e: any) {
       setError(e?.response?.data?.error ?? 'Failed to create booking. Please try again.');
     } finally {
@@ -346,7 +395,7 @@ return (
               >
                 <p style={{ margin: 0, fontSize: 13, color: colors.subText, width: 100 }}>Payment</p>
                 <p style={{ margin: 0, flex: 1, fontSize: 13, color: colors.text, fontWeight: 600 }}>
-                  {paymentMethod === 'apple_pay' ? '🍎 Apple Pay' : paymentMethod === 'paypal' ? '🅿️ PayPal' : '💳 Credit / Debit Card'} ›
+                  {paymentMethod === 'instant_eft' ? '🏦 Instant EFT' : paymentMethod === 'paypal' ? '🅿️ PayPal' : '💳 Credit / Debit Card'} ›
                 </p>
               </div>
             </div>
@@ -469,11 +518,11 @@ return (
       {paySheetOpen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setPaySheetOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
-            <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payments</h3>
+            <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payment Method</h3>
             {([
-              { id: 'apple_pay',  icon: '🍎', label: 'Apple Pay' },
-              { id: 'paypal',     icon: '🅿️', label: 'PayPal' },
-              { id: 'card',       icon: '💳', label: 'Credit / Debit Card' },
+              { id: 'card',        icon: '💳', label: 'Credit / Debit Card' },
+              { id: 'paypal',      icon: '🅿️', label: 'PayPal' },
+              { id: 'instant_eft', icon: '🏦', label: 'Instant EFT' },
             ] as const).map(({ id, icon, label }) => (
               <div
                 key={id}
