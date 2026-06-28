@@ -17,7 +17,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://bunny-his-included-pod.trycloudflare.com"
+       "EXPO_PUBLIC_API_URL": "https://api.ticket-hawk.com"
       }
     },
     "production": {
