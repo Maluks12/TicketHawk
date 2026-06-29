@@ -25,7 +25,7 @@ function fmtCountdown(secs: number) { const m = Math.floor(secs / 60); const s =
 export default function CartCheckoutPage() {
   const router = useRouter();
   const { colors, isDark } = useAppTheme();
-  const { user } = useAuthStore();
+  const { user, authReady, loadUser } = useAuthStore();
 
   const [cart, setCart] = useState<CartSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +34,7 @@ export default function CartCheckoutPage() {
   const [initialSecs, setInitialSecs] = useState(600);
   const [payMethod, setPayMethod] = useState<'card' | 'paypal' | 'instant_eft'>('card');
   const [guestName, setGuestName] = useState('');
+  useEffect(() => { loadUser(); }, [loadUser]);
   const [guestEmail, setGuestEmail] = useState('');
 
   const secondsLeft = useCountdown(initialSecs, phase === 'reserved');
@@ -196,7 +197,7 @@ export default function CartCheckoutPage() {
               { id: 'card',        emoji: '💳', label: 'Credit / Debit Card' },
               { id: 'paypal',      emoji: '🅿️', label: 'PayPal'              },
               { id: 'instant_eft', emoji: '🏦', label: 'Instant EFT'         },
-            ].map((opt) => (
+            ].filter((opt) => !authReady || user || opt.id === 'card').map((opt) => (
               <button key={opt.id} onClick={() => setPayMethod(opt.id as any)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: `2px solid ${payMethod === opt.id ? '#ff2d55' : border}`, background: payMethod === opt.id ? (isDark ? '#1a0008' : '#fff0f3') : cardBg, cursor: 'pointer' }}>
                 <span style={{ fontSize: 20 }}>{opt.emoji}</span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>{opt.label}</span>

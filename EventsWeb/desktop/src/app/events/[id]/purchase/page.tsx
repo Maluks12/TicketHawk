@@ -34,7 +34,7 @@ function isSoldOut(tt: TicketType): boolean {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function EventPurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, authReady, loadUser } = useAuthStore();
   const { colors, isDark } = useAppTheme();
   const { id: eventId } = use(params);
 
@@ -56,6 +56,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   // Use a ref so this check only runs once, even if the component re-renders
   // (e.g. due to React.use() Suspense cycles unwrapping params).
   const gateChecked = useRef(false);
+  useEffect(() => { loadUser(); }, [loadUser]);
   useEffect(() => {
     if (gateChecked.current) return;
     gateChecked.current = true;
@@ -523,7 +524,7 @@ return (
               { id: 'card',        icon: '💳', label: 'Credit / Debit Card' },
               { id: 'paypal',      icon: '🅿️', label: 'PayPal' },
               { id: 'instant_eft', icon: '🏦', label: 'Instant EFT' },
-            ] as const).map(({ id, icon, label }) => (
+            ] as const).filter(({ id }) => !authReady || user || id === 'card').map(({ id, icon, label }) => (
               <div
                 key={id}
                 onClick={() => { setPaymentMethod(id); setPaySheetOpen(false); }}
