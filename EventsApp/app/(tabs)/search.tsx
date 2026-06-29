@@ -1,62 +1,80 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  Image, ActivityIndicator, StyleSheet, Keyboard, Animated,
+  ActivityIndicator, StyleSheet, Keyboard, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { searchEvents, getSuggestionEvents, type Event } from '../../lib/api';
+import { searchEvents, getActiveEvents, getTrendingEvents, type Event } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/search';
-import { useAppTheme } from '../../theme/colors'; // ADD
+import { useAppTheme } from '../../theme/colors';
 import { CoverImage } from '../../components/CoverImage';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ACCENT    = '#ff3c6e';
-
-const SUGGESTIONS = [
-  { key: 'popular',        label: 'Popular Events',  icon: 'star'     as const, iconColor: '#3b82f6', bgColor: 'rgba(59,130,246,0.12)'  },
-  { key: 'just_announced', label: 'Just Announced',  icon: 'megaphone'as const, iconColor: '#a855f7', bgColor: 'rgba(168,85,247,0.12)' },
-];
+const ACCENT          = '#ff3c6e';
+const SUGGESTED_COUNT = 12;   // how many random picks to show
+const POOL_LIMIT      = 40;   // how many events to pull into the shuffle pool
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const formatPrice = (price: number) => price === 0 ? 'Free' : `R${Math.round(price).toLocaleString('en-ZA')}`;
-const formatDate  = (iso: string)   => iso ? new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const formatDate  = (iso: string)   => iso ? new Date(iso).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) : '';
+
+// Fisher–Yates shuffle — returns a new array, never mutates the input.
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Merge several event lists into one de-duplicated pool (by id).
+function dedupe(...lists: Event[][]): Event[] {
+  const seen = new Set<string>();
+  const out: Event[] = [];
+  for (const list of lists) {
+    for (const ev of list) {
+      if (ev && ev.id && !seen.has(ev.id)) { seen.add(ev.id); out.push(ev); }
+    }
+  }
+  return out;
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-const SuggestionRow = ({ item, onPress, colors }: { item: typeof SUGGESTIONS[number]; onPress: () => void; colors: any }) => (
-  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16 }} onPress={onPress} activeOpacity={0.7}>
-    <View style={[sheet.suggIcon, { backgroundColor: item.bgColor }]}>
-      <Ionicons name={item.icon} size={20} color={item.iconColor} />
-    </View>
-    <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: colors.text }}>{item.label}</Text>
-    <Ionicons name="chevron-forward" size={18} color={colors.iconColor} />
-  </TouchableOpacity>
-);
+// Recommendation / result row: landscape thumbnail · title · date & city · chevron.
+const SuggestedRow = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => {
+  const meta = [formatDate(item.start_time), item.city].filter(Boolean).join(' · ');
+  return (
+    <TouchableOpacity style={sheet.nfRow} onPress={onPress} activeOpacity={0.7}>
+      <View style={[sheet.nfThumb, { backgroundColor: colors.sectionCardBg }]}>
+        {item.cover_image_url
+          ? <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} recyclingKey={item.id} />
+          : <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+              <Ionicons name="ticket-outline" size={22} color={colors.iconColor} />
+            </View>
+        }
+      </View>
 
-const EventResultRow = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
-  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 }} onPress={onPress} activeOpacity={0.75}>
-    <View style={sheet.resultThumb}>
-      {item.cover_image_url
-        ? <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} />
-        : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.sectionCardBg }]} />
-      }
-    </View>
-    <View style={{ flex: 1 }}>
-      <Text style={{ fontSize: 9, fontWeight: '800', color: '#ff3c6e', letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 2 }} numberOfLines={1}>{item.category?.toUpperCase()}</Text>
-      <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text, lineHeight: 19, marginBottom: 3 }} numberOfLines={2}>{item.title}</Text>
-      <Text style={{ fontSize: 11, color: colors.subText, marginBottom: 1 }} numberOfLines={1}>📍 {item.venue_name}{item.city ? `, ${item.city}` : ''}</Text>
-      {item.start_time ? <Text style={{ fontSize: 11, color: colors.subText }}>{formatDate(item.start_time)}</Text> : null}
-    </View>
-    <View style={{ alignItems: 'flex-end', minWidth: 56 }}>
-      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }}>{formatPrice(item.price)}</Text>
-    </View>
-  </TouchableOpacity>
-);
+      <View style={{ flex: 1, justifyContent: 'center' }}>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, lineHeight: 21 }} numberOfLines={2}>
+          {item.title}
+        </Text>
+        {meta ? (
+          <Text style={{ fontSize: 12, color: colors.subText, marginTop: 3 }} numberOfLines={1}>
+            {meta}
+          </Text>
+        ) : null}
+      </View>
+
+      <Ionicons name="chevron-forward" size={20} color={colors.iconColor} style={{ flexShrink: 0 }} />
+    </TouchableOpacity>
+  );
+};
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -68,14 +86,39 @@ export default function SearchScreen() {
   const underlineAnim    = useRef(new Animated.Value(0)).current;
   const { isDark, colors } = useAppTheme();
 
-  const [query,       setQuery]       = useState('');
-  const [isFocused,   setIsFocused]   = useState(false);
-  const [results,     setResults]     = useState<Event[]>([]);
-  const [loading,     setLoading]     = useState(false);
-  const [suggResults, setSuggResults] = useState<Event[]>([]);
-  const [suggTitle,   setSuggTitle]   = useState('');
-  const [suggLoading, setSuggLoading] = useState(false);
-  const [view,        setView]        = useState<'idle' | 'typing' | 'results' | 'suggestion'>('idle');
+  const [query,     setQuery]     = useState('');
+  const [isFocused, setIsFocused] = useState(false);
+  const [results,   setResults]   = useState<Event[]>([]);
+  const [loading,   setLoading]   = useState(false);
+  const [view,      setView]      = useState<'idle' | 'typing' | 'results'>('idle');
+
+  // Random "Recommended" pool
+  const pool          = useRef<Event[]>([]);            // full fetched pool (kept for re-shuffles)
+  const [suggested,   setSuggested]   = useState<Event[]>([]);
+  const [suggLoading, setSuggLoading] = useState(true);
+
+  // Fetch the pool once on mount, then show a random slice.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [activeRes, trendingRes] = await Promise.allSettled([
+          getActiveEvents(POOL_LIMIT),
+          getTrendingEvents(POOL_LIMIT),
+        ]);
+        const activeEvents   = activeRes.status   === 'fulfilled' ? (activeRes.value.data.data   ?? []) : [];
+        const trendingEvents = trendingRes.status === 'fulfilled' ? (trendingRes.value.data.data ?? []) : [];
+        if (!active) return;
+        pool.current = dedupe(activeEvents, trendingEvents);
+        setSuggested(shuffle(pool.current).slice(0, SUGGESTED_COUNT));
+      } catch {
+        if (active) setSuggested([]);
+      } finally {
+        if (active) setSuggLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   const animateFocus = (focused: boolean) =>
     Animated.timing(underlineAnim, { toValue: focused ? 1 : 0, duration: 180, useNativeDriver: false }).start();
@@ -100,16 +143,9 @@ export default function SearchScreen() {
   const handleClear  = () => { setQuery(''); setResults([]); setView('idle'); inputRef.current?.focus(); };
   const handleCancel = () => { Keyboard.dismiss(); setQuery(''); setResults([]); setView('idle'); setIsFocused(false); };
 
-  const handleSuggestion = async (key: string, label: string) => {
-    Keyboard.dismiss(); setSuggTitle(label); setSuggLoading(true); setView('suggestion');
-    setSuggResults(await getSuggestionEvents(key as 'popular' | 'just_announced'));
-    setSuggLoading(false);
-  };
-
   const handleEventPress = (event: Event) => { setSelectedEvent(event); router.push(`/event/${event.id}`); };
 
   const showCancel  = isFocused || query.length > 0;
-  const activeItems = view === 'suggestion' ? suggResults : results;
   const searchBoxBg = isFocused
     ? (isDark ? '#1c1c1c' : '#fff')
     : (isDark ? 'rgba(255,255,255,0.07)' : 'rgba(10,10,10,0.06)');
@@ -146,18 +182,37 @@ export default function SearchScreen() {
         )}
       </View>
 
-      {/* Idle: suggestions */}
+      {/* Idle: Netflix-style random recommendations */}
       {view === 'idle' && (
-        <FlatList
-          data={SUGGESTIONS}
-          keyExtractor={item => item.key}
-          ListHeaderComponent={<Text style={{ fontSize: 18, fontWeight: '800', color: colors.text, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 }}>Suggestions</Text>}
-          renderItem={({ item }) => (
-           <SuggestionRow item={item} onPress={() => handleSuggestion(item.key, item.label)} colors={colors} />
-          )}
-         ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor, marginLeft: 20 }} />}
-          keyboardShouldPersistTaps="handled"
-        />
+        suggLoading ? (
+          <View className={s.centred}>
+            <ActivityIndicator size="large" color={ACCENT} />
+          </View>
+        ) : (
+          <FlatList
+            data={suggested}
+            keyExtractor={item => item.id}
+            ListHeaderComponent={
+              <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 10 }}>
+                Recommended Events
+              </Text>
+            }
+            renderItem={({ item }) => (
+              <SuggestedRow item={item} onPress={() => handleEventPress(item)} colors={colors} />
+            )}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: 24 }}
+            ListEmptyComponent={
+              <View className={s.centred}>
+                <Ionicons name="sparkles-outline" size={44} color={colors.iconColor} />
+                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 6 }}>Nothing to suggest yet</Text>
+                <Text style={{ fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 19 }}>
+                  Search for an event above to get started.
+                </Text>
+              </View>
+            }
+          />
+        )
       )}
 
       {/* Typing: show hint until 3 chars */}
@@ -171,40 +226,31 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {/* Results / suggestion */}
-      {(view === 'results' || view === 'suggestion') && (
-        <>
-          {view === 'suggestion' && (
-            <TouchableOpacity className={s.backRow} onPress={() => { setView('idle'); setSuggResults([]); }} activeOpacity={0.7}>
-              <Ionicons name="chevron-back" size={16} color={ACCENT} />
-              <Text className={s.backText}>  {suggTitle}</Text>
-            </TouchableOpacity>
-          )}
-
-          {loading || suggLoading ? (
-            <View className={s.centred}>
-              <ActivityIndicator size="large" color={ACCENT} />
-            </View>
-          ) : (
-            <FlatList
-              data={activeItems}
-              keyExtractor={e => e.id}
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => <EventResultRow item={item} onPress={() => handleEventPress(item)} colors={colors} />}
-              ItemSeparatorComponent={() => <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor, marginLeft: 20 }} />}
-              ListEmptyComponent={
-                <View className={s.centred}>
-                  <Ionicons name="search-outline" size={48} color={colors.iconColor} />
-                  <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 6 }}>No events found</Text>
-                  <Text style={{ fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 19 }}>
-                    {view === 'results' ? `No results for "${query}". Try a different keyword.` : 'Check back later for updates.'}
-                  </Text>
-                </View>
-              }
-            />
-          )}
-        </>
+      {/* Results */}
+      {view === 'results' && (
+        loading ? (
+          <View className={s.centred}>
+            <ActivityIndicator size="large" color={ACCENT} />
+          </View>
+        ) : (
+          <FlatList
+            data={results}
+            keyExtractor={e => e.id}
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => <SuggestedRow item={item} onPress={() => handleEventPress(item)} colors={colors} />}
+            contentContainerStyle={{ paddingBottom: 24 }}
+            ListEmptyComponent={
+              <View className={s.centred}>
+                <Ionicons name="search-outline" size={48} color={colors.iconColor} />
+                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 6 }}>No events found</Text>
+                <Text style={{ fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 19 }}>
+                  No results for "{query}". Try a different keyword.
+                </Text>
+              </View>
+            }
+          />
+        )
       )}
     </SafeAreaView>
   );
