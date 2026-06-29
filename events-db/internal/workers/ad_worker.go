@@ -12,6 +12,7 @@ import (
 
 // StartAdWorker runs nightly ad maintenance just after midnight:
 //
+
 //  1. Resume campaigns that hit their daily budget (exhausted -> active).
 //  2. End campaigns whose end_date has passed.
 //

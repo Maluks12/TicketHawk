@@ -88,4 +88,20 @@ export const sheet = StyleSheet.create({
     backgroundColor: '#e5e5e5',
     flexShrink: 0,
   },
+
+  // ── Netflix-style "Recommended" rows ────────────────────────────────────────
+  nfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    gap: 14,
+  },
+  nfThumb: {
+    width: 118,
+    height: 68,
+    borderRadius: 8,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
 });

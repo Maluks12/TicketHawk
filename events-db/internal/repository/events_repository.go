@@ -1139,8 +1139,8 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 				OR (
 					featured_until = $4
 					AND (
-						start_time < $5
-						OR (start_time = $5 AND id < $6)
+						e.start_time < $5
+						OR (e.start_time = $5 AND e.id < $6)
 					)
 				)
 			)
@@ -1161,7 +1161,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
         FROM events e
         JOIN categories c ON e.category_id = c.id
     ` + where + `
-		ORDER BY featured_until DESC, start_time DESC, id DESC
+		ORDER BY featured_until DESC, e.start_time DESC, e.id DESC
 		LIMIT $` + strconv.Itoa(limitPlaceholder)
 
 	rows, err := pool.Query(ctx, query, args...)
@@ -1210,14 +1210,14 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 	args := []interface{}{models.EventPublished, time.Now()}
 	where := `
 	WHERE e.status = $1
-	AND end_time > $2
+	AND e.end_time > $2
 	`
 
 	if cursor != nil {
 		where += `
 			AND (
-				start_time < $3
-				OR (start_time = $3 AND id < $4)
+				e.start_time < $3
+				OR (e.start_time = $3 AND e.id < $4)
 			)
 		`
 		args = append(args, cursor.StartTime, cursor.ID)
@@ -1236,7 +1236,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
         FROM events e
 		JOIN categories c ON e.category_id = c.id
 	` + where + `
-		ORDER BY start_time DESC, id DESC
+		ORDER BY e.start_time DESC, e.id DESC
 		LIMIT $` + strconv.Itoa(limitPlaceholder)
 
 	rows, err := pool.Query(ctx, query, args...)
