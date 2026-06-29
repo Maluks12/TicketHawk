@@ -137,6 +137,7 @@ func main() {
 	// Setup Router
 	// ==========================================
 	router := gin.New()
+	router.TrustedPlatform = gin.PlatformCloudflare
 	router.SetTrustedProxies(nil)
 
 	router.Use(middleware.RequestID())

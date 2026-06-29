@@ -1,0 +1,55 @@
+# docker-compose.prod.yml — what runs ON the EC2 box in af-south-1.
+#
+# Differences vs the dev docker-compose.yml:
+#   • The `db` (Postgres) and `test-postgres` services are GONE — Amazon RDS is
+#     now your database. The app reaches it via DATABASE_URL in .env.
+#   • Redis stays, but its port is NOT published to the host/internet. Only the
+#     api container reaches it over the private compose network.
+#   • cloudflared runs the Cloudflare Tunnel, so you never open inbound 80/443
+#     on the EC2 security group. Cloudflare terminates TLS and forwards to api.
+#
+# Run with:  docker compose -f docker-compose.prod.yml up -d --build
+
+services:
+
+  # ── Redis (ticket holds, rate limiter, feed cache) ──────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # No `ports:` — reachable only as `redis:6379` inside this compose network.
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Go API ──────────────────────────────────────────────────────────────────
+  api:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    # Publish only to localhost so the Cloudflare Tunnel (and nothing else) can
+    # reach it. The security group can then block ALL inbound traffic.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Cloudflare Tunnel ───────────────────────────────────────────────────────
+  # Token-based tunnel: create it in the Cloudflare Zero Trust dashboard, set the
+  # public hostname (api.yourdomain.co.za) → http://api:8080, and paste the token
+  # into .env.production as CLOUDFLARE_TUNNEL_TOKEN.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    depends_on:
+      - api
+
+volumes:
+  redis-data:
