@@ -137,7 +137,6 @@ func main() {
 	// Setup Router
 	// ==========================================
 	router := gin.New()
-	router.TrustedPlatform = gin.PlatformCloudflare
 	router.SetTrustedProxies(nil)
 
 	router.Use(middleware.RequestID())
@@ -377,6 +376,7 @@ func main() {
 		guest.GET("/bookings/:bookingNumber/assignments/:assignmentId/qr", handlers.GetGuestRotatingQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/pool-qr",                      handlers.GetGuestPoolQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/payment",        handlers.GuestPaymentStatusHandler(pool, paymentService))
+		guest.POST("/bookings/:bookingNumber/payment/start", handlers.GuestStartPaymentHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
 	}
 

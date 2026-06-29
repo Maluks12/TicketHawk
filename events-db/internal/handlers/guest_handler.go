@@ -57,7 +57,11 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 			return
 		}
 
-		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking)
+		method := dto.PaymentMethod
+		if method == "" {
+			method = models.PaymentCreditCard
+		}
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize payment"})
 			return
@@ -228,7 +232,11 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 			}
 		}
 
-		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking)
+		retryMethod := models.PaymentMethod(c.Query("method"))
+		if retryMethod == "" {
+			retryMethod = models.PaymentCreditCard
+		}
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, retryMethod)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
 			return
@@ -239,6 +247,53 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 			"booking_number":     booking.BookingNumber,
 			"client_token":       clientToken,
 			"payment_request_id": paymentRequestID,
+			"amount":             booking.TotalAmount,
+			"currency":           booking.Currency,
+		})
+	}
+}
+// GuestStartPaymentHandler initialises (or re-initialises) a payment for a
+// guest booking with the requested method (card, paypal, instant_eft).
+// Identity is verified by bookingNumber + email query params.
+//
+//	POST /v1/guest/bookings/:bookingNumber/payment/start?email=&method=
+func GuestStartPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bookingNumber := c.Param("bookingNumber")
+		email := c.Query("email")
+		if bookingNumber == "" || email == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Booking number and email are required"})
+			return
+		}
+
+		booking, err := repository.GetGuestBooking(pool, bookingNumber, email)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+
+		if booking.PaymentStatus == "completed" || booking.PaymentStatus == "refunded" {
+			c.JSON(http.StatusConflict, gin.H{"error": "Payment already completed"})
+			return
+		}
+
+		method := models.PaymentMethod(c.Query("method"))
+		if method == "" {
+			method = models.PaymentCreditCard
+		}
+
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize payment"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"booking_id":         booking.ID,
+			"booking_number":     booking.BookingNumber,
+			"authorization_url":  clientToken,
+			"reference":          paymentRequestID,
+			"payment_method":     method,
 			"amount":             booking.TotalAmount,
 			"currency":           booking.Currency,
 		})

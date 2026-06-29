@@ -98,14 +98,15 @@ type CreateBookingDTO struct {
 }
 
 type CreateGuestBookingDTO struct {
-	EventID             string  `json:"event_id" binding:"required,uuid"`
-	TicketQuantity      int     `json:"ticket_quantity" binding:"required,min=1,max=10"`
-	AttendeeFirstName   string  `json:"attendee_first_name" binding:"required,max=100"`
-	AttendeeLastName    string  `json:"attendee_last_name" binding:"max=100"`
-	AttendeeEmail       string  `json:"attendee_email" binding:"required,email,max=255"`
-	AttendeePhone       *string `json:"attendee_phone"`
-	SpecialRequirements *string `json:"special_requirements"`
-	PromoCode           *string `json:"promo_code"`
+	EventID             string        `json:"event_id" binding:"required,uuid"`
+	TicketQuantity      int           `json:"ticket_quantity" binding:"required,min=1,max=10"`
+	AttendeeFirstName   string        `json:"attendee_first_name" binding:"required,max=100"`
+	AttendeeLastName    string        `json:"attendee_last_name" binding:"max=100"`
+	AttendeeEmail       string        `json:"attendee_email" binding:"required,email,max=255"`
+	AttendeePhone       *string       `json:"attendee_phone"`
+	SpecialRequirements *string       `json:"special_requirements"`
+	PromoCode           *string       `json:"promo_code"`
+	PaymentMethod       PaymentMethod `json:"payment_method"`
 }
 
 type BookingResponse struct {

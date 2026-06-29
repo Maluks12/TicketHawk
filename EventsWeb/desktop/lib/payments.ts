@@ -163,6 +163,29 @@ export async function fetchPaymentStatus(
   return res.data as PaymentStatus;
 }
 
+/**
+ * startGuestPayment initialises (or re-initialises) a payment for a guest
+ * booking with the chosen method (card, paypal, instant_eft).
+ * Identity is verified by bookingNumber + email.
+ */
+export async function startGuestPayment(
+  bookingNumber: string,
+  email: string,
+  method: PaymentMethod = 'card',
+): Promise<{ authorization_url: string; reference: string; payment_method: string }> {
+  const res = await api.post(
+    `/v1/guest/bookings/${encodeURIComponent(bookingNumber)}/payment/start`,
+    {},
+    { params: { email, method } },
+  );
+  const data = res.data as any;
+  return {
+    authorization_url: data?.authorization_url ?? data?.client_token ?? '',
+    reference:         data?.reference ?? data?.payment_request_id ?? '',
+    payment_method:    data?.payment_method ?? method,
+  };
+}
+
 /** retryGuestPayment re-initialises a guest's card payment by booking number. */
 export async function retryGuestPayment(
   bookingNumber: string,
