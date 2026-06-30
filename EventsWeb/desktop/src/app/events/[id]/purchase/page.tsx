@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
-import { startBookingPayment, type PaymentMethod } from '@/lib/payments';
+import { startBookingPayment, startGuestPayment, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -34,7 +34,7 @@ function isSoldOut(tt: TicketType): boolean {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function EventPurchasePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
-  const { user, authReady, loadUser } = useAuthStore();
+  const { user } = useAuthStore();
   const { colors, isDark } = useAppTheme();
   const { id: eventId } = use(params);
 
@@ -56,7 +56,6 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   // Use a ref so this check only runs once, even if the component re-renders
   // (e.g. due to React.use() Suspense cycles unwrapping params).
   const gateChecked = useRef(false);
-  useEffect(() => { loadUser(); }, [loadUser]);
   useEffect(() => {
     if (gateChecked.current) return;
     gateChecked.current = true;
@@ -156,15 +155,22 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       let authorizationUrl: string;
       let usedMethod: PaymentMethod = 'card';
 
-      if (user && paymentMethod === 'card' && (booking as any).client_token) {
+      if (paymentMethod === 'card' && (booking as any).client_token) {
+        // Card: reuse the checkout URL already returned by booking creation.
         authorizationUrl = (booking as any).client_token;
         usedMethod = 'card';
-      } else if (user && (paymentMethod === 'paypal' || paymentMethod === 'instant_eft')) {
-        const started = await startBookingPayment(bookingId, paymentMethod);
-        authorizationUrl = started.authorization_url;
+      } else if (paymentMethod === 'paypal' || paymentMethod === 'instant_eft') {
+        // PayPal / Instant EFT: initialise a method-specific checkout.
+        if (user) {
+          const started = await startBookingPayment(bookingId, paymentMethod);
+          authorizationUrl = started.authorization_url;
+        } else {
+          const bn = (booking as any).booking_number;
+          const started = await startGuestPayment(bn, guestEmail.trim(), paymentMethod);
+          authorizationUrl = started.authorization_url;
+        }
         usedMethod = paymentMethod;
       } else {
-        // Guest checkout: card only via client_token.
         authorizationUrl = (booking as any).client_token ?? '';
         usedMethod = 'card';
       }
@@ -524,7 +530,7 @@ return (
               { id: 'card',        icon: '💳', label: 'Credit / Debit Card' },
               { id: 'paypal',      icon: '🅿️', label: 'PayPal' },
               { id: 'instant_eft', icon: '🏦', label: 'Instant EFT' },
-            ] as const).filter(({ id }) => !authReady || user || id === 'card').map(({ id, icon, label }) => (
+            ] as const).map(({ id, icon, label }) => (
               <div
                 key={id}
                 onClick={() => { setPaymentMethod(id); setPaySheetOpen(false); }}
