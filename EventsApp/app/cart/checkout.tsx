@@ -287,7 +287,15 @@ export default function CartCheckoutScreen() {
 
   const allItems    = cart?.items_by_event?.flatMap(g => g.items) ?? [];
   const cartTotal   = cart?.total_amount ?? 0;
-  const platformFee = Math.ceil(cartTotal * 0.05);
+  // Service fee mirrors the backend (CalculateFees): R10 per ticket, capped at
+  // 20% of each ticket's face value, summed per ticket line. Merch carries no
+  // service fee. The real charge is the backend's total_amount on confirm.
+  const platformFee = Math.round(
+    allItems
+      .filter(i => i.item_type === 'ticket')
+      .reduce((sum, i) => sum + Math.min(10, 0.20 * i.unit_price_snapshot) * i.quantity, 0)
+    * 100,
+  ) / 100;
   const grandTotal  = cartTotal + platformFee;
   const hasTickets  = allItems.some(i => i.item_type === 'ticket');
   const isBusy      = phase === 'reserving' || phase === 'confirming';
@@ -470,7 +478,7 @@ export default function CartCheckoutScreen() {
               </View>
             )}
             <View style={styles.priceRow}>
-              <Text style={[styles.priceLabel, { color: colors.subText }]}>Service fee (5%)</Text>
+              <Text style={[styles.priceLabel, { color: colors.subText }]}>Service fee</Text>
               <Text style={[styles.priceValue, { color: colors.subText }]}>{fmtZAR(platformFee)}</Text>
             </View>
             <View style={[styles.priceDivider, { backgroundColor: colors.dividerColor }]} />

@@ -328,7 +328,11 @@ func ConvertReservationsToBookings(
 		}
 
 		subtotal := unitPrice * float64(r.qty)
-		platformFee := CalculatePlatformFee(subtotal)
+		serviceFee, commission := CalculateFees(subtotal, r.qty)
+		platformFee := serviceFee  // buyer-paid service fee (R10 × qty)
+		organizerFee := commission // organizer-paid commission (6% × subtotal)
+		// Buyer pays ticket price + service fee; commission is deducted from the
+		// organizer's payout, so it is not part of total_amount.
 		totalAmount := subtotal + platformFee
 
 		isGuest := userID == nil
@@ -371,17 +375,17 @@ func ConvertReservationsToBookings(
 				$1, $2, $3, $4,
 				$5, $6,
 				$7, $8, $9,
-				$10, 0, $11, 'ZAR',
-				$12,
+				$10, $11, $12, 'ZAR',
+				$13,
 				'pending', 'pending',
-				$13
+				$14
 			)
 			RETURNING id
 		`,
 			r.bookingNumber, r.eventID, userID, isGuest,
 			r.ticketTypeID, ticketTypeName,
 			r.qty, unitPrice, subtotal,
-			platformFee, totalAmount,
+			platformFee, organizerFee, totalAmount,
 			attendeeEmail,
 			cartID,
 		).Scan(&bookingID)

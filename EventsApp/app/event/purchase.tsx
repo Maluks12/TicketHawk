@@ -178,7 +178,14 @@ export default function TicketPurchaseScreen() {
 
   const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  const platformFee  = Math.ceil(totalAmount * 0.05);
+  // Mirror the backend fee model (CalculateFees in events-db): a R10 service fee
+  // per ticket, capped at 20% of the ticket's face value. This must match the
+  // server, because the real charge is the booking's total_amount from the API.
+  const SERVICE_FEE_PER_TICKET = 10;
+  const MAX_SERVICE_FEE_RATE   = 0.20;
+  const unitPrice    = selectedType?.price ?? 0;
+  const perTicketFee = unitPrice > 0 ? Math.min(SERVICE_FEE_PER_TICKET, MAX_SERVICE_FEE_RATE * unitPrice) : 0;
+  const platformFee  = Math.round(perTicketFee * quantity * 100) / 100;
   const grandTotal   = totalAmount + platformFee;
   const venueType = (() => {
     if (!event) return 'none' as const;
@@ -639,7 +646,7 @@ export default function TicketPurchaseScreen() {
                     <Text style={ss.priceValue}>{fmtPrice(totalAmount)}</Text>
                   </View>
                   <View style={ss.priceRow}>
-                    <Text style={ss.priceLabelLight}>Service Fees (5%)</Text>
+                    <Text style={ss.priceLabelLight}>Service fee</Text>
                     <Text style={ss.priceValueLight}>{fmtPrice(platformFee)}</Text>
                   </View>
                   <View style={ss.priceDivider} />

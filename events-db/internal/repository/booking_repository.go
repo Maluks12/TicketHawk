@@ -7,6 +7,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/utils"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -41,10 +42,13 @@ func createBookingTx(
 	defer cancel()
 
 	subtotal := unitPrice * float64(quantity)
-	platformFee := CalculatePlatformFee(subtotal)
-	organizerFee := 0.0
+	serviceFee, commission := CalculateFees(subtotal, quantity)
+	platformFee := serviceFee  // buyer-paid service fee (R10 × qty)
+	organizerFee := commission // organizer-paid commission (6% × subtotal)
 	discountAmount := 0.0
-	totalAmount := subtotal + platformFee + organizerFee - discountAmount
+	// Buyer is charged the ticket price plus the service fee only. The 6%
+	// commission is NOT added here — it comes out of the organizer's payout.
+	totalAmount := subtotal + platformFee - discountAmount
 
 	if quantity <= 0 {
     	return nil, errors.New("invalid ticket quantity")
@@ -110,6 +114,10 @@ func createBookingTx(
 	booking.UserID = userID
 	booking.IsGuest = isGuest
 	booking.TicketQuantity = quantity
+	booking.UnitPrice = unitPrice
+	booking.Subtotal = subtotal
+	booking.PlatformFee = platformFee
+	booking.OrganizerFee = organizerFee
 	booking.TotalAmount = totalAmount
 	booking.Currency = currency
 	booking.AttendeeFirstName = firstName
@@ -158,15 +166,52 @@ func CreateGuestBooking(pool *pgxpool.Pool, dto *models.CreateGuestBookingDTO, e
 	)
 }
 
-func CalculatePlatformFee(subtotal float64) float64 {
-	// Free tickets always pay no fee — avoid charging a fixed component on a R0 subtotal.
-	if subtotal == 0 {
-		return 0
+// ── Fee model ────────────────────────────────────────────────────────────────
+//
+// Per ticket the platform takes two distinct fees with two distinct bearers:
+//
+//   • Service fee — R10.00 PER TICKET, paid by the BUYER, added on top of the
+//     ticket price (so it lands in total_amount). To avoid gouging cheap
+//     tickets, the per-ticket fee is CAPPED at MaxServiceFeeRate of the ticket's
+//     face value. The cap only ever bites below R50 (20% × R50 = R10), so any
+//     ticket R50+ pays the full flat R10. Stored in the `platform_fee` column.
+//
+//        R200 → R10 (5%)    R50 → R10 (20%)    R30 → R6 (20%)    R10 → R2 (20%)
+//
+//   • Commission — 6% of the ticket subtotal, borne by the ORGANIZER. A
+//     percentage already scales with price, so it needs no cap. It is NOT added
+//     to total_amount (the buyer never pays it); instead it is deducted from the
+//     organizer's payout. Stored in the `organizer_fee` column.
+//
+// So:  buyer pays      = subtotal + service_fee
+//      organizer nets  = subtotal − commission
+//      platform earns  = service_fee + commission
+const (
+	ServiceFeePerTicket     = 10.00 // ZAR, buyer-paid, charged once per ticket (before the cap)
+	MaxServiceFeeRate       = 0.20  // service fee never exceeds this share of a ticket's face value
+	OrganizerCommissionRate = 0.06  // organizer-paid, fraction of the ticket subtotal
+)
+
+// round2 rounds a money amount to whole cents (2 decimal places).
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+// CalculateFees returns the buyer-paid service fee and the organizer-paid
+// commission for a single booking line of `quantity` tickets totalling
+// `subtotal`. The per-ticket service fee is the flat ServiceFeePerTicket, but
+// never more than MaxServiceFeeRate of the ticket's face value — so a R50 ticket
+// pays the full R10 while a R20 ticket pays R4 (20%) instead. Free lines
+// (subtotal == 0) incur neither fee.
+func CalculateFees(subtotal float64, quantity int) (serviceFee, commission float64) {
+	if subtotal <= 0 || quantity <= 0 {
+		return 0, 0
 	}
-	// example platform fees such as stipe
-	percentage := subtotal * 0.029
-	fixed := 0.30
-	return percentage + fixed
+	unitPrice := subtotal / float64(quantity)
+	perTicket := math.Min(ServiceFeePerTicket, MaxServiceFeeRate*unitPrice)
+	serviceFee = round2(perTicket * float64(quantity))
+	commission = round2(OrganizerCommissionRate * subtotal)
+	return serviceFee, commission
 }
 
 func ConfirmBooking(pool *pgxpool.Pool, bookingID string) error {

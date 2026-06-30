@@ -78,9 +78,9 @@ func GetOrganizerStats(pool *pgxpool.Pool, organizerID string) (*OrganizerStats,
 			COUNT(b.id)                         AS total_bookings,
 			COALESCE(SUM(b.ticket_quantity), 0) AS total_tickets_sold,
 			COALESCE(SUM(b.subtotal), 0)        AS gross_ticket_revenue,
-			COALESCE(SUM(b.platform_fee), 0)    AS platform_fees_paid,
+			COALESCE(SUM(b.organizer_fee), 0)   AS platform_fees_paid,
 			COUNT(b.id) FILTER (WHERE b.confirmed_at >= CURRENT_DATE)   AS bookings_today,
-			COALESCE(SUM(b.subtotal - b.platform_fee)
+			COALESCE(SUM(b.subtotal - b.organizer_fee)
 				FILTER (WHERE b.confirmed_at >= CURRENT_DATE), 0)       AS revenue_today
 		FROM bookings b
 		JOIN events e ON e.id = b.event_id
@@ -182,7 +182,7 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 			e.city, e.price, e.currency, e.max_capacity, e.tickets_sold,
 			COALESCE(COUNT(b.id)  FILTER (WHERE b.booking_status = 'confirmed'), 0)::int,
 			COALESCE(SUM(b.subtotal)     FILTER (WHERE b.booking_status = 'confirmed'), 0),
-			COALESCE(SUM(b.platform_fee) FILTER (WHERE b.booking_status = 'confirmed'), 0),
+			COALESCE(SUM(b.organizer_fee) FILTER (WHERE b.booking_status = 'confirmed'), 0),
 			COALESCE(SUM(mo.quantity)    FILTER (WHERE mo.fulfillment_status = 'fulfilled'), 0)::int,
 			COALESCE(SUM(mo.total_amount)FILTER (WHERE mo.fulfillment_status = 'fulfilled'), 0),
 			e.created_at
@@ -320,7 +320,7 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 			COUNT(*) FILTER (WHERE booking_status = 'cancelled')                       AS cancelled,
 			COUNT(*) FILTER (WHERE booking_status = 'refunded')                        AS refunded,
 			COALESCE(SUM(subtotal)     FILTER (WHERE booking_status = 'confirmed'), 0) AS gross_revenue,
-			COALESCE(SUM(platform_fee) FILTER (WHERE booking_status = 'confirmed'), 0) AS platform_fees,
+			COALESCE(SUM(organizer_fee) FILTER (WHERE booking_status = 'confirmed'), 0) AS platform_fees,
 			COALESCE((
 				SELECT SUM(p.refunded_amount)
 				FROM payments p
@@ -431,7 +431,7 @@ func GetOrganizerEventBookings(
 			b.ticket_quantity,
 			b.unit_price,
 			b.subtotal,
-			b.platform_fee,
+			b.organizer_fee,
 			b.currency,
 			b.booking_status,
 			b.payment_status,
@@ -596,7 +596,7 @@ func GetOrganizerPayoutSummary(pool *pgxpool.Pool, organizerID string) (*Organiz
 	err := pool.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(b.subtotal)      FILTER (WHERE b.booking_status = 'confirmed'), 0) AS gross_revenue,
-			COALESCE(SUM(b.platform_fee)  FILTER (WHERE b.booking_status = 'confirmed'), 0) AS platform_fees,
+			COALESCE(SUM(b.organizer_fee)  FILTER (WHERE b.booking_status = 'confirmed'), 0) AS platform_fees,
 			COALESCE(SUM(b.refunded_amount) FILTER (
 				WHERE b.booking_status IN ('refunded','cancelled')
 				  AND b.refunded_amount IS NOT NULL), 0)                                    AS refunds_issued
