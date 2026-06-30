@@ -53,7 +53,7 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 				})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create booking"})
+			utils.InternalError(c, err, "guest checkout: failed to create booking")
 			return
 		}
 
@@ -63,7 +63,7 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 		}
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize payment"})
+			utils.InternalError(c, err, "guest checkout: failed to initialize payment")
 			return
 		}
 
@@ -199,7 +199,7 @@ func GetGuestTicketAssignmentsHandler(pool *pgxpool.Pool, rdb *redis.Client) gin
 
 		assignments, err := repository.GetAssignmentsByBookingID(pool, booking.ID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load assignments"})
+			utils.InternalError(c, err, "guest assignments: failed to load assignments")
 			return
 		}
 
@@ -238,7 +238,7 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 		}
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, retryMethod)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
+			utils.InternalError(c, err, "guest retry payment: failed to initialize payment")
 			return
 		}
 
@@ -284,7 +284,7 @@ func GuestStartPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize payment"})
+			utils.InternalError(c, err, "guest start payment: failed to initialize payment")
 			return
 		}
 
