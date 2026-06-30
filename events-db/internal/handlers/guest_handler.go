@@ -57,6 +57,28 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 			return
 		}
 
+		// Free event — skip the gateway entirely. Paystack rejects a R0 amount
+		// ("Invalid Amount Sent"), so confirm the booking immediately and let the
+		// worker create ticket assignments / QR / email, identical to the
+		// post-payment flow for paid bookings.
+		if booking.TotalAmount == 0 {
+			if err := repository.ConfirmBooking(pool, booking.ID); err != nil {
+				utils.InternalError(c, err, "guest checkout: failed to confirm free booking")
+				return
+			}
+			paymentService.EnqueueJob(booking.ID)
+			c.JSON(http.StatusCreated, models.BookingResponse{
+				BookingID:     booking.ID,
+				BookingNumber: booking.BookingNumber,
+				TotalAmount:   0,
+				Currency:      booking.Currency,
+				ClientToken:   "",
+				ExpiresAt:     booking.CreatedAt.Add(15 * time.Minute),
+				IsGuest:       true,
+			})
+			return
+		}
+
 		method := dto.PaymentMethod
 		if method == "" {
 			method = models.PaymentCreditCard
