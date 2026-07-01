@@ -100,7 +100,7 @@ func CreateBookingHandler(
 
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize payment"})
+			utils.InternalError(c, err, "checkout: failed to initialize payment")
 			return
 		}
 		c.JSON(http.StatusCreated, models.BookingResponse{
