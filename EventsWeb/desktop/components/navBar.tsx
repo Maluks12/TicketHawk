@@ -5,54 +5,40 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useFilterStore } from '@/store/filterStore';
 import { useAppTheme } from '@/themes/colors';
-import {
-  ShoppingCart, Menu, X, MapPin, ChevronDown,
-  Home, ShoppingBag, Search, Ticket, User,
-} from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
-import { getCart, getCachedSessionId } from '@/lib/api';
-
-// ── Cart badge button ──────────────────────────────────────────────────────────
-function CartButton() {
-  const router     = useRouter();
-  const { colors } = useAppTheme();
-  const [count, setCount] = useState(0);
-
-  const refresh = useCallback(async () => {
-    try {
-      const sid  = await getCachedSessionId();
-      const data = await getCart(sid);
-      setCount(data?.total_items ?? 0);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [refresh]);
-
-  return (
-    <button onClick={() => router.push('/cart')} className="relative p-1">
-      <ShoppingCart size={22} color={colors.text} />
-      {count > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] rounded-full bg-[#FF2D55] text-white text-[9px] font-black flex items-center justify-center border border-black/30 px-0.5">
-          {count > 9 ? '9+' : count}
-        </span>
-      )}
-    </button>
-  );
-}
+import { Menu, X, MapPin, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 // ── Nav links config ───────────────────────────────────────────────────────────
 const NAV_LINKS = [
-  { href: '/',        label: 'Home',    Icon: Home        },
-  { href: '/merch',   label: 'Drops',   Icon: ShoppingBag },
-  { href: '/search',  label: 'Search',  Icon: Search      },
-  { href: '/tickets', label: 'Tickets', Icon: Ticket      },
-  { href: '/profile', label: 'Profile', Icon: User        },
+  { href: '/',        label: 'Home'    },
+  { href: '/merch',   label: 'Drops'   },
+  { href: '/search',  label: 'Search'  },
+  { href: '/tickets', label: 'Tickets' },
+  { href: '/profile', label: 'Profile' },
 ];
+
+// ── Nav pill button (desktop) ───────────────────────────────────────────────────
+function NavPill({ href, label, active }: { href: string; label: string; active: boolean }) {
+  const { colors } = useAppTheme();
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <Link
+      href={href}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="px-4 py-[9px] rounded-full text-[12.5px] font-bold tracking-[0.6px] transition-all duration-200 ease-out"
+      style={{
+        backgroundColor: active ? '#FF2D55' : hovered ? colors.sectionCardBg : 'transparent',
+        color: active ? '#ffffff' : hovered ? colors.text : colors.iconColor,
+        boxShadow: active ? '0 4px 14px rgba(255,45,85,0.35)' : 'none',
+        transform: hovered && !active ? 'translateY(-1px)' : 'translateY(0)',
+      }}
+    >
+      {label.toUpperCase()}
+    </Link>
+  );
+}
 
 // ── NavBar ─────────────────────────────────────────────────────────────────────
 export default function NavBar() {
@@ -92,64 +78,41 @@ export default function NavBar() {
           borderBottom: `1px solid ${colors.dividerColor}`,
         }}
       >
-        {/* LEFT: brand logo ─────────────────────────────────────────────── */}
-        <div className="flex-none">
+        {/* LEFT: brand logo + nav links ───────────────────────────────────── */}
+        <div className="flex-none flex items-center gap-8">
           <Link href="/" className="text-[17px] font-black tracking-wide" style={{ color: colors.text }}>
             EVENTS<span style={{ color: '#FF2D55' }}>APP</span>
           </Link>
+
+          {/* nav links — desktop only */}
+          <nav className="hidden md:flex items-center gap-1.5">
+            {NAV_LINKS.map(({ href, label }) => {
+              const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+              return <NavPill key={href} href={href} label={label} active={active} />;
+            })}
+          </nav>
         </div>
 
-        {/* CENTER: nav icons — desktop only ────────────────────────────── */}
-        <nav className="hidden md:flex flex-1 items-center justify-center gap-1">
-          {NAV_LINKS.map(({ href, label, Icon }) => {
-            const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-            return (
-              <Link
-                key={href}
-                href={href}
-                className="flex flex-col items-center gap-[3px] px-5 py-[7px] rounded-lg transition-colors duration-150"
-                style={{ backgroundColor: active ? 'rgba(255,255,255,0.07)' : 'transparent' }}
-              >
-                <Icon size={21} color={active ? colors.text : colors.iconColor} />
-                <span
-                  className="text-[10px] font-bold tracking-[0.7px]"
-                  style={{ color: active ? colors.text : colors.iconColor }}
-                >
-                  {label.toUpperCase()}
-                </span>
-                {/* active indicator dot */}
-                <div
-                  className="h-[3px] w-[3px] rounded-full transition-opacity duration-200"
-                  style={{
-                    backgroundColor: '#FF2D55',
-                    opacity: active ? 1 : 0,
-                  }}
-                />
-              </Link>
-            );
-          })}
-        </nav>
+        {/* RIGHT: filter pill (homepage only) + mobile hamburger ─────────── */}
+        <div className="flex-none flex items-center gap-3 ml-auto">
 
-        {/* RIGHT: filter pill + cart + mobile hamburger ────────────────── */}
-        <div className="flex-none flex items-center gap-3 ml-auto md:ml-0">
-
-          {/* Filter pill — desktop only */}
-          <button
-            onClick={() => setFilterOpen(true)}
-            className="hidden md:flex items-center gap-2 h-11 px-4 rounded-full text-[13px] font-semibold transition-all duration-150 hover:opacity-80 hover:scale-[1.02]"
-            style={{
-              backgroundColor: colors.sectionCardBg,
-              border: `1px solid ${colors.dividerColor}`,
-            }}
-          >
-            <MapPin size={18} color="#FF2D55" />
-            <span style={{ color: colors.text }}>{locationLabel}</span>
-            <span className="opacity-30" style={{ color: colors.text }}>·</span>
-            <span style={{ color: colors.subText }}>{dateLabelText}</span>
-            <ChevronDown size={15} color={colors.subText} />
-          </button>
-
-          <CartButton />
+          {/* Filter pill — desktop only, homepage only */}
+          {pathname === '/' && (
+            <button
+              onClick={() => setFilterOpen(true)}
+              className="hidden md:flex items-center gap-2 h-11 px-4 rounded-full text-[13px] font-semibold transition-all duration-150 hover:opacity-80 hover:scale-[1.02]"
+              style={{
+                backgroundColor: colors.sectionCardBg,
+                border: `1px solid ${colors.dividerColor}`,
+              }}
+            >
+              <MapPin size={18} color="#FF2D55" />
+              <span style={{ color: colors.text }}>{locationLabel}</span>
+              <span className="opacity-30" style={{ color: colors.text }}>·</span>
+              <span style={{ color: colors.subText }}>{dateLabelText}</span>
+              <ChevronDown size={15} color={colors.subText} />
+            </button>
+          )}
 
           {/* Hamburger — mobile only */}
           <button
@@ -173,44 +136,44 @@ export default function NavBar() {
         >
           <nav className="flex-1 flex flex-col pt-4 px-8 overflow-y-auto">
 
-            {/* Filter row at top of mobile menu */}
-            <button
-              onClick={() => { setMenuOpen(false); setFilterOpen(true); }}
-              className="flex items-center gap-4 py-5 border-b"
-              style={{ borderColor: colors.dividerColor }}
-            >
-              <MapPin size={24} color={colors.iconColor} />
-              <div className="text-left">
-                <p className="text-[17px] font-bold leading-tight" style={{ color: colors.text }}>
-                  {locationLabel}
-                </p>
-                <p className="text-[12px] mt-0.5" style={{ color: colors.subText }}>
-                  {dateLabelText}
-                </p>
-              </div>
-              <ChevronDown size={16} color={colors.subText} className="ml-auto" />
-            </button>
+            {/* Filter row at top of mobile menu — homepage only */}
+            {pathname === '/' && (
+              <button
+                onClick={() => { setMenuOpen(false); setFilterOpen(true); }}
+                className="flex items-center gap-4 py-5 border-b"
+                style={{ borderColor: colors.dividerColor }}
+              >
+                <MapPin size={24} color={colors.iconColor} />
+                <div className="text-left">
+                  <p className="text-[17px] font-bold leading-tight" style={{ color: colors.text }}>
+                    {locationLabel}
+                  </p>
+                  <p className="text-[12px] mt-0.5" style={{ color: colors.subText }}>
+                    {dateLabelText}
+                  </p>
+                </div>
+                <ChevronDown size={16} color={colors.subText} className="ml-auto" />
+              </button>
+            )}
 
             {/* Nav links */}
-            {NAV_LINKS.map(({ href, label, Icon }) => {
+            {NAV_LINKS.map(({ href, label }) => {
               const active = pathname === href || (href !== '/' && pathname.startsWith(href));
               return (
                 <Link
                   key={href}
                   href={href}
-                  className="flex items-center gap-5 py-5 border-b"
-                  style={{ borderColor: colors.dividerColor }}
+                  className="flex items-center gap-3 py-4 px-4 my-1 rounded-2xl transition-colors duration-150"
+                  style={{
+                    backgroundColor: active ? '#FF2D55' : 'transparent',
+                  }}
                 >
-                  <Icon size={25} color={active ? '#FF2D55' : colors.iconColor} />
                   <span
-                    className="text-[21px] font-bold"
-                    style={{ color: active ? '#FF2D55' : colors.text }}
+                    className="text-[19px] font-bold"
+                    style={{ color: active ? '#ffffff' : colors.text }}
                   >
                     {label}
                   </span>
-                  {active && (
-                    <div className="ml-auto w-[7px] h-[7px] rounded-full bg-[#FF2D55]" />
-                  )}
                 </Link>
               );
             })}
