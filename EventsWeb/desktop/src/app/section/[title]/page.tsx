@@ -334,7 +334,7 @@ export default function SectionPage() {
               <GridCard
                 key={item.id}
                 item={item}
-                rank={isTrending ? i + 2 : undefined}
+                rank={undefined}
                 onPress={handlePress}
                 colors={colors}
                 isDark={isDark}

@@ -448,6 +448,12 @@ export default function HomePage() {
     router.push(`/events/${event.id}`);
   }, [setSelectedEvent, router]);
 
+  const handleBuyTickets = useCallback((event: Event) => {
+    setSelectedEvent(event);
+    sessionStorage.setItem(`event_detail_visited_${event.id}`, '1');
+    router.push(`/events/${event.id}/purchase`);
+  }, [setSelectedEvent, router]);
+
   const handleViewAll = useCallback((sectionId: string, title: string, events: Event[]) => {
     setSectionMeta({ title, sectionId, events });
     router.push(`/section/${encodeURIComponent(title)}`);
@@ -512,7 +518,7 @@ export default function HomePage() {
               <div
                 key={evt.id}
                 className="absolute inset-0 w-full h-full transition-opacity duration-500"
-                style={{ opacity: idx === featuredIndex ? 1 : 0, pointerEvents: idx === featuredIndex ? 'auto' : 'none' }}
+                style={{ opacity: idx === featuredIndex ? 1 : 0, pointerEvents: idx === featuredIndex ? 'auto' : 'none', zIndex: idx === featuredIndex ? 1 : 0 }}
               >
                 {/* Background image */}
                 {(evt.banner_image_url ?? evt.cover_image_url) && (
@@ -522,10 +528,9 @@ export default function HomePage() {
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                 )}
-                {/* Clickable gradient overlay */}
+                {/* Gradient overlay — visual only, no click handler */}
                 <div
-                  className="absolute inset-0 cursor-pointer"
-                  onClick={() => handleEventPress(evt)}
+                  className="absolute inset-0"
                   style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.75) 35%, rgba(0,0,0,0.1) 65%, transparent 100%)' }}
                 />
                 {/* Content — category badge, title, description, then buttons+dots on same row */}
@@ -552,14 +557,14 @@ export default function HomePage() {
                   <div className="flex items-end justify-between pointer-events-auto">
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => handleEventPress(evt)}
+                        onClick={(e) => { e.stopPropagation(); handleBuyTickets(evt); }}
                         className="bg-[#FF2D55] text-white font-extrabold tracking-[1.5px] rounded-[5px]"
                         style={{ padding: '12px 26px', fontSize: 13 }}
                       >
                         🎟 GET TICKETS
                       </button>
                       <button
-                        onClick={() => handleEventPress(evt)}
+                        onClick={(e) => { e.stopPropagation(); handleEventPress(evt); }}
                         className="bg-[#1c2e61] text-white font-bold tracking-[1px] rounded-[5px]"
                         style={{ padding: '12px 26px', fontSize: 13 }}
                       >
@@ -761,7 +766,7 @@ export default function HomePage() {
                     <div className="flex items-center gap-4">
                       {/* Solid accent-coloured CTA */}
                       <button
-                        onClick={() => handleEventPress(evt)}
+                        onClick={(e) => { e.stopPropagation(); handleBuyTickets(evt); }}
                         className="px-6 py-[11px] rounded-[8px] font-extrabold text-[12px] tracking-[1px]"
                         style={{
                           backgroundColor: spotlightConfig.accentColor,
