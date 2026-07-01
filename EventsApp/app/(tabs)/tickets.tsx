@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
+import { cacheBookingsList, getCachedBookingsList, syncManyOffline } from '../../lib/offline';
 import { s, sheet } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
 
@@ -426,7 +427,16 @@ export default function TicketsScreen() {
         return aUp ? aT - bT : bT - aT;
       });
       setApiBookings(sorted);
-    } catch (e: any) { setError(e?.response?.data?.error ?? 'Failed to load tickets'); }
+      // Cache the list for offline viewing + pull each confirmed booking's
+      // offline entry tokens in the background ("saved as soon as bought").
+      cacheBookingsList(sorted);
+      syncManyOffline(sorted as any);
+    } catch (e: any) {
+      // Offline / network down — fall back to the last cached list instead of erroring.
+      const cached = await getCachedBookingsList<Booking>();
+      if (cached.length) setApiBookings(cached);
+      else setError(e?.response?.data?.error ?? 'Failed to load tickets');
+    }
   }, [user]);
 
   const load    = useCallback(async () => { setLoading(true); await fetchApiBookings(); setLoading(false); }, [fetchApiBookings]);

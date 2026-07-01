@@ -19,6 +19,7 @@ import {
   api,
 } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
+import { syncBookingOffline } from '../../lib/offline';
 import { s, sheet } from '../../styles/booking';
 import { RotatingQR } from '../../components/RotatingQR';
 
@@ -491,6 +492,16 @@ export default function BookingDetailScreen() {
           : await getTicketAssignments(id as string).catch(() => []);
         setBooking(bookingDetail);
         setAssignments(assignments);
+
+        // Cache offline entry tokens the moment the ticket is viewed online, so
+        // it still scans at the gate with no signal. Best-effort; never blocks.
+        if (bookingDetail?.booking_status === 'confirmed') {
+          const realId = bookingDetail.id ?? (id as string);
+          syncBookingOffline(
+            realId,
+            guest ? { bookingNumber: guest.bookingNumber, email: guest.email } : undefined,
+          );
+        }
       } catch {} finally { setLoading(false); }
     };
     load();
