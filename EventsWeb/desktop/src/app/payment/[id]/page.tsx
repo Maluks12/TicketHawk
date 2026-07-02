@@ -108,9 +108,10 @@ export default function PaymentPage({
     try { router.back(); } catch { router.replace('/'); }
   }, [router]);
 
-  // Cleanup on unmount — clear timer and close any lingering popup
+  // Cleanup on unmount — clear timer, abort poll, close any lingering popup
   useEffect(() => () => {
     if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    pollAbortRef.current?.abort();
     try { popupRef.current?.close(); } catch {}
   }, []);
 
@@ -152,13 +153,20 @@ export default function PaymentPage({
   );
 
   // ── Core checkout runner ─────────────────────────────────────────────────
+  const pollAbortRef = useRef<AbortController | null>(null);
+
   const run = useCallback(
-    async (checkoutUrl: string) => {
+    async (checkoutUrl: string, isRetry = false) => {
       if (!checkoutUrl) {
         setPhase('failed');
         setMessage('Missing checkout link. Please go back and try again.');
         return;
       }
+
+      // Cancel any previous in-flight poll
+      pollAbortRef.current?.abort();
+      const abortCtrl = new AbortController();
+      pollAbortRef.current = abortCtrl;
 
       setPhase('in_popup');
       setMessage('Complete your payment in the secure window…');
@@ -166,28 +174,28 @@ export default function PaymentPage({
       const outcome = await openGatewayCheckout(checkoutUrl);
 
       if (outcome.type === 'blocked') {
-        // Popup was blocked — redirect the current tab to the payment page.
-        // The backend's /payments/return will redirect back here when done.
         setMessage('Popup blocked — redirecting to payment page…');
         window.location.href = checkoutUrl;
         return;
       }
 
-      // Popup closed (either the gateway redirected or the user closed it).
+      if (abortCtrl.signal.aborted) return;
+
       setPhase('confirming');
       setMessage('Confirming your payment…');
 
-      // On web we treat both popup-close reasons identically: poll and let the
-      // server tell us the real outcome. We use a brief poll (9 s) first and
-      // fall through to a final direct read if it times out — same as mobile.
+      // On retry, ignore stale 'failed' status for 20 s while webhook arrives
+      const ignoreFailedMs = isRetry ? 20_000 : 0;
+
       try {
-        const status = await pollPayment(bookingId, 2500, 150_000, guest);
+        const status = await pollPayment(bookingId, 2500, 15_000, guest, ignoreFailedMs, abortCtrl.signal);
+        if (abortCtrl.signal.aborted) return;
         finishFromStatus(status, false);
       } catch {
-        // Timed out — do one last direct read before giving up.
+        if (abortCtrl.signal.aborted) return;
         try {
           const status = await fetchPaymentStatus(bookingId, guest);
-          finishFromStatus(status, true);
+          finishFromStatus(status, status.payment_status !== 'completed');
         } catch {
           finishFromStatus(null, true);
         }
@@ -205,14 +213,15 @@ export default function PaymentPage({
 
   // ── Retry ────────────────────────────────────────────────────────────────
   const retry = useCallback(async () => {
+    if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     setPhase('opening');
     setMessage('Restarting secure checkout…');
     try {
       const started = guest
         ? await retryGuestPayment(guest.bookingNumber, guest.email)
         : await retryBookingPayment(bookingId, (method as PaymentMethod) || 'card');
-      startedRef.current = false; // allow run() to fire again
-      run(started.authorization_url);
+      // Call run directly — don't reset startedRef or the mount effect re-fires
+      run(started.authorization_url, true);
     } catch {
       setPhase('failed');
       setMessage("Couldn't restart checkout. Please go back and start over.");
@@ -310,6 +319,30 @@ export default function PaymentPage({
               Complete your {methodLabel} payment there — this page will update
               automatically once your payment is confirmed. Do not close this tab.
             </div>
+          )}
+
+          {/* ── Manual check button — shown after 3 s in case focus detection fails ── */}
+          {inPopup && (
+            <button
+              onClick={() => {
+                pollAbortRef.current?.abort();
+                const abortCtrl = new AbortController();
+                pollAbortRef.current = abortCtrl;
+                setPhase('confirming');
+                setMessage('Confirming your payment…');
+                fetchPaymentStatus(bookingId, guest)
+                  .then(s => finishFromStatus(s, s.payment_status !== 'completed'))
+                  .catch(() => finishFromStatus(null, true));
+              }}
+              style={{
+                background: 'none', border: `1px solid ${border}`,
+                borderRadius: 12, padding: '11px 0', fontWeight: 600,
+                fontSize: 14, cursor: 'pointer', color: colors.subText,
+                width: '100%',
+              }}
+            >
+              I've closed the payment window — check status
+            </button>
           )}
 
           {/* ── Paystack / PayPal badge ── */}

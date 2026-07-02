@@ -89,23 +89,37 @@ export function openGatewayCheckout(authorizationUrl: string): Promise<CheckoutO
 
     const popup = window.open(authorizationUrl, 'eventspay_checkout', features);
 
-    if (!popup || popup.closed) {
-      // Popup was blocked immediately.
+    if (!popup) {
       resolve({ type: 'blocked' });
       return;
     }
 
-    // Poll every 500 ms — cheap and reliable across all browsers.
+    let resolved = false;
+    const done = () => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      try { popup.close(); } catch {}
+      resolve({ type: 'returned' });
+    };
+
+    // popup.closed is unreliable cross-origin (always returns false in Chrome
+    // when the popup navigated to Paystack). Keep it as a best-effort check.
     const timer = setInterval(() => {
-      try {
-        if (popup.closed) {
-          clearInterval(timer);
-          resolve({ type: 'returned' });
-        }
-      } catch {
-        // Cross-origin access check can throw; ignore — popup is still open.
-      }
+      try { if (popup.closed) done(); } catch {}
     }, 500);
+
+    // Primary detection: when user closes the popup and clicks back to this
+    // tab, the main window fires a focus event. We delay 1 s before listening
+    // so the focus that fires when the popup first opens doesn't trigger it.
+    let focusArmed = false;
+    setTimeout(() => { focusArmed = true; }, 1000);
+
+    const onFocus = () => {
+      if (focusArmed) done();
+    };
+    window.addEventListener('focus', onFocus);
   });
 }
 
@@ -204,28 +218,34 @@ export async function retryGuestPayment(
  * failed / refunded) or the timeout elapses. Returns the last status seen.
  */
 export async function pollPayment(
-  bookingId: string,
-  intervalMs = 2500,
-  timeoutMs  = 150_000,
-  guest?: GuestRef,
+  bookingId      : string,
+  intervalMs     = 2500,
+  timeoutMs      = 150_000,
+  guest?         : GuestRef,
+  ignoreFailedMs = 0,
+  signal?        : AbortSignal,
 ): Promise<PaymentStatus> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline          = Date.now() + timeoutMs;
+  const ignoreFailedUntil = Date.now() + ignoreFailedMs;
   let last: PaymentStatus | null = null;
 
   while (Date.now() < deadline) {
+    if (signal?.aborted) break;
     try {
       last = await fetchPaymentStatus(bookingId, guest);
-      if (
-        last.payment_status === 'completed' ||
-        last.payment_status === 'failed'    ||
-        last.payment_status === 'refunded'
-      ) {
+      const isTerminalFailed =
+        (last.payment_status === 'failed' || last.payment_status === 'refunded') &&
+        Date.now() >= ignoreFailedUntil;
+      if (last.payment_status === 'completed' || isTerminalFailed) {
         return last;
       }
     } catch {
       // Transient network / 5xx — keep polling until the deadline.
     }
-    await sleep(intervalMs);
+    await new Promise<void>((res) => {
+      const t = setTimeout(res, intervalMs);
+      signal?.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true });
+    });
   }
 
   if (last) return last;

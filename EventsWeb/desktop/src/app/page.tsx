@@ -158,8 +158,8 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
           <span className="text-white text-[9px] font-extrabold tracking-[1.2px]">LIVE</span>
         </div>
       )}
-      <div className="absolute top-3 right-3 bg-black/60 rounded-[6px] px-2.5 py-1">
-        <span className="text-white text-[10px] font-bold">{formatPrice(item.price)}</span>
+      <div className="absolute top-3 right-3 min-w-[34px] h-[22px] bg-black/60 rounded-[6px] px-2 flex items-center justify-center">
+        <span className="text-white text-[10px] font-bold leading-none">{formatPrice(item.price)}</span>
       </div>
     </div>
     <div className="pt-3">
@@ -180,8 +180,8 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       )}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.72), rgba(0,0,0,0.18), transparent)' }} />
       <span className="absolute top-1.5 left-3 text-[60px] font-black text-white leading-none" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)', letterSpacing: -2 }}>{rank}</span>
-      <div className="absolute top-3 right-3 bg-black/60 rounded-[6px] px-2.5 py-1">
-        <span className="text-white text-[10px] font-bold">{formatPrice(item.price)}</span>
+      <div className="absolute top-3 right-3 min-w-[34px] h-[22px] bg-black/60 rounded-[6px] px-2 flex items-center justify-center">
+        <span className="text-white text-[10px] font-bold leading-none">{formatPrice(item.price)}</span>
       </div>
     </div>
     <div className="pt-3">
