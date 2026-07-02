@@ -184,3 +184,98 @@ export async function syncManyOffline(
     }
   }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Booking DETAIL cache — the screen data (booking + assignments), as opposed to
+// the entry tokens above. The detail screen falls back to this when its network
+// fetch fails, so a previously-viewed ticket still renders (and can host the
+// offline QR) with no signal.
+// ═════════════════════════════════════════════════════════════════════════════
+const K_DETAILS = 'th:offline:details'; // { [bookingId]: CachedDetail }
+
+interface CachedDetail {
+  booking: any;
+  assignments: any[];
+  booking_number?: string; // secondary key for guest lookups
+  cached_at: string;
+}
+
+type DetailMap = Record<string, CachedDetail>;
+
+async function readDetails(): Promise<DetailMap> {
+  try {
+    const raw = await AsyncStorage.getItem(K_DETAILS);
+    return raw ? (JSON.parse(raw) as DetailMap) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Cache a booking's detail + assignments after a successful online load. */
+export async function cacheBookingDetail(booking: any, assignments: any[]): Promise<void> {
+  try {
+    if (!booking?.id) return;
+    const map = await readDetails();
+    map[booking.id] = {
+      booking,
+      assignments: assignments ?? [],
+      booking_number: booking.booking_number,
+      cached_at: new Date().toISOString(),
+    };
+    await AsyncStorage.setItem(K_DETAILS, JSON.stringify(map));
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Cached detail by booking id (authed) or booking number (guest), or null. */
+export async function getCachedBookingDetail(opts: {
+  bookingId?: string;
+  bookingNumber?: string;
+}): Promise<{ booking: any; assignments: any[] } | null> {
+  const map = await readDetails();
+  if (opts.bookingId && map[opts.bookingId]) {
+    const d = map[opts.bookingId];
+    return { booking: d.booking, assignments: d.assignments };
+  }
+  if (opts.bookingNumber) {
+    for (const d of Object.values(map)) {
+      if (d.booking_number === opts.bookingNumber) {
+        return { booking: d.booking, assignments: d.assignments };
+      }
+    }
+  }
+  return null;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Guest ticket persistence — guests have no account, so nothing restores their
+// "list" on a cold start. Every successful guest lookup is saved here; the
+// Tickets tab shows these under the lookup form so a guest can re-open their
+// ticket offline without re-entering (or re-fetching) anything.
+// ═════════════════════════════════════════════════════════════════════════════
+const K_GUESTS = 'th:offline:guest_tickets'; // { [booking_number]: booking }
+
+export async function saveGuestTicket(booking: any, email: string): Promise<void> {
+  try {
+    const bn = booking?.booking_number;
+    if (!bn) return;
+    const raw = await AsyncStorage.getItem(K_GUESTS);
+    const map = raw ? (JSON.parse(raw) as Record<string, any>) : {};
+    // Stamp the fields TicketCard's guest navigation relies on.
+    map[bn] = { ...booking, is_guest: true, attendee_email: email };
+    await AsyncStorage.setItem(K_GUESTS, JSON.stringify(map));
+  } catch {
+    /* best-effort */
+  }
+}
+
+export async function getGuestTickets<T>(): Promise<T[]> {
+  try {
+    const raw = await AsyncStorage.getItem(K_GUESTS);
+    if (!raw) return [];
+    return Object.values(JSON.parse(raw) as Record<string, T>);
+  } catch {
+    return [];
+  }
+}

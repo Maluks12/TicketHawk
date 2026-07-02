@@ -19,7 +19,7 @@ import {
   api,
 } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
-import { syncBookingOffline } from '../../lib/offline';
+import { syncBookingOffline, cacheBookingDetail, getCachedBookingDetail } from '../../lib/offline';
 import { s, sheet } from '../../styles/booking';
 import { RotatingQR } from '../../components/RotatingQR';
 
@@ -492,6 +492,8 @@ export default function BookingDetailScreen() {
           : await getTicketAssignments(id as string).catch(() => []);
         setBooking(bookingDetail);
         setAssignments(assignments);
+        // Cache the screen data itself so this ticket still renders offline.
+        cacheBookingDetail(bookingDetail, assignments);
 
         // Cache offline entry tokens the moment the ticket is viewed online, so
         // it still scans at the gate with no signal. Best-effort; never blocks.
@@ -502,7 +504,17 @@ export default function BookingDetailScreen() {
             guest ? { bookingNumber: guest.bookingNumber, email: guest.email } : undefined,
           );
         }
-      } catch {} finally { setLoading(false); }
+      } catch {
+        // Offline / network failure — fall back to the cached copy so the
+        // ticket (and its offline QR) still renders with no signal.
+        const cached = await getCachedBookingDetail(
+          guest ? { bookingNumber: guest.bookingNumber } : { bookingId: id as string },
+        );
+        if (cached) {
+          setBooking(cached.booking);
+          setAssignments((cached.assignments ?? []) as TicketAssignment[]);
+        }
+      } finally { setLoading(false); }
     };
     load();
   }, [id, bookingNumber, email]);
