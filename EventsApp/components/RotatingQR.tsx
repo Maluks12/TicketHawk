@@ -8,6 +8,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../lib/api';
+import { getOfflineIndividualToken, getOfflinePoolToken } from '../lib/offline';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Pro
   const [secsLeft,  setSecsLeft]  = useState(30);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(false);
+  // Offline fallback: the cached, self-contained token we show with no signal.
+  const [offlineToken, setOfflineToken] = useState<string | null>(null);
 
   // Animated progress bar: 1 = full, 0 = empty
   const progressAnim = useRef(new Animated.Value(1)).current;
@@ -74,7 +77,32 @@ export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Pro
     animRunningRef.current.start();
   }, [progressAnim, progressAnim2]);
 
-  // ── Fetch a new token ──────────────────────────────────────────────────────
+  // ── Load a cached offline token as a fallback when the network fails ───────
+  const loadOfflineFallback = useCallback(async (): Promise<boolean> => {
+    try {
+      let tok: string | null = null;
+      if (pool) {
+        tok = await getOfflinePoolToken({
+          bookingId: pool.bookingId,
+          bookingNumber: guest?.bookingNumber,
+        });
+      } else if (assignmentId) {
+        tok = await getOfflineIndividualToken(assignmentId);
+      }
+      if (!mountedRef.current) return false;
+      if (tok) {
+        setOfflineToken(tok);
+        setError(false);
+        setLoading(false);
+        return true;
+      }
+    } catch {
+      /* fall through to the error state */
+    }
+    return false;
+  }, [pool, pool?.bookingId, guest?.bookingNumber, assignmentId]);
+
+  // ── Fetch a new (live) token ──────────────────────────────────────────────
   const fetchToken = useCallback(async () => {
     try {
       // Resolve the endpoint by mode: pool vs individual, guest vs authed.
@@ -104,6 +132,7 @@ export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Pro
 
       expiresAtRef.current = exp;
       setToken(token);
+      setOfflineToken(null); // back online — drop the static fallback
       setWindowSec(window_sec);
       setSecsLeft(Math.ceil(msLeft / 1000));
       setError(false);
@@ -125,13 +154,21 @@ export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Pro
       refreshTimerRef.current = setTimeout(fetchToken, Math.max(msLeft - 2000, 1000));
     } catch {
       if (!mountedRef.current) return;
-      setError(true);
-      setLoading(false);
-      // Retry in 5 s
+
+      // Network (or auth) failed — try the cached offline token before erroring.
+      const haveOffline = await loadOfflineFallback();
+      if (!mountedRef.current) return;
+
+      if (!haveOffline) {
+        setError(true);
+        setLoading(false);
+      }
+      // Either way, keep trying to come back online so we resume the live QR
+      // (and refresh the countdown) the moment signal returns.
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-      refreshTimerRef.current = setTimeout(fetchToken, 5000);
+      refreshTimerRef.current = setTimeout(fetchToken, haveOffline ? 15000 : 5000);
     }
-  }, [assignmentId, animateBar, guest?.bookingNumber, guest?.email, pool, pool?.bookingId, onRemaining]);
+  }, [assignmentId, animateBar, guest?.bookingNumber, guest?.email, pool, pool?.bookingId, onRemaining, loadOfflineFallback]);
 
   // ── Mount / unmount ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -147,15 +184,16 @@ export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Pro
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        // If the stored expiry has already passed, fetch immediately
-        if (Date.now() >= expiresAtRef.current - 1000) {
+        // If we're on the offline fallback, or the stored expiry has passed,
+        // try for a fresh live token immediately.
+        if (offlineToken || Date.now() >= expiresAtRef.current - 1000) {
           clearTimers();
           fetchToken();
         }
       }
     });
     return () => sub.remove();
-  }, [fetchToken, clearTimers]);
+  }, [fetchToken, clearTimers, offlineToken]);
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const urgency: 'ok' | 'warn' | 'crit' =
@@ -176,6 +214,35 @@ export function RotatingQR({ size, assignmentId, guest, pool, onRemaining }: Pro
       <View style={[styles.placeholder, { width: size, height: size }]}>
         <ActivityIndicator color="rgba(255,255,255,0.35)" size="small" />
         <Text style={styles.placeholderText}>Loading ticket…</Text>
+      </View>
+    );
+  }
+
+  // ── Offline fallback: static cached token, no live countdown ───────────────
+  if (offlineToken) {
+    return (
+      <View style={styles.wrapper}>
+        <View style={[styles.qrBox, { width: size, height: size, padding: qrPadding }]}>
+          <QRCode
+            value={offlineToken}
+            size={qrCodeSize}
+            color="#0a0a0a"
+            backgroundColor="#ffffff"
+            quietZone={6}
+          />
+        </View>
+
+        {/* Offline badge in place of the live progress bar */}
+        <View style={[styles.barTrack, { width: size }]}>
+          <View style={[styles.barFill, { backgroundColor: '#8a8f98', width: '100%' }]} />
+        </View>
+
+        <View style={styles.statusRow}>
+          <Ionicons name="cloud-offline-outline" size={13} color="#c7ccd4" />
+          <Text style={[styles.statusText, { color: '#c7ccd4' }]}>
+            Offline ticket · valid for entry
+          </Text>
+        </View>
       </View>
     );
   }

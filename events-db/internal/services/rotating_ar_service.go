@@ -21,9 +21,26 @@ const QRWindowSeconds = 30
 // This gives the app enough time to display the code before it expires.
 const qrWindowTolerance = 1
 
-// RotatingQRService generates and verifies HMAC-signed time-windowed QR tokens.
-// Tokens are purely computational — no DB writes on generation, no stored secrets per-ticket.
-// The only state needed for verification is the shared HMAC secret in config.
+// OfflineTokenSkewSeconds is the grace period we add on top of an offline
+// token's embedded expiry to absorb device/server clock drift at the gate.
+// The expiry itself is already set to the event's admission window end
+// (event end + 2h), so this is only slop, not a real extension.
+const OfflineTokenSkewSeconds = 300 // 5 minutes
+
+// RotatingQRService generates and verifies HMAC-signed QR tokens.
+//
+// It mints two families of token from the same shared secret:
+//
+//   - Rotating tokens: bound to a 30-second time window. The app polls for a
+//     fresh one every ~28s. Screenshot-proof, but requires the holder to be
+//     online. Used for the in-app live QR.
+//   - Offline tokens: bound to an absolute expiry (the event admission window)
+//     instead of a rotating window. Self-contained, so the app can render them
+//     with no network — the fallback shown when the holder has no signal, and
+//     the payload carried inside Apple/Google Wallet passes later on.
+//
+// Both are purely computational — no DB writes on generation, no per-ticket
+// secrets. The only state needed for verification is the shared HMAC secret.
 type RotatingQRService struct {
 	cfg *config.Config
 }
@@ -43,8 +60,18 @@ type RotatingQRPayload struct {
 	BookingID    string `json:"bid"`           // bookings.id
 	EventID      string `json:"eid"`           // events.id
 	SlotNumber   int    `json:"sn,omitempty"`  // seat/slot number (individual tokens)
-	Window       int64  `json:"w"`             // unix_time / QRWindowSeconds
-	Version      int    `json:"v"`             // token version for future migrations
+
+	// Window is set on ROTATING tokens only: unix_time / QRWindowSeconds.
+	Window int64 `json:"w,omitempty"`
+
+	// Off marks an OFFLINE token. When true, verification checks Exp instead of
+	// the rotating window, and the signature comes from the offline namespace so
+	// an offline token can never be verified as (or forged from) a rotating one.
+	Off bool `json:"off,omitempty"`
+	// Exp is the absolute unix expiry for OFFLINE tokens (event admission end).
+	Exp int64 `json:"exp,omitempty"`
+
+	Version int `json:"v"` // token version for future migrations
 }
 
 // TokenTypePool marks a group pool token. Anything else (incl. empty) is treated
@@ -54,8 +81,12 @@ const TokenTypePool = "p"
 // IsPool reports whether the payload is a group pool token.
 func (p *RotatingQRPayload) IsPool() bool { return p.Type == TokenTypePool }
 
-// RotatingQRToken is returned to the app. The app renders Token as a QR code
-// and refreshes when ExpiresAt is reached (or every ~25s for smooth UX).
+// IsOffline reports whether the payload is a self-contained offline token.
+func (p *RotatingQRPayload) IsOffline() bool { return p.Off }
+
+// RotatingQRToken is returned to the app. The app renders Token as a QR code.
+// For rotating tokens it refreshes when ExpiresAt is reached (WindowSec > 0);
+// for offline tokens WindowSec is 0 and ExpiresAt is the event admission end.
 type RotatingQRToken struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -63,8 +94,8 @@ type RotatingQRToken struct {
 	IssuedAt  time.Time `json:"issued_at"`
 }
 
-// GenerateToken creates a fresh HMAC-signed token for the given assignment.
-// Call this every time the app polls for a new QR code.
+// GenerateToken creates a fresh HMAC-signed rotating token for the given
+// assignment. Call this every time the app polls for a new QR code.
 func (s *RotatingQRService) GenerateToken(
 	assignmentID, bookingID, eventID string,
 	slotNumber int,
@@ -134,16 +165,99 @@ func (s *RotatingQRService) GeneratePoolToken(
 	}, nil
 }
 
-// VerifyToken parses a rotating QR token and returns the embedded payload if valid.
+// GenerateOfflineToken mints a self-contained INDIVIDUAL token that verifies
+// without a live network round-trip on the holder's side. It is bound to an
+// absolute expiry (typically the event admission window end) rather than a
+// rotating window, so a phone with no signal can still render a valid QR that
+// the (online) scanner admits through the exact same code path as a rotating
+// token — VerifyToken returns the same payload shape.
+//
+// Trade-off: an offline token is static and therefore screenshot-shareable.
+// While the scanner is online this is fully contained by the single-entry DB
+// guard; it only becomes a real exposure once BOTH sides go offline.
+func (s *RotatingQRService) GenerateOfflineToken(
+	assignmentID, bookingID, eventID string,
+	slotNumber int,
+	exp time.Time,
+) (*RotatingQRToken, error) {
+	e := exp.Unix()
+
+	payload := RotatingQRPayload{
+		AssignmentID: assignmentID,
+		BookingID:    bookingID,
+		EventID:      eventID,
+		SlotNumber:   slotNumber,
+		Off:          true,
+		Exp:          e,
+		Version:      1,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal offline payload: %w", err)
+	}
+
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig := s.signOffline(assignmentID, e)
+	token := payloadB64 + "." + sig
+
+	return &RotatingQRToken{
+		Token:     token,
+		ExpiresAt: exp,
+		WindowSec: 0, // 0 signals to the app: static, do not poll for refresh
+		IssuedAt:  time.Now(),
+	}, nil
+}
+
+// GenerateOfflinePoolToken mints a self-contained GROUP token for a booking's
+// pool. Like the online pool token it carries the booking rather than a slot;
+// the scanner still resolves the live remaining count from the DB, so even a
+// replayed offline pool token cannot over-admit while the scanner is online.
+func (s *RotatingQRService) GenerateOfflinePoolToken(
+	bookingID, eventID string,
+	exp time.Time,
+) (*RotatingQRToken, error) {
+	e := exp.Unix()
+
+	payload := RotatingQRPayload{
+		Type:      TokenTypePool,
+		BookingID: bookingID,
+		EventID:   eventID,
+		Off:       true,
+		Exp:       e,
+		Version:   1,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal offline pool payload: %w", err)
+	}
+
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	sig := s.signOfflinePool(bookingID, e)
+	token := payloadB64 + "." + sig
+
+	return &RotatingQRToken{
+		Token:     token,
+		ExpiresAt: exp,
+		WindowSec: 0,
+		IssuedAt:  time.Now(),
+	}, nil
+}
+
+// VerifyToken parses a QR token (rotating, pool, or offline) and returns the
+// embedded payload if valid.
 //
 // Verification steps:
 //  1. Split token into payload and HMAC signature.
 //  2. Decode and unmarshal the payload.
-//  3. Check that the embedded window is current or at most qrWindowTolerance windows old.
-//  4. Recompute HMAC and compare in constant time to prevent timing attacks.
+//  3. Validity check — offline tokens are checked against their absolute Exp;
+//     rotating/pool tokens against the current time window.
+//  4. Recompute HMAC in the matching namespace and compare in constant time.
 //
-// This method does NOT check the DB — the caller (handler) must verify booking/assignment
-// status after calling this. Keeping crypto and DB concerns separate makes testing easier.
+// This method does NOT touch the DB — the caller (handler) verifies
+// booking/assignment status afterwards. Keeping crypto and DB concerns separate
+// makes testing easier and lets the same call serve every token family.
 func (s *RotatingQRService) VerifyToken(token string) (*RotatingQRPayload, error) {
 	// Find the last dot — everything before it is the payload, after is the signature.
 	dotIdx := strings.LastIndex(token, ".")
@@ -164,21 +278,38 @@ func (s *RotatingQRService) VerifyToken(token string) (*RotatingQRPayload, error
 		return nil, fmt.Errorf("invalid token payload")
 	}
 
-	// ── Check time window ────────────────────────────────────────────────────
+	// ── Offline tokens: absolute-expiry path ──────────────────────────────────
+	// Pool and individual offline tokens sign different, namespaced inputs, so
+	// the signature itself enforces the type — a token can't be cross-cast, and
+	// an offline token can never validate as a rotating one (different secret
+	// namespace) or vice-versa.
+	if payload.Off {
+		now := time.Now().Unix()
+		if payload.Exp == 0 || now > payload.Exp+OfflineTokenSkewSeconds {
+			return nil, fmt.Errorf("offline ticket expired")
+		}
+
+		var expectedSig string
+		if payload.IsPool() {
+			expectedSig = s.signOfflinePool(payload.BookingID, payload.Exp)
+		} else {
+			expectedSig = s.signOffline(payload.AssignmentID, payload.Exp)
+		}
+		if !hmac.Equal([]byte(gotSig), []byte(expectedSig)) {
+			return nil, fmt.Errorf("invalid token signature")
+		}
+		return &payload, nil
+	}
+
+	// ── Rotating / pool tokens: time-window path ──────────────────────────────
 	now := currentWindow()
 	age := now - payload.Window
 	// age > qrWindowTolerance → token is too old (expired)
-	// age < -qrWindowTolerance → token is too far in the future (severe clock skew or replay)
-	// We allow age == -1 (device clock 1 window ahead of server) to handle normal clock drift.
+	// age < -qrWindowTolerance → token is too far in the future (clock skew / replay)
 	if age > qrWindowTolerance || age < -qrWindowTolerance {
-		// age < 0 means the token is from the future (clock skew / replay from another server)
-		// age > tolerance means it's too old
 		return nil, fmt.Errorf("token expired (window age: %d)", age)
 	}
 
-	// ── Verify HMAC in constant time ─────────────────────────────────────────
-	// Pool and individual tokens sign different, namespaced inputs, so the
-	// signature itself enforces the type — a token can't be cross-cast.
 	var expectedSig string
 	if payload.IsPool() {
 		expectedSig = s.signPool(payload.BookingID, payload.Window)
@@ -207,6 +338,23 @@ func (s *RotatingQRService) sign(assignmentID string, window int64) string {
 func (s *RotatingQRService) signPool(bookingID string, window int64) string {
 	mac := hmac.New(sha256.New, []byte(s.cfg.QRHMACSecret))
 	mac.Write([]byte(fmt.Sprintf("pool:%s:%d", bookingID, window)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// signOffline computes the HMAC for an individual offline token. The "off:"
+// namespace binds the signature to the assignment and its absolute expiry and
+// keeps it fully separate from rotating and pool signature spaces.
+func (s *RotatingQRService) signOffline(assignmentID string, exp int64) string {
+	mac := hmac.New(sha256.New, []byte(s.cfg.QRHMACSecret))
+	mac.Write([]byte(fmt.Sprintf("off:%s:%d", assignmentID, exp)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// signOfflinePool computes the HMAC for a group offline token, in its own
+// "offpool:" namespace so it can't be confused with any other token family.
+func (s *RotatingQRService) signOfflinePool(bookingID string, exp int64) string {
+	mac := hmac.New(sha256.New, []byte(s.cfg.QRHMACSecret))
+	mac.Write([]byte(fmt.Sprintf("offpool:%s:%d", bookingID, exp)))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 

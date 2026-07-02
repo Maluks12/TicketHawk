@@ -214,45 +214,53 @@ func main() {
 	// ==========================================
 	// Authentication Routes
 	// ==========================================
+	// FIX 4: auth endpoints are now ALWAYS rate limited. RateLimitAuthByIP and
+	// RateLimitLoginByEmail accept a nil manager and degrade to an in-process
+	// token bucket when Redis is down (fail-safe, never open). /login also
+	// gets a per-account (email) bucket so one account can't be brute-forced
+	// from many rotating IPs.
 	auth := v1.Group("/auth")
-	if rateLimitManager != nil {
-		loginGroup := auth.Group("")
-		loginGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			// 10 attempts, refill 1 token/minute — blocks brute force without locking out real users
+
+	// ── /login ── two stacked buckets: per-IP and per-target-account ──────
+	loginGroup := auth.Group("")
+	loginGroup.Use(
+		// 10 attempts per IP, refill 1 token/minute — blocks single-IP brute force
+		middleware.RateLimitAuthByIP(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 2 * time.Hour},
-			"login"))
-		loginGroup.POST("/login", handlers.LoginHandler(pool, cfg))
+			"login"),
+		// 5 attempts per account, refill 1 token/2 minutes — blocks
+		// distributed brute force against a single email
+		middleware.RateLimitLoginByEmail(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 120.0, TTL: 2 * time.Hour},
+			"login-email"),
+	)
+	loginGroup.POST("/login", handlers.LoginHandler(pool, cfg))
 
-		registerGroup := auth.Group("")
-		registerGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			// 5 attempts, refill 1 token/10 minutes
-			ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 600.0, TTL: 2 * time.Hour},
-			"register"))
-		registerGroup.POST("/register", handlers.CreateUserhandler(pool))
+	// ── /register ──────────────────────────────────────────────────────────
+	registerGroup := auth.Group("")
+	registerGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
+		// 5 attempts, refill 1 token/10 minutes
+		ratelimit.BucketConfig{Capacity: 5, RefillRate: 1.0 / 600.0, TTL: 2 * time.Hour},
+		"register"))
+	registerGroup.POST("/register", handlers.CreateUserhandler(pool))
 
-		passwordResetGroup := auth.Group("")
-		passwordResetGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 300.0, TTL: 1 * time.Hour},
-			"password-reset"))
-		passwordResetGroup.POST("/reset_password_request", handlers.RequestPasswordResetHandler(pool, emailService, cfg))
-		passwordResetGroup.POST("/reset_password",         handlers.ResetPasswordHandler(pool))
-	} else {
-		auth.POST("/login",                  handlers.LoginHandler(pool, cfg))
-		auth.POST("/register",               handlers.CreateUserhandler(pool))
-		auth.POST("/reset_password_request", handlers.RequestPasswordResetHandler(pool, emailService, cfg))
-		auth.POST("/reset_password",         handlers.ResetPasswordHandler(pool))
-	}
+	// ── password reset ─────────────────────────────────────────────────────
+	passwordResetGroup := auth.Group("")
+	passwordResetGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
+		ratelimit.BucketConfig{Capacity: 3, RefillRate: 1.0 / 300.0, TTL: 1 * time.Hour},
+		"password-reset"))
+	passwordResetGroup.POST("/reset_password_request", handlers.RequestPasswordResetHandler(pool, emailService, cfg))
+	passwordResetGroup.POST("/reset_password", handlers.ResetPasswordHandler(pool))
 
-	if rateLimitManager != nil {
-		refreshGroup := auth.Group("")
-		refreshGroup.Use(middleware.RateLimitByIP(rateLimitManager,
-			// 20 attempts, refill 1 token/minute
-			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 1 * time.Hour},
-			"refresh"))
-		refreshGroup.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
-	} else {
-		auth.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
-	}
+	// ── /refresh ───────────────────────────────────────────────────────────
+	refreshGroup := auth.Group("")
+	refreshGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
+		// 20 attempts, refill 1 token/minute
+		ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 1 * time.Hour},
+		"refresh"))
+	refreshGroup.POST("/refresh", handlers.RefreshTokenHandler(pool, cfg))
+
+	// ── /logout ────────────────────────────────────────────────────────────
 	auth.POST("/logout", middleware.AuthMiddleware(cfg), handlers.LogoutHandler(pool))
 
 	// ==========================================
@@ -375,6 +383,7 @@ func main() {
 		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
 		guest.GET("/bookings/:bookingNumber/assignments/:assignmentId/qr", handlers.GetGuestRotatingQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/pool-qr",                      handlers.GetGuestPoolQRTokenHandler(pool, rotatingQRService))
+		guest.GET("/bookings/:bookingNumber/offline",                     handlers.GetGuestOfflineTicketsHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/payment",        handlers.GuestPaymentStatusHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/start", handlers.GuestStartPaymentHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
@@ -414,6 +423,7 @@ func main() {
 		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
 		bookings.GET("/:id/assignments",                  handlers.GetTicketAssignmentsHandler(pool))
 		bookings.GET("/:id/pool-qr",                      handlers.GetPoolQRTokenHandler(pool, rotatingQRService))
+		bookings.GET("/:id/offline",                      handlers.GetOfflineTicketsHandler(pool, rotatingQRService))
 		bookings.POST("/:id/assignments/:assignmentId",   handlers.AssignTicketHandler(pool, emailService, cfg.FrontendURLs[0]))
 		bookings.DELETE("/:id/assignments/:assignmentId", handlers.RevokeAssignmentHandler(pool))
 		bookings.POST("/:id/verify",                      handlers.VerifyQRCodeHandler(bookingRepo, eventRepo, qrService))

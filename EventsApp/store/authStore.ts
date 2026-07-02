@@ -26,6 +26,37 @@ async function clearTokens() {
   await SecureStore.deleteItemAsync('refresh_token');
 }
 
+// ── Cached user profile ───────────────────────────────────────────────────────
+// We keep the last-known profile on-device so the session can be restored with
+// NO network (e.g. arriving at a venue with no signal). It's only display data —
+// every real API call still authenticates against the server when back online.
+const USER_KEY = 'auth_user';
+
+async function saveCachedUser(user: AuthUser) {
+  try {
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
+  } catch {
+    /* best-effort — a failed cache write must not break login */
+  }
+}
+
+async function getCachedUser(): Promise<AuthUser | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(USER_KEY);
+    return raw ? (JSON.parse(raw) as AuthUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearCachedUser() {
+  try {
+    await SecureStore.deleteItemAsync(USER_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isLoading: false,
@@ -40,6 +71,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       // 2. Fetch profile (interceptor will attach the token automatically)
       const { data: user } = await getMe();
+      await saveCachedUser(user); // cache for offline session restore
       set({ user, isLoading: false, authReady: true });
     } catch (e) {
       set({ isLoading: false });
@@ -59,6 +91,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       // 3. Fetch full profile
       const { data: user } = await getMe();
+      await saveCachedUser(user); // cache for offline session restore
       set({ user, isLoading: false, authReady: true });
     } catch (e) {
       set({ isLoading: false });
@@ -69,18 +102,49 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     try { await authLogout(); } catch { /* clear locally regardless */ }
     await clearTokens();
+    await clearCachedUser();
     set({ user: null });
   },
 
   loadUser: async () => {
     try {
       const token = await SecureStore.getItemAsync('access_token');
-      if (!token) return;
-      const { data: user } = await getMe();
-      set({ user });
+      if (!token) {
+        // No token → genuinely signed out. Make sure no stale profile lingers.
+        await clearCachedUser();
+        set({ user: null });
+        return;
+      }
+
+      // Optimistically restore the cached profile FIRST, so the app is usable
+      // offline (venue with no signal) before we even try to reach the server.
+      const cached = await getCachedUser();
+      if (cached) set({ user: cached });
+
+      // Then validate against the server. The key rule: only an explicit auth
+      // rejection (server reachable, says the token is bad) logs the user out.
+      // A network failure (offline) or server hiccup must NOT drop the session —
+      // otherwise a dead-signal cold-start would wipe tokens and lock the user
+      // out of their own cached tickets.
+      try {
+        const { data: user } = await getMe();
+        await saveCachedUser(user);
+        set({ user });
+      } catch (err: any) {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          // Reached the server and it rejected us (token truly invalid / refresh
+          // also failed) → real sign-out.
+          await clearTokens();
+          await clearCachedUser();
+          set({ user: null });
+        }
+        // Otherwise: offline / network error / 5xx → keep the cached session.
+        // (If there was no cached user, we simply remain signed-out this launch.)
+      }
     } catch {
-      await clearTokens();
-      set({ user: null });
+      // Unexpected local failure (e.g. SecureStore read) — leave state as-is
+      // rather than forcing a logout.
     } finally {
       // Mark auth as settled in every path (no token, success, or failure) so
       // screens waiting on authReady always proceed.
