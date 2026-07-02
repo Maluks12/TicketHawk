@@ -7,10 +7,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrUserNotFound = errors.New("user not found")
+
+// ErrRefreshTokenReused signals that a client presented a refresh token that
+// was already rotated (revoked). This is the classic signature of a stolen
+// token being replayed, so all of the user's sessions have been revoked.
+var ErrRefreshTokenReused = errors.New("refresh token reuse detected")
 
 func CreateUser(pool *pgxpool.Pool, user *models.User) (*models.User, error) {
 	var ctx context.Context
@@ -97,7 +103,7 @@ func GetUserByID(pool *pgxpool.Pool, id string) (*models.User, error) {
 	return &user, nil
 }
 
-func DeleteUserByID(pool *pgxpool.Pool, id string)  error {
+func DeleteUserByID(pool *pgxpool.Pool, id string) error {
 	var ctx context.Context
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
@@ -121,7 +127,7 @@ func DeleteUserByID(pool *pgxpool.Pool, id string)  error {
 }
 
 func CreateRefreshToken(pool *pgxpool.Pool, userID string, tokenHash string, expiresAt time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `
 		INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
@@ -132,10 +138,21 @@ func CreateRefreshToken(pool *pgxpool.Pool, userID string, tokenHash string, exp
 	return err
 }
 
+// GetAndRevokeRefreshToken rotates a refresh token: it atomically revokes the
+// presented token and returns the owning user so a fresh pair can be issued.
+//
+// FIX 2 (reuse detection): if the presented token exists but was ALREADY
+// revoked, someone is replaying an old token — almost certainly a stolen one,
+// because the legitimate client received a new token at rotation time. In
+// that case we revoke every token the user holds and return
+// ErrRefreshTokenReused so the handler can log it. The attacker AND the
+// legitimate user are both logged out; the legitimate user simply logs in
+// again, the attacker is locked out.
 func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID string, role string, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Happy path: token is live → revoke it and hand back the user.
 	query := `
 		UPDATE refresh_tokens rt
 		SET revoked = TRUE
@@ -146,12 +163,37 @@ func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID stri
 		AND rt.expires_at > NOW()
 		RETURNING rt.user_id, u.role
 	`
-	err =  pool.QueryRow(ctx, query, tokenHash).Scan(&userID, &role)
-	return
+	err = pool.QueryRow(ctx, query, tokenHash).Scan(&userID, &role)
+	if err == nil {
+		return userID, role, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", err
+	}
+
+	// No live token matched. Check whether this hash belongs to a token that
+	// was already revoked — that's a replay of a rotated token.
+	var reusedUserID string
+	checkErr := pool.QueryRow(ctx, `
+		SELECT user_id
+		FROM refresh_tokens
+		WHERE token_hash = $1
+		  AND revoked = TRUE
+		LIMIT 1
+	`, tokenHash).Scan(&reusedUserID)
+
+	if checkErr == nil {
+		// Reuse detected → nuke the whole session family.
+		_ = RevokeAllUserTokens(pool, reusedUserID)
+		return "", "", ErrRefreshTokenReused
+	}
+
+	// Token simply doesn't exist (or is expired) — plain invalid token.
+	return "", "", err
 }
 
 func RevokeAllUserTokens(pool *pgxpool.Pool, userID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `
@@ -165,13 +207,13 @@ func RevokeAllUserTokens(pool *pgxpool.Pool, userID string) error {
 func GetUserByIDForEmail(pool *pgxpool.Pool, id string) (*models.User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
- 
+
 	query := `
 		SELECT id, email, first_name, last_name, role, created_at
 		FROM users
 		WHERE id = $1
 	`
- 
+
 	var user models.User
 	err := pool.QueryRow(ctx, query, id).Scan(
 		&user.ID,
