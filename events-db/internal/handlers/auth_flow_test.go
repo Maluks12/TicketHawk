@@ -552,7 +552,10 @@ func TestAuthLogin(t *testing.T) {
 	})
 
 	t.Run("each login issues a distinct refresh token (multi-device)", func(t *testing.T) {
-		body := map[string]string{"email": knownEmail, "password": knownPassword}
+		// Earlier subtests truncate the tables, so use a fresh user rather
+		// than the shared fixture from the top of the suite.
+		_, email := createTestUser(t, pool, knownPassword, models.RoleAttendee)
+		body := map[string]string{"email": email, "password": knownPassword}
 		w1 := doRequest(r, http.MethodPost, "/auth/login", body)
 		w2 := doRequest(r, http.MethodPost, "/auth/login", body)
 		require.Equal(t, http.StatusOK, w1.Code)
