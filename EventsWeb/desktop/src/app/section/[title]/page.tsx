@@ -187,19 +187,6 @@ function GridCard({
         >
           <span className="text-white text-[10px] font-black tracking-wide">{formatPrice(item.price)}</span>
         </div>
-        <div
-          className="absolute inset-0 flex items-center justify-center transition-opacity duration-200"
-          style={{ opacity: hovered ? 1 : 0 }}
-        >
-          <div
-            className="w-11 h-11 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(6px)' }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="white">
-              <path d="M4 2.5l10 5.5-10 5.5V2.5z" />
-            </svg>
-          </div>
-        </div>
       </div>
       <div style={{ paddingLeft: rank !== undefined ? '1.25rem' : 0 }}>
         <p
