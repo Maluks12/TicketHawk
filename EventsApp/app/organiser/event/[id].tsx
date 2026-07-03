@@ -332,6 +332,22 @@ export default function StudioEventDetail() {
           {/* Scan this event's tickets */}
           <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
             <TouchableOpacity
+              style={[styles.scanBtn, {
+                backgroundColor: 'rgba(255,255,255,0.08)',
+                marginBottom: 10,
+              }]}
+              activeOpacity={0.85}
+              onPress={() =>
+                router.push({
+                  pathname: '/organiser/staff/[eventId]',
+                  params: { eventId: ev.id, title: ev.title },
+                } as any)
+              }
+            >
+              <Ionicons name="people-outline" size={18} color="#fff" />
+              <Text style={styles.scanBtnTxt}>Manage door staff</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.scanBtn}
               activeOpacity={0.85}
               onPress={() =>
