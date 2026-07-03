@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
-import { startBookingPayment, startGuestPayment, type PaymentMethod } from '@/lib/payments';
+import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -118,6 +118,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
     }
     setAdding(true);
     setError('');
+    preopenGatewayPopup();
     try {
       const nameParts  = guestName.trim().split(' ');
       const firstName  = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');
@@ -140,6 +141,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
 
       // Free ticket — booking is already confirmed server-side.
       if ((booking as any).total_amount === 0) {
+        discardPendingPopup();
         router.replace('/tickets');
         return;
       }
@@ -176,6 +178,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       }
 
       if (!authorizationUrl) {
+        discardPendingPopup();
         setError('Payment unavailable. Please try again.');
         return;
       }
@@ -193,6 +196,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       }
       router.push(`/payment/${bookingId}?${params.toString()}`);
     } catch (e: any) {
+      discardPendingPopup();
       setError(e?.response?.data?.error ?? 'Failed to create booking. Please try again.');
     } finally {
       setAdding(false);

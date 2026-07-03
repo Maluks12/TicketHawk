@@ -7,7 +7,7 @@ import {
   getCart, checkoutBegin, checkoutConfirm, checkoutHeartbeat, checkoutAbandon,
   cartItemLabel, cartItemSubtitle, fmtZAR, getCachedSessionId,
 } from '@/lib/api';
-import { startBookingPayment, type PaymentMethod } from '@/lib/payments';
+import { startBookingPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 
@@ -100,6 +100,7 @@ export default function CartCheckoutPage() {
   };
 
   const handleConfirm = async () => {
+    preopenGatewayPopup();
     setPhase('confirming');
     abandonedRef.current = true;
     try {
@@ -122,6 +123,7 @@ export default function CartCheckoutPage() {
       }
 
       if (!authorizationUrl) {
+        discardPendingPopup();
         abandonedRef.current = false;
         setPhase('reserved');
         alert('Payment setup failed — no checkout URL returned. Please try again.');
@@ -136,6 +138,7 @@ export default function CartCheckoutPage() {
       });
       router.push(`/payment/${primaryId}?${params.toString()}`);
     } catch (err: any) {
+      discardPendingPopup();
       abandonedRef.current = false;
       setPhase('reserved');
       alert(err?.response?.data?.error ?? 'Payment setup failed. Please try again.');

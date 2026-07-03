@@ -33,6 +33,8 @@ import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   openGatewayCheckout,
+  preopenGatewayPopup,
+  discardPendingPopup,
   retryBookingPayment,
   retryGuestPayment,
   pollPayment,
@@ -171,7 +173,9 @@ export default function PaymentPage({
       setPhase('in_popup');
       setMessage('Complete your payment in the secure window…');
 
-      const outcome = await openGatewayCheckout(checkoutUrl);
+      const outcome = await openGatewayCheckout(checkoutUrl, (popup) => {
+        popupRef.current = popup;
+      });
 
       if (outcome.type === 'blocked') {
         setMessage('Popup blocked — redirecting to payment page…');
@@ -213,6 +217,7 @@ export default function PaymentPage({
 
   // ── Retry ────────────────────────────────────────────────────────────────
   const retry = useCallback(async () => {
+    preopenGatewayPopup();
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     setPhase('opening');
     setMessage('Restarting secure checkout…');
@@ -223,6 +228,7 @@ export default function PaymentPage({
       // Call run directly — don't reset startedRef or the mount effect re-fires
       run(started.authorization_url, true);
     } catch {
+      discardPendingPopup();
       setPhase('failed');
       setMessage("Couldn't restart checkout. Please go back and start over.");
     }
@@ -321,7 +327,7 @@ export default function PaymentPage({
             </div>
           )}
 
-          {/* ── Manual check button — shown after 3 s in case focus detection fails ── */}
+          {/* ── Manual check button — fallback in case `closed` detection misses ── */}
           {inPopup && (
             <button
               onClick={() => {

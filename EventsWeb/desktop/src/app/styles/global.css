@@ -18,7 +18,15 @@
 }
 
 html, body {
-  height: 100%;
+  /* FIX: was `height: 100%`, which fixes html/body to exactly one viewport
+     tall. Any position:sticky descendant can only stick within its nearest
+     ancestor's box — once page content grows past that fixed height, the
+     box stops growing (overflow just spills out visibly) so sticky elements
+     run out of room and scroll away instead of staying pinned. min-height
+     keeps the "at least one viewport tall" behavior for short pages while
+     letting the box grow for longer ones, so sticky headers/search bars
+     stay stuck for the full length of the page. */
+  min-height: 100%;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   /* FIX: theme color only applies once the client JS detects dark/light

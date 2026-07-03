@@ -311,9 +311,12 @@ export const searchEvents = async (query: string): Promise<Event[]> => {
   }
 };
 
-export const getSuggestionEvents = async (key: 'popular' | 'just_announced'): Promise<Event[]> => {
+export const getSuggestionEvents = async (key: 'popular' | 'just_announced' | 'featured'): Promise<Event[]> => {
   try {
-    const endpoint = key === 'popular' ? '/v1/events/trending' : '/v1/events';
+    const endpoint =
+      key === 'popular'  ? '/v1/events/trending' :
+      key === 'featured' ? '/v1/events/featured'  :
+      '/v1/events';
     const params = key === 'just_announced' ? { sort: 'created_at', order: 'desc', limit: 30 } : { limit: 30 };
     const res = await api.get<{ data: Event[] }>(endpoint, { params });
     return res.data.data ?? [];

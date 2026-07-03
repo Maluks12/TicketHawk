@@ -74,52 +74,154 @@ export type CheckoutOutcome =
  * can't navigate to that scheme, so it shows an error page inside the popup
  * rather than closing it. Polling is the authoritative way to confirm the outcome.
  */
-export function openGatewayCheckout(authorizationUrl: string): Promise<CheckoutOutcome> {
-  return new Promise((resolve) => {
-    const w    = 720;
-    const h    = 700;
-    const left = Math.max(0, Math.round((window.screen.width  - w) / 2));
-    const top  = Math.max(0, Math.round((window.screen.height - h) / 2));
-    const features = [
-      `width=${w}`, `height=${h}`,
-      `left=${left}`, `top=${top}`,
-      'scrollbars=yes', 'resizable=yes',
-      'toolbar=no', 'menubar=no', 'location=no', 'status=no',
-    ].join(',');
+function popupFeatures() {
+  const w    = 720;
+  const h    = 700;
+  const left = Math.max(0, Math.round((window.screen.width  - w) / 2));
+  const top  = Math.max(0, Math.round((window.screen.height - h) / 2));
+  return [
+    `width=${w}`, `height=${h}`,
+    `left=${left}`, `top=${top}`,
+    'scrollbars=yes', 'resizable=yes',
+    'toolbar=no', 'menubar=no', 'location=no', 'status=no',
+  ].join(',');
+}
 
-    const popup = window.open(authorizationUrl, 'eventspay_checkout', features);
+// Holds a popup opened by preopenGatewayPopup() until openGatewayCheckout()
+// claims it. Module-level (not component state) because Next.js client-side
+// navigation (router.push) does not reload the JS runtime, so this survives
+// the trip from the checkout/purchase page into the /payment/[id] page.
+let pendingPopup: Window | null = null;
+
+/**
+ * Opens a blank placeholder popup immediately. MUST be called synchronously
+ * inside the "Pay Now" click handler, before any `await`.
+ *
+ * Why this exists: the real checkout URL is only known after one or two
+ * network round-trips (checkoutConfirm / startBookingPayment) and a
+ * router.push() into /payment/[id], where openGatewayCheckout() used to call
+ * window.open() for the first time. By that point several `await`s and a
+ * route change separate the call from the original click, so browsers treat
+ * it as not user-initiated and silently block it — intermittently, since
+ * some browsers' "sticky activation" occasionally survives a short async gap
+ * and sometimes doesn't. Opening the popup up front, synchronously, keeps it
+ * tied to the actual click every time; openGatewayCheckout() then just points
+ * this already-open window at the real URL once it has one.
+ */
+export function preopenGatewayPopup(): boolean {
+  if (typeof window === 'undefined') return false;
+  const popup = window.open('about:blank', 'eventspay_checkout', popupFeatures());
+  if (!popup) return false;
+  try {
+    popup.document.write(
+      '<!doctype html><title>Loading…</title><body style="margin:0;height:100vh;display:flex;' +
+      'align-items:center;justify-content:center;font-family:sans-serif;color:#888">' +
+      'Loading secure checkout…</body>',
+    );
+  } catch {}
+  pendingPopup = popup;
+  return true;
+}
+
+/** Closes and discards any popup opened by preopenGatewayPopup() that ended up unused
+ *  (e.g. the booking turned out to be free, or checkout failed before reaching the gateway). */
+export function discardPendingPopup() {
+  try { pendingPopup?.close(); } catch {}
+  pendingPopup = null;
+}
+
+export function openGatewayCheckout(
+  authorizationUrl: string,
+  onOpen?: (popup: Window) => void,
+): Promise<CheckoutOutcome> {
+  return new Promise((resolve) => {
+    let popup: Window | null = null;
+    let reused = false;
+
+    // Reuse a popup opened synchronously on click, if there is one.
+    if (pendingPopup) {
+      popup = pendingPopup;
+      pendingPopup = null;
+      reused = true;
+    }
+
+    // Fallback: no pre-opened popup (e.g. page was loaded directly via a
+    // shared link). This is still subject to the browser's popup blocker.
+    if (!popup) {
+      popup = window.open(authorizationUrl, 'eventspay_checkout', popupFeatures());
+    }
 
     if (!popup) {
       resolve({ type: 'blocked' });
       return;
     }
+    const gwPopup = popup; // narrowed, non-null alias for use inside closures below
+
+    onOpen?.(gwPopup);
 
     let resolved = false;
     const done = () => {
       if (resolved) return;
       resolved = true;
       clearInterval(timer);
-      window.removeEventListener('focus', onFocus);
-      try { popup.close(); } catch {}
+      try { gwPopup.close(); } catch {}
       resolve({ type: 'returned' });
     };
 
-    // popup.closed is unreliable cross-origin (always returns false in Chrome
-    // when the popup navigated to Paystack). Keep it as a best-effort check.
+    // openedAt marks when we actually point the popup at the real gateway
+    // URL — see the grace period below.
+    let openedAt = Date.now();
+
+    if (reused) {
+      // The placeholder ("Loading secure checkout…") is already on screen.
+      // Wait a frame so it's actually painted before swapping in the real,
+      // cross-origin gateway URL, then give it focus.
+      requestAnimationFrame(() => {
+        try {
+          gwPopup.location.href = authorizationUrl;
+          gwPopup.focus();
+        } catch {}
+        openedAt = Date.now();
+      });
+    }
+
+    // Detection is deliberately based on ONE signal only: whether the popup
+    // is really closed. We used to also treat "the main window regained
+    // focus" as a close signal, on the theory that the user had clicked back
+    // here after finishing in the popup. That turned out to be too fragile —
+    // exactly when a popup takes/gives back focus varies by browser and by
+    // the timing of the network calls before the popup navigates — and it
+    // was closing the popup out from under people while they were still
+    // trying to pay. `closed` is the only signal that's actually true when
+    // it fires, so it's the only one allowed to end the flow automatically.
+    //
+    // `closed` itself has two known quirks around the cross-origin navigation
+    // from our placeholder to the real gateway URL:
+    //  - it can keep reporting false for a while after a real close, and
+    //  - right after the navigation it can briefly and *incorrectly* flip to
+    //    true for a tick while the browser swaps the window to a new
+    //    process, before settling back to false.
+    // A short grace period after navigation, plus requiring two consecutive
+    // positive reads before acting, filters out that transient blip without
+    // meaningfully delaying detection of a real close.
+    const CLOSE_CHECK_GRACE_MS = 1500;
+    let consecutiveClosedReads = 0;
     const timer = setInterval(() => {
-      try { if (popup.closed) done(); } catch {}
+      let isClosed = false;
+      try { isClosed = gwPopup.closed; } catch { isClosed = false; }
+
+      if (!isClosed || Date.now() - openedAt <= CLOSE_CHECK_GRACE_MS) {
+        consecutiveClosedReads = 0;
+        return;
+      }
+      consecutiveClosedReads += 1;
+      if (consecutiveClosedReads >= 2) done();
     }, 500);
 
-    // Primary detection: when user closes the popup and clicks back to this
-    // tab, the main window fires a focus event. We delay 1 s before listening
-    // so the focus that fires when the popup first opens doesn't trigger it.
-    let focusArmed = false;
-    setTimeout(() => { focusArmed = true; }, 1000);
-
-    const onFocus = () => {
-      if (focusArmed) done();
-    };
-    window.addEventListener('focus', onFocus);
+    // If detection fails (e.g. `closed` never reliably flips true in this
+    // browser once the popup has gone cross-origin), the page's own "I've
+    // closed the payment window" fallback button covers that case — it
+    // doesn't depend on any of the above.
   });
 }
 
