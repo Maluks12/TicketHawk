@@ -61,6 +61,7 @@ func AdmitFromPool(
 		)
 		UPDATE ticket_assignments t
 		SET qr_scanned_at           = NOW(),
+		    scanned_by_user_id      = $3,
 		    scanned_by_organizer_id = (SELECT id FROM organizers WHERE user_id = $3 LIMIT 1)
 		FROM picked
 		WHERE t.id = picked.id

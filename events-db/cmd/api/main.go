@@ -518,6 +518,35 @@ func main() {
 	}
 
 	// ==========================================
+	// Event Staffing (scanner assignment & join codes)
+	// ==========================================
+	eventStaff := v1.Group("/events")
+	eventStaff.Use(middleware.AuthMiddleware(cfg))
+	{
+		eventStaff.GET("/:id/staff",                  handlers.ListEventStaffHandler(pool))
+		eventStaff.POST("/:id/staff",                 handlers.AddEventStaffHandler(pool))
+		eventStaff.DELETE("/:id/staff/:userId",       handlers.RevokeEventStaffHandler(pool))
+		eventStaff.POST("/:id/staff/codes",           handlers.CreateStaffCodeHandler(pool))
+		eventStaff.GET("/:id/staff/codes",            handlers.ListStaffCodesHandler(pool))
+		eventStaff.DELETE("/:id/staff/codes/:codeId", handlers.RevokeStaffCodeHandler(pool))
+	}
+
+	// Staffer-side: redeem a join code / list events I can scan. The redeem
+	// endpoint gets a strict per-user bucket — it is the only endpoint where
+	// guessing is the attack (40-bit codes + this limit = not practical).
+	staffSelf := v1.Group("/staff")
+	staffSelf.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		staffSelf.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 10, RefillRate: 0.2, TTL: 15 * time.Minute},
+			"staff-redeem"))
+	}
+	{
+		staffSelf.POST("/redeem", handlers.RedeemStaffCodeHandler(pool))
+		staffSelf.GET("/events",  handlers.ListMyScanEventsHandler(pool))
+	}
+
+	// ==========================================
 	// Home Feed
 	// ==========================================
 	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))

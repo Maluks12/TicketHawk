@@ -86,20 +86,24 @@ func scanIndividual(
 		startTime       time.Time
 		endTime         time.Time
 		organizerUserID string
+		isStaff         bool
 	)
 	err := pool.QueryRow(ctx, `
-		SELECT ta.status, b.booking_status, e.start_time, e.end_time, e.organizer_id
+		SELECT ta.status, b.booking_status, e.start_time, e.end_time, e.organizer_id,
+		       (es.user_id IS NOT NULL) AS is_staff
 		FROM ticket_assignments ta
 		JOIN bookings b ON ta.booking_id = b.id
 		JOIN events   e ON b.event_id    = e.id
+		LEFT JOIN event_staff es
+		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE ta.id = $1
-	`, payload.AssignmentID).Scan(&assignStatus, &bookingStatus, &startTime, &endTime, &organizerUserID)
+	`, payload.AssignmentID, scannerUserID).Scan(&assignStatus, &bookingStatus, &startTime, &endTime, &organizerUserID, &isStaff)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
 		return
 	}
-	if organizerUserID != scannerUserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only the event organizer can scan tickets"})
+	if organizerUserID != scannerUserID && !isStaff && c.GetString("role") != string(models.RoleAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have scanning access for this event"})
 		return
 	}
 	if assignStatus != string(models.AssignmentClaimed) {
@@ -149,7 +153,8 @@ func scanIndividual(
 		defer auditCancel()
 		_, _ = pool.Exec(auditCtx, `
 			UPDATE ticket_assignments
-			SET scanned_by_organizer_id = (SELECT id FROM organizers WHERE user_id = $1 LIMIT 1)
+			SET scanned_by_user_id      = $1,
+			    scanned_by_organizer_id = (SELECT id FROM organizers WHERE user_id = $1 LIMIT 1)
 			WHERE id = $2
 		`, scannerUserID, payload.AssignmentID)
 	}()
@@ -172,19 +177,23 @@ func scanPool(
 		startTime       time.Time
 		endTime         time.Time
 		organizerUserID string
+		isStaff         bool
 	)
 	err := pool.QueryRow(ctx, `
-		SELECT b.booking_status, b.booking_number, e.title, e.start_time, e.end_time, e.organizer_id
+		SELECT b.booking_status, b.booking_number, e.title, e.start_time, e.end_time, e.organizer_id,
+		       (es.user_id IS NOT NULL) AS is_staff
 		FROM bookings b
 		JOIN events  e ON b.event_id = e.id
+		LEFT JOIN event_staff es
+		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE b.id = $1
-	`, payload.BookingID).Scan(&bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID)
+	`, payload.BookingID, scannerUserID).Scan(&bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID, &isStaff)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 		return
 	}
-	if organizerUserID != scannerUserID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only the event organizer can scan tickets"})
+	if organizerUserID != scannerUserID && !isStaff && c.GetString("role") != string(models.RoleAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have scanning access for this event"})
 		return
 	}
 	if bookingStatus != string(models.BookingConfirmed) {

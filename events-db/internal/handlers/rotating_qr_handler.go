@@ -276,6 +276,7 @@ func ScanRotatingQRHandler(
 			startTime       time.Time
 			endTime         time.Time
 			organizerUserID string // equals events.organizer_id which REFERENCES users(id)
+			isStaff         bool   // active event_staff membership for the scanner
 		)
 
 		err = pool.QueryRow(ctx, `
@@ -284,26 +285,32 @@ func ScanRotatingQRHandler(
 				b.booking_status,
 				e.start_time,
 				e.end_time,
-				e.organizer_id AS organizer_user_id
+				e.organizer_id AS organizer_user_id,
+				(es.user_id IS NOT NULL) AS is_staff
 			FROM ticket_assignments ta
 			JOIN bookings  b ON ta.booking_id = b.id
 			JOIN events    e ON b.event_id    = e.id
+			LEFT JOIN event_staff es
+			       ON es.event_id = e.id
+			      AND es.user_id  = $2
+			      AND es.status   = 'active'
 			WHERE ta.id = $1
-		`, payload.AssignmentID).Scan(
+		`, payload.AssignmentID, scannerUserID).Scan(
 			&assignStatus,
 			&bookingStatus,
 			&startTime,
 			&endTime,
 			&organizerUserID,
+			&isStaff,
 		)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
 			return
 		}
 
-		// Only the event organizer may scan tickets at the door.
-		if organizerUserID != scannerUserID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Only the event organizer can scan tickets"})
+		// Owner, active event staff, or platform admin may scan at the door.
+		if organizerUserID != scannerUserID && !isStaff && c.GetString("role") != string(models.RoleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You don't have scanning access for this event"})
 			return
 		}
 
@@ -377,7 +384,8 @@ func ScanRotatingQRHandler(
 			defer auditCancel()
 			_, _ = pool.Exec(auditCtx, `
 				UPDATE ticket_assignments
-				SET scanned_by_organizer_id = (
+				SET scanned_by_user_id      = $1,
+				    scanned_by_organizer_id = (
 					SELECT id FROM organizers WHERE user_id = $1 LIMIT 1
 				)
 				WHERE id = $2
