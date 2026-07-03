@@ -10,7 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
-import { cacheBookingsList, getCachedBookingsList, syncManyOffline } from '../../lib/offline';
+import { cacheBookingsList, getCachedBookingsList, syncManyOffline, syncBookingOffline, cacheBookingDetail, saveGuestTicket, getGuestTickets } from '../../lib/offline';
 import { s, sheet } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
 
@@ -182,6 +182,10 @@ const GuestLookup = () => {
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState<string | null>(null);
   const [result, setResult]             = useState<Booking | null>(null);
+  // Previously looked-up guest tickets, persisted on-device so they can be
+  // re-opened offline without re-entering (or re-fetching) anything.
+  const [saved, setSaved]               = useState<Booking[]>([]);
+  useEffect(() => { getGuestTickets<Booking>().then(setSaved).catch(() => {}); }, [result]);
 
   const lookup = async () => {
     const bn = bookingNumber.trim().toUpperCase();
@@ -190,9 +194,28 @@ const GuestLookup = () => {
     setLoading(true); setError(null); setResult(null);
     try {
       const { data } = await api.get<Booking>(`/v1/guest/bookings/${encodeURIComponent(bn)}`, { params: { email: em } });
-      setResult(data);
+      const rec = { ...data, is_guest: true, attendee_email: em } as Booking;
+      setResult(rec);
+      // One successful lookup = fully offline-capable from here on: persist the
+      // ticket, cache it as screen data, and pull its offline entry tokens now.
+      saveGuestTicket(rec, em);
+      cacheBookingDetail(rec, []);
+      if ((rec as any).booking_status === 'confirmed') {
+        syncBookingOffline((rec as any).id, { bookingNumber: bn, email: em });
+      }
     } catch (e: any) {
       const status = e?.response?.status;
+      // No response at all = offline. If this ticket was found on this device
+      // before, serve the saved copy instead of an error.
+      if (!e?.response) {
+        const savedTickets = await getGuestTickets<Booking>().catch(() => [] as Booking[]);
+        const hit = savedTickets.find(t =>
+          (t as any).booking_number?.toUpperCase() === bn &&
+          (t as any).attendee_email?.toLowerCase() === em);
+        if (hit) { setResult(hit); setLoading(false); return; }
+        setError("You're offline. Tickets previously viewed on this device appear below.");
+        setLoading(false); return;
+      }
       setError(status === 404 ? 'No booking found. Check your booking number and email.'
         : status === 429 ? 'Too many attempts. Wait a moment and try again.'
         : e?.response?.data?.error ?? 'Something went wrong.');
@@ -253,6 +276,13 @@ const GuestLookup = () => {
             </Text>
           </TouchableOpacity>
         </View>
+
+        {saved.length > 0 && (
+          <View style={{ marginTop: 28 }}>
+            <Text className={s.sectionLabel}>YOUR SAVED TICKETS</Text>
+            <TicketStack bookings={saved} />
+          </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
