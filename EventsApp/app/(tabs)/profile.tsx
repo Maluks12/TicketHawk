@@ -246,6 +246,14 @@ export default function ProfileScreen() {
                 onPress={() => router.push('/profile/following' as any)}
                 colors={colors}
               />
+              <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
+              {/* Event staff: redeem a join code / scan events you work */}
+              <Row
+                icon={<Ionicons name="qr-code-outline" size={16} color={colors.iconColor} />}
+                label="Event staff"
+                onPress={() => router.push('/staff/join' as any)}
+                colors={colors}
+              />
             </Section>
 
             <Section title="APPEARANCE" colors={colors}>
