@@ -241,6 +241,10 @@ export default function TicketPurchaseScreen() {
           }
         : {
             event_id:            event.id,
+            // Same as the authenticated path: tell the server WHICH tier was
+            // chosen — the server resolves the price from this ID. 'ga-fallback'
+            // is a client-only placeholder for flat-priced events, so omit it.
+            ticket_type_id:      selectedId !== 'ga-fallback' ? (selectedId ?? undefined) : undefined,
             ticket_quantity:     quantity,
             attendee_first_name: firstName,
             attendee_last_name:  lastName,

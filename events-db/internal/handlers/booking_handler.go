@@ -72,6 +72,18 @@ func CreateBookingHandler(
 				})
 				return
 			}
+			if errors.Is(err, repository.ErrBookingTicketTypeNotFound) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Ticket type not found for this event"})
+				return
+			}
+			if errors.Is(err, repository.ErrTicketTypeNotOnSale) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "This ticket type is not currently on sale"})
+				return
+			}
+			if errors.Is(err, repository.ErrTicketTypeSoldOut) {
+				c.JSON(http.StatusConflict, gin.H{"error": "This ticket type is sold out"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create booking"})
 			return
 		}

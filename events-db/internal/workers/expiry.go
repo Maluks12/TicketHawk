@@ -213,7 +213,7 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	defer tx.Rollback(ctx)
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, event_id, ticket_quantity
+		SELECT id, event_id, ticket_type_id, ticket_quantity
 		FROM bookings
 		WHERE booking_status = 'pending'
 		AND payment_status = 'pending'
@@ -226,15 +226,16 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	defer rows.Close()
 
 	type expiredBooking struct {
-		id       string
-		eventID  string
-		quantity int
+		id           string
+		eventID      string
+		ticketTypeID *string
+		quantity     int
 	}
 
 	var expired []expiredBooking
 	for rows.Next() {
 		var b expiredBooking
-		if err := rows.Scan(&b.id, &b.eventID, &b.quantity); err != nil {
+		if err := rows.Scan(&b.id, &b.eventID, &b.ticketTypeID, &b.quantity); err != nil {
 			return err
 		}
 		expired = append(expired, b)
@@ -259,6 +260,17 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 			WHERE id = $2
 		`, b.quantity, b.eventID); err != nil {
 			return err
+		}
+		// Release the tier's capacity too — createBookingTx incremented
+		// ticket_types.tickets_sold when the booking targeted a tier.
+		if b.ticketTypeID != nil {
+			if _, err = tx.Exec(ctx, `
+				UPDATE ticket_types
+				SET tickets_sold = GREATEST(0, tickets_sold - $1), updated_at = NOW()
+				WHERE id = $2
+			`, b.quantity, *b.ticketTypeID); err != nil {
+				return err
+			}
 		}
 	}
 

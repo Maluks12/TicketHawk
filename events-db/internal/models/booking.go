@@ -88,6 +88,10 @@ func (b *Booking) GuestName() string {
 
 type CreateBookingDTO struct {
 	EventID             string  `json:"event_id" binding:"required,uuid"`
+	// TicketTypeID selects the pricing tier (GA / VIP / Early Bird...). When
+	// nil the event's flat price is used. The server ALWAYS resolves the price
+	// from this ID — the client never sends a price.
+	TicketTypeID        *string `json:"ticket_type_id" binding:"omitempty,uuid"`
 	TicketQuantity      int     `json:"ticket_quantity" binding:"required,min=1,max=10"`
 	AttendeeFirstName   *string `json:"attendee_first_name"`
 	AttendeeLastName    *string `json:"attendee_last_name"`
@@ -99,6 +103,8 @@ type CreateBookingDTO struct {
 
 type CreateGuestBookingDTO struct {
 	EventID             string        `json:"event_id" binding:"required,uuid"`
+	// TicketTypeID selects the pricing tier; nil = flat-priced event.
+	TicketTypeID        *string       `json:"ticket_type_id" binding:"omitempty,uuid"`
 	TicketQuantity      int           `json:"ticket_quantity" binding:"required,min=1,max=10"`
 	AttendeeFirstName   string        `json:"attendee_first_name" binding:"required,max=100"`
 	AttendeeLastName    string        `json:"attendee_last_name" binding:"max=100"`

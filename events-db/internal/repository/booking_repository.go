@@ -11,11 +11,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrBookingNotFound = errors.New("booking not found")
 var ErrInsufficientCapacity = errors.New("insufficient tickets available")
+
+// Tier (ticket type) resolution errors — surfaced by createBookingTx when a
+// booking targets a specific pricing tier.
+var ErrBookingTicketTypeNotFound = errors.New("ticket type not found for this event")
+var ErrTicketTypeNotOnSale = errors.New("ticket type is not currently on sale")
+var ErrTicketTypeSoldOut = errors.New("ticket type has insufficient availability")
 
 type CancelledAssignee struct {
 	Name  string
@@ -28,6 +35,7 @@ func createBookingTx(
 	eventID string,
 	userID *string, 
 	isGuest bool,
+	ticketTypeID *string,
 	quantity int,
 	unitPrice float64,
 	currency string,
@@ -40,15 +48,6 @@ func createBookingTx(
 ) (*models.Booking, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	subtotal := unitPrice * float64(quantity)
-	serviceFee, commission := CalculateFees(subtotal, quantity)
-	platformFee := serviceFee  // buyer-paid service fee (R10 × qty)
-	organizerFee := commission // organizer-paid commission (6% × subtotal)
-	discountAmount := 0.0
-	// Buyer is charged the ticket price plus the service fee only. The 6%
-	// commission is NOT added here — it comes out of the organizer's payout.
-	totalAmount := subtotal + platformFee - discountAmount
 
 	if quantity <= 0 {
     	return nil, errors.New("invalid ticket quantity")
@@ -77,19 +76,79 @@ func createBookingTx(
 		return nil, ErrInsufficientCapacity
 	}
 
+	// ── Tier resolution ─────────────────────────────────────────────────
+	// When the booking targets a specific ticket type (GA / VIP / ...), the
+	// tier's price is AUTHORITATIVE and overrides the event's flat price
+	// (events.price only mirrors the cheapest visible tier, so charging it
+	// for a VIP booking under-charges). The row is locked FOR UPDATE so the
+	// availability check + tickets_sold increment are race-free.
+	var ticketTypeName *string
+	if ticketTypeID != nil {
+		var (
+			ttName        string
+			ttPrice       float64
+			ttCapacity    *int
+			ttSold        int
+			ttReserved    int
+			ttVisible     bool
+			ttSaleStarts  *time.Time
+			ttSaleEnds    *time.Time
+		)
+		err = tx.QueryRow(ctx, `
+			SELECT name, price, capacity, tickets_sold, reserved_count,
+			       is_visible, sale_starts_at, sale_ends_at
+			FROM ticket_types
+			WHERE id = $1 AND event_id = $2
+			FOR UPDATE
+		`, *ticketTypeID, eventID).Scan(
+			&ttName, &ttPrice, &ttCapacity, &ttSold, &ttReserved,
+			&ttVisible, &ttSaleStarts, &ttSaleEnds,
+		)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrBookingTicketTypeNotFound
+			}
+			return nil, fmt.Errorf("failed to lock ticket type: %w", err)
+		}
+
+		now := time.Now()
+		if !ttVisible ||
+			(ttSaleStarts != nil && now.Before(*ttSaleStarts)) ||
+			(ttSaleEnds != nil && now.After(*ttSaleEnds)) {
+			return nil, ErrTicketTypeNotOnSale
+		}
+		if ttCapacity != nil && ttSold+ttReserved+quantity > *ttCapacity {
+			return nil, ErrTicketTypeSoldOut
+		}
+
+		unitPrice = ttPrice
+		ticketTypeName = &ttName
+	}
+
+	subtotal := unitPrice * float64(quantity)
+	serviceFee, commission := CalculateFees(subtotal, quantity)
+	platformFee := serviceFee  // buyer-paid service fee (R10 × qty)
+	organizerFee := commission // organizer-paid commission (6% × subtotal)
+	discountAmount := 0.0
+	// Buyer is charged the ticket price plus the service fee only. The 6%
+	// commission is NOT added here — it comes out of the organizer's payout.
+	totalAmount := subtotal + platformFee - discountAmount
+
 	var booking models.Booking
 	err = tx.QueryRow(ctx, `
 		INSERT INTO bookings (
-			event_id, user_id, is_guest, ticket_quantity, unit_price, subtotal,
+			event_id, user_id, is_guest, ticket_type_id, ticket_type_name,
+			ticket_quantity, unit_price, subtotal,
 			platform_fee, organizer_fee, total_amount, currency,
 			attendee_first_name, attendee_last_name, attendee_email, attendee_phone,
 			special_requirements, promo_code, discount_amount,
 			booking_status, payment_status
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING id, booking_number, created_at
 	`,
-		eventID, userID, isGuest, quantity, unitPrice, subtotal,
+		eventID, userID, isGuest, ticketTypeID, ticketTypeName,
+		quantity, unitPrice, subtotal,
 		platformFee, organizerFee, totalAmount, currency,
 		firstName, lastName, email, phone,
 		specialReqs, promoCode, discountAmount,
@@ -97,6 +156,20 @@ func createBookingTx(
 	).Scan(&booking.ID, &booking.BookingNumber, &booking.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create booking: %w", err)
+	}
+
+	// Track sold capacity on the tier as well (the event-level counter is
+	// incremented below). Done under the FOR UPDATE lock taken above, and the
+	// chk_tt_not_oversold constraint is a final backstop.
+	if ticketTypeID != nil {
+		_, err = tx.Exec(ctx, `
+			UPDATE ticket_types
+			SET tickets_sold = tickets_sold + $1, updated_at = NOW()
+			WHERE id = $2
+		`, quantity, *ticketTypeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to increment ticket type sold count: %w", err)
+		}
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -113,6 +186,8 @@ func createBookingTx(
 	booking.EventID = &eventID
 	booking.UserID = userID
 	booking.IsGuest = isGuest
+	booking.TicketTypeID = ticketTypeID
+	booking.TicketTypeName = ticketTypeName
 	booking.TicketQuantity = quantity
 	booking.UnitPrice = unitPrice
 	booking.Subtotal = subtotal
@@ -136,6 +211,7 @@ func CreateBooking(pool *pgxpool.Pool, dto *models.CreateBookingDTO, userID stri
 		dto.EventID,
 		&uid,
 		false, // not a guest
+		dto.TicketTypeID,
 		dto.TicketQuantity,
 		event.Price,
 		event.Currency,
@@ -154,6 +230,7 @@ func CreateGuestBooking(pool *pgxpool.Pool, dto *models.CreateGuestBookingDTO, e
 		dto.EventID,
 		nil, // no user_id
 		true, // is_guest = true
+		dto.TicketTypeID,
 		dto.TicketQuantity,
 		event.Price,
 		event.Currency,
