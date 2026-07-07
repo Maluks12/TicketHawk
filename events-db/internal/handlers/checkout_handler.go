@@ -243,9 +243,31 @@ func CheckoutConfirmHandler(
 			}
 			currency = primaryBooking.Currency
 
-			// Create the Stitch payment intent using the primary booking.
-			primaryBooking.TotalAmount = cartTotal
-			clientToken, paymentRequestID, payErr := paymentSvc.CreateCartPaymentIntent(primaryBooking, cart.ID, cartTotal)
+			// Charge the sum of the booking rows just created, NOT the raw cart
+			// total. ConvertReservationsToBookings stores each ticket line's
+			// total_amount as subtotal + buyer service fee (R10/ticket capped at
+			// 20% of face value), while SumCartTotal is fee-less. Charging the
+			// raw cart total silently dropped the service fee and left the
+			// gateway charge out of sync with the booking records. Merch lines
+			// have no booking rows, so their cart-line totals are added back.
+			chargeTotal := 0.0
+			for _, bid := range bookingIDs {
+				b, bErr := bookings.GetBookingByID(bid)
+				if bErr != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to total bookings"})
+					return
+				}
+				chargeTotal += b.TotalAmount
+			}
+			for _, item := range allCartItems {
+				if item.ItemType == models.CartItemTypeMerch {
+					chargeTotal += item.LineTotal()
+				}
+			}
+
+			// Create the payment intent using the primary booking.
+			primaryBooking.TotalAmount = chargeTotal
+			clientToken, paymentRequestID, payErr := paymentSvc.CreateCartPaymentIntent(primaryBooking, cart.ID, chargeTotal, paymentChannel(c))
 			if payErr != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initiate payment"})
 				return
@@ -254,7 +276,7 @@ func CheckoutConfirmHandler(
 			c.JSON(http.StatusOK, gin.H{
 				"client_token":       clientToken,
 				"payment_request_id": paymentRequestID,
-				"total_amount":       cartTotal,
+				"total_amount":       chargeTotal,
 				"currency":           currency,
 				"booking_ids":        bookingIDs,
 				"primary_booking_id": primaryBookingID,
@@ -273,7 +295,7 @@ func CheckoutConfirmHandler(
 		primaryBookingID = merchBooking.ID
 		bookingIDs = []string{primaryBookingID}
 
-		clientToken, paymentRequestID, payErr := paymentSvc.CreateCartPaymentIntent(merchBooking, cart.ID, cartTotal)
+		clientToken, paymentRequestID, payErr := paymentSvc.CreateCartPaymentIntent(merchBooking, cart.ID, cartTotal, paymentChannel(c))
 		if payErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initiate payment"})
 			return

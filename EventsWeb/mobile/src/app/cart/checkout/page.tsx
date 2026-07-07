@@ -7,6 +7,7 @@ import {
   getCart, checkoutBegin, checkoutConfirm, checkoutHeartbeat, checkoutAbandon,
   cartItemLabel, cartItemSubtitle, fmtZAR, getCachedSessionId,
 } from '@/lib/api';
+import { startBookingPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 
@@ -68,7 +69,17 @@ export default function CartCheckoutPage() {
 
   const allItems = (cart as any)?.items_by_event?.flatMap((g: any) => g.items) ?? [];
   const cartTotal = (cart as any)?.total_amount ?? 0;
-  const platformFee = Math.ceil(cartTotal * 0.05);
+  // Mirror the backend fee model (events-db repository.CalculateFees): a R10
+  // buyer service fee per TICKET, capped at 20% of that ticket's face value,
+  // per line, rounded to cents. Merch lines carry no service fee. The old
+  // flat 5%-of-cart estimate didn't match what the gateway actually charges.
+  const platformFee = allItems.reduce((sum: number, i: any) => {
+    if (i.item_type !== 'ticket') return sum;
+    const unit = Number(i.unit_price_snapshot ?? 0);
+    const qty  = Number(i.quantity ?? 0);
+    if (unit <= 0 || qty <= 0) return sum;
+    return sum + Math.round(Math.min(10, 0.2 * unit) * qty * 100) / 100;
+  }, 0);
   const grandTotal = cartTotal + platformFee;
   const hasTickets = allItems.some((i: CartItem) => i.item_type === 'ticket');
   const isBusy = phase === 'reserving' || phase === 'confirming';
@@ -98,12 +109,48 @@ export default function CartCheckoutPage() {
   };
 
   const handleConfirm = async () => {
+    // Open the placeholder popup synchronously inside the click so the browser
+    // ties it to the user gesture; the real checkout URL is swapped in on the
+    // /payment/[id] page once the confirm round-trips.
+    preopenGatewayPopup();
     setPhase('confirming');
     abandonedRef.current = true;
     try {
       const data: any = await checkoutConfirm(sidRef.current);
-      router.push(`/payment/${data.primary_booking_id}?token=${encodeURIComponent(data.client_token)}&amount=${data.total_amount}&currency=${data.currency ?? 'ZAR'}`);
+      const primaryId = data.primary_booking_id;
+
+      // Resolve the gateway checkout URL.
+      // • Card: checkout confirm already initialised a Paystack checkout and
+      //   returned its URL in client_token. Reuse it to save a round-trip.
+      // • Instant EFT: initialise a method-specific checkout via the payment
+      //   start route.
+      const method: PaymentMethod = payMethod === 'eft' ? 'instant_eft' : 'card';
+      let authorizationUrl: string;
+
+      if (method === 'card' && data.client_token) {
+        authorizationUrl = data.client_token;
+      } else {
+        const started = await startBookingPayment(primaryId, method);
+        authorizationUrl = started.authorization_url;
+      }
+
+      if (!authorizationUrl) {
+        discardPendingPopup();
+        abandonedRef.current = false;
+        setPhase('reserved');
+        alert('Payment setup failed — no checkout URL returned. Please try again.');
+        return;
+      }
+
+      const params = new URLSearchParams({
+        url:      encodeURIComponent(authorizationUrl),
+        method,
+        amount:   String(data.total_amount ?? 0),
+        currency: data.currency ?? 'ZAR',
+      });
+      router.push(`/payment/${primaryId}?${params.toString()}`);
     } catch (err: any) {
+      discardPendingPopup();
       abandonedRef.current = false;
       setPhase('reserved');
       alert(err?.response?.data?.error ?? 'Payment setup failed. Please try again.');

@@ -95,7 +95,7 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 		if method == "" {
 			method = models.PaymentCreditCard
 		}
-		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
 			utils.InternalError(c, err, "guest checkout: failed to initialize payment")
 			return
@@ -270,7 +270,7 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 		if retryMethod == "" {
 			retryMethod = models.PaymentCreditCard
 		}
-		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, retryMethod)
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, retryMethod, paymentChannel(c))
 		if err != nil {
 			utils.InternalError(c, err, "guest retry payment: failed to initialize payment")
 			return
@@ -316,7 +316,7 @@ func GuestStartPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 			method = models.PaymentCreditCard
 		}
 
-		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
 			utils.InternalError(c, err, "guest start payment: failed to initialize payment")
 			return

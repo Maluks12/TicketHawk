@@ -110,12 +110,55 @@ export default function PaymentPage({
     try { router.back(); } catch { router.replace('/'); }
   }, [router]);
 
-  // Cleanup on unmount — clear timer, abort poll, close any lingering popup
-  useEffect(() => () => {
-    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
-    pollAbortRef.current?.abort();
-    try { popupRef.current?.close(); } catch {}
+  // Cleanup on unmount — clear timer, abort poll, close any lingering popup.
+  //
+  // The teardown is DEFERRED one macrotask and cancelled if the effect re-runs.
+  // React Strict Mode (on by default in `next dev`) mounts, unmounts, and
+  // remounts every component in development: with a plain cleanup, that
+  // simulated unmount fired popupRef.current.close() + pollAbortRef.abort()
+  // a moment after the checkout popup opened — the popup flashed on screen and
+  // instantly vanished, and the aborted run() left the page stuck on
+  // "Complete your payment…" forever. Strict Mode remounts synchronously, so
+  // the remounted effect body always runs before a 0 ms timer can fire and
+  // cancels the teardown; on a REAL unmount nothing cancels it, and the popup
+  // and poll are cleaned up as intended.
+  const teardownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (teardownTimerRef.current) {
+      clearTimeout(teardownTimerRef.current);
+      teardownTimerRef.current = null;
+    }
+    return () => {
+      teardownTimerRef.current = setTimeout(() => {
+        if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+        pollAbortRef.current?.abort();
+        try { popupRef.current?.close(); } catch {}
+      }, 0);
+    };
   }, []);
+
+  // Instant confirmation: when a payment is initiated with channel=web, the
+  // backend's return page posts a message to its opener the moment the gateway
+  // redirects back (see PaymentReturnHandler). The message is only a NUDGE —
+  // the status shown to the buyer always comes from our own API, so a forged
+  // message can't fake a successful payment.
+  useEffect(() => {
+    const onMsg = (event: MessageEvent) => {
+      const d = event.data as { source?: string; type?: string } | null;
+      if (!d || d.source !== 'tickethawk' || d.type !== 'payment-return') return;
+      fetchPaymentStatus(bookingId, guest)
+        .then((s) => {
+          if (s.payment_status === 'completed') {
+            pollAbortRef.current?.abort();
+            finishFromStatus(s, false);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingId, bookingNumber, email]);
 
   // ── finishFromStatus ─────────────────────────────────────────────────────
   const finishFromStatus = useCallback(
@@ -173,9 +216,46 @@ export default function PaymentPage({
       setPhase('in_popup');
       setMessage('Complete your payment in the secure window…');
 
+      // Watch the server-side status WHILE the popup is open. The backend's
+      // return handler verifies with the gateway synchronously the moment the
+      // popup lands back on /payments/return, so 'completed' shows up here
+      // within seconds of a successful charge. When it does, close the popup
+      // programmatically and show success — this rescues every case where
+      // popup-close detection can't work (COOP-severed window handles, the
+      // popup parked on a dead redirect page, or the buyer simply not closing
+      // it). It only ever acts on 'completed': a transient 'failed' while the
+      // popup is open can still be retried inside the gateway's own page, so
+      // slamming the popup shut on failure would be wrong.
+      let watcherFinished = false;
+      const watchCtrl = new AbortController();
+      abortCtrl.signal.addEventListener('abort', () => watchCtrl.abort(), { once: true });
+      (async () => {
+        while (!watchCtrl.signal.aborted) {
+          try {
+            const s = await fetchPaymentStatus(bookingId, guest);
+            if (watchCtrl.signal.aborted) return;
+            if (s.payment_status === 'completed') {
+              watcherFinished = true;
+              abortCtrl.abort(); // stop everything else in this run
+              finishFromStatus(s, false);
+              return;
+            }
+          } catch {
+            // transient — keep watching
+          }
+          await new Promise<void>((res) => {
+            const t = setTimeout(res, 3000);
+            watchCtrl.signal.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true });
+          });
+        }
+      })();
+
       const outcome = await openGatewayCheckout(checkoutUrl, (popup) => {
         popupRef.current = popup;
       });
+
+      if (watcherFinished) return; // success already handled by the watcher
+      watchCtrl.abort();           // popup closed — hand over to the confirm poll below
 
       if (outcome.type === 'blocked') {
         setMessage('Popup blocked — redirecting to payment page…');

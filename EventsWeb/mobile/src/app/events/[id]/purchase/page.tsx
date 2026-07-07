@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
+import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -100,7 +101,13 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
 
   const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  const platformFee  = Math.ceil(totalAmount * 0.05);
+  // Mirror the backend fee model (events-db repository.CalculateFees): a R10
+  // buyer service fee PER TICKET, capped at 20% of the ticket's face value,
+  // rounded to cents. The old flat 5% estimate showed a total that didn't
+  // match what Paystack actually charged.
+  const platformFee  = totalAmount > 0
+    ? Math.round(Math.min(10, 0.2 * (selectedType?.price ?? 0)) * quantity * 100) / 100
+    : 0;
   const grandTotal   = totalAmount + platformFee;
   const venueType = (() => {
   if (!event) return 'none' as const;
@@ -117,6 +124,10 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
     }
     setAdding(true);
     setError('');
+    // Open the placeholder popup NOW, synchronously inside the click, so the
+    // browser ties it to the user gesture — the real checkout URL is swapped
+    // in on the /payment/[id] page once the booking round-trips.
+    preopenGatewayPopup();
     try {
       const nameParts  = guestName.trim().split(' ');
       const firstName  = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');
@@ -134,9 +145,60 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         attendee_email:      email,
       };
 
-      const { data: booking } = await api.post(endpoint, payload);
-      router.push(`/payment/${(booking as any).booking_id ?? booking.id}?token=${booking.client_token}&amount=${booking.total_amount}&currency=${booking.currency ?? 'ZAR'}`);
+      // channel=web tags the payment so the gateway's return page is a
+      // self-closing web page instead of the mobile-app deep link.
+      const { data: booking } = await api.post(endpoint, payload, { params: { channel: 'web' } });
+      const bookingId = (booking as any).booking_id ?? booking.id;
+
+      // Free ticket — booking is already confirmed server-side.
+      if ((booking as any).total_amount === 0) {
+        discardPendingPopup();
+        router.replace('/tickets');
+        return;
+      }
+
+      // Resolve the gateway checkout URL. Card (and Apple Pay, which isn't
+      // available on mobile web) reuse the Paystack URL that booking creation
+      // already returned in client_token; PayPal starts a method-specific
+      // checkout. Guests have no method-aware start route — card URL only.
+      let authorizationUrl: string;
+      let usedMethod: PaymentMethod = 'card';
+
+      if (paymentMethod === 'paypal') {
+        if (user) {
+          const started = await startBookingPayment(bookingId, 'paypal');
+          authorizationUrl = started.authorization_url;
+        } else {
+          const bn = (booking as any).booking_number;
+          const started = await startGuestPayment(bn, guestEmail.trim(), 'paypal');
+          authorizationUrl = started.authorization_url;
+        }
+        usedMethod = 'paypal';
+      } else {
+        authorizationUrl = (booking as any).client_token ?? '';
+        usedMethod = 'card';
+      }
+
+      if (!authorizationUrl) {
+        discardPendingPopup();
+        setError('Payment unavailable. Please try again.');
+        return;
+      }
+
+      const params = new URLSearchParams({
+        url:      encodeURIComponent(authorizationUrl),
+        method:   usedMethod,
+        amount:   String((booking as any).total_amount ?? 0),
+        currency: (booking as any).currency ?? 'ZAR',
+      });
+      // Pass booking number + email so the payment page can poll via guest routes.
+      if (!user) {
+        params.set('bookingNumber', String((booking as any).booking_number ?? ''));
+        params.set('email', email);
+      }
+      router.push(`/payment/${bookingId}?${params.toString()}`);
     } catch (e: any) {
+      discardPendingPopup();
       setError(e?.response?.data?.error ?? 'Failed to create booking. Please try again.');
     } finally {
       setAdding(false);

@@ -16,6 +16,16 @@ import (
 // parsePaymentMethod reads the requested method from the `method` query param
 // (or JSON body field), defaulting to card. Card and Apple Pay go to Paystack;
 // PayPal goes to PayPal.
+// paymentChannel reads the optional `channel` query param web clients send so
+// the gateway return page can be web-friendly (see PaymentReturnHandler).
+// Anything other than "web" is treated as the default app channel.
+func paymentChannel(c *gin.Context) string {
+	if strings.EqualFold(strings.TrimSpace(c.Query("channel")), services.ChannelWeb) {
+		return services.ChannelWeb
+	}
+	return ""
+}
+
 func parsePaymentMethod(c *gin.Context) models.PaymentMethod {
 	m := c.Query("method")
 	if m == "" {
@@ -77,7 +87,7 @@ func CreatePaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 		}
 
 		method := parsePaymentMethod(c)
-		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
+		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
 			return
@@ -189,7 +199,7 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 		}
 
 		method := parsePaymentMethod(c)
-		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method)
+		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
 			return

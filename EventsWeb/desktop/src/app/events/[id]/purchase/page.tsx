@@ -101,7 +101,13 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
 
   const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  const platformFee  = Math.ceil(totalAmount * 0.05);
+  // Mirror the backend fee model (events-db repository.CalculateFees): a R10
+  // buyer service fee PER TICKET, capped at 20% of the ticket's face value,
+  // rounded to cents. The old flat 5% estimate showed a total that didn't
+  // match what Paystack actually charged.
+  const platformFee  = totalAmount > 0
+    ? Math.round(Math.min(10, 0.2 * (selectedType?.price ?? 0)) * quantity * 100) / 100
+    : 0;
   const grandTotal   = totalAmount + platformFee;
   const venueType = (() => {
   if (!event) return 'none' as const;
@@ -136,7 +142,9 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         attendee_email:      email,
       };
 
-      const { data: booking } = await api.post(endpoint, payload);
+      // channel=web tags the payment so the gateway's return page is a
+      // self-closing web page instead of the mobile-app deep link.
+      const { data: booking } = await api.post(endpoint, payload, { params: { channel: 'web' } });
       const bookingId = (booking as any).booking_id ?? booking.id;
 
       // Free ticket — booking is already confirmed server-side.

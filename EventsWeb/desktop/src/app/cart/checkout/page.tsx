@@ -70,7 +70,17 @@ export default function CartCheckoutPage() {
 
   const allItems = (cart as any)?.items_by_event?.flatMap((g: any) => g.items) ?? [];
   const cartTotal = (cart as any)?.total_amount ?? 0;
-  const platformFee = Math.ceil(cartTotal * 0.05);
+  // Mirror the backend fee model (events-db repository.CalculateFees): a R10
+  // buyer service fee per TICKET, capped at 20% of that ticket's face value,
+  // per line, rounded to cents. Merch lines carry no service fee. The old
+  // flat 5%-of-cart estimate didn't match what the gateway actually charges.
+  const platformFee = allItems.reduce((sum: number, i: any) => {
+    if (i.item_type !== 'ticket') return sum;
+    const unit = Number(i.unit_price_snapshot ?? 0);
+    const qty  = Number(i.quantity ?? 0);
+    if (unit <= 0 || qty <= 0) return sum;
+    return sum + Math.round(Math.min(10, 0.2 * unit) * qty * 100) / 100;
+  }, 0);
   const grandTotal = cartTotal + platformFee;
   const hasTickets = allItems.some((i: CartItem) => i.item_type === 'ticket');
   const isBusy = phase === 'reserving' || phase === 'confirming';

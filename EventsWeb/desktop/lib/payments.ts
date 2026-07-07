@@ -237,7 +237,7 @@ export async function startBookingPayment(
   bookingId: string,
   method: PaymentMethod = 'card',
 ): Promise<StartPaymentResult> {
-  const res = await api.post(`/v1/bookings/${bookingId}/payment`, {}, { params: { method } });
+  const res = await api.post(`/v1/bookings/${bookingId}/payment`, {}, { params: { method, channel: 'web' } });
   return normaliseStart(res.data);
 }
 
@@ -249,7 +249,7 @@ export async function retryBookingPayment(
   const res = await api.post(
     `/v1/bookings/${bookingId}/payment/retry`,
     {},
-    { params: { method } },
+    { params: { method, channel: 'web' } },
   );
   return normaliseStart(res.data);
 }
@@ -292,7 +292,7 @@ export async function startGuestPayment(
   const res = await api.post(
     `/v1/guest/bookings/${encodeURIComponent(bookingNumber)}/payment/start`,
     {},
-    { params: { email, method } },
+    { params: { email, method, channel: 'web' } },
   );
   const data = res.data as any;
   return {
@@ -310,7 +310,7 @@ export async function retryGuestPayment(
   const res = await api.post(
     `/v1/guest/bookings/${encodeURIComponent(bookingNumber)}/payment/retry`,
     {},
-    { params: { email } },
+    { params: { email, channel: 'web' } },
   );
   return normaliseStart(res.data);
 }

@@ -110,7 +110,7 @@ func CreateBookingHandler(
 			return
 		}
 
-		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking)
+		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking, paymentChannel(c))
 		if err != nil {
 			utils.InternalError(c, err, "checkout: failed to initialize payment")
 			return

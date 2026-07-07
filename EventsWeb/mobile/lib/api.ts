@@ -599,7 +599,8 @@ export async function checkoutBegin(sessionId?: string | null): Promise<Checkout
 
 export async function checkoutConfirm(sessionId?: string | null): Promise<CheckoutConfirmResponse> {
   const headers = makeSessionHeaders(sessionId ?? null);
-  const res = await api.post<CheckoutConfirmResponse>('/v1/checkout/confirm', {}, { headers });
+  // channel=web tags the payment so the gateway return page is web-friendly.
+  const res = await api.post<CheckoutConfirmResponse>('/v1/checkout/confirm', {}, { headers, params: { channel: 'web' } });
   return res.data;
 }
 

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -62,6 +63,30 @@ func newRef(prefix string) string {
 	return prefix + strings.ReplaceAll(uuid.NewString(), "-", "")
 }
 
+// ChannelWeb marks a payment as initiated from the web frontend. The channel is
+// appended to the gateway callback URL so PaymentReturnHandler can respond with
+// a self-closing HTML page (web popups) instead of the eventsapp:// deep-link
+// redirect (mobile app in-app browser).
+const ChannelWeb = "web"
+
+// callbackURLFor returns the gateway callback URL, tagged with ?channel=web
+// when the payment was initiated from the web frontend. An empty or unknown
+// channel returns the plain callback URL (mobile-app behaviour, unchanged).
+func (s *PaymentService) callbackURLFor(channel string) string {
+	base := s.cfg.PaymentCallbackURL
+	if channel != ChannelWeb || base == "" {
+		return base
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	q := u.Query()
+	q.Set("channel", ChannelWeb)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 // resolvePayerEmail finds the best email to bill against. Paystack requires one.
 func (s *PaymentService) resolvePayerEmail(ctx context.Context, booking *models.Booking) string {
 	if e := booking.GuestEmail(); e != "" {
@@ -88,14 +113,14 @@ func (s *PaymentService) userEmail(ctx context.Context, userID string) string {
 
 // CreatePaymentIntent starts a card (Paystack) payment for a booking — the
 // back-compat default used by booking creation, guest, and retry flows.
-func (s *PaymentService) CreatePaymentIntent(booking *models.Booking) (redirectURL string, reference string, err error) {
-	return s.CreatePaymentIntentWithMethod(booking, models.PaymentCreditCard)
+func (s *PaymentService) CreatePaymentIntent(booking *models.Booking, channel string) (redirectURL string, reference string, err error) {
+	return s.CreatePaymentIntentWithMethod(booking, models.PaymentCreditCard, channel)
 }
 
 // CreatePaymentIntentWithMethod starts a payment for a booking using the chosen
 // method: card/apple_pay route to Paystack, paypal routes to PayPal. Returns the
 // hosted-checkout URL the client opens, plus the provider reference.
-func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, method models.PaymentMethod) (redirectURL string, reference string, err error) {
+func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, method models.PaymentMethod, channel string) (redirectURL string, reference string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -106,7 +131,7 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 		Currency:    booking.Currency,
 		Email:       s.resolvePayerEmail(ctx, booking),
 		Description: "Booking " + booking.BookingNumber,
-		CallbackURL: s.cfg.PaymentCallbackURL,
+		CallbackURL: s.callbackURLFor(channel),
 		Channels:    method.PaystackChannels(),
 		Metadata:    map[string]string{"booking_id": booking.ID, "booking_number": booking.BookingNumber},
 	})
@@ -121,12 +146,12 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 }
 
 // CreateCartPaymentIntent starts a card (Paystack) payment for a multi-item cart.
-func (s *PaymentService) CreateCartPaymentIntent(primaryBooking *models.Booking, cartID string, totalAmount float64) (redirectURL string, reference string, err error) {
-	return s.CreateCartPaymentIntentWithMethod(primaryBooking, cartID, totalAmount, models.PaymentCreditCard)
+func (s *PaymentService) CreateCartPaymentIntent(primaryBooking *models.Booking, cartID string, totalAmount float64, channel string) (redirectURL string, reference string, err error) {
+	return s.CreateCartPaymentIntentWithMethod(primaryBooking, cartID, totalAmount, models.PaymentCreditCard, channel)
 }
 
 // CreateCartPaymentIntentWithMethod starts a cart payment using the chosen method.
-func (s *PaymentService) CreateCartPaymentIntentWithMethod(primaryBooking *models.Booking, cartID string, totalAmount float64, method models.PaymentMethod) (redirectURL string, reference string, err error) {
+func (s *PaymentService) CreateCartPaymentIntentWithMethod(primaryBooking *models.Booking, cartID string, totalAmount float64, method models.PaymentMethod, channel string) (redirectURL string, reference string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -137,7 +162,7 @@ func (s *PaymentService) CreateCartPaymentIntentWithMethod(primaryBooking *model
 		Currency:    primaryBooking.Currency,
 		Email:       s.resolvePayerEmail(ctx, primaryBooking),
 		Description: "Cart " + cartID,
-		CallbackURL: s.cfg.PaymentCallbackURL,
+		CallbackURL: s.callbackURLFor(channel),
 		Channels:    method.PaystackChannels(),
 		Metadata:    map[string]string{"cart_id": cartID},
 	})
