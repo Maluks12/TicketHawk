@@ -268,13 +268,17 @@ export default function CartCheckoutScreen() {
     setPhase('confirming');
     try {
       const data = await checkoutConfirm(sidRef.current);
+      // The payment screen reads `url` (URL-encoded authorization_url) — the
+      // old `token` param belonged to the removed WebView flow and was
+      // silently ignored, so cart checkouts died on "Missing checkout link".
       router.push({
         pathname: '/payment/[id]',
         params: {
           id:       data.primary_booking_id,
-          token:    data.client_token,
+          url:      encodeURIComponent(data.client_token),
           amount:   String(data.total_amount),
           currency: data.currency,
+          method:   'card',
         },
       } as any);
     } catch (err: any) {

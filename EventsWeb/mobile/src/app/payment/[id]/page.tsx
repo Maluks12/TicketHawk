@@ -226,11 +226,35 @@ export default function PaymentPage({
       // it). It only ever acts on 'completed': a transient 'failed' while the
       // popup is open can still be retried inside the gateway's own page, so
       // slamming the popup shut on failure would be wrong.
+      // The watcher is bounded: bookings expire 15 minutes after creation, so
+      // an abandoned popup can never turn into a success past the deadline —
+      // without a cap, an abandoned transaction left this page spinning and
+      // polling the API every 3 s forever. Poll fast at first (payments
+      // usually settle in the first couple of minutes), then back off; at the
+      // deadline, stop polling, close the stale popup (paying inside it would
+      // charge the buyer for an already-expired booking), and surface the
+      // failed state so the buyer can retry. The postMessage listener stays
+      // registered, so a straggler payment that does land still gets picked up.
+      const WATCH_DEADLINE_MS    = 15 * 60_000;
+      const WATCH_FAST_MS        = 3_000;
+      const WATCH_SLOW_MS        = 12_000;
+      const WATCH_FAST_WINDOW_MS = 2 * 60_000;
+
       let watcherFinished = false;
       const watchCtrl = new AbortController();
       abortCtrl.signal.addEventListener('abort', () => watchCtrl.abort(), { once: true });
+      const watchStart = Date.now();
       (async () => {
         while (!watchCtrl.signal.aborted) {
+          const elapsed = Date.now() - watchStart;
+          if (elapsed >= WATCH_DEADLINE_MS) {
+            watcherFinished = true;
+            abortCtrl.abort(); // stop everything else in this run
+            try { popupRef.current?.close(); } catch {}
+            setPhase('failed');
+            setMessage('This payment session timed out. If you did complete the payment, check your Tickets tab — otherwise you can try again.');
+            return;
+          }
           try {
             const s = await fetchPaymentStatus(bookingId, guest);
             if (watchCtrl.signal.aborted) return;
@@ -243,8 +267,9 @@ export default function PaymentPage({
           } catch {
             // transient — keep watching
           }
+          const delay = elapsed < WATCH_FAST_WINDOW_MS ? WATCH_FAST_MS : WATCH_SLOW_MS;
           await new Promise<void>((res) => {
-            const t = setTimeout(res, 3000);
+            const t = setTimeout(res, delay);
             watchCtrl.signal.addEventListener('abort', () => { clearTimeout(t); res(); }, { once: true });
           });
         }
