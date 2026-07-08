@@ -547,6 +547,24 @@ func main() {
 	}
 
 	// ==========================================
+	// Offline scanning: credential, manifest, scan-event sync
+	// ==========================================
+	scannerCredService := services.NewScannerCredentialService(cfg)
+	scanSync := v1.Group("/staff/events")
+	scanSync.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		scanSync.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 240, RefillRate: 4.0, TTL: 10 * time.Minute},
+			"scan-sync"))
+	}
+	{
+		scanSync.POST("/:id/scanner-credential", handlers.MintScannerCredentialHandler(pool, scannerCredService))
+		scanSync.GET("/:id/manifest",            handlers.GetManifestHandler(pool))
+		scanSync.POST("/:id/scans",              handlers.IngestScansHandler(pool))
+	}
+	eventStaff.GET("/:id/scan-exceptions", handlers.ScanExceptionsHandler(pool))
+
+	// ==========================================
 	// Home Feed
 	// ==========================================
 	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))

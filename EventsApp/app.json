@@ -41,7 +41,8 @@
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera to scan ticket QR codes at the door."
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "extra": {
       "router": {},
