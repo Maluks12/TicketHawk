@@ -27,6 +27,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CheckCircle, Warning, ArrowUUpLeft, HourglassMedium } from 'phosphor-react-native';
 import {
   openGatewayCheckout,
   startBookingPayment,
@@ -97,7 +98,7 @@ export default function PaymentScreen() {
   const finishFromStatus = useCallback((status: PaymentStatus | null, cancelledFallback: boolean) => {
     if (status?.payment_status === 'completed') {
       setPhase('done');
-      setMessage('Payment confirmed! 🎟');
+      setMessage('Payment confirmed!');
       doneTimerRef.current = setTimeout(goToTickets, 1400);
     } else if (status?.payment_status === 'failed') {
       setPhase('failed');
@@ -204,15 +205,15 @@ export default function PaymentScreen() {
         <Text style={styles.headerTitle}>
           {methodLabel ? `Pay with ${methodLabel}` : 'Secure Payment'}
         </Text>
-        <Text style={styles.headerAmount}>{fmtAmount()}</Text>
       </View>
 
       <View style={styles.body}>
+        <Text style={styles.bigAmount}>{fmtAmount()}</Text>
         {spinning && <ActivityIndicator size="large" color="#ff3c6e" />}
-        {phase === 'done' && <Text style={styles.bigIcon}>✅</Text>}
-        {phase === 'failed' && <Text style={styles.bigIcon}>⚠️</Text>}
-        {phase === 'cancelled' && <Text style={styles.bigIcon}>↩️</Text>}
-        {phase === 'pending' && <Text style={styles.bigIcon}>⏳</Text>}
+        {phase === 'done' && <CheckCircle size={56} color="#00a843" weight="fill" />}
+        {phase === 'failed' && <Warning size={56} color="#f0a020" weight="fill" />}
+        {phase === 'cancelled' && <ArrowUUpLeft size={48} color="#6b7280" weight="bold" />}
+        {phase === 'pending' && <HourglassMedium size={48} color="#f0a020" weight="fill" />}
 
         <Text style={[styles.message, phase === 'done' && styles.successText]}>{message}</Text>
 
@@ -248,9 +249,8 @@ const styles = StyleSheet.create({
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14,
                   borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e5e5' },
   headerTitle:  { flex: 1, fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
-  headerAmount: { fontSize: 14, color: '#666' },
+  bigAmount:    { fontSize: 32, fontWeight: '800', color: '#0a0a0a', letterSpacing: -0.6, marginBottom: 4 },
   body:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 18 },
-  bigIcon:      { fontSize: 44 },
   message:      { fontSize: 16, color: '#333', textAlign: 'center', lineHeight: 24 },
   successText:  { color: '#00a843', fontWeight: '700', fontSize: 18 },
   primaryBtn:   { backgroundColor: '#ff3c6e', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 36, marginTop: 6 },

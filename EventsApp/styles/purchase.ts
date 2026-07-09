@@ -32,12 +32,14 @@ export const sheet = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
   },
+  // 40px tap target; glyph is optically centered (lineHeight == fontSize kills
+  // the baseline offset that pushed the old 26/32 chevron low and left).
   backBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 40, height: 40, borderRadius: 20,
     backgroundColor: '#f3f4f6',
     alignItems: 'center', justifyContent: 'center',
   },
-  backIcon:     { fontSize: 26, fontWeight: '400', color: '#222', lineHeight: 32, marginLeft: -1 },
+  backIcon:     { fontSize: 24, fontWeight: '400', color: '#222', lineHeight: 24, textAlign: 'center', marginTop: -2 },
   closeBtn: {
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: '#f3f4f6',
@@ -167,8 +169,10 @@ export const sheet = StyleSheet.create({
 
   // ── Checkout summary ───────────────────────────────────────────────────────
   checkoutWrap: { paddingBottom: 8 },
+  // No top border: eventTitleSection above already draws a bottom hairline,
+  // so a top border here rendered as a double line above "Contact".
   detailsList: {
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#f3f4f6',
+    borderBottomWidth: 1, borderColor: '#f3f4f6',
     marginHorizontal: 20, marginTop: 4, marginBottom: 24,
   },
   detailRow: {

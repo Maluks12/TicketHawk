@@ -13,7 +13,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
-import { CalendarDots, Clock, MapPin, UsersThree, Heart, Export, Hash, type Icon as PhosphorIcon } from 'phosphor-react-native';
+import { CalendarDots, Clock, MapPin, UsersThree, Heart, Export, Hash, Ticket, type Icon as PhosphorIcon } from 'phosphor-react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -344,8 +344,9 @@ export default function EventDetail() {
           <View style={[sheet.metaDivider, { backgroundColor: colors.dividerColor }]} />
           <View className={s.ctaWrap}>
             {isSoldOut ? (
-              <TouchableOpacity className={s.btnSoldOut} disabled>
-                <Text className={s.btnSoldOutText}>🎟  SOLD OUT</Text>
+              <TouchableOpacity className={s.btnSoldOut} style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }} disabled>
+                <Ticket size={18} color="rgba(0,0,0,0.3)" weight="regular" />
+                <Text className={s.btnSoldOutText}>SOLD OUT</Text>
               </TouchableOpacity>
             ) : (
               /* GET TICKETS — only full #FF2D55 fill in the whole screen */
