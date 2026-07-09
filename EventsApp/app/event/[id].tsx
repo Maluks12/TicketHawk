@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as ExpoImage } from 'expo-image';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -20,6 +21,12 @@ import { s, sheet, HERO_H } from '../../styles/eventDetail';
 import { useAppTheme } from '../../theme/colors';
 import { getBaseUrl } from '../../components/FilterModal';
 import { toggleFollow, getFollowStatus } from '../../lib/api';
+
+// ─── Hero display mode ────────────────────────────────────────────────────────
+// 'contain' → the whole image is shown, never zoomed or cropped (letterboxed
+//             over a blurred backdrop when the aspect ratio doesn't match).
+// 'cover'   → edge-to-edge fill, crops/upscales to fit the hero frame.
+const HERO_FIT: 'contain' | 'cover' = 'contain';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -221,10 +228,14 @@ export default function EventDetail() {
   const organizerName    = ev.organizer_name ?? 'EVENT ORGANIZER';
   const organizerInitial = organizerName.charAt(0).toUpperCase();
 
-  const PARALLAX_EXTRA  = Math.round(HERO_H * 0.35);
+  // Gentle parallax on the sharp foreground only. The image is no longer
+  // oversized (the old `bottom: -35%` overscan forced `cover` to upscale the
+  // source ~35% beyond full-screen). As it drifts, the blurred backdrop shows
+  // through — no zoom, no crop, no resolution loss.
+  const PARALLAX_SHIFT  = Math.round(HERO_H * 0.12);
   const imageTranslateY = scrollY.interpolate({
     inputRange:  [-HERO_H, 0, HERO_H],
-    outputRange: [-PARALLAX_EXTRA / 2, 0, PARALLAX_EXTRA * 0.6],
+    outputRange: [-PARALLAX_SHIFT / 2, 0, PARALLAX_SHIFT],
     extrapolate: 'clamp',
   });
 
@@ -254,11 +265,35 @@ export default function EventDetail() {
         {/* ── Hero ─────────────────────────────────────────────────── */}
         <View style={sheet.heroContainer}>
           {heroImage ? (
-            <Animated.Image
-              source={{ uri: heroImage }}
-              style={[sheet.heroImage, { transform: [{ translateY: imageTranslateY }] }]}
-              resizeMode="cover"
-            />
+            <>
+              {/* Blurred backdrop fills the frame edge-to-edge, so the sharp
+                  layer never needs to be zoomed/cropped to cover it. */}
+              <ExpoImage
+                source={{ uri: heroImage }}
+                style={sheet.heroBackdrop}
+                contentFit="cover"
+                blurRadius={24}
+                cachePolicy="memory-disk"
+                transition={150}
+              />
+              {/* Sharp foreground: HERO_FIT='contain' shows the entire image at
+                  its native aspect ratio — zero upscaling beyond fitting the
+                  screen width. Flip to 'cover' for edge-to-edge crop once all
+                  events have high-res portrait artwork. */}
+              <Animated.View
+                style={[sheet.heroImage, { transform: [{ translateY: imageTranslateY }] }]}
+                pointerEvents="none"
+              >
+                <ExpoImage
+                  source={{ uri: heroImage }}
+                  style={{ flex: 1 }}
+                  contentFit={HERO_FIT}
+                  cachePolicy="memory-disk"
+                  priority="high"
+                  transition={150}
+                />
+              </Animated.View>
+            </>
           ) : (
             <View style={[sheet.heroImage, { backgroundColor: '#222222' }]} />
           )}

@@ -200,6 +200,12 @@ func makeThumbnail(data []byte, contentType string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// scaleDown returns img scaled so that neither dimension exceeds maxW/maxH,
+// preserving the aspect ratio. Uses area averaging (box filter) — the correct
+// filter for large downscale factors, since every source pixel contributes to
+// the output instead of most being skipped (which is what bilinear does at
+// ratios beyond ~2x, causing aliasing and muddy thumbnails).
+// Mirrors internal/services/image_service.go.
 func scaleDown(img image.Image, maxW, maxH int) image.Image {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
@@ -209,65 +215,65 @@ func scaleDown(img image.Image, maxW, maxH int) image.Image {
 	ratio := math.Min(float64(maxW)/float64(w), float64(maxH)/float64(h))
 	newW := int(math.Round(float64(w) * ratio))
 	newH := int(math.Round(float64(h) * ratio))
+	if newW < 1 {
+		newW = 1
+	}
+	if newH < 1 {
+		newH = 1
+	}
+
+	src, ok := img.(*image.RGBA)
+	if !ok || src.Rect.Min != (image.Point{}) {
+		tmp := image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(tmp, tmp.Bounds(), img, bounds.Min, draw.Src)
+		src = tmp
+	}
+
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	xRatio := float64(w) / float64(newW)
+	yRatio := float64(h) / float64(newH)
+
 	for y := 0; y < newH; y++ {
+		sy0 := float64(y) * yRatio
+		sy1 := sy0 + yRatio
+		iy0 := int(sy0)
+		iy1 := int(math.Ceil(sy1))
+		if iy1 > h {
+			iy1 = h
+		}
 		for x := 0; x < newW; x++ {
-			srcXf := (float64(x)+0.5)*float64(w)/float64(newW) - 0.5
-			srcYf := (float64(y)+0.5)*float64(h)/float64(newH) - 0.5
-			x0 := int(math.Floor(srcXf))
-			y0 := int(math.Floor(srcYf))
-			x1 := x0 + 1
-			y1 := y0 + 1
-			x0 = clampInt(x0, bounds.Min.X, bounds.Max.X-1)
-			y0 = clampInt(y0, bounds.Min.Y, bounds.Max.Y-1)
-			x1 = clampInt(x1, bounds.Min.X, bounds.Max.X-1)
-			y1 = clampInt(y1, bounds.Min.Y, bounds.Max.Y-1)
-			fx := srcXf - math.Floor(srcXf)
-			fy := srcYf - math.Floor(srcYf)
-			c00 := toRGBAf(img.At(x0, y0))
-			c10 := toRGBAf(img.At(x1, y0))
-			c01 := toRGBAf(img.At(x0, y1))
-			c11 := toRGBAf(img.At(x1, y1))
-			r := lerp2(c00[0], c10[0], c01[0], c11[0], fx, fy)
-			g := lerp2(c00[1], c10[1], c01[1], c11[1], fx, fy)
-			bb := lerp2(c00[2], c10[2], c01[2], c11[2], fx, fy)
-			a := lerp2(c00[3], c10[3], c01[3], c11[3], fx, fy)
-			dst.Set(x, y, color.RGBA{
-				R: uint8(clampFloat(r, 0, 255)),
-				G: uint8(clampFloat(g, 0, 255)),
-				B: uint8(clampFloat(bb, 0, 255)),
-				A: uint8(clampFloat(a, 0, 255)),
-			})
+			sx0 := float64(x) * xRatio
+			sx1 := sx0 + xRatio
+			ix0 := int(sx0)
+			ix1 := int(math.Ceil(sx1))
+			if ix1 > w {
+				ix1 = w
+			}
+
+			var rSum, gSum, bSum, aSum, cov float64
+			for sy := iy0; sy < iy1; sy++ {
+				cy := math.Min(sy1, float64(sy+1)) - math.Max(sy0, float64(sy))
+				rowOff := sy * src.Stride
+				for sx := ix0; sx < ix1; sx++ {
+					cx := math.Min(sx1, float64(sx+1)) - math.Max(sx0, float64(sx))
+					c := cx * cy
+					off := rowOff + sx*4
+					rSum += float64(src.Pix[off]) * c
+					gSum += float64(src.Pix[off+1]) * c
+					bSum += float64(src.Pix[off+2]) * c
+					aSum += float64(src.Pix[off+3]) * c
+					cov += c
+				}
+			}
+
+			off := y*dst.Stride + x*4
+			dst.Pix[off] = uint8(rSum/cov + 0.5)
+			dst.Pix[off+1] = uint8(gSum/cov + 0.5)
+			dst.Pix[off+2] = uint8(bSum/cov + 0.5)
+			dst.Pix[off+3] = uint8(aSum/cov + 0.5)
 		}
 	}
 	return dst
-}
-
-func toRGBAf(c color.Color) [4]float64 {
-	r, g, b, a := c.RGBA()
-	return [4]float64{float64(r) / 257, float64(g) / 257, float64(b) / 257, float64(a) / 257}
-}
-func lerp(a, b, t float64) float64 { return a*(1-t) + b*t }
-func lerp2(c00, c10, c01, c11, fx, fy float64) float64 {
-	return lerp(lerp(c00, c10, fx), lerp(c01, c11, fx), fy)
-}
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-func clampFloat(v, lo, hi float64) float64 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
 
 // ── R2 primitives ─────────────────────────────────────────────────────────────

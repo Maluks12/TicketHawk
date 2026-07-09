@@ -73,6 +73,13 @@ const (
 	// balance between visual fidelity and file size (~60–70 % smaller than
 	// a typical camera JPEG at 95+ quality).
 	jpegQuality = 82
+
+	// minHeroLongEdge is the minimum long-edge (px) accepted for covers and
+	// banners. Both render as the full-screen hero on the event detail page,
+	// which needs ~1080–1980 physical pixels on modern phones — anything much
+	// smaller upscales into visible pixelation. 1000px keeps the bar practical
+	// for organizers while ruling out card-sized images.
+	minHeroLongEdge = 1000
 )
 
 // ── Allowed MIME types ────────────────────────────────────────────────────────
@@ -171,8 +178,15 @@ func hasTransparency(img image.Image) bool {
 }
 
 // scaleDown returns img scaled so that neither dimension exceeds maxW/maxH,
-// preserving the aspect ratio. Uses bilinear interpolation for quality.
-// If the image already fits, img is returned as-is (zero allocation).
+// preserving the aspect ratio. If the image already fits, img is returned
+// as-is (zero allocation).
+//
+// Uses area averaging (a box filter): every source pixel inside the footprint
+// of an output pixel contributes proportionally to its coverage. This is the
+// correct filter for large downscale factors (e.g. a 5000px camera photo down
+// to a 600px thumbnail). Bilinear, which this replaces, samples only the 4
+// source pixels nearest each output pixel, so at ratios beyond ~2x most of the
+// source is skipped entirely — producing aliasing, shimmer, and muddy detail.
 func scaleDown(img image.Image, maxW, maxH int) image.Image {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
@@ -184,88 +198,72 @@ func scaleDown(img image.Image, maxW, maxH int) image.Image {
 	ratio := math.Min(float64(maxW)/float64(w), float64(maxH)/float64(h))
 	newW := int(math.Round(float64(w) * ratio))
 	newH := int(math.Round(float64(h) * ratio))
+	if newW < 1 {
+		newW = 1
+	}
+	if newH < 1 {
+		newH = 1
+	}
+
+	// Normalise the source to a zero-origin RGBA buffer for fast, direct
+	// pixel access (avoids the interface-call cost of img.At per sample).
+	src, ok := img.(*image.RGBA)
+	if !ok || src.Rect.Min != (image.Point{}) {
+		tmp := image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(tmp, tmp.Bounds(), img, bounds.Min, draw.Src)
+		src = tmp
+	}
 
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	xRatio := float64(w) / float64(newW)
+	yRatio := float64(h) / float64(newH)
 
-	// Bilinear interpolation – good quality for downscaling photos.
 	for y := 0; y < newH; y++ {
+		// Vertical footprint of this output row in source space.
+		sy0 := float64(y) * yRatio
+		sy1 := sy0 + yRatio
+		iy0 := int(sy0)
+		iy1 := int(math.Ceil(sy1))
+		if iy1 > h {
+			iy1 = h
+		}
+
 		for x := 0; x < newW; x++ {
-			// Map destination pixel back to source space.
-			srcXf := (float64(x)+0.5)*float64(w)/float64(newW) - 0.5
-			srcYf := (float64(y)+0.5)*float64(h)/float64(newH) - 0.5
+			// Horizontal footprint of this output column in source space.
+			sx0 := float64(x) * xRatio
+			sx1 := sx0 + xRatio
+			ix0 := int(sx0)
+			ix1 := int(math.Ceil(sx1))
+			if ix1 > w {
+				ix1 = w
+			}
 
-			x0 := int(math.Floor(srcXf))
-			y0 := int(math.Floor(srcYf))
-			x1 := x0 + 1
-			y1 := y0 + 1
+			var rSum, gSum, bSum, aSum, cov float64
+			for sy := iy0; sy < iy1; sy++ {
+				// Fraction of this source row covered by the footprint.
+				cy := math.Min(sy1, float64(sy+1)) - math.Max(sy0, float64(sy))
+				rowOff := sy * src.Stride
+				for sx := ix0; sx < ix1; sx++ {
+					cx := math.Min(sx1, float64(sx+1)) - math.Max(sx0, float64(sx))
+					c := cx * cy
+					off := rowOff + sx*4
+					rSum += float64(src.Pix[off]) * c
+					gSum += float64(src.Pix[off+1]) * c
+					bSum += float64(src.Pix[off+2]) * c
+					aSum += float64(src.Pix[off+3]) * c
+					cov += c
+				}
+			}
 
-			// Clamp to image bounds.
-			x0 = clampInt(x0, bounds.Min.X, bounds.Max.X-1)
-			y0 = clampInt(y0, bounds.Min.Y, bounds.Max.Y-1)
-			x1 = clampInt(x1, bounds.Min.X, bounds.Max.X-1)
-			y1 = clampInt(y1, bounds.Min.Y, bounds.Max.Y-1)
-
-			fx := srcXf - math.Floor(srcXf)
-			fy := srcYf - math.Floor(srcYf)
-
-			c00 := toRGBAf(img.At(x0, y0))
-			c10 := toRGBAf(img.At(x1, y0))
-			c01 := toRGBAf(img.At(x0, y1))
-			c11 := toRGBAf(img.At(x1, y1))
-
-			r := lerp2(c00[0], c10[0], c01[0], c11[0], fx, fy)
-			g := lerp2(c00[1], c10[1], c01[1], c11[1], fx, fy)
-			b := lerp2(c00[2], c10[2], c01[2], c11[2], fx, fy)
-			a := lerp2(c00[3], c10[3], c01[3], c11[3], fx, fy)
-
-			dst.Set(x, y, color.RGBA{
-				R: uint8(clampFloat(r, 0, 255)),
-				G: uint8(clampFloat(g, 0, 255)),
-				B: uint8(clampFloat(b, 0, 255)),
-				A: uint8(clampFloat(a, 0, 255)),
-			})
+			off := y*dst.Stride + x*4
+			dst.Pix[off] = uint8(rSum/cov + 0.5)
+			dst.Pix[off+1] = uint8(gSum/cov + 0.5)
+			dst.Pix[off+2] = uint8(bSum/cov + 0.5)
+			dst.Pix[off+3] = uint8(aSum/cov + 0.5)
 		}
 	}
 
 	return dst
-}
-
-// ── Bilinear helpers ──────────────────────────────────────────────────────────
-
-func toRGBAf(c color.Color) [4]float64 {
-	r, g, b, a := c.RGBA() // each in [0, 65535]
-	return [4]float64{
-		float64(r) / 257,
-		float64(g) / 257,
-		float64(b) / 257,
-		float64(a) / 257,
-	}
-}
-
-func lerp(a, b, t float64) float64 { return a*(1-t) + b*t }
-
-func lerp2(c00, c10, c01, c11, fx, fy float64) float64 {
-	return lerp(lerp(c00, c10, fx), lerp(c01, c11, fx), fy)
-}
-
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func clampFloat(v, lo, hi float64) float64 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }
 
 // ── Card thumbnail ────────────────────────────────────────────────────────────
@@ -364,6 +362,25 @@ func (s *ImageService) UploadEventImage(
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Reject covers/banners that are too small to render sharply as the
+	// full-screen hero on the event detail page. DecodeConfig reads only the
+	// header — no full decode. WebP has no stdlib decoder, so it is skipped
+	// here (compressImage passes WebP through untouched anyway).
+	if imgType == ImageTypeCover || imgType == ImageTypeBanner {
+		if imgCfg, _, cfgErr := image.DecodeConfig(bytes.NewReader(data)); cfgErr == nil {
+			longEdge := imgCfg.Width
+			if imgCfg.Height > longEdge {
+				longEdge = imgCfg.Height
+			}
+			if longEdge < minHeroLongEdge {
+				return "", fmt.Errorf(
+					"image too small: covers and banners must be at least %dpx on the longest side (got %dx%d) — small images look pixelated on the event page",
+					minHeroLongEdge, imgCfg.Width, imgCfg.Height,
+				)
+			}
+		}
 	}
 
 	// Keep the original bytes/type so the thumbnail is generated from the source

@@ -122,8 +122,6 @@ export const s = {
 
 // ─── StyleSheet ───────────────────────────────────────────────────────────────
 
-const PARALLAX_EXTRA = Math.round(HERO_H * 0.35);
-
 export const sheet = StyleSheet.create({
   absoluteFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
@@ -133,12 +131,27 @@ export const sheet = StyleSheet.create({
     backgroundColor: '#111111',
   },
 
+  // Blurred, dimmed copy of the hero image that fills the whole frame.
+  // Slightly scaled up so the blur never exposes soft/transparent edges.
+  heroBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    opacity: 0.6,
+    transform: [{ scale: 1.08 }],
+  } as any,
+
+  // Sharp foreground layer. Exactly the hero frame — the old version extended
+  // `bottom` by -35% for parallax overscan, which forced `cover` to upscale
+  // the source image an extra 35% and was a major cause of pixelation.
   heroImage: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: -PARALLAX_EXTRA,
+    bottom: 0,
   } as any,
 
   navOverlay: {
