@@ -2,7 +2,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Image,
   StatusBar,
   Share,
   Linking,
@@ -14,6 +13,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
+import { CalendarDots, Clock, MapPin, UsersThree, Heart, Export, Hash, type Icon as PhosphorIcon } from 'phosphor-react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -56,12 +56,12 @@ function formatTime(iso: string) {
 
 // ─── MetaItem ─────────────────────────────────────────────────────────────────
 
-function MetaItem({ icon, label, value }: { icon: string; label: string; value: string }) {
+function MetaItem({ icon: IconCmp, label, value }: { icon: PhosphorIcon; label: string; value: string }) {
   const { colors, isDark } = useAppTheme();
   return (
     <View className={s.metaItemRow}>
       <View className={s.metaIconBox} style={{ backgroundColor: colors.sectionCardBg }}>
-        <Text className={s.metaIconText}>{icon}</Text>
+        <IconCmp size={22} color={colors.text} weight="regular" />
       </View>
       <View>
         <Text className={s.metaLabelText} style={{ color: colors.subText }}>{label}</Text>
@@ -196,6 +196,7 @@ export default function EventDetail() {
   const isASport     = event.category?.toLowerCase() === 'sports';
   const teams:      string[] = ev.teams      ?? [];
   const performers: string[] = ev.performers ?? [];
+  const tags:       string[] = (ev.tags ?? []).filter((t: string) => !!t?.trim());
 
   // Routing unchanged — matches index.tsx push to /event/${event.id}
   const handleGetTickets = () => router.push('/event/purchase');
@@ -225,9 +226,6 @@ export default function EventDetail() {
   const hasMore     = longDesc.length > 200;
   const displayDesc = expanded ? longDesc : (shortDesc + (hasMore ? '…' : ''));
 
-  const organizerName    = ev.organizer_name ?? 'EVENT ORGANIZER';
-  const organizerInitial = organizerName.charAt(0).toUpperCase();
-
   // Gentle parallax on the sharp foreground only. The image is no longer
   // oversized (the old `bottom: -35%` overscan forced `cover` to upscale the
   // source ~35% beyond full-screen). As it drifts, the blurred backdrop shows
@@ -249,7 +247,7 @@ export default function EventDetail() {
           <Text className={s.backIcon}>‹</Text>
         </TouchableOpacity>
         <TouchableOpacity style={sheet.navBtn} onPress={handleShare} activeOpacity={0.8}>
-          <Text className={s.shareIcon}>↑</Text>
+          <Export size={18} color="#FFFFFF" weight="regular" />
         </TouchableOpacity>
       </View>
 
@@ -318,20 +316,15 @@ export default function EventDetail() {
           )}
 
           <View style={sheet.heroTitleBlock}>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 10 }}>
-              {/* TRENDING — #FF2D55 badge retained */}
-              {event.is_featured && (
+            {/* TRENDING — #FF2D55 badge retained. View count is intentionally
+                not shown to users (tracked backend-side only). */}
+            {event.is_featured && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, alignItems: 'center', marginBottom: 10 }}>
                 <View style={sheet.trendingBadge}>
                   <Text style={sheet.trendingBadgeText}>TRENDING #1</Text>
                 </View>
-              )}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>👁</Text>
-                <Text style={sheet.viewsText}>
-                  {event.views?.toLocaleString('en-ZA') ?? '0'} VIEWS
-                </Text>
               </View>
-            </View>
+            )}
             {/* Category — #FF2D55 text on dark, not a fill */}
             <Text style={sheet.heroCategory}>✦ {event.category}</Text>
             <Text style={sheet.heroTitle} numberOfLines={3}>
@@ -342,11 +335,11 @@ export default function EventDetail() {
 
         {/* ── Floating action card ─────────────────────────────────── */}
         <View style={[sheet.actionCard, { backgroundColor: colors.cardBg }]}>
-          <MetaItem icon="📅" label="DATE"     value={formatDateShort(event.start_time)} />
-          <MetaItem icon="🕐" label="TIME"     value={formatTime(event.start_time)} />
-          <MetaItem icon="📍" label="VENUE"    value={`${event.venue_name}, ${event.city}`} />
+          <MetaItem icon={CalendarDots} label="DATE"     value={formatDateShort(event.start_time)} />
+          <MetaItem icon={Clock}        label="TIME"     value={formatTime(event.start_time)} />
+          <MetaItem icon={MapPin}       label="VENUE"    value={`${event.venue_name}, ${event.city}`} />
           {maxCap > 0 && (
-            <MetaItem icon="👥" label="CAPACITY" value={`${maxCap.toLocaleString('en-ZA')} Seats`} />
+            <MetaItem icon={UsersThree} label="CAPACITY" value={`${maxCap.toLocaleString('en-ZA')} Seats`} />
           )}
           <View style={[sheet.metaDivider, { backgroundColor: colors.dividerColor }]} />
           <View className={s.ctaWrap}>
@@ -372,9 +365,11 @@ export default function EventDetail() {
                   ? { backgroundColor: '#2d1c3a', borderColor: '#b57bee' }
                   : undefined}
               >
-                <Text className={s.btnOutlineIcon}>
-                  {isFollowing ? '💜' : '🤍'}
-                </Text>
+                <Heart
+                  size={16}
+                  color={isFollowing ? '#b57bee' : '#FFFFFF'}
+                  weight={isFollowing ? 'fill' : 'regular'}
+                />
                 <Text
                   className={s.btnOutlineText}
                   style={isFollowing ? { color: '#b57bee' } : undefined}
@@ -384,7 +379,7 @@ export default function EventDetail() {
               </TouchableOpacity>
 
               <TouchableOpacity className={s.btnOutline} onPress={handleShare} activeOpacity={0.85}>
-                <Text className={s.btnOutlineIcon}>↑</Text>
+                <Export size={16} color="#FFFFFF" weight="regular" />
                 <Text className={s.btnOutlineText}>SHARE</Text>
               </TouchableOpacity>
             </View>
@@ -407,26 +402,6 @@ export default function EventDetail() {
                 </Text>
               </TouchableOpacity>
             )}
-          </View>
-
-          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-
-          {/* Bento */}
-          <View style={{ marginBottom: 8 }}>
-            <View className={s.bentoGrid}>
-              <View className={s.bentoCard}
-                style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                <Text className={s.bentoIcon}>🎟</Text>
-                <Text className={s.bentoLabel} style={{ color: colors.subText }}>STATUS</Text>
-                <Text className={s.bentoValue} style={{ color: colors.text }}>...</Text>
-              </View>
-              <View className={s.bentoCard}
-                style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                <Text className={s.bentoIcon}>✅</Text>
-                <Text className={s.bentoLabel} style={{ color: colors.subText }}>TYPE</Text>
-                <Text className={s.bentoValue} style={{ color: colors.text }}>{event.category}</Text>
-              </View>
-            </View>
           </View>
 
           <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
@@ -482,6 +457,31 @@ export default function EventDetail() {
             </>
           )}
 
+          {/* Tags — same ESPN-style row list as Teams/Performers */}
+          {tags.length > 0 && (
+            <>
+              <View style={{ marginBottom: 8 }}>
+                <View className={s.sectionHeader}>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>TAGS</Text>
+                </View>
+                {tags.map((tag, i) => (
+                  <View key={i} className={i < tags.length - 1 ? s.participantRow : s.participantRowLast}
+                    style={i < tags.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
+                    <View className={s.participantAvatar}
+                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+                      <Hash size={16} color={colors.text} weight="regular" />
+                    </View>
+                    <Text className={s.participantName} style={{ color: colors.text }}>
+                      {tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1)}
+                    </Text>
+                    <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+                  </View>
+                ))}
+              </View>
+              <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+            </>
+          )}
+
           {/* Location */}
           <View style={{ marginBottom: 8 }}>
             <View className={s.sectionHeader}>
@@ -508,7 +508,7 @@ export default function EventDetail() {
                   shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
                   shadowOpacity: 0.25, shadowRadius: 8, elevation: 6,
                 }}>
-                  <Text style={{ fontSize: 22 }}>📍</Text>
+                  <MapPin size={24} color="#FF2D55" weight="fill" />
                 </View>
               </View>
               <View className={s.locationInfoRow}>
@@ -518,39 +518,14 @@ export default function EventDetail() {
                   <Text className={s.locationAddr} style={{ color: colors.subText }}>{event.city}</Text>
                 </View>
                 <View className={s.locationBtnRow}>
-                  <TouchableOpacity className={s.locationBtnFilled} onPress={handleDirections} activeOpacity={0.8}>
-                    <Text className={s.locationBtnFilledText}>GET DIRECTIONS</Text>
-                  </TouchableOpacity>
+                  {/* GET DIRECTIONS removed — it was a duplicate of OPEN IN MAPS
+                      (both called handleDirections). */}
                   <TouchableOpacity className={s.locationBtnOutline} onPress={handleDirections} activeOpacity={0.8}>
                     <Text className={s.locationBtnOutlineText}>OPEN IN MAPS</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             </View>
-          </View>
-
-          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-
-          {/* Organizer */}
-          <View className={s.organizerCard}
-            style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor, marginBottom: 8 }}>
-            <View className={s.organizerLeft}>
-              <View className={s.organizerAvatar}
-                style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                {ev.organizer_avatar ? (
-                  <Image source={{ uri: ev.organizer_avatar }} style={{ width: 56, height: 56, borderRadius: 28 }} resizeMode="cover" />
-                ) : (
-                  <Text className={s.organizerAvatarText} style={{ color: colors.text }}>{organizerInitial}</Text>
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text className={s.organizerByLabel} style={{ color: colors.subText }}>Organized by</Text>
-                <Text className={s.organizerName} style={{ color: colors.text }} numberOfLines={2}>{organizerName}</Text>
-              </View>
-            </View>
-            <TouchableOpacity style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-              <Text style={{ fontSize: 22 }}>💬</Text>
-            </TouchableOpacity>
           </View>
 
           <View className={s.bottomPad} />
