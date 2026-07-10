@@ -7,11 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#1d1d29"
-    },
     "ios": {
       "supportsTablet": true
     },
@@ -42,7 +37,16 @@
           "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera to scan ticket QR codes at the door."
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#1d1d29"
+        }
+      ]
     ],
     "extra": {
       "router": {},
