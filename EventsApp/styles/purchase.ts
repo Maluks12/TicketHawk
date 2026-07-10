@@ -211,9 +211,10 @@ export const sheet = StyleSheet.create({
   priceDivider:     { height: 1, backgroundColor: '#e5e7eb', marginVertical: 2 },
   priceTotalLabel:  { fontSize: 15, fontWeight: '800', color: '#111111' },
   // Terms agreement under the price breakdown (fills the former dead space)
+  // Aligned to the 20px page gutter used by the detail rows and price card.
   termsText: {
     marginTop: 16,
-    marginHorizontal: 4,
+    marginHorizontal: 20,
     fontSize: 12.5,
     lineHeight: 19,
     color: '#6b7280',

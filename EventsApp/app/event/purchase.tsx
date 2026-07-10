@@ -394,7 +394,7 @@ export default function TicketPurchaseScreen() {
           style={ss.backBtn}
           hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}
         >
-          <CaretLeft size={20} color="#222" weight="regular" />
+          <CaretLeft size={20} color="#222" weight="bold" />
         </TouchableOpacity>
         <Text style={ss.headerTitle}>{headerTitle}</Text>
         <View style={ss.stepDots}>
@@ -415,7 +415,7 @@ export default function TicketPurchaseScreen() {
           <ScrollView
             style={ss.scroll}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 170 }}
+            contentContainerStyle={{ paddingBottom: 130 }}
           >
             {/* ── Event Banner — checkout step only, scrolls with content ── */}
             {step === 'summary' && (
@@ -818,7 +818,13 @@ export default function TicketPurchaseScreen() {
             </View>
 
             {/* Already have an account */}
-            <TouchableOpacity style={ss.modalAccountRow}>
+            <TouchableOpacity
+              style={ss.modalAccountRow}
+              onPress={() => {
+                closeContactModal();
+                router.push('/auth/login');
+              }}
+            >
               <Text style={ss.modalAccountText}>Already have an account?</Text>
               <Text style={ss.modalAccountChevron}>›</Text>
             </TouchableOpacity>
