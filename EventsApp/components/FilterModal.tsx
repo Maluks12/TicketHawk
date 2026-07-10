@@ -609,8 +609,8 @@ export default function FilterModal({ visible, onClose, onApply, initialParams }
                       activeOpacity={0.7}
                     >
                       <View style={s.locRowLeft}>
-                        <Ionicons name="earth-outline" size={18} color="rgba(10,10,10,0.35)" style={{ marginRight: 12 }} />
-                        <Text style={[s.locRowText, !locationIsSet && s.locRowTextSelected]}>
+                        <Ionicons name="earth-outline" size={18} color={isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)'} style={{ marginRight: 12 }} />
+                        <Text style={[s.locRowText, !locationIsSet && s.locRowTextSelected, { color: colors.text }]}>
                           Anywhere
                         </Text>
                       </View>
