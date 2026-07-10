@@ -28,7 +28,8 @@ import {
 } from '../../lib/api';
 import { startBookingPayment } from '../../lib/payments';
 import SeatingMap, { detectVenueType, MapLegend } from '../../components/seatingmap';
-import { sheet as ss, PRIMARY } from '../../styles/purchase';
+import { makePurchaseSheet, purchaseTokens, PRIMARY } from '../../styles/purchase';
+import { useAppTheme } from '../../theme/colors';
 import {
   CaretLeft, CaretDown, ArrowsDownUp, Star, CrownSimple, Check,
   CreditCard, AppleLogo, PaypalLogo, Bank,
@@ -70,6 +71,9 @@ function isSoldOut(tt: TicketType): boolean {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function TicketPurchaseScreen() {
+  const { isDark } = useAppTheme();
+  const ss = React.useMemo(() => makePurchaseSheet(isDark), [isDark]);
+  const T  = purchaseTokens(isDark);
   const router   = useRouter();
   const insets   = useSafeAreaInsets();
   const event    = useEventStore((s) => s.selectedEvent) as any;
@@ -210,12 +214,18 @@ export default function TicketPurchaseScreen() {
   const perTicketFee = unitPrice > 0 ? Math.min(SERVICE_FEE_PER_TICKET, MAX_SERVICE_FEE_RATE * unitPrice) : 0;
   const platformFee  = Math.round(perTicketFee * quantity * 100) / 100;
   const grandTotal   = totalAmount + platformFee;
-  const venueType = (() => {
+  // Seating maps are disabled for launch (like the merch tab). All events go
+  // straight from ticket selection to the order summary. Flip this to true to
+  // restore the Choose Seats step -- all its code below is intact.
+  const SEATING_ENABLED = false;
+
+  const rawVenueType = (() => {
     if (!event) return 'none' as const;
     const override = event.venue_type as string | undefined;
     if (override && override !== 'auto') return override as 'stadium' | 'auditorium' | 'none';
     return detectVenueType(event.category ?? '', event.venue_name);
   })();
+  const venueType = SEATING_ENABLED ? rawVenueType : 'none';
   const bannerImage  = event?.banner_image_url ?? event?.cover_image_url ?? null;
 
   const handleSelectType = useCallback((id: string) => setSelectedId(id), []);
@@ -381,7 +391,7 @@ export default function TicketPurchaseScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
     <View style={[ss.screen, { paddingBottom: insets.bottom }]}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <View style={[ss.header, { paddingTop: insets.top + 4 }]}>
@@ -394,7 +404,7 @@ export default function TicketPurchaseScreen() {
           style={ss.backBtn}
           hitSlop={{ top: 8, left: 8, right: 8, bottom: 8 }}
         >
-          <CaretLeft size={20} color="#222" weight="bold" />
+          <CaretLeft size={20} color={T.text} weight="bold" />
         </TouchableOpacity>
         <Text style={ss.headerTitle}>{headerTitle}</Text>
         <View style={ss.stepDots}>
@@ -424,7 +434,7 @@ export default function TicketPurchaseScreen() {
                   <Image source={{ uri: bannerImage }} style={ss.bannerImage} resizeMode="cover" />
                 ) : (
                   <View style={ss.bannerPlaceholder}>
-                    <Ticket size={36} color="#d1d5db" weight="duotone" />
+                    <Ticket size={36} color={T.border3} weight="duotone" />
                   </View>
                 )}
                 <View style={ss.bannerOverlay} />
@@ -458,14 +468,14 @@ export default function TicketPurchaseScreen() {
                 <View style={ss.sectionHeader}>
                   <Text style={ss.sectionHeaderText}>AVAILABLE TICKETS</Text>
                   <View style={[ss.sortChip, { flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
-                    <ArrowsDownUp size={13} color="#374151" weight="bold" />
+                    <ArrowsDownUp size={13} color={T.subStrong} weight="bold" />
                     <Text style={ss.sortChipText}>Best deal</Text>
                   </View>
                 </View>
 
                 {ticketTypes.length === 0 ? (
                   <View style={ss.emptyState}>
-                    <Ticket size={34} color="#d1d5db" weight="duotone" />
+                    <Ticket size={34} color={T.border3} weight="duotone" />
                     <Text style={ss.emptyText}>No tickets currently on sale</Text>
                   </View>
                 ) : (
@@ -488,7 +498,7 @@ export default function TicketPurchaseScreen() {
                             <Text style={[ss.ticketName, sold && ss.ticketNameSoldOut]}>{tt.name}</Text>
                             {isPremium && !sold && (
                               <View style={[ss.vipBadge, { flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
-                                <Star size={11} color="#b45309" weight="fill" />
+                                <Star size={11} color={T.vipText} weight="fill" />
                                 <Text style={ss.vipBadgeText}>VIP</Text>
                               </View>
                             )}
@@ -503,8 +513,8 @@ export default function TicketPurchaseScreen() {
                           ) : (
                             <View style={[ss.dealBadge, { flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
                               {isPremium
-                                ? <CrownSimple size={11} color="#15803d" weight="fill" />
-                                : <Check size={11} color="#15803d" weight="bold" />}
+                                ? <CrownSimple size={11} color={T.okText} weight="fill" />
+                                : <Check size={11} color={T.okText} weight="bold" />}
                               <Text style={ss.dealBadgeText}>{isPremium ? 'Premium' : 'Available'}</Text>
                             </View>
                           )}
@@ -538,7 +548,7 @@ export default function TicketPurchaseScreen() {
                         <Text style={ss.qtySectionTitle}>How many tickets?</Text>
                       </View>
                       {isFinite(maxPer) && (
-                        <Text style={{ fontSize: 12, color: '#888', marginBottom: 8, marginLeft: 2 }}>
+                        <Text style={{ fontSize: 12, color: T.faint, marginBottom: 8, marginLeft: 2 }}>
                           Max {maxPer} ticket{maxPer !== 1 ? 's' : ''} per person
                         </Text>
                       )}
@@ -623,10 +633,10 @@ export default function TicketPurchaseScreen() {
                   <TouchableOpacity style={ss.detailRow} onPress={openPaymentSheet} activeOpacity={0.7}>
                     <Text style={ss.detailLabel}>Payment</Text>
                     <View style={ss.detailRight}>
-                      {paymentMethod === 'apple_pay' ? <AppleLogo size={16} color="#0a0a0a" weight="fill" />
+                      {paymentMethod === 'apple_pay' ? <AppleLogo size={16} color={T.text} weight="fill" />
                         : paymentMethod === 'paypal' ? <PaypalLogo size={16} color="#003087" weight="fill" />
                         : paymentMethod === 'instant_eft' ? <Bank size={16} color="#1a7f5a" weight="fill" />
-                        : <CreditCard size={16} color="#374151" weight="regular" />}
+                        : <CreditCard size={16} color={T.subStrong} weight="regular" />}
                       <Text style={ss.detailValue}>
                         {paymentMethod === 'apple_pay' ? 'Apple Pay' : paymentMethod === 'paypal' ? 'PayPal' : paymentMethod === 'instant_eft' ? 'Instant EFT' : 'Credit / Debit Card'}
                       </Text>
@@ -661,10 +671,10 @@ export default function TicketPurchaseScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                       <Text style={ss.priceTotalValue}>{fmtPrice(grandTotal)}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#6b7280' }}>
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: T.sub }}>
                           {showBreakdown ? 'Hide details' : 'View details'}
                         </Text>
-                        <CaretDown size={14} color="#6b7280" weight="bold" style={{ transform: [{ rotate: showBreakdown ? '180deg' : '0deg' }] }} />
+                        <CaretDown size={14} color={T.sub} weight="bold" style={{ transform: [{ rotate: showBreakdown ? '180deg' : '0deg' }] }} />
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -760,7 +770,7 @@ export default function TicketPurchaseScreen() {
             {/* Header */}
             <View style={ss.modalHeader}>
               <TouchableOpacity onPress={closeContactModal} style={ss.modalCloseBtn}>
-                <X size={16} color="#222" weight="bold" />
+                <X size={16} color={T.text} weight="bold" />
               </TouchableOpacity>
               <Text style={ss.modalTitle}>Contact</Text>
               <TouchableOpacity onPress={handleContactDone} style={ss.modalDoneBtn}>
@@ -847,19 +857,19 @@ export default function TicketPurchaseScreen() {
         <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 8 }}>
           <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#e0e0e0' }} />
         </View>
-        <Text style={{ fontSize: 17, fontWeight: '700', color: '#0a0a0a', paddingHorizontal: 20, paddingBottom: 8 }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: T.text, paddingHorizontal: 20, paddingBottom: 8 }}>
           Payments
         </Text>
 
         {/* Apple Pay */}
         <TouchableOpacity onPress={() => selectPaymentMethod('apple_pay')} activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: '#222', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, marginRight: 14 }}>
-            <AppleLogo size={13} color="#000" weight="fill" />
-            <Text style={{ fontSize: 13, fontWeight: '800', color: '#000', letterSpacing: -0.5 }}>Pay</Text>
+          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: T.text, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, marginRight: 14 }}>
+            <AppleLogo size={13} color={T.text} weight="fill" />
+            <Text style={{ fontSize: 13, fontWeight: '800', color: T.text, letterSpacing: -0.5 }}>Pay</Text>
           </View>
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>Apple Pay</Text>
-          {paymentMethod === 'apple_pay' && <Check size={18} color="#0a0a0a" weight="bold" />}
+          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: T.text }}>Apple Pay</Text>
+          {paymentMethod === 'apple_pay' && <Check size={18} color={T.text} weight="bold" />}
         </TouchableOpacity>
 
         {/* PayPal */}
@@ -868,8 +878,8 @@ export default function TicketPurchaseScreen() {
           <View style={{ width: 52, height: 34, borderRadius: 8, backgroundColor: '#003087', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
             <PaypalLogo size={20} color="#ffffff" weight="fill" />
           </View>
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>PayPal</Text>
-          {paymentMethod === 'paypal' && <Check size={18} color="#0a0a0a" weight="bold" />}
+          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: T.text }}>PayPal</Text>
+          {paymentMethod === 'paypal' && <Check size={18} color={T.text} weight="bold" />}
         </TouchableOpacity>
 
         {/* Instant EFT (Paystack/Ozow) — signed-in users only for now;
@@ -881,21 +891,21 @@ export default function TicketPurchaseScreen() {
               <Bank size={19} color="#ffffff" weight="fill" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>Instant EFT</Text>
-              <Text style={{ fontSize: 12, color: '#888', marginTop: 1 }}>Pay from your bank · instant confirmation</Text>
+              <Text style={{ fontSize: 16, fontWeight: '500', color: T.text }}>Instant EFT</Text>
+              <Text style={{ fontSize: 12, color: T.faint, marginTop: 1 }}>Pay from your bank · instant confirmation</Text>
             </View>
-            {paymentMethod === 'instant_eft' && <Check size={18} color="#0a0a0a" weight="bold" />}
+            {paymentMethod === 'instant_eft' && <Check size={18} color={T.text} weight="bold" />}
           </TouchableOpacity>
         )}
 
         {/* Credit Card */}
         <TouchableOpacity onPress={() => selectPaymentMethod('card')} activeOpacity={0.7}
           style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
-            <CreditCard size={20} color="#374151" weight="regular" />
+          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: T.border3, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+            <CreditCard size={20} color={T.subStrong} weight="regular" />
           </View>
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: '#0a0a0a' }}>Add credit card</Text>
-          {paymentMethod === 'card' && <Check size={18} color="#0a0a0a" weight="bold" />}
+          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: T.text }}>Add credit card</Text>
+          {paymentMethod === 'card' && <Check size={18} color={T.text} weight="bold" />}
         </TouchableOpacity>
       </Animated.View>
     </Modal>

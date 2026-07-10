@@ -28,6 +28,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckCircle, Warning, ArrowUUpLeft, HourglassMedium } from 'phosphor-react-native';
+import { useAppTheme } from '../../theme/colors';
 import {
   openGatewayCheckout,
   startBookingPayment,
@@ -47,6 +48,8 @@ const METHOD_LABEL: Record<string, string> = {
 };
 
 export default function PaymentScreen() {
+  const { isDark } = useAppTheme();
+  const styles = React.useMemo(() => makeStyles(isDark), [isDark]);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id: bookingId, url, amount, currency, method, bookingNumber, email } = useLocalSearchParams<{
@@ -199,7 +202,7 @@ export default function PaymentScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       <View style={styles.header}>
         <Text style={styles.headerTitle}>
@@ -244,19 +247,19 @@ export default function PaymentScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: '#fff' },
+const makeStyles = (dark: boolean) => StyleSheet.create({
+  root:         { flex: 1, backgroundColor: dark ? '#0e0e12' : '#fff' },
   header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14,
-                  borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e5e5' },
-  headerTitle:  { flex: 1, fontSize: 16, fontWeight: '600', color: '#0a0a0a' },
-  bigAmount:    { fontSize: 32, fontWeight: '800', color: '#0a0a0a', letterSpacing: -0.6, marginBottom: 4 },
+                  borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: dark ? '#2e2e35' : '#e5e5e5' },
+  headerTitle:  { flex: 1, fontSize: 16, fontWeight: '600', color: dark ? '#ffffff' : '#0a0a0a' },
+  bigAmount:    { fontSize: 32, fontWeight: '800', color: dark ? '#ffffff' : '#0a0a0a', letterSpacing: -0.6, marginBottom: 4 },
   body:         { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 18 },
-  message:      { fontSize: 16, color: '#333', textAlign: 'center', lineHeight: 24 },
+  message:      { fontSize: 16, color: dark ? '#c8c8cf' : '#333', textAlign: 'center', lineHeight: 24 },
   successText:  { color: '#00a843', fontWeight: '700', fontSize: 18 },
   primaryBtn:   { backgroundColor: '#ff3c6e', borderRadius: 12, paddingVertical: 13, paddingHorizontal: 36, marginTop: 6 },
   primaryText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
-  secondaryBtn: { borderRadius: 12, paddingVertical: 12, paddingHorizontal: 36, borderWidth: 1, borderColor: '#1a1a2e' },
-  secondaryText:{ color: '#1a1a2e', fontWeight: '600', fontSize: 15 },
+  secondaryBtn: { borderRadius: 12, paddingVertical: 12, paddingHorizontal: 36, borderWidth: 1, borderColor: dark ? '#c8c8cf' : '#1a1a2e' },
+  secondaryText:{ color: dark ? '#e5e5ea' : '#1a1a2e', fontWeight: '600', fontSize: 15 },
   linkBtn:      { paddingVertical: 8 },
   linkText:     { color: '#888', fontSize: 14, textDecorationLine: 'underline' },
 });

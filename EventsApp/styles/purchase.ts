@@ -1,54 +1,83 @@
 import { StyleSheet, Dimensions } from 'react-native';
 
 // ─── Import ───────────────────────────────────────────────────────────────────
-// import { s, sheet, PRIMARY } from '../../styles/purchase';
-// Use:  <View style={sheet.header} />  or  <Text style={sheet.eventTitle} />
+// import { makePurchaseSheet, PRIMARY } from '../../styles/purchase';
+// const ss = useMemo(() => makePurchaseSheet(isDark), [isDark]);
 
 const { width: SW } = Dimensions.get('window');
 
 export const PRIMARY = '#FF2D55';
 
-// ─── StyleSheet ───────────────────────────────────────────────────────────────
+// ─── Theme tokens ─────────────────────────────────────────────────────────────
+const LIGHT = {
+  bg: '#ffffff', sheet: '#ffffff', surface: '#fafafa', faintSurface: '#f3f4f6',
+  border2: '#e5e7eb', border3: '#d1d5db',
+  text: '#111111', sub: '#6b7280', subStrong: '#374151', faint: '#9ca3af',
+  link: '#2563eb',
+  selBg: '#fff5f7', selBorder: '#fecdd3',
+  infoBg: '#f8faff', infoBorder: '#e0eaff',
+  vipBg: '#fef3c7', vipText: '#92400e',
+  okBg: '#f0fdf4', okText: '#15803d',
+  soldBg: '#fff1f2', soldText: '#be123c',
+};
 
-export const sheet = StyleSheet.create({
+const DARK: typeof LIGHT = {
+  bg: '#0e0e12', sheet: '#1b1b20', surface: '#17171c', faintSurface: '#232329',
+  border2: '#2e2e35', border3: '#43434b',
+  text: '#ffffff', sub: '#a1a1aa', subStrong: '#c8c8cf', faint: '#8a8a93',
+  link: '#60a5fa',
+  selBg: '#2a141b', selBorder: '#59202e',
+  infoBg: '#131a28', infoBorder: '#26334d',
+  vipBg: '#3a2d0d', vipText: '#fbbf24',
+  okBg: '#10261a', okText: '#4ade80',
+  soldBg: '#2c1317', soldText: '#f87171',
+};
+
+export type PurchaseTokens = typeof LIGHT;
+export const purchaseTokens = (dark: boolean): PurchaseTokens => (dark ? DARK : LIGHT);
+
+// ─── StyleSheet factory ──────────────────────────────────────────────────────
+export const makePurchaseSheet = (dark: boolean) => {
+  const T = purchaseTokens(dark);
+  return StyleSheet.create({
 
   // ── Shell ──────────────────────────────────────────────────────────────────
-  screen:       { flex: 1, backgroundColor: '#ffffff' },
+  screen:       { flex: 1, backgroundColor: T.bg },
   centered:     { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   scroll:       { flex: 1 },
-  errorText:    { fontSize: 13, fontWeight: '800', color: '#333', letterSpacing: 1 },
-  goBackBtn:    { borderWidth: 1, borderColor: '#ddd', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  goBackText:   { fontSize: 12, fontWeight: '700', color: '#333' },
-  loadingText:  { fontSize: 12, color: '#999', marginTop: 8, fontWeight: '600' },
+  errorText:    { fontSize: 13, fontWeight: '800', color: T.text, letterSpacing: 1 },
+  goBackBtn:    { borderWidth: 1, borderColor: T.border3, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  goBackText:   { fontSize: 12, fontWeight: '700', color: T.text },
+  loadingText:  { fontSize: 12, color: T.faint, marginTop: 8, fontWeight: '600' },
 
   // ── Header ─────────────────────────────────────────────────────────────────
   header: {
-    backgroundColor: '#ffffff',
+    backgroundColor: T.bg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: T.faintSurface,
   },
   // 40px tap target; glyph is optically centered (lineHeight == fontSize kills
   // the baseline offset that pushed the old 26/32 chevron low and left).
   backBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: T.faintSurface,
     alignItems: 'center', justifyContent: 'center',
   },
-  backIcon:     { fontSize: 24, fontWeight: '400', color: '#222', lineHeight: 24, textAlign: 'center', marginTop: -2 },
+  backIcon:     { fontSize: 24, fontWeight: '400', color: T.text, lineHeight: 24, textAlign: 'center', marginTop: -2 },
   closeBtn: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: T.faintSurface,
     alignItems: 'center', justifyContent: 'center',
   },
-  closeIcon:    { fontSize: 13, fontWeight: '700', color: '#222' },
-  headerTitle:  { fontSize: 16, fontWeight: '800', color: '#111111', letterSpacing: -0.2 },
+  closeIcon:    { fontSize: 13, fontWeight: '700', color: T.text },
+  headerTitle:  { fontSize: 16, fontWeight: '800', color: T.text, letterSpacing: -0.2 },
   stepDots:     { flexDirection: 'row', gap: 5, alignItems: 'center' },
-  stepDot:      { width: 6, height: 6, borderRadius: 3, backgroundColor: '#e5e7eb' },
+  stepDot:      { width: 6, height: 6, borderRadius: 3, backgroundColor: T.border2 },
   stepDotActive: { backgroundColor: PRIMARY, width: 16 },
 
   // ── Banner ─────────────────────────────────────────────────────────────────
@@ -83,88 +112,88 @@ export const sheet = StyleSheet.create({
   // ── Event title ────────────────────────────────────────────────────────────
   eventTitleSection: {
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
-    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+    borderBottomWidth: 1, borderBottomColor: T.faintSurface,
   },
-  eventTitle:       { fontSize: 22, fontWeight: '800', color: '#111111', letterSpacing: -0.4, marginBottom: 4 },
-  eventSubtitle:    { fontSize: 14, fontWeight: '500', color: '#6b7280' },
-  eventVenueSmall:  { fontSize: 13, fontWeight: '400', color: '#9ca3af', marginTop: 2 },
+  eventTitle:       { fontSize: 22, fontWeight: '800', color: T.text, letterSpacing: -0.4, marginBottom: 4 },
+  eventSubtitle:    { fontSize: 14, fontWeight: '500', color: T.sub },
+  eventVenueSmall:  { fontSize: 13, fontWeight: '400', color: T.faint, marginTop: 2 },
 
   // ── Section header ─────────────────────────────────────────────────────────
   sectionHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingTop: 16, paddingBottom: 10,
   },
-  sectionHeaderText: { fontSize: 11, fontWeight: '800', color: '#9ca3af', letterSpacing: 1.2 },
-  sortChip:          { backgroundColor: '#f3f4f6', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  sortChipText:      { fontSize: 11, fontWeight: '600', color: '#374151' },
+  sectionHeaderText: { fontSize: 11, fontWeight: '800', color: T.faint, letterSpacing: 1.2 },
+  sortChip:          { backgroundColor: T.faintSurface, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  sortChipText:      { fontSize: 11, fontWeight: '600', color: T.subStrong },
 
   // ── Ticket cards ───────────────────────────────────────────────────────────
   ticketCard: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+    backgroundColor: T.bg,
+    borderBottomWidth: 1, borderBottomColor: T.faintSurface,
     paddingHorizontal: 20, paddingVertical: 16, gap: 14,
   },
   ticketCardSelected: {
-    backgroundColor: '#fff5f7',
+    backgroundColor: T.selBg,
     borderLeftWidth: 3, borderLeftColor: PRIMARY, paddingLeft: 17,
   },
   ticketCardSoldOut: { opacity: 0.45 },
   radioOuter: {
     width: 20, height: 20, borderRadius: 10,
-    borderWidth: 2, borderColor: '#d1d5db',
+    borderWidth: 2, borderColor: T.border3,
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
   radioOuterSelected: { borderColor: PRIMARY },
   radioInner:         { width: 10, height: 10, borderRadius: 5, backgroundColor: PRIMARY },
   ticketInfo:         { flex: 1, gap: 4 },
   ticketNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ticketName:         { fontSize: 15, fontWeight: '700', color: '#111111', letterSpacing: -0.1 },
-  ticketNameSoldOut:  { color: '#9ca3af' },
-  ticketAvail:        { fontSize: 12, color: '#9ca3af', fontWeight: '500' },
-  vipBadge:           { backgroundColor: '#fef3c7', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
-  vipBadgeText:       { fontSize: 10, fontWeight: '700', color: '#92400e' },
-  dealBadge:          { backgroundColor: '#f0fdf4', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
-  dealBadgeText:      { fontSize: 10, fontWeight: '700', color: '#15803d' },
-  soldBadge:          { backgroundColor: '#fff1f2', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
-  soldBadgeText:      { fontSize: 10, fontWeight: '700', color: '#be123c' },
+  ticketName:         { fontSize: 15, fontWeight: '700', color: T.text, letterSpacing: -0.1 },
+  ticketNameSoldOut:  { color: T.faint },
+  ticketAvail:        { fontSize: 12, color: T.faint, fontWeight: '500' },
+  vipBadge:           { backgroundColor: T.vipBg, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+  vipBadgeText:       { fontSize: 10, fontWeight: '700', color: T.vipText },
+  dealBadge:          { backgroundColor: T.okBg, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
+  dealBadgeText:      { fontSize: 10, fontWeight: '700', color: T.okText },
+  soldBadge:          { backgroundColor: T.soldBg, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },
+  soldBadgeText:      { fontSize: 10, fontWeight: '700', color: T.soldText },
   ticketPriceCol:     { alignItems: 'flex-end', gap: 2 },
-  ticketPrice:        { fontSize: 17, fontWeight: '900', color: '#111111' },
-  ticketPriceSoldOut: { color: '#d1d5db', textDecorationLine: 'line-through' },
-  ticketFeeNote:      { fontSize: 10, color: '#9ca3af', fontWeight: '500' },
+  ticketPrice:        { fontSize: 17, fontWeight: '900', color: T.text },
+  ticketPriceSoldOut: { color: T.border3, textDecorationLine: 'line-through' },
+  ticketFeeNote:      { fontSize: 10, color: T.faint, fontWeight: '500' },
 
   // ── Quantity picker ────────────────────────────────────────────────────────
   qtySection: {
-    backgroundColor: '#fafafa', marginTop: 8,
+    backgroundColor: T.surface, marginTop: 8,
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24,
-    borderTopWidth: 1, borderTopColor: '#f0f0f0',
+    borderTopWidth: 1, borderTopColor: T.faintSurface,
   },
   qtySectionHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  qtySectionTitle:    { fontSize: 14, fontWeight: '700', color: '#111111' },
-  seatedNote:         { fontSize: 11, color: '#9ca3af', fontWeight: '500' },
+  qtySectionTitle:    { fontSize: 14, fontWeight: '700', color: T.text },
+  seatedNote:         { fontSize: 11, color: T.faint, fontWeight: '500' },
   qtyGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   qtyBtn: {
     flex: 1, minWidth: (SW - 60) / 3 - 8, paddingVertical: 16,
-    borderRadius: 12, backgroundColor: '#f3f4f6',
+    borderRadius: 12, backgroundColor: T.faintSurface,
     borderWidth: 1.5, borderColor: 'transparent', alignItems: 'center',
   },
-  qtyBtnSel:          { backgroundColor: '#ffffff', borderColor: PRIMARY },
-  qtyBtnText:         { fontSize: 17, fontWeight: '800', color: '#9ca3af' },
+  qtyBtnSel:          { backgroundColor: T.bg, borderColor: PRIMARY },
+  qtyBtnText:         { fontSize: 17, fontWeight: '800', color: T.faint },
   qtyBtnTextSel:      { color: PRIMARY },
 
   // ── Seating map ────────────────────────────────────────────────────────────
-  mapSubtitle:  { fontSize: 12, color: '#9ca3af', fontWeight: '500', paddingHorizontal: 20, marginBottom: 10 },
-  legendRow:    { backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  mapWrap:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
+  mapSubtitle:  { fontSize: 12, color: T.faint, fontWeight: '500', paddingHorizontal: 20, marginBottom: 10 },
+  legendRow:    { backgroundColor: T.bg, paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.faintSurface },
+  mapWrap:      { backgroundColor: T.bg, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
   tierCard: {
     flexDirection: 'row', alignItems: 'center',
     marginHorizontal: 20, marginTop: 12, padding: 16,
-    backgroundColor: '#fff5f7', borderRadius: 12,
-    borderWidth: 1, borderColor: '#fecdd3', gap: 12,
+    backgroundColor: T.selBg, borderRadius: 12,
+    borderWidth: 1, borderColor: T.selBorder, gap: 12,
   },
   tierCardLeft:   { flex: 1 },
-  tierCardName:   { fontSize: 13, fontWeight: '900', color: '#111111', letterSpacing: 0.4 },
-  tierCardMeta:   { fontSize: 11, color: '#9ca3af', fontWeight: '500', marginTop: 2 },
+  tierCardName:   { fontSize: 13, fontWeight: '900', color: T.text, letterSpacing: 0.4 },
+  tierCardMeta:   { fontSize: 11, color: T.faint, fontWeight: '500', marginTop: 2 },
   tierCardTotal:  { fontSize: 18, fontWeight: '900', color: PRIMARY },
 
   // ── Checkout summary ───────────────────────────────────────────────────────
@@ -172,44 +201,44 @@ export const sheet = StyleSheet.create({
   // No top border: eventTitleSection above already draws a bottom hairline,
   // so a top border here rendered as a double line above "Contact".
   detailsList: {
-    borderBottomWidth: 1, borderColor: '#f3f4f6',
+    borderBottomWidth: 1, borderColor: T.faintSurface,
     marginHorizontal: 20, marginTop: 4, marginBottom: 24,
   },
   detailRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: T.faintSurface,
   },
   detailRowMultiline: {
     flexDirection: 'row', alignItems: 'flex-start',
-    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: T.faintSurface,
   },
-  detailLabel:    { width: 80, fontSize: 15, fontWeight: '700', color: '#111111', flexShrink: 0 },
+  detailLabel:    { width: 80, fontSize: 15, fontWeight: '700', color: T.text, flexShrink: 0 },
   detailRight:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginLeft: 12 },
-  detailValue:    { fontSize: 14, color: '#6b7280', fontWeight: '500' },
-  detailValueSub: { fontSize: 12, color: '#9ca3af', marginTop: 2, fontWeight: '400' },
-  chevron:        { fontSize: 18, color: '#d1d5db', fontWeight: '300', lineHeight: 20 },
+  detailValue:    { fontSize: 14, color: T.sub, fontWeight: '500' },
+  detailValueSub: { fontSize: 12, color: T.faint, marginTop: 2, fontWeight: '400' },
+  chevron:        { fontSize: 18, color: T.border3, fontWeight: '300', lineHeight: 20 },
 
   // ── Trust badges ───────────────────────────────────────────────────────────
   trustSection: { paddingHorizontal: 20, marginBottom: 24, gap: 14 },
   trustRow:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
   trustIcon:    { fontSize: 18, width: 24, textAlign: 'center' },
   trustText:    { flex: 1 },
-  trustTitle:   { fontSize: 13, fontWeight: '700', color: '#111111' },
-  trustBody:    { fontSize: 12, color: '#9ca3af', marginTop: 1 },
-  trustHelp:    { fontSize: 16, color: '#d1d5db' },
+  trustTitle:   { fontSize: 13, fontWeight: '700', color: T.text },
+  trustBody:    { fontSize: 12, color: T.faint, marginTop: 1 },
+  trustHelp:    { fontSize: 16, color: T.border3 },
 
   // ── Price breakdown ────────────────────────────────────────────────────────
   priceBreakdown: {
-    backgroundColor: '#fafafa', borderRadius: 14,
+    backgroundColor: T.surface, borderRadius: 14,
     marginHorizontal: 20, padding: 18, marginBottom: 16, gap: 10,
   },
   priceRow:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  priceLabel:       { fontSize: 13, color: '#6b7280', fontWeight: '500' },
-  priceValue:       { fontSize: 13, color: '#6b7280', fontWeight: '600' },
-  priceLabelLight:  { fontSize: 13, color: '#9ca3af', fontWeight: '400' },
-  priceValueLight:  { fontSize: 13, color: '#9ca3af', fontWeight: '500' },
-  priceDivider:     { height: 1, backgroundColor: '#e5e7eb', marginVertical: 2 },
-  priceTotalLabel:  { fontSize: 15, fontWeight: '800', color: '#111111' },
+  priceLabel:       { fontSize: 13, color: T.sub, fontWeight: '500' },
+  priceValue:       { fontSize: 13, color: T.sub, fontWeight: '600' },
+  priceLabelLight:  { fontSize: 13, color: T.faint, fontWeight: '400' },
+  priceValueLight:  { fontSize: 13, color: T.faint, fontWeight: '500' },
+  priceDivider:     { height: 1, backgroundColor: T.border2, marginVertical: 2 },
+  priceTotalLabel:  { fontSize: 15, fontWeight: '800', color: T.text },
   // Terms agreement under the price breakdown (fills the former dead space)
   // Aligned to the 20px page gutter used by the detail rows and price card.
   termsText: {
@@ -217,26 +246,26 @@ export const sheet = StyleSheet.create({
     marginHorizontal: 20,
     fontSize: 12.5,
     lineHeight: 19,
-    color: '#6b7280',
+    color: T.sub,
   },
   termsLink: {
-    color: '#2563eb',
+    color: T.link,
     textDecorationLine: 'underline',
   },
 
-  priceTotalValue:  { fontSize: 17, fontWeight: '900', color: '#111111' },
+  priceTotalValue:  { fontSize: 17, fontWeight: '900', color: T.text },
 
   // ── CTA bar ────────────────────────────────────────────────────────────────
   ctaBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: T.bg,
     paddingHorizontal: 20, paddingTop: 14,
-    borderTopWidth: 1, borderTopColor: '#f3f4f6',
+    borderTopWidth: 1, borderTopColor: T.faintSurface,
     gap: 12,
     shadowColor: '#000', shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.06, shadowRadius: 10, elevation: 8,
   },
-  ctaTotalLabel:  { fontSize: 14, fontWeight: '800', color: '#111111' },
+  ctaTotalLabel:  { fontSize: 14, fontWeight: '800', color: T.text },
   payBtn: {
     backgroundColor: PRIMARY, paddingVertical: 16,
     borderRadius: 14, alignItems: 'center',
@@ -244,17 +273,17 @@ export const sheet = StyleSheet.create({
     shadowOpacity: 0.25, shadowRadius: 8, elevation: 4,
   },
   payBtnDisabled: { opacity: 0.6 },
-  payBtnText:     { fontSize: 16, fontWeight: '800', color: '#ffffff', letterSpacing: 0.3 },
+  payBtnText:     { fontSize: 16, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.3 },
 
   // ── Empty state ────────────────────────────────────────────────────────────
   emptyState:   { padding: 48, alignItems: 'center', gap: 8 },
   emptyIcon:    { fontSize: 36 },
-  emptyText:    { fontSize: 13, color: '#9ca3af', fontWeight: '600' },
+  emptyText:    { fontSize: 13, color: T.faint, fontWeight: '600' },
 
   // ── Contact modal ──────────────────────────────────────────────────────────
   modalBackdrop:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },
   modalSheet: {
-    backgroundColor: '#ffffff',
+    backgroundColor: T.sheet,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: 36,
@@ -266,7 +295,7 @@ export const sheet = StyleSheet.create({
   },
   modalHandle: {
     width: 36, height: 4, borderRadius: 2,
-    backgroundColor: '#d1d5db',
+    backgroundColor: T.border3,
     alignSelf: 'center',
     marginTop: 10, marginBottom: 4,
   },
@@ -277,27 +306,27 @@ export const sheet = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: T.faintSurface,
   },
   modalCloseBtn: {
     width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: T.faintSurface,
     alignItems: 'center', justifyContent: 'center',
   },
-  modalCloseText:   { fontSize: 13, fontWeight: '700', color: '#555' },
-  modalTitle:       { fontSize: 17, fontWeight: '700', color: '#111111' },
+  modalCloseText:   { fontSize: 13, fontWeight: '700', color: T.sub },
+  modalTitle:       { fontSize: 17, fontWeight: '700', color: T.text },
   modalDoneBtn:     { paddingHorizontal: 4, paddingVertical: 4 },
-  modalDoneText:    { fontSize: 16, fontWeight: '600', color: '#111111' },
+  modalDoneText:    { fontSize: 16, fontWeight: '600', color: T.text },
   modalFieldWrap: {
     marginHorizontal: 16,
     marginTop: 16,
     borderWidth: 1.5,
-    borderColor: '#111111',
+    borderColor: T.text,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  modalInput:         { fontSize: 16, color: '#111111', fontWeight: '400' },
+  modalInput:         { fontSize: 16, color: T.text, fontWeight: '400' },
   modalAccountRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -306,39 +335,43 @@ export const sheet = StyleSheet.create({
     marginTop: 20,
     paddingVertical: 4,
   },
-  modalAccountText:   { fontSize: 16, fontWeight: '500', color: '#111111' },
-  modalAccountChevron: { fontSize: 18, color: '#9ca3af' },
+  modalAccountText:   { fontSize: 16, fontWeight: '500', color: T.text },
+  modalAccountChevron: { fontSize: 18, color: T.faint },
   modalFootnote: {
-    fontSize: 13, color: '#6b7280', lineHeight: 19,
+    fontSize: 13, color: T.sub, lineHeight: 19,
     marginHorizontal: 16, marginTop: 16, fontWeight: '400',
   },
 
   // ── Guest / input (legacy, kept for compatibility) ─────────────────────────
   guestSection: {
     marginHorizontal: 20, marginTop: 16, marginBottom: 20,
-    backgroundColor: '#f8faff', borderRadius: 14, padding: 18,
-    borderWidth: 1, borderColor: '#e0eaff',
+    backgroundColor: T.infoBg, borderRadius: 14, padding: 18,
+    borderWidth: 1, borderColor: T.infoBorder,
   },
-  guestSectionTitle:  { fontSize: 14, fontWeight: '800', color: '#111111', letterSpacing: -0.1, marginBottom: 4 },
-  guestSectionSub:    { fontSize: 12, color: '#6b7280', fontWeight: '400', marginBottom: 16, lineHeight: 17 },
+  guestSectionTitle:  { fontSize: 14, fontWeight: '800', color: T.text, letterSpacing: -0.1, marginBottom: 4 },
+  guestSectionSub:    { fontSize: 12, color: T.sub, fontWeight: '400', marginBottom: 16, lineHeight: 17 },
   inputGroup:         { marginBottom: 14 },
   inputLabel: {
-    fontSize: 11, fontWeight: '700', color: '#374151',
+    fontSize: 11, fontWeight: '700', color: T.subStrong,
     letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase',
   },
   input: {
-    backgroundColor: '#ffffff', borderWidth: 1.5, borderColor: '#d1d5db',
+    backgroundColor: T.bg, borderWidth: 1.5, borderColor: T.border3,
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 14, fontWeight: '500', color: '#111111',
+    fontSize: 14, fontWeight: '500', color: T.text,
   },
 
   // ── Unused stubs (kept to avoid TS errors if referenced) ──────────────────
-  backToMapBtn:       { alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#e5e7eb' },
-  backToMapText:      { fontSize: 12, fontWeight: '700', color: '#374151' },
+  backToMapBtn:       { alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: T.border2 },
+  backToMapText:      { fontSize: 12, fontWeight: '700', color: T.subStrong },
   editLink:           { alignSelf: 'center', paddingVertical: 14 },
-  editLinkText:       { fontSize: 12, fontWeight: '700', color: '#6b7280' },
+  editLinkText:       { fontSize: 12, fontWeight: '700', color: T.sub },
   viewDetailsBtn:     { flexDirection: 'row', alignItems: 'center' },
-  viewDetailsBtnText: { fontSize: 13, fontWeight: '700', color: '#111111' },
-  viewDetailsChevron: { fontSize: 13, fontWeight: '700', color: '#111111' },
+  viewDetailsBtnText: { fontSize: 13, fontWeight: '700', color: T.text },
+  viewDetailsChevron: { fontSize: 13, fontWeight: '700', color: T.text },
   ctaTotalRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 },
 });
+};
+
+// Backwards-compatible light sheet for any legacy imports.
+export const sheet = makePurchaseSheet(false);

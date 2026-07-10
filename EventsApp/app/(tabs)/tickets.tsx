@@ -248,13 +248,13 @@ const GuestLookup = () => {
           <View style={sheet.fieldGroup}>
             <Text className={s.fieldLabel}>BOOKING NUMBER</Text>
             <TextInput style={sheet.input} value={bookingNumber} onChangeText={setBookingNumber}
-              placeholder="e.g. BK-A3F7K2" placeholderTextColor="rgba(255,255,255,0.2)"
+              placeholder="" placeholderTextColor="rgba(255,255,255,0.2)"
               autoCapitalize="characters" autoCorrect={false} returnKeyType="next" />
           </View>
           <View style={sheet.fieldGroup}>
             <Text className={s.fieldLabel}>EMAIL ADDRESS</Text>
             <TextInput style={sheet.input} value={email} onChangeText={setEmail}
-              placeholder="you@example.com" placeholderTextColor="rgba(255,255,255,0.2)"
+              placeholder="" placeholderTextColor="rgba(255,255,255,0.2)"
               autoCapitalize="none" keyboardType="email-address" autoCorrect={false}
               returnKeyType="search" onSubmitEditing={lookup} />
           </View>

@@ -114,12 +114,12 @@ const cartStyles = StyleSheet.create({
 
 // ─── Dynamic spotlight section configs ────────────────────────────────────────
 const SPOTLIGHT_CONFIGS = [
-  { title: 'SPORTS ELITE',    category: 'sports',   badge: '⚡ SPORTS',    accentColor: '#e8c14a', bgColor: '#1a1200', gradientDark: 'rgba(26,18,0,0.82)',   gradientLight: 'rgba(26,18,0,0.25)'   },
-  { title: 'BEST FESTIVALS',  category: 'music',    badge: '🎪 FESTIVAL',  accentColor: '#ff3c6e', bgColor: '#1a0010', gradientDark: 'rgba(26,0,16,0.82)',   gradientLight: 'rgba(26,0,16,0.25)'   },
-  { title: 'GALA NIGHTS',     category: 'gala',     badge: '✨ GALA',      accentColor: '#c084fc', bgColor: '#0e0018', gradientDark: 'rgba(14,0,24,0.82)',   gradientLight: 'rgba(14,0,24,0.25)'   },
-  { title: 'TECH SUMMIT',     category: 'tech',     badge: '💻 TECH',      accentColor: '#38bdf8', bgColor: '#00101a', gradientDark: 'rgba(0,16,26,0.82)',   gradientLight: 'rgba(0,16,26,0.25)'   },
-  { title: 'FOOD & CULTURE',  category: 'food',     badge: '🍽 FOOD',      accentColor: '#fb923c', bgColor: '#1a0800', gradientDark: 'rgba(26,8,0,0.82)',    gradientLight: 'rgba(26,8,0,0.25)'    },
-  { title: 'TOP CONCERTS',    category: 'concerts', badge: '🎵 MUSIC',     accentColor: '#34d399', bgColor: '#001a10', gradientDark: 'rgba(0,26,16,0.82)',   gradientLight: 'rgba(0,26,16,0.25)'   },
+  { title: 'SPORTS ELITE',    category: 'sports',   badge: 'SPORTS',    accentColor: '#e8c14a', bgColor: '#1a1200', gradientDark: 'rgba(26,18,0,0.82)',   gradientLight: 'rgba(26,18,0,0.25)'   },
+  { title: 'BEST FESTIVALS',  category: 'music',    badge: 'FESTIVAL',  accentColor: '#ff3c6e', bgColor: '#1a0010', gradientDark: 'rgba(26,0,16,0.82)',   gradientLight: 'rgba(26,0,16,0.25)'   },
+  { title: 'GALA NIGHTS',     category: 'gala',     badge: 'GALA',      accentColor: '#c084fc', bgColor: '#0e0018', gradientDark: 'rgba(14,0,24,0.82)',   gradientLight: 'rgba(14,0,24,0.25)'   },
+  { title: 'TECH SUMMIT',     category: 'tech',     badge: 'TECH',      accentColor: '#38bdf8', bgColor: '#00101a', gradientDark: 'rgba(0,16,26,0.82)',   gradientLight: 'rgba(0,16,26,0.25)'   },
+  { title: 'FOOD & CULTURE',  category: 'food',     badge: 'FOOD',      accentColor: '#fb923c', bgColor: '#1a0800', gradientDark: 'rgba(26,8,0,0.82)',    gradientLight: 'rgba(26,8,0,0.25)'    },
+  { title: 'TOP CONCERTS',    category: 'concerts', badge: 'MUSIC',     accentColor: '#34d399', bgColor: '#001a10', gradientDark: 'rgba(0,26,16,0.82)',   gradientLight: 'rgba(0,26,16,0.25)'   },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -860,6 +860,7 @@ export default function Index() {
               <FlatList
                 data={categories}
                 keyExtractor={(item) => item}
+                showsVerticalScrollIndicator={false}
                 renderItem={({ item }) => (
                   <TouchableOpacity className={s.modalItem} onPress={() => handleSelectCategory(item)}>
                     <Text
@@ -922,7 +923,6 @@ export default function Index() {
             <View className={s.sectionMt}>
               <View className={s.sectionHeader}>
                 <Text className={s.sectionTitle} style={{ color: spotlightConfig.accentColor }}>{spotlightConfig.title}</Text>
-                <TouchableOpacity><Text className={s.sectionLink} style={{ color: spotlightConfig.accentColor }}>EXPLORE</Text></TouchableOpacity>
               </View>
             </View>
             <TouchableOpacity activeOpacity={0.92} onPress={() => handleEventPress(sportsBannerEvent)}>
@@ -956,7 +956,7 @@ export default function Index() {
                       <Text className={s.sportTitle} style={{ color: colors.text }}>{sport.title}</Text>
                       <Text className={s.sportLoc} style={{ color: colors.subText }}>{sport.city}</Text>
                     </View>
-                    <Text className={s.sportArrow} style={{ color: spotlightConfig.accentColor }}>›</Text>
+                    <Text className={s.sportArrow} style={{ color: '#FFFFFF' }}>›</Text>
                   </TouchableOpacity>
                 ))}
               </View>
