@@ -13,6 +13,7 @@ import {
   TextInput,
   Modal,
   Platform,
+  Linking,
   KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,7 +31,7 @@ import SeatingMap, { detectVenueType, MapLegend } from '../../components/seating
 import { sheet as ss, PRIMARY } from '../../styles/purchase';
 import {
   CaretLeft, CaretDown, ArrowsDownUp, Star, CrownSimple, Check,
-  SealCheck, ShieldCheck, Question, CreditCard, AppleLogo, PaypalLogo, Bank,
+  CreditCard, AppleLogo, PaypalLogo, Bank,
   Ticket, X,
 } from 'phosphor-react-native';
 
@@ -82,17 +83,33 @@ export default function TicketPurchaseScreen() {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [adding, setAdding]           = useState(false);
   const [guestName, setGuestName]         = useState('');
+  const [guestSurname, setGuestSurname]   = useState('');
   const [guestEmail, setGuestEmail]       = useState('');
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'paypal' | 'apple_pay' | 'instant_eft'>('card');
   const modalSlide = useRef(new Animated.Value(300)).current;
+  const surnameRef = useRef<TextInput>(null);
+  const emailRef   = useRef<TextInput>(null);
   const paymentSlide = useRef(new Animated.Value(400)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   function openContactModal() {
     setContactModalOpen(true);
     Animated.spring(modalSlide, { toValue: 0, useNativeDriver: true, bounciness: 4 }).start();
+  }
+
+  function handleContactDone() {
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim());
+    if (!guestName.trim() || !guestSurname.trim()) {
+      Alert.alert('Name required', 'Please enter your first name and surname.');
+      return;
+    }
+    if (!emailOk) {
+      Alert.alert('Valid email required', 'Please enter a valid email address.');
+      return;
+    }
+    closeContactModal();
   }
 
   function closeContactModal() {
@@ -216,7 +233,7 @@ export default function TicketPurchaseScreen() {
 
     // Guest validation — must have filled in contact details
     if (!user) {
-      if (!guestName.trim()) {
+      if (!guestName.trim() || !guestSurname.trim()) {
         Alert.alert('Name required', 'Please enter your name so we can personalise your ticket.');
         return;
       }
@@ -229,10 +246,10 @@ export default function TicketPurchaseScreen() {
 
     setAdding(true);
     try {
-      const nameParts = guestName.trim().split(' ');
-      const firstName = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');
-      const lastRaw   = user ? String((user as any).last_name ?? '') : (nameParts.slice(1).join(' '));
-      const lastName  = lastRaw.trim() !== '' ? lastRaw : firstName;
+      // Guests provide first name and surname as separate fields — never
+      // derive the surname by splitting or duplicating the first name.
+      const firstName = user ? String((user as any).first_name ?? '') : guestName.trim();
+      const lastName  = user ? String((user as any).last_name ?? '')  : guestSurname.trim();
       const email     = user ? String((user as any).email ?? '') : guestEmail.trim();
 
       const endpoint  = user ? '/v1/bookings' : '/v1/guest/bookings';
@@ -596,7 +613,7 @@ export default function TicketPurchaseScreen() {
                         <Text style={ss.detailValue} numberOfLines={1}>
                           {user
                             ? (`${(user as any).first_name ?? ''} ${(user as any).last_name ?? ''}`.trim() || (user as any).email)
-                            : (guestName || guestEmail)}
+                            : (`${guestName} ${guestSurname}`.trim() || guestEmail)}
                         </Text>
                       )}
                       {!user && <Text style={ss.chevron}>›</Text>}
@@ -629,22 +646,6 @@ export default function TicketPurchaseScreen() {
                     <View style={{ flex: 1, marginLeft: 12 }}>
                       <Text style={ss.detailValue}>{selectedType?.name ?? 'General Admission'}</Text>
                     </View>
-                  </View>
-                </View>
-
-                {/* Trust section */}
-                <View style={ss.trustSection}>
-                  <View style={ss.trustRow}>
-                    <View style={{ width: 24, alignItems: 'center' }}><SealCheck size={22} color="#1a7f4b" weight="fill" /></View>
-                    <View style={ss.trustText}>
-                      <Text style={ss.trustTitle}>Official Ticket Marketplace</Text>
-                      <Text style={ss.trustBody}>Tickets are reviewed and verified by the venue.</Text>
-                    </View>
-                  </View>
-                  <View style={ss.trustRow}>
-                    <View style={{ width: 24, alignItems: 'center' }}><ShieldCheck size={22} color="#111111" weight="fill" /></View>
-                    <Text style={[ss.trustTitle, { flex: 1 }]}>Every ticket protected</Text>
-                    <Question size={18} color="#d1d5db" weight="fill" />
                   </View>
                 </View>
 
@@ -681,6 +682,20 @@ export default function TicketPurchaseScreen() {
                     </>
                   )}
                 </View>
+
+                {/* Terms agreement */}
+                <Text style={ss.termsText}>
+                  By tapping Pay Now to complete your purchase, you agree to
+                  TicketHawk's{' '}
+                  <Text style={ss.termsLink} onPress={() => Linking.openURL('https://ticket-hawk.com/terms')}>
+                    Terms of Use
+                  </Text>
+                  {' '}and confirm that you have read our{' '}
+                  <Text style={ss.termsLink} onPress={() => Linking.openURL('https://ticket-hawk.com/privacy')}>
+                    Privacy Policy
+                  </Text>
+                  .
+                </Text>
 
               </View>
             )}
@@ -748,28 +763,47 @@ export default function TicketPurchaseScreen() {
                 <X size={16} color="#222" weight="bold" />
               </TouchableOpacity>
               <Text style={ss.modalTitle}>Contact</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim());
-                  if (!guestName.trim()) {
-                    Alert.alert('Name required', 'Please enter your full name.');
-                    return;
-                  }
-                  if (!emailOk) {
-                    Alert.alert('Valid email required', 'Please enter a valid email address.');
-                    return;
-                  }
-                  closeContactModal();
-                }}
-                style={ss.modalDoneBtn}
-              >
+              <TouchableOpacity onPress={handleContactDone} style={ss.modalDoneBtn}>
                 <Text style={ss.modalDoneText}>Done</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Email field */}
+            {/* Name fields — email intentionally last. No autoFocus: focusing
+                a field in the same frame the Modal mounts makes iOS's
+                KeyboardAvoidingView miss the keyboard event, leaving the
+                sheet stuck behind the keyboard. */}
             <View style={ss.modalFieldWrap}>
               <TextInput
+                style={ss.modalInput}
+                placeholder="First name"
+                placeholderTextColor="#aab0be"
+                value={guestName}
+                onChangeText={setGuestName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => surnameRef.current?.focus()}
+              />
+            </View>
+            <View style={[ss.modalFieldWrap, { marginTop: 10 }]}>
+              <TextInput
+                ref={surnameRef}
+                style={ss.modalInput}
+                placeholder="Surname"
+                placeholderTextColor="#aab0be"
+                value={guestSurname}
+                onChangeText={setGuestSurname}
+                autoCapitalize="words"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => emailRef.current?.focus()}
+              />
+            </View>
+
+            {/* Email field */}
+            <View style={[ss.modalFieldWrap, { marginTop: 10 }]}>
+              <TextInput
+                ref={emailRef}
                 style={ss.modalInput}
                 placeholder="Email address"
                 placeholderTextColor="#aab0be"
@@ -778,23 +812,8 @@ export default function TicketPurchaseScreen() {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
-                returnKeyType="next"
-                autoFocus
-              />
-            </View>
-
-            {/* Name field */}
-            <View style={[ss.modalFieldWrap, { marginTop: 10 }]}>
-              <TextInput
-                style={ss.modalInput}
-                placeholder="Full name"
-                placeholderTextColor="#aab0be"
-                value={guestName}
-                onChangeText={setGuestName}
-                autoCapitalize="words"
-                autoCorrect={false}
                 returnKeyType="done"
-                onSubmitEditing={closeContactModal}
+                onSubmitEditing={handleContactDone}
               />
             </View>
 

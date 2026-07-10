@@ -210,6 +210,19 @@ export const sheet = StyleSheet.create({
   priceValueLight:  { fontSize: 13, color: '#9ca3af', fontWeight: '500' },
   priceDivider:     { height: 1, backgroundColor: '#e5e7eb', marginVertical: 2 },
   priceTotalLabel:  { fontSize: 15, fontWeight: '800', color: '#111111' },
+  // Terms agreement under the price breakdown (fills the former dead space)
+  termsText: {
+    marginTop: 16,
+    marginHorizontal: 4,
+    fontSize: 12.5,
+    lineHeight: 19,
+    color: '#6b7280',
+  },
+  termsLink: {
+    color: '#2563eb',
+    textDecorationLine: 'underline',
+  },
+
   priceTotalValue:  { fontSize: 17, fontWeight: '900', color: '#111111' },
 
   // ── CTA bar ────────────────────────────────────────────────────────────────

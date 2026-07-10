@@ -30,11 +30,24 @@ import {
   type HomeSection,
 } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
+import { Ticket } from 'phosphor-react-native';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl } from '../../components/FilterModal';
 import { useAppTheme } from '../../theme/colors';
 import { BlurView } from 'expo-blur';
+
+// ─── Live window check ────────────────────────────────────────────────────────
+// LIVE only while the event is actually running: start <= now <= end.
+// Events without an end_time are assumed live for 4 hours after start.
+function isEventLive(e: { start_time?: string; end_time?: string | null }): boolean {
+  if (!e?.start_time) return false;
+  const now   = Date.now();
+  const start = new Date(e.start_time).getTime();
+  if (Number.isNaN(start) || now < start) return false;
+  const end = e.end_time ? new Date(e.end_time).getTime() : start + 4 * 60 * 60 * 1000;
+  return !Number.isNaN(end) && now <= end;
+}
 
 // ─── Cart header button ───────────────────────────────────────────────────────
 function CartHeaderButton() {
@@ -205,8 +218,7 @@ const EventCard = memo(({ item, onPress, colors, priority }: { item: Event; onPr
           recyclingKey={item.id}
         />
       )}
-      {(item.category?.toLowerCase().includes('music') ||
-        item.category?.toLowerCase().includes('concert')) && (
+      {isEventLive(item) && (
         <View className={s.hCardBadge}>
           <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: '#fff' }} />
           <Text className={s.hCardBadgeText}>LIVE</Text>
@@ -665,6 +677,12 @@ export default function Index() {
     router.push(`/event/${event.id}`);
   }, [setSelectedEvent, router]);
 
+  // GET TICKETS skips the details page and lands directly on ticket selection.
+  const handleGetTickets = useCallback((event: Event) => {
+    setSelectedEvent(event);
+    router.push('/event/purchase');
+  }, [setSelectedEvent, router]);
+
   const handleViewAll = useCallback((sectionId: string, title: string, events: Event[]) => {
     setSectionMeta({ title, sectionId, events });
     router.push(`/section/${encodeURIComponent(title)}`);
@@ -784,8 +802,9 @@ export default function Index() {
                     {evt?.description ?? 'Find and book the best events happening near you.'}
                   </Text>
                   <View className={s.heroActions}>
-                    <TouchableOpacity className={s.btnPrimary} onPress={() => evt && handleEventPress(evt)}>
-                      <Text className={s.btnPrimaryText}>🎟 GET TICKETS</Text>
+                    <TouchableOpacity className={s.btnPrimary} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }} onPress={() => evt && handleGetTickets(evt)}>
+                      <Ticket size={15} color="#FFFFFF" weight="fill" />
+                      <Text className={s.btnPrimaryText}>GET TICKETS</Text>
                     </TouchableOpacity>
                     <TouchableOpacity className={s.btnBlue} onPress={() => evt && handleEventPress(evt)}>
                       <Text className={s.btnBlueText}>VIEW DETAILS</Text>
@@ -999,7 +1018,6 @@ export default function Index() {
           <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
           <Text className={s.locationSub} style={{ color: colors.subText }}>{dateLabelText}</Text>
         </TouchableOpacity>
-        <CartHeaderButton />
       </Animated.View>
 
       {/* Filter bottom sheet */}
