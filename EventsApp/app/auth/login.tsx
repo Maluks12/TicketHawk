@@ -9,7 +9,8 @@ import { CheckCircle } from 'phosphor-react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet, fieldSheet } from '../../styles/auth';
-import { useAppTheme } from '../../theme/colors';        // ADD
+import { useAppTheme } from '../../theme/colors';
+import BrandLogo from '../../components/BrandLogo';        // ADD
 
 type Mode = 'login' | 'register';
 
@@ -205,9 +206,7 @@ export default function AuthScreen() {
 
           {/* Brand */}
           <View className={s.brand}>
-            <View className={s.logoMark} style={sheet.logoShadow}>
-              <Ionicons name="ticket" size={26} color="#fff" />
-            </View>
+            <BrandLogo size={96} />
             <Text className={s.brandTitle} style={{ color: colors.text }}>{mode === 'login' ? 'Welcome back' : 'Create account'}</Text>
             <Text className={s.brandSub} style={{ color: colors.subText }}>
               {mode === 'login' ? 'Sign in to access your tickets and bookings' : 'Join thousands of event-goers across South Africa'}
