@@ -32,7 +32,7 @@ export const s = {
   // mb-4 keeps cards (e.g. Support and Log out) from touching each other
   section:              'gap-2 mb-4',
   // ml-4 aligns the label with the 16px inner padding of the cards below it
-  sectionTitle:         'text-[10px] font-extrabold tracking-[2.5px] text-white/28 ml-4 mt-1',
+  sectionTitle:         'text-[10px] font-extrabold tracking-[2.5px] text-white/30 ml-4 mt-1',
 
   // ── Row ───────────────────────────────────────────────────────────────────
   row:                  'flex-row items-center justify-between px-4 py-[15px]',

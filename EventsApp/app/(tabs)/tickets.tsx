@@ -176,6 +176,7 @@ const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: n
 
 const GuestLookup = () => {
   const { isDark } = useAppTheme();
+  setTicketsTheme(isDark);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [bookingNumber, setBookingNumber] = useState('');
@@ -436,7 +437,8 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
 export default function TicketsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { colors } = useAppTheme(); 
+  const { colors, isDark } = useAppTheme();
+  setTicketsTheme(isDark);
 
   const [apiBookings, setApiBookings] = useState<Booking[]>([]);
   const [loading, setLoading]         = useState(false);

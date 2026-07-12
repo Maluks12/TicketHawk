@@ -956,7 +956,7 @@ export default function Index() {
                       <Text className={s.sportTitle} style={{ color: colors.text }}>{sport.title}</Text>
                       <Text className={s.sportLoc} style={{ color: colors.subText }}>{sport.city}</Text>
                     </View>
-                    <Text className={s.sportArrow} style={{ color: '#FFFFFF' }}>›</Text>
+                    <Text className={s.sportArrow} style={{ color: colors.iconColor }}>›</Text>
                   </TouchableOpacity>
                 ))}
               </View>

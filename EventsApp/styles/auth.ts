@@ -10,7 +10,7 @@ export const s = {
   logoMark:         'w-14 h-14 rounded-2xl bg-brand-pink items-center justify-center mb-0.5',
   tabTrack:         'flex-row bg-[#ebebeb] rounded-[14px] p-1 mb-6 relative',
   tab:              'flex-1 items-center py-[11px] z-[1]',
-  tabLabel:         'text-[14px] font-semibold text-[#0a0a0a]/38',
+  tabLabel:         'text-[14px] font-semibold text-[#0a0a0a]/40',
   tabLabelActive:   'text-[#0a0a0a] font-bold',
   errBanner:        'flex-row items-start gap-2 bg-brand-pink/[0.07] border border-brand-pink/[0.18] rounded-[12px] p-[13px] mb-4',
   errBannerText:    'flex-1 text-[13px] text-brand-pink leading-[18px] font-medium',
