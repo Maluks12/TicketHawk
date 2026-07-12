@@ -20,7 +20,8 @@ import {
 } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { syncBookingOffline, cacheBookingDetail, getCachedBookingDetail } from '../../lib/offline';
-import { s, sheet } from '../../styles/booking';
+import { s, sheet, setBookingTheme } from '../../styles/booking';
+import { useAppTheme } from '../../theme/colors';
 import { RotatingQR } from '../../components/RotatingQR';
 
 const { width: SW } = Dimensions.get('window');
@@ -285,6 +286,7 @@ interface AssignSheetProps {
 }
 
 const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, onSuccess }: AssignSheetProps) => {
+  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [name, setName]       = useState('');
   const [email, setEmail]     = useState('');
@@ -385,10 +387,10 @@ const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, on
             activeOpacity={0.85}
           >
             {loading
-              ? <ActivityIndicator color="#0a0a0a" size="small" />
+              ? <ActivityIndicator color={isDark ? '#0a0a0a' : '#ffffff'} size="small" />
               : (
                 <>
-                  <Feather name="send" size={15} color="#0a0a0a" />
+                  <Feather name="send" size={15} color={isDark ? '#0a0a0a' : '#ffffff'} />
                   <Text style={sheet.sendBtnText}>Send claim link</Text>
                 </>
               )
@@ -407,6 +409,8 @@ const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, on
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function BookingDetailScreen() {
+  const { isDark } = useAppTheme();
+  setBookingTheme(isDark);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id, bookingNumber, email } = useLocalSearchParams<{ id: string; bookingNumber?: string; email?: string }>();

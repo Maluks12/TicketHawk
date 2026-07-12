@@ -1,6 +1,13 @@
 import { StyleSheet } from 'react-native';
 
-export const s = {
+const CARD_HEIGHT = 200;
+
+let dark = true;
+export const setTicketsTheme = (d: boolean) => { dark = d; };
+const pick = <T extends object>(D: T, L: T): T =>
+  new Proxy({} as T, { get: (_, k) => (dark ? D : L)[k as keyof T] }) as T;
+
+const sDark = {
   root:               'flex-1 bg-dark-base',
   scroll:             'px-5 pt-1',
   header:             'flex-row items-center gap-2.5 px-6 pb-[18px]',
@@ -34,9 +41,43 @@ export const s = {
   tabLabelInactive:   'text-[14px] font-semibold text-white/35 tracking-[0.2px]',
 };
 
-const CARD_HEIGHT = 200;
+const sLight = {
+  root:               'flex-1 bg-white',
+  scroll:             'px-5 pt-1',
+  header:             'flex-row items-center gap-2.5 px-6 pb-[18px]',
+  headerTitle:        'text-[28px] font-extrabold text-[#0a0a0a] tracking-[-0.5px]',
+  sectionLabel:       'text-[10px] font-extrabold tracking-[2.5px] text-black/28 mb-3.5 ml-0.5',
+  cardTopRow:         'flex-row items-center justify-between',
+  statusPill:         'flex-row items-center gap-[5px] px-[9px] py-1 rounded-full border',
+  statusDot:          'w-[5px] h-[5px] rounded-full',
+  statusText:         'text-[9px] font-extrabold tracking-[1.5px]',
+ eventTitle:          'text-[21px] font-extrabold text-[#0a0a0a] tracking-[-0.2px] leading-[22px]',
+  metaRow:            'flex-row items-center gap-[5px]',
+  metaText:           'text-[11px] text-black/50 font-medium flex-1',
+  cardBottom:         'flex-row items-center gap-2',
+  bottomLabel:        'text-[8px] font-bold tracking-[1.5px] text-black/38 mb-0.5',
+  bottomValue:        'text-[13px] font-extrabold',
+  bottomCenter:       'flex-1 items-center',
+  bookingNum:         'text-[10px] text-black/25 font-semibold tracking-[0.5px]',
+  bottomRight:        'items-end',
+  centred:            'flex-1 items-center justify-center gap-3 px-10',
+  emptyTitle:         'text-[19px] font-extrabold text-[#0a0a0a]',
+  emptySub:           'text-[13px] text-black/32 text-center leading-5',
+  retryText:          'text-[#0a0a0a] text-[13px] font-bold',
+  guestTitle:         'text-[22px] font-extrabold text-[#0a0a0a] text-center tracking-[-0.3px]',
+  guestSub:           'text-[13px] text-black/38 text-center leading-5',
+  fieldLabel:         'text-[10px] font-extrabold tracking-[2px] text-black/30',
+  lookupBtnText:      'text-white text-[15px] font-extrabold tracking-[0.2px]',
+  lookupAgainText:    'text-black/60 text-[13px] font-semibold',
+  signInPromptText:   'text-black/35 text-[13px] font-medium',
+  errorText:          'text-[#ff8080] text-[13px] leading-[18px] flex-1',
+  tabLabelActive:     'text-[14px] font-extrabold text-[#0a0a0a] tracking-[0.2px]',
+  tabLabelInactive:   'text-[14px] font-semibold text-black/35 tracking-[0.2px]',
+};
 
-export const sheet = StyleSheet.create({
+export const s = pick(sDark, sLight);
+
+const sheetDark = StyleSheet.create({
   cardTouchable: {
     borderRadius: 20,
     shadowColor: '#000',
@@ -205,3 +246,173 @@ export const sheet = StyleSheet.create({
     color: '#fff',
   },
 });
+const sheetLight = StyleSheet.create({
+  cardTouchable: {
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.6,
+    shadowRadius: 22,
+    elevation: 16,
+  },
+  card: {
+    width: '100%' as const,
+    height: CARD_HEIGHT,
+    borderRadius: 20,
+    padding: 18,
+    overflow: 'hidden' as const,
+    justifyContent: 'space-between' as const,
+  },
+  perfRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginHorizontal: -18,
+    position: 'relative' as const,
+  },
+  perfCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#0a0a0a',
+    position: 'absolute' as const,
+    zIndex: 2,
+  },
+  perfLine: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    gap: 4,
+    overflow: 'hidden' as const,
+    marginHorizontal: 8,
+  },
+  perfDash: { flex: 1, height: 1 },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginBottom: 4,
+  },
+  retryBtn: {
+    marginTop: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.07)',
+  },
+  guestScroll: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 4 },
+  guestForm: { flex: 1, gap: 20 },
+  guestIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    alignSelf: 'center' as const,
+    marginTop: 24,
+  },
+  fieldGroup: { gap: 8 },
+  input: {
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#0a0a0a',
+    fontSize: 15,
+    fontWeight: '500' as const,
+  },
+  errorBox: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 8,
+    backgroundColor: 'rgba(255,80,80,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,80,80,0.2)',
+    borderRadius: 10,
+    padding: 12,
+  },
+  lookupBtn: {
+    backgroundColor: '#0a0a0a',
+    borderRadius: 12,
+    paddingVertical: 15,
+    alignItems: 'center' as const,
+    marginTop: 4,
+  },
+  lookupAgainBtn: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+  },
+  signInPrompt: {
+    marginTop: 32,
+    alignItems: 'center' as const,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  countPill: {
+    backgroundColor: 'rgba(0,0,0,0.08)',
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+ countText: { color: 'rgba(0,0,0,0.45)', fontSize: 12, fontWeight: '700' as const },
+
+  tabBarWrapper: {
+    position: 'relative' as const,
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
+  tabBar: {
+    flexDirection: 'row' as const,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.08)',
+  },
+  tabItem: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingBottom: 12,
+    paddingTop: 4,
+    gap: 6,
+  },
+  tabIndicator: {
+    position: 'absolute' as const,
+    bottom: -1,
+    width: '50%' as any,
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: '#0a0a0a',
+  },
+  tabBadge: {
+    borderRadius: 20,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+  },
+  tabBadgeActive: {
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  tabBadgeText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: 'rgba(0,0,0,0.35)',
+  },
+  tabBadgeTextActive: {
+    color: '#0a0a0a',
+  },
+});
+export const sheet = pick(sheetDark, sheetLight);

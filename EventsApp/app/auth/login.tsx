@@ -134,6 +134,9 @@ export default function AuthScreen() {
   ];
   const passAllOk = passChecks.every(c => c.ok);
 
+  // Log in only lights up when both fields are plausibly filled.
+  const loginFormValid = /\S+@\S+\.\S+/.test(loginEmail) && loginPassword.length > 0;
+
   // Sign up only lights up when every field is filled in correctly.
   const regFormValid =
     firstName.trim().length > 0 &&
@@ -245,12 +248,19 @@ export default function AuthScreen() {
                 returnKeyType="done" onSubmit={handleLogin} isDark={isDark} />
 
               <TouchableOpacity className={s.forgotWrap} onPress={() => {}}>
-                <Text className={s.forgotText}>Forgot password?</Text>
+                <Text className={s.forgotText} style={{ color: colors.text }}>Forgot password?</Text>
               </TouchableOpacity>
 
-               <TouchableOpacity style={[sheet.cta, loading && sheet.ctaDisabled, { backgroundColor: isDark ? '#ffffff' : '#0a0a0a' }]}
-                onPress={handleLogin} activeOpacity={0.85} disabled={loading}>
-                {loading ? <ActivityIndicator color={isDark ? '#000' : '#fff'} size="small" /> : <Text className={s.ctaText} style={{ color: isDark ? '#0a0a0a' : '#ffffff' }}>Log in</Text>}
+               <TouchableOpacity
+                style={[
+                  sheet.cta,
+                  loading && sheet.ctaDisabled,
+                  { backgroundColor: loginFormValid ? (isDark ? '#ffffff' : '#0a0a0a') : (isDark ? '#232326' : '#e2e2e6') },
+                ]}
+                onPress={handleLogin} activeOpacity={0.85} disabled={loading || !loginFormValid}>
+                {loading
+                  ? <ActivityIndicator color={isDark ? '#000' : '#fff'} size="small" />
+                  : <Text className={s.ctaText} style={{ color: loginFormValid ? (isDark ? '#0a0a0a' : '#ffffff') : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)') }}>Log in</Text>}
               </TouchableOpacity>
 
 
@@ -285,7 +295,7 @@ export default function AuthScreen() {
               returnKeyType="next" onSubmit={() => phoneRef.current?.focus()} isDark={isDark} />
 
               <View className={s.phoneRow}>
-                <View style={sheet.dialCode}>
+                <View style={[sheet.dialCode, isDark && { backgroundColor: '#1c1c21', borderColor: '#2e2e35' }]}>
                   <Text className={s.dialFlag}>🇿🇦</Text>
                   <Text className={s.dialNum} style={{ color: colors.text }}>+27</Text>
                 </View>
@@ -330,12 +340,16 @@ export default function AuthScreen() {
               {/* Terms */}
               <TouchableOpacity className={s.termsRow}
                 onPress={() => { setAgreed(a => !a); clearErr('agreed'); }} activeOpacity={0.75}>
-                <View style={[sheet.checkbox, agreed && sheet.checkboxChecked]}>
-                  {agreed && <Ionicons name="checkmark" size={13} color="#fff" />}
+                <View style={[
+                  sheet.checkbox,
+                  { borderColor: isDark ? '#4a4a52' : '#ccc' },
+                  agreed && { backgroundColor: colors.text, borderColor: colors.text },
+                ]}>
+                  {agreed && <Ionicons name="checkmark" size={13} color={isDark ? '#000' : '#fff'} />}
                 </View>
-                <Text className={s.termsText}>
-                  By checking this box, you agree to our <Text className={s.termsLink}>Terms of Use</Text>
-                  {' '}and acknowledge having read our <Text className={s.termsLink}>Privacy Policy</Text>.
+                <Text className={s.termsText} style={{ color: colors.subText }}>
+                  By checking this box, you agree to our <Text className={s.termsLink} style={{ color: colors.text }}>Terms of Use</Text>
+                  {' '}and acknowledge having read our <Text className={s.termsLink} style={{ color: colors.text }}>Privacy Policy</Text>.
                 </Text>
               </TouchableOpacity>
               {errors.agreed ? <Text className={s.termsErr}>{errors.agreed}</Text> : null}

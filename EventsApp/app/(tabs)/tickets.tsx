@@ -11,7 +11,7 @@ import { StyleSheet } from 'react-native';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { cacheBookingsList, getCachedBookingsList, syncManyOffline, syncBookingOffline, cacheBookingDetail, saveGuestTicket, getGuestTickets } from '../../lib/offline';
-import { s, sheet } from '../../styles/tickets';
+import { s, sheet, setTicketsTheme } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
 
 const CARD_HEIGHT = 210;
@@ -175,6 +175,7 @@ const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: n
 // ─── Guest Lookup ─────────────────────────────────────────────────────────────
 
 const GuestLookup = () => {
+  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [bookingNumber, setBookingNumber] = useState('');
@@ -240,7 +241,7 @@ const GuestLookup = () => {
       <ScrollView contentContainerStyle={[sheet.guestScroll, { paddingBottom: insets.bottom + 40 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={sheet.guestForm}>
           <View style={sheet.guestIconWrap}>
-            <Ionicons name="ticket-outline" size={36} color="rgba(255,255,255,0.18)" />
+            <Ionicons name="ticket-outline" size={36} color={isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)'} />
           </View>
           <Text className={s.guestTitle}>Find your ticket</Text>
           <Text className={s.guestSub}>Enter your booking number and email from your confirmation.</Text>
@@ -248,13 +249,13 @@ const GuestLookup = () => {
           <View style={sheet.fieldGroup}>
             <Text className={s.fieldLabel}>BOOKING NUMBER</Text>
             <TextInput style={sheet.input} value={bookingNumber} onChangeText={setBookingNumber}
-              placeholder="" placeholderTextColor="rgba(255,255,255,0.2)"
+              placeholder="" placeholderTextColor={isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.25)'}
               autoCapitalize="characters" autoCorrect={false} returnKeyType="next" />
           </View>
           <View style={sheet.fieldGroup}>
             <Text className={s.fieldLabel}>EMAIL ADDRESS</Text>
             <TextInput style={sheet.input} value={email} onChangeText={setEmail}
-              placeholder="" placeholderTextColor="rgba(255,255,255,0.2)"
+              placeholder="" placeholderTextColor={isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.25)'}
               autoCapitalize="none" keyboardType="email-address" autoCorrect={false}
               returnKeyType="search" onSubmitEditing={lookup} />
           </View>
@@ -267,7 +268,7 @@ const GuestLookup = () => {
           )}
 
           <TouchableOpacity style={[sheet.lookupBtn, loading && { opacity: 0.6 }]} onPress={lookup} disabled={loading} activeOpacity={0.85}>
-            {loading ? <ActivityIndicator color="#0a0a0a" size="small" /> : <Text className={s.lookupBtnText}>Find Ticket</Text>}
+            {loading ? <ActivityIndicator color={isDark ? '#0a0a0a' : '#ffffff'} size="small" /> : <Text className={s.lookupBtnText}>Find Ticket</Text>}
           </TouchableOpacity>
 
           <TouchableOpacity style={sheet.signInPrompt} onPress={() => router.push('/auth/login' as any)}>
@@ -296,6 +297,7 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
 }) => {
   const insets             = useSafeAreaInsets();
   const { colors, isDark } = useAppTheme();
+  setTicketsTheme(isDark);
 
   const all      = dedup([...apiBookings]).filter(isRealTicket);
   const upcoming = all.filter(isUpcomingActive);
