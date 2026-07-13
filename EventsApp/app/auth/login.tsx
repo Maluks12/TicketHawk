@@ -247,7 +247,7 @@ export default function AuthScreen() {
                 secure inputRef={loginPassRef} error={errors.loginPassword}
                 returnKeyType="done" onSubmit={handleLogin} isDark={isDark} />
 
-              <TouchableOpacity className={s.forgotWrap} onPress={() => {}}>
+              <TouchableOpacity className={s.forgotWrap} onPress={() => router.push({ pathname: '/auth/forgot', params: { email: loginEmail.trim() } })}>
                 <Text className={s.forgotText} style={{ color: colors.text }}>Forgot password?</Text>
               </TouchableOpacity>
 

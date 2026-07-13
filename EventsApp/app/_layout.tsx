@@ -64,6 +64,11 @@ export default function RootLayout() {
       />
 
       <Stack.Screen
+        name="auth/forgot"
+        options={{ animation: 'slide_from_right' }}
+      />
+
+      <Stack.Screen
         name="booking/[id]"
         options={{ animation: 'slide_from_right' }}
       />
