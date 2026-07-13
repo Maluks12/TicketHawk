@@ -759,3 +759,50 @@ func (s *EmailService) renderBookingConfirmationWithQR(
 	}
 	return buf.String(), nil
 }
+// SendOrganizerHandover — sent when an admin hands an event over to an
+// organiser (Path 4). Covers both a fresh invite (account was just created;
+// they must SET a password) and an existing organiser (link doubles as a
+// reset in case they've forgotten theirs). The link reuses the standard
+// password-reset flow and is valid for 7 days.
+func (s *EmailService) SendOrganizerHandover(email, businessName, eventTitle, resetLink, dashboardURL string, newAccount bool) error {
+	subject := fmt.Sprintf("Your event %q is live on TicketHawk", eventTitle)
+
+	intro := fmt.Sprintf(`<p>Good news — your event <strong>%s</strong> has been set up on TicketHawk and ownership has been handed over to you.</p>`, eventTitle)
+	action := fmt.Sprintf(`<p>To manage it, sign in to the organiser dashboard. If you've forgotten your password you can reset it with the button below.</p>
+			<p style="text-align: center; margin: 30px 0;">
+				<a href="%s" style="background: #ff2d55; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Reset Password</a>
+			</p>`, resetLink)
+	if newAccount {
+		action = fmt.Sprintf(`<p>An organiser account has been created for you with this email address. Set your password to activate it and access your dashboard:</p>
+			<p style="text-align: center; margin: 30px 0;">
+				<a href="%s" style="background: #ff2d55; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">Set Your Password</a>
+			</p>`, resetLink)
+	}
+
+	htmlContent := fmt.Sprintf(`
+		<html>
+		<body style="font-family: Arial, sans-serif; color: #1a1a1a;">
+			<h1 style="letter-spacing: -0.5px;">Welcome to TicketHawk</h1>
+			%s
+			%s
+			<p>From your dashboard you can view your event, edit its details, track ticket sales, and manage door staff.</p>
+			<p style="color: #666; font-size: 13px;">Dashboard: <a href="%s">%s</a><br>
+			This link expires in 7 days. If you weren't expecting this email, please ignore it or contact support.</p>
+		</body>
+		</html>
+	`, intro, action, dashboardURL, dashboardURL)
+
+	from := mail.NewEmail(s.cfg.EmailFromName, s.cfg.EmailFromAddress)
+	to := mail.NewEmail(businessName, email)
+
+	message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
+
+	resp, err := s.client.Send(message)
+	if err != nil {
+		return fmt.Errorf("failed to send organizer handover email: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("organizer handover email API error: %d", resp.StatusCode)
+	}
+	return nil
+}

@@ -212,6 +212,11 @@ type CreateEventDTO struct {
 	// Optional: create ticket types inline with the event. When provided the
 	// cheapest type price overwrites the Price field above via DB trigger.
 	TicketTypes        []CreateTicketTypeDTO `json:"ticket_types"`
+	// Optional (admin create only): hand the event to an organiser at creation
+	// time. The organiser is invited + auto-approved if needed, ownership is
+	// set to them, and the handover email fires immediately.
+	OrganizerEmail        *string `json:"organizer_email" binding:"omitempty,email,max=255"`
+	OrganizerBusinessName *string `json:"organizer_business_name" binding:"omitempty,max=255"`
 }
 
 type UpdateEventDTO struct {

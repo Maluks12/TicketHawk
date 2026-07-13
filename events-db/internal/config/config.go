@@ -32,6 +32,11 @@ type Config struct {
 
 	FrontendURLs []string
 
+	// OrganizerDashboardURL is where handover/invite emails point organisers
+	// to sign in and set their password. Falls back to FrontendURLs[0] until
+	// a dedicated dashboard domain exists.
+	OrganizerDashboardURL string
+
 	EnableEmailVerification bool
 	EnableWaitlist          bool
 
@@ -97,6 +102,8 @@ func Load() (*Config, error) {
 		PayPalEnvironment:  os.Getenv("PAYPAL_ENVIRONMENT"),
 
 		PaymentCallbackURL: os.Getenv("PAYMENT_CALLBACK_URL"),
+
+		OrganizerDashboardURL: os.Getenv("ORGANIZER_DASHBOARD_URL"),
 	}
 
 	// FIX: validate required fields at startup so the server never silently
@@ -114,6 +121,11 @@ func Load() (*Config, error) {
 	}
 	if cfg.PayPalEnvironment == "" {
 		cfg.PayPalEnvironment = "sandbox"
+	}
+	if cfg.OrganizerDashboardURL == "" {
+		// No dedicated dashboard domain yet — reuse the primary frontend URL
+		// (validated non-empty above) so handover links always resolve.
+		cfg.OrganizerDashboardURL = cfg.FrontendURLs[0]
 	}
 
 	cfg.BookingExpiryMinutes = 15

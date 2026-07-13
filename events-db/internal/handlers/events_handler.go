@@ -3,8 +3,10 @@ package handlers
 import (
 	"errors"
 	"events-db/internal/cache"
+	"events-db/internal/config"
 	"events-db/internal/models"
 	"events-db/internal/repository"
+	"events-db/internal/services"
 	"events-db/internal/utils"
 	"net/http"
 	"strconv"
@@ -12,12 +14,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FIX 5: renamed CreateEventHandlers → CreateEventHandler (singular, consistent naming)
-func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache, emailService *services.EmailService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 
@@ -43,14 +46,41 @@ func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 			return
 		}
 
+		// Path 4: created on behalf of an organiser — hand it over right now.
+		// The event exists and is published either way; a handover failure is
+		// reported but doesn't roll back creation (the admin can retransfer
+		// via PUT /admin/events/:id/organizer).
+		var handover gin.H
+		if dto.OrganizerEmail != nil && *dto.OrganizerEmail != "" {
+			businessName := ""
+			if dto.OrganizerBusinessName != nil {
+				businessName = *dto.OrganizerBusinessName
+			}
+			info := &repository.EventOwnershipInfo{
+				ID:          event.ID,
+				Title:       event.Title,
+				OrganizerID: userID.(string),
+			}
+			handover, err = handoverEventToOrganizer(pool, emailService, cfg, info, *dto.OrganizerEmail, businessName)
+			if err != nil {
+				log.Warn().Err(err).Str("event_id", event.ID).
+					Msg("admin create: event created but handover failed — retransfer via PUT /admin/events/:id/organizer")
+				handover = gin.H{"error": "Event was created, but the handover failed. Use the transfer endpoint to retry."}
+			}
+		}
+
 		if ec != nil {
 			ec.BustOnPublish(c.Request.Context())
 		}
 
-		c.JSON(http.StatusCreated, gin.H{
+		resp := gin.H{
 			"message": "Event created and published to the home page",
 			"event":   event,
-		})
+		}
+		if handover != nil {
+			resp["handover"] = handover
+		}
+		c.JSON(http.StatusCreated, resp)
 	}
 }
 

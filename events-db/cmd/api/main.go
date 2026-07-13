@@ -586,7 +586,8 @@ func main() {
 			"admin"))
 	}
 	{
-		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache))
+		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
+		admin.PUT("/events/:id/organizer", handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
 		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
 		admin.GET("/events/:id",     handlers.AdminGetEventByIDHandler(pool, eventCache))
 		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool,eventCache))
