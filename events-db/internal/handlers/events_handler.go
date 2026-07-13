@@ -66,6 +66,16 @@ func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache, emailService *
 				log.Warn().Err(err).Str("event_id", event.ID).
 					Msg("admin create: event created but handover failed — retransfer via PUT /admin/events/:id/organizer")
 				handover = gin.H{"error": "Event was created, but the handover failed. Use the transfer endpoint to retry."}
+			} else {
+				// The handover UPDATE ran after CreateEvent returned, so the
+				// in-memory struct is stale. Mirror the DB so the response
+				// doesn't contradict the handover block.
+				if newOrg, ok := handover["new_organizer"].(gin.H); ok {
+					if newID, ok := newOrg["user_id"].(string); ok {
+						event.OrganizerID = newID
+					}
+				}
+				event.ListingFeePaid = true
 			}
 		}
 
