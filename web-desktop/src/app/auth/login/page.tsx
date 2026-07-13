@@ -177,6 +177,9 @@ export default function AuthPage() {
               {loading ? 'Logging in…' : 'Log in'}
             </button>
             <p style={{ textAlign: 'center', fontSize: 13, color: colors.subText, margin: 0 }}>
+              <span onClick={() => router.push('/reset-password')} style={{ color: '#ff2d55', fontWeight: 700, cursor: 'pointer' }}>Forgot password?</span>
+            </p>
+            <p style={{ textAlign: 'center', fontSize: 13, color: colors.subText, margin: 0 }}>
               Don&apos;t have an account?{' '}
               <span onClick={() => switchMode('register')} style={{ color: '#ff2d55', fontWeight: 700, cursor: 'pointer' }}>Sign up</span>
             </p>
