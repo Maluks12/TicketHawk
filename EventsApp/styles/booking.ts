@@ -89,14 +89,14 @@ const sLight = {
   // ── Floating header ──────────────────────────────────────────────────────
   floatingHeader:   'absolute top-0 left-0 right-0 z-50 flex-row items-center px-4 pb-3',
   headerBack:       'w-9 h-9 rounded-[10px] bg-black/[0.12] items-center justify-center',
-  headerTitle:      'flex-1 text-center text-[15px] font-bold text-[#0a0a0a] mx-2',
+  headerTitle:      'flex-1 text-center text-[15px] font-bold text-white mx-2',
 
   // ── Hero ─────────────────────────────────────────────────────────────────
   hero:             'h-80 relative',
   heroBg:           'absolute inset-0 bg-[#1a1a1a]',
   heroContent:      'absolute bottom-0 left-0 right-0 p-6 gap-2',
-  heroTitle:        'text-[28px] font-extrabold text-[#0a0a0a] tracking-[-0.5px] leading-[33px]',
-  heroDate:         'text-[13px] text-black/55 font-medium',
+  heroTitle:        'text-[28px] font-extrabold text-white tracking-[-0.5px] leading-[33px]',
+  heroDate:         'text-[13px] text-white/70 font-medium',
 
   // ── Status badge ─────────────────────────────────────────────────────────
   statusBadge:      'flex-row items-center gap-1.5 px-2.5 py-[5px] rounded-full border self-start',
@@ -419,10 +419,10 @@ const sheetLight = StyleSheet.create({
   // ── QR card ──────────────────────────────────────────────────────────────
   qrCard: {
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(0,0,0,0.05)',
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(0,0,0,0.08)',
     alignItems: 'center',
     padding: 28,
     gap: 16,

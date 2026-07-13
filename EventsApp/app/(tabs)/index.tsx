@@ -713,6 +713,34 @@ export default function Index() {
       .start(() => { headerOffset.current = target; });
   }, [headerAnim]);
 
+  // ── Offline empty state ─────────────────────────────────────────────────────
+  // If the very first load fails with a network error and we have nothing cached
+  // to show, replace the whole page with a single "connect to network" state
+  // instead of rendering the hero + an error banner.
+  const isNetworkError = !!error && /network/i.test(error);
+  if (!loading && isNetworkError && sections.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 14 }}>
+        <View style={{ width: 84, height: 84, borderRadius: 26, backgroundColor: colors.sectionCardBg, alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>
+          <Ionicons name="wifi-outline" size={40} color={colors.iconColor} />
+        </View>
+        <Text style={{ color: colors.text, fontSize: 20, fontWeight: '800', textAlign: 'center', letterSpacing: -0.3 }}>
+          Connect to Network
+        </Text>
+        <Text style={{ color: colors.subText, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
+          You're not connected to the internet. Check your connection to browse events.
+        </Text>
+        <TouchableOpacity
+          onPress={async () => { setLoading(true); await fetchSections(filterParams.city); setLoading(false); }}
+          activeOpacity={0.85}
+          style={{ marginTop: 10, paddingHorizontal: 28, paddingVertical: 13, borderRadius: 12, backgroundColor: colors.ctaBg }}
+        >
+          <Text style={{ color: colors.ctaText, fontSize: 14, fontWeight: '800', letterSpacing: 0.3 }}>Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View className={s.screen} style={{ backgroundColor: colors.background }}>
       <ScrollView
@@ -737,7 +765,7 @@ export default function Index() {
         onScrollEndDrag={snapHeader}
         onMomentumScrollEnd={snapHeader}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#000000" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.text} />
         }
       >
         {/* Hero Banner — horizontal FlatList swiper (no fade-race glitch, swipe-enabled) */}

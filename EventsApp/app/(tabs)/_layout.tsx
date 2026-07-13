@@ -1,6 +1,6 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, StatusBar } from 'react-native';
 import { House, Storefront, MagnifyingGlass, Ticket, User, type Icon as PhosphorIcon } from 'phosphor-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../../theme/colors';
@@ -24,9 +24,11 @@ function TabIcon({ icon: IconCmp, focused, colors }: { icon: PhosphorIcon; focus
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
 
   return (
+    <>
+    <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.background} />
     <Tabs
       screenOptions={{
         headerShown:             false,
@@ -66,6 +68,7 @@ export default function TabLayout() {
         options={{ tabBarIcon: ({ focused }) => <TabIcon icon={User} focused={focused} colors={colors} /> }}
       />
     </Tabs>
+    </>
   );
 }
 

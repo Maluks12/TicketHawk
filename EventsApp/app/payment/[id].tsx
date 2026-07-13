@@ -65,6 +65,15 @@ export default function PaymentScreen() {
     [bookingNumber, email],
   );
 
+  // ── Android deep-link ghost guard ──────────────────────────────────────────
+  // The backend's /payments/return 302s to eventsapp://payment/return. On
+  // Android that intent BOTH resolves openAuthSessionAsync (closing the
+  // browser) AND gets handled by expo-router's linking, which pushes a second
+  // payment/[id] instance with id="return" and no checkout params on top of
+  // the real one ("ZAR 0" / "Missing checkout link"). The real screen sits
+  // right below in the stack, mid-poll. Detect this ghost and close it.
+  const isReturnDeepLink = bookingId === 'return';
+
   const [phase, setPhase]     = useState<Phase>('opening');
   const [message, setMessage] = useState('Opening secure checkout…');
   const startedRef = useRef(false);
@@ -167,10 +176,17 @@ export default function PaymentScreen() {
   }, [bookingId, finishFromStatus, guest]);
 
   useEffect(() => {
+    if (isReturnDeepLink) {
+      // Ghost instance from the return deep link — pop it to reveal the real
+      // payment screen (which is already polling), or fall back to Tickets.
+      if (router.canGoBack()) router.back();
+      else router.replace('/(tabs)/tickets');
+      return;
+    }
     if (startedRef.current) return;
     startedRef.current = true;
     run(authorizationUrl);
-  }, [run, authorizationUrl]);
+  }, [run, authorizationUrl, isReturnDeepLink, router]);
 
   // Retry re-initialises the payment so we get a FRESH gateway order and the
   // payment record resets to pending. Reusing the old order would just resolve
@@ -199,6 +215,12 @@ export default function PaymentScreen() {
   const methodLabel = method ? (METHOD_LABEL[method] ?? '') : '';
   const spinning = phase === 'opening' || phase === 'in_browser' || phase === 'confirming';
   const canRetry = phase === 'failed' || phase === 'cancelled';
+
+  // Ghost instance (see guard above): render a blank themed view for the one
+  // frame before the dismiss effect runs — never the "ZAR 0" error UI.
+  if (isReturnDeepLink) {
+    return <View style={styles.root} />;
+  }
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
