@@ -141,7 +141,7 @@ function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick:
   return (
     <button
       onClick={onClick}
-      className="absolute top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-opacity duration-200 hover:opacity-90"
+      className="absolute top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full hidden md:flex items-center justify-center shadow-lg transition-opacity duration-200 hover:opacity-90"
       style={{
         [dir === 'left' ? 'left' : 'right']: '8px',
         backgroundColor: 'rgba(0,0,0,0.75)',
@@ -158,6 +158,14 @@ function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick:
 }
 
 // ── CHANGE D: EventCard — larger dimensions (200→260 wide, 130→170 tall) ─────
+// Cards ignore onPress in their memo comparison: the home page's carousel
+// intervals re-render the page every few seconds, recreating the inline
+// onPress closures. onPress only closes over `item`, so comparing item
+// identity (+ colors / rank) is safe and stops the every-tick card
+// re-render that users saw as flicker.
+const eventCardEqual = (a: any, b: any) =>
+  a.item === b.item && a.colors === b.colors && a.rank === b.rank;
+
 const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <button onClick={onPress} className="shrink-0 text-left" style={{ width: CARD_W }}>
     <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
@@ -180,8 +188,9 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
-));
+), eventCardEqual);
 EventCard.displayName = 'EventCard';
+// See eventCardEqual note above the memo wrappers.
 
 // ── CHANGE E: Top10Card — larger dimensions ───────────────────────────────────
 const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
@@ -192,8 +201,8 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       )}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.72), rgba(0,0,0,0.18), transparent)' }} />
       <span className="absolute top-1 left-3 text-[60px] font-black text-white leading-none" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)', letterSpacing: -2 }}>{rank}</span>
-      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
-        <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
+      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 h-[18px] flex items-center">
+        <span className="text-white text-[9px] font-bold leading-none">{formatPrice(item.price)}</span>
       </div>
     </div>
     <div className="pt-2.5 px-0.5">
@@ -202,7 +211,7 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
-));
+), eventCardEqual);
 Top10Card.displayName = 'Top10Card';
 
 // ── CHANGE F: SectionRow — now has left/right arrows, no visible scrollbar ───

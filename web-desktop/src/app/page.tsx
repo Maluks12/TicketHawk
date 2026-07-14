@@ -155,6 +155,14 @@ function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick:
 }
 
 // ── CHANGE D: EventCard — larger dimensions (200→260 wide, 130→170 tall) ─────
+// Cards ignore onPress in their memo comparison: the home page's carousel
+// intervals re-render the page every few seconds, recreating the inline
+// onPress closures. onPress only closes over `item`, so comparing item
+// identity (+ colors / rank) is safe and stops the every-tick card
+// re-render that users saw as flicker.
+const eventCardEqual = (a: any, b: any) =>
+  a.item === b.item && a.colors === b.colors && a.rank === b.rank;
+
 const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <button onClick={onPress} className="shrink-0 text-left" style={{ width: CARD_W }}>
     <div className="relative w-full aspect-[16/10] rounded-[16px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
@@ -177,8 +185,9 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
       <p className="text-[12.5px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
-));
+), eventCardEqual);
 EventCard.displayName = 'EventCard';
+// See eventCardEqual note above the memo wrappers.
 
 // ── CHANGE E: Top10Card — larger dimensions ───────────────────────────────────
 const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
@@ -199,7 +208,7 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       <p className="text-[12.5px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
-));
+), eventCardEqual);
 Top10Card.displayName = 'Top10Card';
 
 // ── CHANGE F: SectionRow — now has left/right arrows, no visible scrollbar ───

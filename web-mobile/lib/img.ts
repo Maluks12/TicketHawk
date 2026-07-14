@@ -25,6 +25,11 @@ function isRemote(u: string): boolean {
 export function thumbUrl(url?: string | null): string | undefined {
   if (!url || !isRemote(url)) return undefined;
   const [path] = url.split(/[?#]/);
+  // Thumbnails only exist for OUR media (backend writes a _thumb.jpg sibling
+  // under /covers/ and /banners/). Third-party images (e.g. seeded Unsplash
+  // URLs) have no such sibling — requesting one guarantees a 404 before the
+  // fallback kicks in, which is the card flicker / slow first paint.
+  if (!/\/(covers|banners)\//.test(path)) return undefined;
   const dot = path.lastIndexOf('.');
   const slash = path.lastIndexOf('/');
   if (dot <= slash) return undefined; // no real extension to replace

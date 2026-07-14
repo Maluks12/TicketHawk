@@ -103,7 +103,7 @@ export default function NavBar() {
         {/* LEFT: brand logo ─────────────────────────────────────────────── */}
         <div className="flex-none">
           <Link href="/" className="text-[17px] font-black tracking-wide" style={{ color: colors.text }}>
-            <img src="/brand-logo.png" alt="" style={{ width: 26, height: 26, verticalAlign: 'middle', marginRight: 7, display: 'inline-block' }} />TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+            <img src="/brand-logo.png" alt="" style={{ width: 39, height: 39, verticalAlign: 'middle', marginRight: 8, display: 'inline-block' }} />TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
           </Link>
         </div>
 
@@ -176,7 +176,7 @@ export default function NavBar() {
       {/* ── Mobile full-screen overlay ─────────────────────────────────────── */}
       {menuOpen && (
         <div
-          className="fixed inset-0 z-30 flex flex-col md:hidden pt-16"
+          className="fixed inset-0 z-[45] flex flex-col md:hidden pt-16"
           style={{ backgroundColor: colors.background }}
         >
           <nav className="flex-1 flex flex-col pt-4 px-8 overflow-y-auto">
