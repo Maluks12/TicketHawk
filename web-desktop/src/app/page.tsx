@@ -26,6 +26,15 @@ const SPOTLIGHT_CONFIGS = [
   { title: 'TOP CONCERTS',   category: 'concerts', badge: '🎵 MUSIC',    accentColor: '#34d399', bgColor: '#001a10', gradientDark: 'rgba(0,26,16,0.82)',  gradientLight: 'rgba(0,26,16,0.25)'  },
 ];
 
+function isEventLive(e: { start_time?: string; end_time?: string | null }): boolean {
+  if (!e?.start_time) return false;
+  const now = Date.now();
+  const start = new Date(e.start_time).getTime();
+  if (Number.isNaN(start) || now < start) return false;
+  const end = e.end_time ? new Date(e.end_time).getTime() : start + 4 * 60 * 60 * 1000;
+  return !Number.isNaN(end) && now <= end;
+}
+
 function formatPrice(price: number) {
   if (price === 0) return 'Free';
   return `R${Math.round(price).toLocaleString('en-ZA')}`;
@@ -152,7 +161,7 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
-      {(item.category?.toLowerCase().includes('music') || item.category?.toLowerCase().includes('concert')) && (
+      {isEventLive(item) && (
        <div className="absolute top-3 left-3 bg-black/70 rounded-[6px] px-2.5 py-1 flex items-center gap-1">
           <div className="w-1.5 h-1.5 rounded-full bg-white" />
           <span className="text-white text-[9px] font-extrabold tracking-[1.2px]">LIVE</span>
@@ -283,6 +292,13 @@ export default function HomePage() {
   );
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen,   setDropdownOpen]   = useState(false);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [dropdownOpen]);
   const [filterParams,   setFilterParams]   = useState<FilterParams>({ date: 'any' });
   const [sections,       setSections]       = useState<HomeSection[]>([]);
   const [homeSections,   setHomeSections]   = useState<HomeSection[]>([]);

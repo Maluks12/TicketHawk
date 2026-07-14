@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
@@ -104,7 +105,7 @@ export default function AuthPage() {
     if (!dob) errs.dob = 'Required';
     else if (!parseDobToISO(dob)) errs.dob = 'Use DD/MM/YYYY';
     if (!regPassword) errs.regPassword = 'Required';
-    else if (regPassword.length < 8) errs.regPassword = 'Min. 8 characters';
+    else if (!(regPassword.length >= 8 && /[A-Z]/.test(regPassword) && /[0-9]/.test(regPassword) && /[^A-Za-z0-9\s]/.test(regPassword))) errs.regPassword = 'Password does not meet all requirements';
     if (confirmPass !== regPassword) errs.confirmPass = "Passwords don't match";
     if (!agreed) errs.agreed = 'You must agree to continue';
     if (Object.keys(errs).length) { setErrors(errs); return; }
@@ -132,7 +133,7 @@ export default function AuthPage() {
 
         {/* Brand */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 28 }}>
-          <div style={{ width: 52, height: 52, borderRadius: 16, background: '#ff2d55', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🎟</div>
+          <img src="/brand-logo.png" alt="TicketHawk" style={{ width: 64, height: 64, objectFit: 'contain' }} />
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text }}>
             {mode === 'login' ? 'Welcome back' : 'Create account'}
           </h1>
@@ -195,6 +196,20 @@ export default function AuthPage() {
               <Field placeholder="Last name" value={lastName} onChange={(v) => { setLastName(v); clearErr('lastName'); }} error={errors.lastName} autoComplete="family-name" />
             </div>
             <Field placeholder="Password" value={regPassword} onChange={(v) => { setRegPassword(v); clearErr('regPassword'); }} type="password" error={errors.regPassword} autoComplete="new-password" />
+            {/* Live password requirements */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 4px', marginTop: -2, marginBottom: 4 }}>
+              {[
+                { label: 'At least 8 characters',             ok: regPassword.length >= 8 },
+                { label: 'One capital letter (A\u2013Z)',        ok: /[A-Z]/.test(regPassword) },
+                { label: 'One number (0\u20139)',                ok: /[0-9]/.test(regPassword) },
+                { label: 'One special character (e.g. !@#$)', ok: /[^A-Za-z0-9\s]/.test(regPassword) },
+              ].map((c) => (
+                <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <CheckCircle2 size={15} color={c.ok ? '#22c55e' : (isDark ? 'rgba(255,255,255,0.28)' : 'rgba(10,10,10,0.25)')} />
+                  <span style={{ fontSize: 12.5, color: c.ok ? '#22c55e' : colors.subText }}>{c.label}</span>
+                </div>
+              ))}
+            </div>
             <Field placeholder="Confirm password" value={confirmPass} onChange={(v) => { setConfirmPass(v); clearErr('confirmPass'); }} type="password" error={errors.confirmPass} autoComplete="new-password" />
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', background: isDark ? '#1c1c1c' : '#f5f5f5', border: `1.5px solid ${isDark ? '#333' : '#e0e0e0'}`, borderRadius: '10px 0 0 10px', padding: '12px 12px', whiteSpace: 'nowrap', fontSize: 14, color: colors.text }}>

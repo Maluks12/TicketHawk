@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, use } from 'react';
-import { BadgeCheck, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, ShieldCheck, CreditCard, Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -45,10 +45,11 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [quantity,       setQuantity]       = useState(1);
   const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
   const [adding,         setAdding]         = useState(false);
-  const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal' | 'apple_pay'>('card');
+  const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal'>('card');
   const [paySheetOpen,   setPaySheetOpen]   = useState(false);
   const [contactOpen,    setContactOpen]    = useState(false);
   const [guestName,      setGuestName]      = useState('');
+  const [guestSurname,   setGuestSurname]   = useState('');
   const [guestEmail,     setGuestEmail]     = useState('');
   const [error,          setError]          = useState('');
 
@@ -118,13 +119,13 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const handleBuyNow = async () => {
     if (!selectedType || !event) return;
     if (!user) {
-      if (!guestName.trim()) { setError('Please enter your name.'); return; }
+      if (!guestName.trim() || !guestSurname.trim()) { setError('Please enter your name and surname.'); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) { setError('Please enter a valid email.'); return; }
     }
     setAdding(true);
     setError('');
     try {
-      const nameParts  = guestName.trim().split(' ');
+      const nameParts  = [guestName.trim(), guestSurname.trim()];
       const firstName  = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');
       const lastRaw    = user ? String((user as any).last_name  ?? '') : nameParts.slice(1).join(' ');
       const lastName   = lastRaw.trim() || firstName;
@@ -351,9 +352,14 @@ return (
                 style={{ display: 'flex', alignItems: 'center', padding: '14px 16px', cursor: 'pointer' }}
               >
                 <p style={{ margin: 0, fontSize: 13, color: colors.subText, width: 100 }}>Payment</p>
-                <p style={{ margin: 0, flex: 1, fontSize: 13, color: colors.text, fontWeight: 600 }}>
-                  {paymentMethod === 'apple_pay' ? '🍎 Apple Pay' : paymentMethod === 'paypal' ? '🅿️ PayPal' : '💳 Credit / Debit Card'} ›
-                </p>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  {paymentMethod === 'paypal'
+                    ? <BadgeCheck size={16} color={colors.subText} />
+                    : <CreditCard size={16} color={colors.subText} />}
+                  <p style={{ margin: 0, fontSize: 13, color: colors.text, fontWeight: 600 }}>
+                    {paymentMethod === 'paypal' ? 'PayPal' : 'Credit / Debit Card'} ›
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -446,23 +452,29 @@ return (
             <h3 style={{ margin: '0 0 16px', color: colors.text }}>Contact info</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <input
+                placeholder="Name"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                style={{ background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px', fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+              />
+              <input
+                placeholder="Surname"
+                value={guestSurname}
+                onChange={(e) => setGuestSurname(e.target.value)}
+                style={{ background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px', fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box' }}
+              />
+              <input
                 placeholder="Email address"
                 type="email"
                 value={guestEmail}
                 onChange={(e) => setGuestEmail(e.target.value)}
                 style={{ background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px', fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box' }}
               />
-              <input
-                placeholder="Full name"
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                style={{ background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '12px 14px', fontSize: 14, outline: 'none', width: '100%', boxSizing: 'border-box' }}
-              />
             </div>
             <p style={{ margin: '12px 0', fontSize: 12, color: colors.subText }}>Your email will be used for ticket delivery and purchase confirmation.</p>
             <button
               onClick={() => {
-                if (!guestName.trim()) { setError('Please enter your name.'); return; }
+                if (!guestName.trim() || !guestSurname.trim()) { setError('Please enter your name and surname.'); return; }
                 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail.trim())) { setError('Please enter a valid email.'); return; }
                 setContactOpen(false);
               }}
@@ -480,18 +492,17 @@ return (
           <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
             <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payments</h3>
             {([
-              { id: 'apple_pay',  icon: '🍎', label: 'Apple Pay' },
-              { id: 'paypal',     icon: '🅿️', label: 'PayPal' },
-              { id: 'card',       icon: '💳', label: 'Credit / Debit Card' },
-            ] as const).map(({ id, icon, label }) => (
+              { id: 'paypal',     Icon: BadgeCheck,  label: 'PayPal' },
+              { id: 'card',       Icon: CreditCard,  label: 'Credit / Debit Card' },
+            ] as const).map(({ id, Icon, label }) => (
               <div
                 key={id}
                 onClick={() => { setPaymentMethod(id); setPaySheetOpen(false); }}
                 style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderTop: `1px solid ${border}`, cursor: 'pointer' }}
               >
-                <span style={{ fontSize: 22 }}>{icon}</span>
+                <Icon size={22} color={colors.subText} />
                 <p style={{ flex: 1, margin: 0, fontSize: 15, fontWeight: 500, color: colors.text }}>{label}</p>
-                {paymentMethod === id && <span style={{ fontSize: 18, color: colors.text }}>✓</span>}
+                {paymentMethod === id && <Check size={18} color="#ff2d55" strokeWidth={3} />}
               </div>
             ))}
           </div>

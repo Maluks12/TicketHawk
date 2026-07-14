@@ -26,6 +26,18 @@ const SPOTLIGHT_CONFIGS = [
   { title: 'TOP CONCERTS',   category: 'concerts', badge: '🎵 MUSIC',    accentColor: '#34d399', bgColor: '#001a10', gradientDark: 'rgba(0,26,16,0.82)',  gradientLight: 'rgba(0,26,16,0.25)'  },
 ];
 
+// LIVE only while the event is actually running: start <= now <= end.
+// Events without an end_time are assumed live for 4 hours after start.
+// (Ported from the app so the badge no longer shows on every music event.)
+function isEventLive(e: { start_time?: string; end_time?: string | null }): boolean {
+  if (!e?.start_time) return false;
+  const now   = Date.now();
+  const start = new Date(e.start_time).getTime();
+  if (Number.isNaN(start) || now < start) return false;
+  const end = e.end_time ? new Date(e.end_time).getTime() : start + 4 * 60 * 60 * 1000;
+  return !Number.isNaN(end) && now <= end;
+}
+
 function formatPrice(price: number) {
   if (price === 0) return 'Free';
   return `R${Math.round(price).toLocaleString('en-ZA')}`;
@@ -152,14 +164,14 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
-      {(item.category?.toLowerCase().includes('music') || item.category?.toLowerCase().includes('concert')) && (
-       <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 py-1 flex items-center gap-1">
+      {isEventLive(item) && (
+        <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 h-[18px] flex items-center gap-1">
           <div className="w-[5px] h-[5px] rounded-full bg-white" />
-          <span className="text-white text-[9px] font-extrabold tracking-[1.2px]">LIVE</span>
+          <span className="text-white text-[9px] font-extrabold tracking-[1.2px] leading-none">LIVE</span>
         </div>
       )}
-      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
-        <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
+      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 h-[18px] flex items-center">
+        <span className="text-white text-[9px] font-bold leading-none">{formatPrice(item.price)}</span>
       </div>
     </div>
     <div className="pt-2.5 px-0.5">
@@ -283,6 +295,15 @@ export default function HomePage() {
   );
   const [activeCategory, setActiveCategory] = useState('All');
   const [dropdownOpen,   setDropdownOpen]   = useState(false);
+
+  // Lock the underlying page from scrolling while the category overlay is open,
+  // otherwise swiping the list scrolls the home feed behind it instead.
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [dropdownOpen]);
   const [filterParams,   setFilterParams]   = useState<FilterParams>({ date: 'any' });
   const [sections,       setSections]       = useState<HomeSection[]>([]);
   const [homeSections,   setHomeSections]   = useState<HomeSection[]>([]);
@@ -640,9 +661,9 @@ export default function HomePage() {
 
       {/* Mobile category dropdown overlay */}
       {dropdownOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col md:hidden" onClick={() => setDropdownOpen(false)}>
-          <div className="flex-1 w-full pt-16 pb-10 flex flex-col items-center backdrop-blur-2xl bg-black/60" onClick={(e) => e.stopPropagation()}>
-            <div className="flex-1 w-full overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex flex-col md:hidden" onClick={() => setDropdownOpen(false)} style={{ height: '100dvh' }}>
+          <div className="flex-1 w-full pt-16 pb-10 flex flex-col items-center backdrop-blur-2xl bg-black/60 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex-1 w-full overflow-y-auto overscroll-contain">
               {categories.map((item) => (
                 <button key={item} onClick={() => { setDropdownOpen(false); if (item === 'All') { setActiveCategory('All'); } else { router.push(`/category/${encodeURIComponent(item)}`); } }} className="py-[18px] px-10 w-full text-left">
                   <span className={`text-[26px] ${activeCategory === item ? 'font-black tracking-[1px]' : 'font-normal'}`} style={{ color: activeCategory === item ? colors.text : colors.subText }}>{item}</span>
