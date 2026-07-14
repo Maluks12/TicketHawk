@@ -115,7 +115,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   return detectVenueType(event.category ?? '', event.venue_name);
 })();
 
-  const handleAddToCart = async () => {
+  const handleBuyNow = async () => {
     if (!selectedType || !event) return;
     if (!user) {
       if (!guestName.trim()) { setError('Please enter your name.'); return; }
@@ -428,7 +428,7 @@ return (
             } else if (step === 'map') {
               setStep('summary');
             } else {
-              handleAddToCart();
+              handleBuyNow();
             }
           }}
           disabled={adding}

@@ -202,6 +202,10 @@ export default function EventDetailPage() {
         /* ── Info grid ── */
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; }
         .info-cell { display: flex; align-items: center; gap: 12px; padding: 16px 20px; }
+        .info-grid > .info-cell:nth-child(odd) { border-right: 1px solid ${border}; }
+        @media (max-width: 860px) {
+          .info-grid > .info-cell:nth-child(odd) { border-right: none; }
+        }
         .info-cell-link {
           text-decoration: none; cursor: pointer;
           transition: background 0.12s;
@@ -275,6 +279,7 @@ export default function EventDetailPage() {
           .ed-hero    { height: 300px; }
           .hero-foot  { padding: 0 20px 22px; }
           .ed-body    { grid-template-columns: 1fr; padding: 16px 20px 120px; gap: 10px; }
+          .info-grid  { grid-template-columns: 1fr; }
           .ed-sidebar { display: none; }
           .ed-mobile-cta {
             display: flex; position: fixed; bottom: 0; left: 0; right: 0;
@@ -354,10 +359,8 @@ export default function EventDetailPage() {
           <div className="ed-card">
             <div className="info-grid">
               {infoItems.map(({ icon, label, value, mapsUrl }, i) => {
-                const isLeft    = i % 2 === 0;
                 const isLastRow = Math.floor(i / 2) === Math.ceil(infoItems.length / 2) - 1;
                 const cellStyle = {
-                  borderRight:  isLeft     ? `1px solid ${border}` : 'none',
                   borderBottom: !isLastRow ? `1px solid ${border}` : 'none',
                 };
                 const inner = (

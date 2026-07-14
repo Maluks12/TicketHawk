@@ -10,6 +10,7 @@ import {
 import { startBookingPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
+import { ShieldCheck, Lock, Smartphone } from 'lucide-react';
 
 type Phase = 'review' | 'reserving' | 'reserved' | 'confirming';
 
@@ -262,9 +263,9 @@ export default function CartCheckoutPage() {
 
         {/* Trust signals */}
         <div style={{ display: 'flex', justifyContent: 'space-around', border: `1px solid ${border}`, borderRadius: 12, padding: 14, marginTop: 10 }}>
-          {[{ icon: '🛡', label: 'Official tickets' }, { icon: '🔒', label: 'Secure checkout' }, { icon: '📱', label: 'Mobile tickets' }].map((t) => (
+          {[{ Icon: ShieldCheck, label: 'Official tickets' }, { Icon: Lock, label: 'Secure checkout' }, { Icon: Smartphone, label: 'Mobile tickets' }].map((t) => (
             <div key={t.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontSize: 18 }}>{t.icon}</span>
+              <t.Icon size={18} color={colors.subText} />
               <span style={{ fontSize: 11, fontWeight: 600, color: colors.subText, textAlign: 'center' }}>{t.label}</span>
             </div>
           ))}
@@ -280,7 +281,7 @@ export default function CartCheckoutPage() {
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-            <span style={{ fontSize: 14, color: colors.subText }}>Service fee (5%)</span>
+            <span style={{ fontSize: 14, color: colors.subText }}>Service fee</span>
             <span style={{ fontSize: 14, color: colors.subText }}>{fmtZAR(platformFee)}</span>
           </div>
           <div style={{ height: 1, background: border, margin: '8px 0' }} />
@@ -299,7 +300,7 @@ export default function CartCheckoutPage() {
         </div>
         {phase === 'review' && (
           <button onClick={handleBeginCheckout} disabled={isBusy} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px 22px', fontSize: 15, fontWeight: 800, cursor: isBusy ? 'not-allowed' : 'pointer', opacity: isBusy ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-            🔒 {hasTickets ? 'Reserve & Continue' : 'Continue to Pay'}
+            {hasTickets ? 'Reserve & Continue' : 'Continue to Pay'}
           </button>
         )}
         {phase === 'reserving' && <div style={{ background: '#ff2d55', color: '#fff', borderRadius: 14, padding: '14px 22px', fontSize: 15, fontWeight: 800, opacity: 0.5 }}>Reserving seats…</div>}

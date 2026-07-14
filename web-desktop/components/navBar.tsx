@@ -11,7 +11,6 @@ import { useState, useEffect } from 'react';
 // ── Nav links config ───────────────────────────────────────────────────────────
 const NAV_LINKS = [
   { href: '/',        label: 'Home'    },
-  { href: '/merch',   label: 'Drops'   },
   { href: '/search',  label: 'Search'  },
   { href: '/tickets', label: 'Tickets' },
   { href: '/profile', label: 'Profile' },

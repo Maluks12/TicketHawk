@@ -14,11 +14,18 @@ import { getCart, getCachedSessionId } from '@/lib/api';
 
 // ── Cart badge button ──────────────────────────────────────────────────────────
 function CartButton() {
+  // Cart is hidden: TicketHawk buys tickets directly (POST /v1/bookings →
+  // payment), with no cart step, matching the app. Merch/Drops is removed, so
+  // nothing reaches the cart. Flip SHOW_CART to true to re-enable everything
+  // below (component, badge polling, and imports all stay wired).
+  const SHOW_CART = false;
+
   const router     = useRouter();
   const { colors } = useAppTheme();
   const [count, setCount] = useState(0);
 
   const refresh = useCallback(async () => {
+    if (!SHOW_CART) return;
     try {
       const sid  = await getCachedSessionId();
       const data = await getCart(sid);
@@ -32,6 +39,8 @@ function CartButton() {
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
+
+  if (!SHOW_CART) return null;
 
   return (
     <button onClick={() => router.push('/cart')} className="relative p-1">
