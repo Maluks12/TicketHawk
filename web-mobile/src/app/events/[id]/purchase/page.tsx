@@ -100,7 +100,12 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
 
   const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  const platformFee  = Math.ceil(totalAmount * 0.05);
+  // Service fee mirrors the backend: R10 per ticket capped at 20% of face
+  // value, rounded to cents. The old flat 5% estimate showed a total that
+  // didn't match what Paystack actually charged.
+  const platformFee  = totalAmount > 0
+    ? Math.round(Math.min(10, 0.2 * (selectedType?.price ?? 0)) * quantity * 100) / 100
+    : 0;
   const grandTotal   = totalAmount + platformFee;
   const venueType = (() => {
   if (!event) return 'none' as const;

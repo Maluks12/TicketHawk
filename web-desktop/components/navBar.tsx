@@ -81,7 +81,7 @@ export default function NavBar() {
         {/* LEFT: brand logo + nav links ───────────────────────────────────── */}
         <div className="flex-none flex items-center gap-8">
           <Link href="/" className="text-[17px] font-black tracking-wide" style={{ color: colors.text }}>
-            EVENTS<span style={{ color: '#FF2D55' }}>APP</span>
+            <img src="/brand-logo.png" alt="" style={{ width: 26, height: 26, verticalAlign: 'middle', marginRight: 7, display: 'inline-block' }} />TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
           </Link>
 
           {/* nav links — desktop only */}

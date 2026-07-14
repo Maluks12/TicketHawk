@@ -4,8 +4,8 @@ import './styles/global.css';
 import NavBar from '@/components/navBar';
 
 export const metadata: Metadata = {
-  title: 'EventsApp',
-  description: 'Discover and book events near you',
+  title: 'TicketHawk',
+  description: 'Discover and book events across South Africa',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

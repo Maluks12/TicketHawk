@@ -68,7 +68,16 @@ export default function CartCheckoutPage() {
 
   const allItems = (cart as any)?.items_by_event?.flatMap((g: any) => g.items) ?? [];
   const cartTotal = (cart as any)?.total_amount ?? 0;
-  const platformFee = Math.ceil(cartTotal * 0.05);
+  // Service fee mirrors the backend: R10 per ticket, capped at 20% of face
+  // value per line, rounded to cents. Merch lines carry no service fee. The
+  // old flat 5%-of-cart estimate didn't match what the gateway charges.
+  const platformFee = allItems.reduce((sum: number, i: any) => {
+    if (i.item_type !== 'ticket') return sum;
+    const unit = Number(i.unit_price_snapshot ?? 0);
+    const qty  = Number(i.quantity ?? 0);
+    if (unit <= 0 || qty <= 0) return sum;
+    return sum + Math.round(Math.min(10, 0.2 * unit) * qty * 100) / 100;
+  }, 0);
   const grandTotal = cartTotal + platformFee;
   const hasTickets = allItems.some((i: CartItem) => i.item_type === 'ticket');
   const isBusy = phase === 'reserving' || phase === 'confirming';
@@ -183,7 +192,7 @@ export default function CartCheckoutPage() {
                 const sub = cartItemSubtitle(item);
                 const lineTotal = (item as any).unit_price_snapshot * item.quantity + ((item as any).delivery_fee_snapshot ?? 0);
                 return (
-                  <div key={item.id} style={{ display: 'flex', gap: 10, paddingVertical: 8, borderTop: `1px solid ${border}`, padding: '8px 0', alignItems: 'flex-start' }}>
+                  <div key={item.id} style={{ display: 'flex', gap: 10, borderTop: `1px solid ${border}`, padding: '8px 0', alignItems: 'flex-start' }}>
                     <div style={{ width: 26, height: 26, borderRadius: 7, background: item.item_type === 'ticket' ? '#ff2d55' : '#1c2e61', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12 }}>{item.item_type === 'ticket' ? '🎟' : '👜'}</div>
                     <div style={{ flex: 1 }}>
                       <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>{cartItemLabel(item)}</p>
@@ -231,7 +240,7 @@ export default function CartCheckoutPage() {
             </div>
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-            <span style={{ fontSize: 14, color: colors.subText }}>Service fee (5%)</span>
+            <span style={{ fontSize: 14, color: colors.subText }}>Service fee</span>
             <span style={{ fontSize: 14, color: colors.subText }}>{fmtZAR(platformFee)}</span>
           </div>
           <div style={{ height: 1, background: border, margin: '8px 0' }} />
