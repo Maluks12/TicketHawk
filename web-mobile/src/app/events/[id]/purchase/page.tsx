@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { BadgeCheck, ShieldCheck, CreditCard, Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
+import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -141,8 +142,59 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         attendee_email:      email,
       };
 
+      // Pre-open the gateway popup within the tap gesture so mobile browsers
+      // don't block it; the payment page falls back to a full redirect if the
+      // popup was blocked anyway.
+      preopenGatewayPopup();
+
       const { data: booking } = await api.post(endpoint, payload);
-      router.push(`/payment/${(booking as any).booking_id ?? booking.id}?token=${booking.client_token}&amount=${booking.total_amount}&currency=${booking.currency ?? 'ZAR'}`);
+      const bookingId = (booking as any).booking_id ?? booking.id;
+
+      // Free booking: nothing to pay, tickets are issued directly.
+      if (!booking.total_amount || Number(booking.total_amount) <= 0) {
+        discardPendingPopup();
+        router.replace('/tickets');
+        return;
+      }
+
+      // Resolve the gateway checkout URL (same flow as desktop):
+      // • Card: booking creation already initialised a Paystack checkout and
+      //   returned its URL in client_token — reuse it.
+      // • PayPal: start a method-specific checkout.
+      let authorizationUrl: string;
+      let usedMethod: PaymentMethod = 'card';
+      if (paymentMethod === 'card' && (booking as any).client_token) {
+        authorizationUrl = (booking as any).client_token;
+      } else if (paymentMethod === 'paypal') {
+        if (user) {
+          const started = await startBookingPayment(bookingId, 'paypal');
+          authorizationUrl = started.authorization_url;
+        } else {
+          const started = await startGuestPayment((booking as any).booking_number, guestEmail.trim(), 'paypal');
+          authorizationUrl = started.authorization_url;
+        }
+        usedMethod = 'paypal';
+      } else {
+        authorizationUrl = (booking as any).client_token ?? '';
+      }
+
+      if (!authorizationUrl) {
+        discardPendingPopup();
+        setError('Payment unavailable. Please try again.');
+        return;
+      }
+
+      const params = new URLSearchParams({
+        url:      encodeURIComponent(authorizationUrl),
+        method:   usedMethod,
+        amount:   String((booking as any).total_amount ?? 0),
+        currency: (booking as any).currency ?? 'ZAR',
+      });
+      if (!user) {
+        params.set('bookingNumber', (booking as any).booking_number ?? '');
+        params.set('email', guestEmail.trim());
+      }
+      router.push(`/payment/${bookingId}?${params.toString()}`);
     } catch (e: any) {
       setError(e?.response?.data?.error ?? 'Failed to create booking. Please try again.');
     } finally {

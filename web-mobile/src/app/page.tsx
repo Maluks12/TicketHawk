@@ -184,7 +184,7 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
     </div>
     <div className="pt-2.5 px-0.5">
       <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2 h-[36px]" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
@@ -207,12 +207,41 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
     </div>
     <div className="pt-2.5 px-0.5">
       <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2 h-[36px]" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ), eventCardEqual);
 Top10Card.displayName = 'Top10Card';
+
+// EditorialSection — MUST live at module scope. It was previously defined
+// inside Home, so every carousel tick (4.5–5s setState) created a new
+// component type and React remounted every section — images re-requested,
+// cards visibly flickered, and in-flight image loads were aborted.
+const EditorialSection = memo(function EditorialSection({ title, events, filterKey, colors, onViewAll, onEventPress }: {
+  title: string; events: Event[]; filterKey: string; colors: any;
+  onViewAll: (filterKey: string, title: string) => void;
+  onEventPress: (event: Event) => void;
+}) {
+  const { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight } = useScrollArrows();
+  if (!events.length) return null;
+  return (
+    <div className="mt-8">
+      <div className="px-5 mb-1.5 flex items-center justify-between">
+        <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{title}</h2>
+        <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
+      </div>
+      <div className="relative">
+        {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
+        {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
+        <div ref={scrollRef} className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
+          {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
+        </div>
+      </div>
+    </div>
+  );
+}, (a, b) => a.events === b.events && a.colors === b.colors && a.title === b.title);
+
 
 // ── CHANGE F: SectionRow — now has left/right arrows, no visible scrollbar ───
 const SectionRow = memo(({
@@ -503,30 +532,6 @@ export default function HomePage() {
     setDateLabelText(dateLabelText);
   }, [locationLabel, dateLabelText]);
 
-  // ── CHANGE K: EditorialSection now has arrow scroll ───────────────────────
-  function EditorialSection({ title, events, filterKey, colors, onViewAll, onEventPress }: {
-    title: string; events: Event[]; filterKey: string; colors: any;
-    onViewAll: (filterKey: string, title: string) => void;
-    onEventPress: (event: Event) => void;
-  }) {
-    const { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight } = useScrollArrows();
-    if (!events.length) return null;
-    return (
-      <div className="mt-8">
-        <div className="px-5 mb-1.5 flex items-center justify-between">
-          <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{title}</h2>
-          <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
-        </div>
-        <div className="relative">
-          {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
-          {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
-          <div ref={scrollRef} className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
-            {events.map((item) => <EventCard key={item.id} item={item} onPress={() => onEventPress(item)} colors={colors} />)}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }} className="pt-4">
