@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, use } from 'react';
+import { BadgeCheck, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -373,12 +374,15 @@ return (
 
             {/* Trust badges */}
             <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {[['✅', 'Official Ticket Marketplace', 'Tickets are reviewed and verified by the venue.'], ['🔒', 'Every ticket protected', 'Secure payment processing.']].map(([icon, title, body]) => (
-                <div key={title as string} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <span>{icon}</span>
+              {[
+                { Icon: BadgeCheck, title: 'Official Ticket Marketplace', body: 'Tickets are reviewed and verified by the venue.' },
+                { Icon: ShieldCheck, title: 'Every ticket protected',      body: 'Secure payment processing.' },
+              ].map(({ Icon, title, body }) => (
+                <div key={title} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <Icon size={18} color="#2ecc71" style={{ flexShrink: 0, marginTop: 1 }} />
                   <div>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{title as string}</p>
-                    <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>{body as string}</p>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: colors.text }}>{title}</p>
+                    <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>{body}</p>
                   </div>
                 </div>
               ))}
@@ -392,7 +396,7 @@ return (
                 <p style={{ margin: 0, fontSize: 14, color: colors.text }}>{fmtPrice(totalAmount)}</p>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                <p style={{ margin: 0, fontSize: 14, color: colors.subText }}>Service Fee (5%)</p>
+                <p style={{ margin: 0, fontSize: 14, color: colors.subText }}>Service Fee</p>
                 <p style={{ margin: 0, fontSize: 14, color: colors.subText }}>{fmtPrice(platformFee)}</p>
               </div>
               <div style={{ height: 1, background: border, margin: '8px 0' }} />

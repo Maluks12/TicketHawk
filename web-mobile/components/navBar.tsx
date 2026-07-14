@@ -7,7 +7,7 @@ import { useFilterStore } from '@/store/filterStore';
 import { useAppTheme } from '@/themes/colors';
 import {
   ShoppingCart, Menu, X, MapPin, ChevronDown,
-  Home, ShoppingBag, Search, Ticket, User,
+  Home, Search, Ticket, User,
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { getCart, getCachedSessionId } from '@/lib/api';
@@ -48,7 +48,6 @@ function CartButton() {
 // ── Nav links config ───────────────────────────────────────────────────────────
 const NAV_LINKS = [
   { href: '/',        label: 'Home',    Icon: Home        },
-  { href: '/merch',   label: 'Drops',   Icon: ShoppingBag },
   { href: '/search',  label: 'Search',  Icon: Search      },
   { href: '/tickets', label: 'Tickets', Icon: Ticket      },
   { href: '/profile', label: 'Profile', Icon: User        },
@@ -168,8 +167,8 @@ export default function NavBar() {
       {/* ── Mobile full-screen overlay ─────────────────────────────────────── */}
       {menuOpen && (
         <div
-          className="fixed inset-0 top-16 z-40 flex flex-col md:hidden"
-          style={{ backgroundColor: colors.headerBg }}
+          className="fixed inset-0 z-30 flex flex-col md:hidden pt-16"
+          style={{ backgroundColor: colors.background }}
         >
           <nav className="flex-1 flex flex-col pt-4 px-8 overflow-y-auto">
 
@@ -192,16 +191,15 @@ export default function NavBar() {
             </button>
 
             {/* Nav links */}
-            {NAV_LINKS.map(({ href, label, Icon }) => {
+            {NAV_LINKS.map(({ href, label }) => {
               const active = pathname === href || (href !== '/' && pathname.startsWith(href));
               return (
                 <Link
                   key={href}
                   href={href}
-                  className="flex items-center gap-5 py-5 border-b"
+                  className="flex items-center py-5 border-b"
                   style={{ borderColor: colors.dividerColor }}
                 >
-                  <Icon size={25} color={active ? '#FF2D55' : colors.iconColor} />
                   <span
                     className="text-[21px] font-bold"
                     style={{ color: active ? '#FF2D55' : colors.text }}

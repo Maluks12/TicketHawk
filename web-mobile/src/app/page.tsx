@@ -58,7 +58,7 @@ const fmtCardDate = (iso?: string | null) => {
 // Card width formula: ~15% smaller than the original baseline overall
 // (3.15 → 3.5 → 3.68, the last step being a further 5% reduction).
 // Breakdown of the 56px offset: 20px left padding (px-5) + 2 gaps × 16px + 4px buffer = 56px.
-const CARD_W = 'calc((100vw - 56px) / 3.68)';
+const CARD_W = '200px';
 
 function SkeletonCard() {
   return (
@@ -148,24 +148,24 @@ function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick:
 // ── CHANGE D: EventCard — larger dimensions (200→260 wide, 130→170 tall) ─────
 const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
   <button onClick={onPress} className="shrink-0 text-left" style={{ width: CARD_W }}>
-    <div className="relative w-full aspect-[16/10] rounded-[16px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
+    <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       {(item.category?.toLowerCase().includes('music') || item.category?.toLowerCase().includes('concert')) && (
-       <div className="absolute top-3 left-3 bg-black/70 rounded-[6px] px-2.5 py-1 flex items-center gap-1">
-          <div className="w-1.5 h-1.5 rounded-full bg-white" />
+       <div className="absolute top-2.5 left-2.5 bg-black/70 rounded-[5px] px-2.5 py-1 flex items-center gap-1">
+          <div className="w-[5px] h-[5px] rounded-full bg-white" />
           <span className="text-white text-[9px] font-extrabold tracking-[1.2px]">LIVE</span>
         </div>
       )}
-      <div className="absolute top-3 right-3 bg-black/60 rounded-[6px] px-2.5 py-1">
-        <span className="text-white text-[10px] font-bold">{formatPrice(item.price)}</span>
+      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
+        <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
       </div>
     </div>
-    <div className="pt-3">
-      <p className="text-[11px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-[16px] font-bold leading-[22px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
-      <p className="text-[12.5px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
+    <div className="pt-2.5 px-0.5">
+      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ));
@@ -174,20 +174,20 @@ EventCard.displayName = 'EventCard';
 // ── CHANGE E: Top10Card — larger dimensions ───────────────────────────────────
 const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
   <button onClick={onPress} className="shrink-0 text-left" style={{ width: CARD_W }}>
-    <div className="relative w-full aspect-[16/10] rounded-[16px] overflow-hidden">
+    <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden">
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
       )}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.72), rgba(0,0,0,0.18), transparent)' }} />
-      <span className="absolute top-1.5 left-3 text-[60px] font-black text-white leading-none" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)', letterSpacing: -2 }}>{rank}</span>
-      <div className="absolute top-3 right-3 bg-black/60 rounded-[6px] px-2.5 py-1">
-        <span className="text-white text-[10px] font-bold">{formatPrice(item.price)}</span>
+      <span className="absolute top-1 left-3 text-[60px] font-black text-white leading-none" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.5)', letterSpacing: -2 }}>{rank}</span>
+      <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1">
+        <span className="text-white text-[9px] font-bold">{formatPrice(item.price)}</span>
       </div>
     </div>
-    <div className="pt-3">
-      <p className="text-[11px] font-semibold tracking-[0.3px] mb-1 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-[16px] font-bold leading-[22px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
-      <p className="text-[12.5px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
+    <div className="pt-2.5 px-0.5">
+      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
 ));
