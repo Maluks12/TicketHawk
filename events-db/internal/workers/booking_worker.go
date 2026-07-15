@@ -125,18 +125,26 @@ func processBookingJob(
 		return
 	}
 
-	// Merch-only bookings have no tickets or QR codes to generate — skip.
+	// Merch-only bookings have no tickets or QR codes to generate. Mark them
+	// sent so the startup re-enqueue (confirmed + tickets_sent = FALSE, last
+	// 24h) stops picking them up on every restart.
 	if booking.BookingType == "merch_only" {
 		log.Info().Str("booking_id", bookingID).Msg("booking worker: merch-only booking, nothing to send")
+		markTicketsSent(pool, bookingID)
 		return
 	}
 
 	event, err := repository.GetEventByID(pool, func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
 	if err != nil {
+		// The event no longer exists (deleted/purged). There is nothing that
+		// can ever be sent for this booking, so mark it sent — otherwise the
+		// startup sweep re-enqueues it on EVERY restart and logs this error
+		// forever.
 		log.Error().Err(err).
 			Str("event_id", func() string { if booking.EventID != nil { return *booking.EventID }; return "" }()).
 			Str("booking_id", bookingID).
-			Msg("booking worker: failed to fetch event")
+			Msg("booking worker: failed to fetch event — marking booking sent to stop requeue churn")
+		markTicketsSent(pool, bookingID)
 		return
 	}
 
@@ -194,6 +202,13 @@ func processBookingJob(
 		}
 		return
 	}
+
+	// Email delivered — record it. This was the missing piece behind the
+	// "every rebuild resends today's booking emails" bug: the happy path
+	// never flipped tickets_sent, so the startup re-enqueue (confirmed +
+	// tickets_sent = FALSE, last 24h) reprocessed and re-emailed every
+	// booking on each restart. Only the retry-drain path marked it.
+	markTicketsSent(pool, bookingID)
 
 	// Use the passed ctx instead of context.Background() so the notification
 	// write respects graceful shutdown and doesn't outlive the server.
