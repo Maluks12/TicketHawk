@@ -147,7 +147,10 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       // popup was blocked anyway.
       preopenGatewayPopup();
 
-      const { data: booking } = await api.post(endpoint, payload);
+      // channel=web makes the booking's pre-initialised card checkout use the
+      // web return page. Without it the gateway redirected back to the
+      // eventsapp:// deep link, which Safari rejects ("address is invalid").
+      const { data: booking } = await api.post(endpoint, payload, { params: { channel: 'web' } });
       const bookingId = (booking as any).booking_id ?? booking.id;
 
       // Free booking: nothing to pay, tickets are issued directly.
