@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import { api } from '@/lib/api';
@@ -48,11 +48,19 @@ function PriceLine({ label, value, bold, accent }: { label: string; value: strin
   );
 }
 
-export default function BookingDetailPage({ params }: { params: { id: string } }) {
+export default function BookingDetailPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { colors, isDark } = useAppTheme();
-  const { id } = params;
+  // Next 16 passes route params as a Promise prop; useParams() sidesteps it.
+  // (Destructuring the prop directly left `id` undefined, so every fetch hit
+  // /v1/bookings/undefined and the page showed "Booking not found".)
+  const { id } = useParams<{ id: string }>();
+  // Guest mode: ?bn=<booking_number>&email=... from the ticket-lookup page.
+  const search = useSearchParams();
+  const guestBn    = search.get('bn') ?? '';
+  const guestEmail = search.get('email') ?? '';
+  const isGuest    = !!(guestBn && guestEmail);
 
   const [booking, setBooking] = useState<BookingDetail | null>(null);
   const [assignments, setAssignments] = useState<TicketAssignment[]>([]);
@@ -69,24 +77,34 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const [assignErr, setAssignErr] = useState('');
 
   const refreshAssignments = useCallback(async () => {
-    if (!id) return;
-    try { const res = await api.get<{ data: TicketAssignment[] }>(`/v1/bookings/${id}/assignments`); setAssignments(res.data.data ?? []); } catch {}
-  }, [id]);
+    if (!id && !isGuest) return;
+    try {
+      const res = isGuest
+        ? await api.get<{ data: TicketAssignment[] }>(`/v1/guest/bookings/${encodeURIComponent(guestBn)}/assignments`, { params: { email: guestEmail } })
+        : await api.get<{ data: TicketAssignment[] }>(`/v1/bookings/${id}/assignments`);
+      setAssignments(res.data.data ?? []);
+    } catch {}
+  }, [id, isGuest, guestBn, guestEmail]);
 
   useEffect(() => {
     const load = async () => {
-      if (!user) { setLoading(false); return; }
+      if (!user && !isGuest) { setLoading(false); return; }
       try {
-        const [bRes, aRes] = await Promise.all([
-          api.get<{ data: BookingDetail }>(`/v1/bookings/${id}`),
-          api.get<{ data: TicketAssignment[] }>(`/v1/bookings/${id}/assignments`).catch(() => ({ data: { data: [] } })),
-        ]);
+        const [bRes, aRes] = isGuest
+          ? await Promise.all([
+              api.get<{ data: BookingDetail }>(`/v1/guest/bookings/${encodeURIComponent(guestBn)}`, { params: { email: guestEmail } }),
+              api.get<{ data: TicketAssignment[] }>(`/v1/guest/bookings/${encodeURIComponent(guestBn)}/assignments`, { params: { email: guestEmail } }).catch(() => ({ data: { data: [] } })),
+            ])
+          : await Promise.all([
+              api.get<{ data: BookingDetail }>(`/v1/bookings/${id}`),
+              api.get<{ data: TicketAssignment[] }>(`/v1/bookings/${id}/assignments`).catch(() => ({ data: { data: [] } })),
+            ]);
         setBooking(bRes.data.data ?? (bRes.data as any));
         setAssignments((aRes.data as any).data ?? []);
       } catch {} finally { setLoading(false); }
     };
     load();
-  }, [id, user]);
+  }, [id, user, isGuest, guestBn, guestEmail]);
 
   const handleRefund = async () => {
     if (refundReason.trim().length < 10) { setRefundErr('Please provide at least 10 characters.'); return; }

@@ -103,7 +103,7 @@ export default function NavBar() {
         {/* LEFT: brand logo ─────────────────────────────────────────────── */}
         <div className="flex-none">
           <Link href="/" className="text-[17px] font-black tracking-wide" style={{ color: colors.text }}>
-            <img src="/brand-logo.png" alt="" style={{ width: 39, height: 39, verticalAlign: 'middle', marginRight: 8, display: 'inline-block' }} />TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+            <img src="/brand-logo.png" alt="" style={{ width: 58, height: 58, verticalAlign: 'middle', marginRight: 8, display: 'inline-block' }} />TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
           </Link>
         </div>
 

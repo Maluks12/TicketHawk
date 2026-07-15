@@ -209,7 +209,7 @@ function GuestLookup() {
     return (
       <div className="max-w-lg mx-auto px-4 py-8">
         <p className="text-[11px] font-black tracking-[1.5px] mb-4" style={{ color: colors.subText }}>YOUR TICKET</p>
-        <TicketCard booking={result} index={0} onPress={() => {}} />
+        <TicketCard booking={result} index={0} onPress={() => router.push(`/booking/${result.id}?bn=${encodeURIComponent(result.booking_number)}&email=${encodeURIComponent(email.trim().toLowerCase())}`)} />
         <button onClick={() => setResult(null)} className="mt-6 flex items-center gap-2 text-sm font-bold" style={{ color: colors.subText }}>
           ← Look up another ticket
         </button>

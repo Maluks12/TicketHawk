@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Ticket } from 'lucide-react';
 import { useFilterStore } from '@/store/filterStore';
 import {
   getHomeSections, loadMoreSectionEvents, getCategories,
@@ -278,15 +278,15 @@ const HeroCarousel = memo(function HeroCarousel({ events: carouselEvents, colors
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => onEventPress(evt)}
-                      className="bg-[#FF2D55] text-white font-extrabold tracking-[1.5px] rounded-[5px]"
-                      style={{ padding: '12px 26px', fontSize: 13 }}
+                      className="bg-[#FF2D55] text-white font-extrabold tracking-[1.5px] rounded-[12px] inline-flex items-center gap-2"
+                      style={{ padding: '15px 24px', fontSize: 13 }}
                     >
-                      🎟 GET TICKETS
+                      <Ticket size={16} color="#ffffff" /> GET TICKETS
                     </button>
                     <button
                       onClick={() => onEventPress(evt)}
-                      className="bg-[#1c2e61] text-white font-bold tracking-[1px] rounded-[5px]"
-                      style={{ padding: '12px 26px', fontSize: 13 }}
+                      className="bg-[#1c2e61] text-white font-bold tracking-[1px] rounded-[12px]"
+                      style={{ padding: '15px 24px', fontSize: 13 }}
                     >
                       VIEW DETAILS
                     </button>

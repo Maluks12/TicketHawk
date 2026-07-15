@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"events-db/internal/services"
@@ -32,7 +34,7 @@ import (
 // PayPal returns carry ?token=<orderID>&PayerID=...; on approval we verify and
 // capture the order here synchronously (the webhook/app poll remain idempotent
 // backups), and on cancel we mark it failed so the app stops polling.
-func PaymentReturnHandler(paymentService *services.PaymentService) gin.HandlerFunc {
+func PaymentReturnHandler(paymentService *services.PaymentService, webBaseURL string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Paystack: ?reference=...&trxref=...   PayPal: ?token=...&PayerID=...
 		reference := c.Query("reference")
@@ -92,8 +94,49 @@ func PaymentReturnHandler(paymentService *services.PaymentService) gin.HandlerFu
 			}
 		}
 
+		// Web-channel returns: the checkout ran in a browser popup/tab opened by
+		// the web frontend (payments were initialised with ?channel=web). A
+		// deep-link redirect would be rejected by the browser ("address is
+		// invalid" on iOS Safari, where no app scheme handler exists in a plain
+		// web context). Serve a tiny self-closing page instead: it notifies the
+		// opener tab via postMessage, closes itself (allowed — the window was
+		// script-opened), and falls back to the web tickets page if closing is
+		// blocked. The opener's status watcher independently confirms the
+		// payment, so this page carries no state of its own.
+		if strings.EqualFold(strings.TrimSpace(c.Query("channel")), services.ChannelWeb) {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(webReturnHTML(webBaseURL, reference, paypalToken)))
+			return
+		}
+
 		c.Redirect(http.StatusFound, buildAppReturnURL(reference, paypalToken))
 	}
+}
+
+// webReturnHTML renders the self-closing landing for web-channel checkouts.
+func webReturnHTML(webBaseURL, reference, paypalToken string) string {
+	fallback := strings.TrimRight(webBaseURL, "/") + "/tickets"
+	ref := url.QueryEscape(reference)
+	tok := url.QueryEscape(paypalToken)
+	return fmt.Sprintf(`<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Payment received</title></head>
+<body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:sans-serif;background:#0a0a0a;color:#eee;gap:10px">
+<div style="font-size:34px">&#10003;</div>
+<div style="font-weight:700">Payment received</div>
+<div style="font-size:13px;color:#999">Returning to TicketHawk&#8230;</div>
+<script>
+(function () {
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ source: 'tickethawk', type: 'payment_return', reference: '%s', token: '%s' }, '*');
+    }
+  } catch (e) {}
+  // Close this popup/tab; the opener's watcher takes it from here.
+  setTimeout(function () { try { window.close(); } catch (e) {} }, 400);
+  // If the browser refused to close us, land somewhere useful.
+  setTimeout(function () { window.location.replace('%s'); }, 1600);
+})();
+</script>
+</body></html>`, ref, tok, fallback)
 }
 
 // buildAppReturnURL constructs the eventsapp:// deep link the in-app browser is

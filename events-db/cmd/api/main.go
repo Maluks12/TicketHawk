@@ -204,7 +204,11 @@ func main() {
 		webhooks.POST("/paystack", handlers.PaystackWebhookHandler(paymentService))
 		webhooks.POST("/paypal",   handlers.PayPalWebhookHandler(paymentService))
 	}
-	router.GET("/payments/return", handlers.PaymentReturnHandler(paymentService))
+	webReturnBase := "https://ticket-hawk.com"
+	if len(cfg.FrontendURLs) > 0 && strings.TrimSpace(cfg.FrontendURLs[0]) != "" {
+		webReturnBase = strings.TrimSpace(cfg.FrontendURLs[0])
+	}
+	router.GET("/payments/return", handlers.PaymentReturnHandler(paymentService, webReturnBase))
 
 	// ==========================================
 	// API v1

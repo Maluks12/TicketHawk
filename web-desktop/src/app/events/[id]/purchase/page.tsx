@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check } from 'lucide-react';
+import { PayPalLogo } from '@/components/payPalLogo';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
@@ -551,7 +552,7 @@ return (
             <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payment Method</h3>
             {([
               { id: 'card',        Icon: CreditCard, label: 'Credit / Debit Card' },
-              { id: 'paypal',      Icon: BadgeCheck, label: 'PayPal' },
+              { id: 'paypal',      Icon: PayPalLogo, label: 'PayPal' },
               { id: 'instant_eft', Icon: Landmark,   label: 'Instant EFT' },
             ] as const).map(({ id, Icon, label }) => (
               <div
