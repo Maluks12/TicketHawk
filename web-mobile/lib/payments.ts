@@ -173,16 +173,18 @@ export function openGatewayCheckout(
     let openedAt = Date.now();
 
     if (reused) {
-      // The placeholder ("Loading secure checkout…") is already on screen.
-      // Wait a frame so it's actually painted before swapping in the real,
-      // cross-origin gateway URL, then give it focus.
-      requestAnimationFrame(() => {
-        try {
-          gwPopup.location.href = authorizationUrl;
-          gwPopup.focus();
-        } catch {}
-        openedAt = Date.now();
-      });
+      // Navigate the placeholder to the real gateway URL IMMEDIATELY and
+      // synchronously. This used to wait one requestAnimationFrame so the
+      // placeholder paints first — but on iOS Safari window.open() opens a
+      // new TAB and switches to it instantly, backgrounding this page, and
+      // rAF never fires in background tabs. The popup then sat on
+      // "Loading secure checkout…" forever. A plain assignment works in
+      // every browser, foreground or background.
+      try {
+        gwPopup.location.href = authorizationUrl;
+        gwPopup.focus();
+      } catch {}
+      openedAt = Date.now();
     }
 
     // Detection is deliberately based on ONE signal only: whether the popup
