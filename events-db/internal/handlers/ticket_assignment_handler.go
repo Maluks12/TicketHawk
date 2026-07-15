@@ -7,6 +7,7 @@ import (
 	"events-db/internal/services"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -156,9 +157,9 @@ func RevokeAssignmentHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 // ── POST /tickets/claim ───────────────────────────────────────────────────────
 // Public endpoint — no auth required. The recipient clicks the link in their
-// email, which hits the frontend, which calls this endpoint with the token and
-// the claimant's confirmed name + email.
-func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService) gin.HandlerFunc {
+// email, which hits the frontend's /claim-ticket page, which calls this
+// endpoint with the token and the claimant's confirmed name + email.
+func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService, frontendURL string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {
 			Token         string `json:"token"          binding:"required,uuid"`
@@ -185,6 +186,13 @@ func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService) gin
 			return
 		}
 
+		// The claimant's permanent "my ticket" link — renders the live
+		// rotating entry QR. Static QR images are no longer emailed: the
+		// gate scanner only verifies rotating tokens, so an emailed image
+		// could never be scanned anyway.
+		ticketURL := fmt.Sprintf("%s/claim-ticket?assignment=%s&email=%s",
+			frontendURL, assignment.ID, url.QueryEscape(input.ClaimantEmail))
+
 		// Fetch event details for the confirmation email.
 		booking, err := repository.GetBookingByID(pool, assignment.BookingID)
 		if err == nil && booking.Event != nil {
@@ -192,10 +200,6 @@ func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService) gin
 			venueName := ""
 			if booking.Event.VenueName != "" {
 				venueName = booking.Event.VenueName
-			}
-			qrURL := ""
-			if assignment.QRCodeURL != nil {
-				qrURL = *assignment.QRCodeURL
 			}
 
 			go func() {
@@ -207,15 +211,16 @@ func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService) gin
 					venueName,
 					booking.BookingNumber,
 					assignment.SlotNumber,
-					qrURL,
+					ticketURL,
 				)
 			}()
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":     "Ticket claimed successfully!",
-			"slot_number": assignment.SlotNumber,
-			"qr_code_url": assignment.QRCodeURL,
+			"message":       "Ticket claimed successfully!",
+			"slot_number":   assignment.SlotNumber,
+			"assignment_id": assignment.ID,
+			"ticket_url":    ticketURL,
 			"event_title": func() string {
 				if booking != nil && booking.Event != nil {
 					return booking.Event.Title

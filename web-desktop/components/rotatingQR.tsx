@@ -12,9 +12,10 @@ interface RotatingQRToken {
 interface Props {
   assignmentId: string;
   size?: number;
+  endpoint?: string;
 }
 
-export function RotatingQR({ assignmentId, size = 200 }: Props) {
+export function RotatingQR({ assignmentId, size = 200, endpoint }: Props) {
   const [token,    setToken]    = useState<string | null>(null);
   const [windowSec, setWindowSec] = useState(30);
   const [secsLeft, setSecsLeft] = useState(30);
@@ -36,7 +37,7 @@ export function RotatingQR({ assignmentId, size = 200 }: Props) {
 
   const fetchToken = useCallback(async () => {
     try {
-      const res = await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
+      const res = await api.get<RotatingQRToken>(endpoint ?? `/v1/tickets/${assignmentId}/qr`);
       if (!mounted.current) return;
 
       const { token, expires_at, window_sec } = res.data;
@@ -77,7 +78,7 @@ export function RotatingQR({ assignmentId, size = 200 }: Props) {
       setLoading(false);
       refreshTimer.current = setTimeout(fetchToken, 5000);
     }
-  }, [assignmentId]);
+  }, [assignmentId, endpoint]);
 
   useEffect(() => {
     mounted.current = true;

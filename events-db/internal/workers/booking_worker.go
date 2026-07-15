@@ -162,18 +162,17 @@ func processBookingJob(
 		log.Error().Err(err).Str("booking_id", bookingID).Msg("booking worker: failed to fetch assignment IDs")
 	}
 
-	var buyerQRURL string
-	for i, assignmentID := range assignments {
+	// QR codes are still generated per assignment — they back the rotating
+	// entry QR in the app/web — but they are no longer embedded in the
+	// confirmation email.
+	for _, assignmentID := range assignments {
 		if err := qrSvc.GenerateQRCodeForAssignment(assignmentID); err != nil {
 			log.Error().Err(err).Str("assignment_id", assignmentID).Msg("booking worker: QR generation failed")
 			continue
 		}
-		if i == 0 {
-			buyerQRURL = fetchQRURLForAssignment(pool, assignmentID)
-		}
 	}
 
-	if err := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); err != nil {
+	if err := emailSvc.SendBookingConfirmation(booking, event, user); err != nil {
 		// A permanent auth/config failure (bad SENDGRID_API_KEY / unverified
 		// sender) won't fix itself on retry. Tickets are already issued, so
 		// just log it once and skip the retry queue to avoid endless churn.
@@ -320,11 +319,9 @@ func retryEmailSend(
 		return markRetryFailed(pool, retryID, fmt.Sprintf("resolve recipient: %v", err))
 	}
 
-	buyerQRURL := fetchQRURLForFirstAssignment(pool, bookingID)
-
 	newAttempts := attempts + 1
 
-	if sendErr := emailSvc.SendBookingConfirmationWithQR(booking, event, user, buyerQRURL); sendErr != nil {
+	if sendErr := emailSvc.SendBookingConfirmation(booking, event, user); sendErr != nil {
 		// A permanent auth/config failure won't resolve on retry — mark it
 		// failed now so it stops draining every cycle.
 		if isPermanentEmailErr(sendErr) {
@@ -482,45 +479,4 @@ func fetchAssignmentIDsForBooking(pool *pgxpool.Pool, bookingID string) ([]strin
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
-}
-
-func fetchQRURLForAssignment(pool *pgxpool.Pool, assignmentID string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	var url *string
-	if err := pool.QueryRow(ctx,
-		`SELECT qr_code_url FROM ticket_assignments WHERE id = $1`,
-		assignmentID,
-	).Scan(&url); err != nil {
-		log.Warn().Err(err).Str("assignment_id", assignmentID).Msg("booking worker: failed to fetch QR URL")
-		return ""
-	}
-
-	if url == nil {
-		return ""
-	}
-	return *url
-}
-
-// fetchQRURLForFirstAssignment returns the QR URL of the first assignment slot
-// for a booking, used during email retries where the individual assignment ID
-// is not tracked in the retry row.
-func fetchQRURLForFirstAssignment(pool *pgxpool.Pool, bookingID string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	var url *string
-	pool.QueryRow(ctx, `
-		SELECT qr_code_url
-		FROM   ticket_assignments
-		WHERE  booking_id = $1
-		ORDER  BY slot_number
-		LIMIT  1
-	`, bookingID).Scan(&url)
-
-	if url == nil {
-		return ""
-	}
-	return *url
 }

@@ -459,7 +459,24 @@ func main() {
 				ratelimit.BucketConfig{Capacity: 10, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
 				"ticket-claim"))
 		}
-		publicTickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService))
+		publicTickets.POST("/claim", handlers.ClaimTicketHandler(pool, emailService, cfg.FrontendURLs[0]))
+
+		// Public: live rotating QR for a CLAIMED slot, authed by
+		// assignment UUID + claimant email (mirrors the guest QR endpoint).
+		// Powers the /claim-ticket "my ticket" page linked from the claim
+		// confirmation email.
+		//
+		// Separate bucket from /claim: the ticket page polls this every
+		// ~28s (and many attendees share carrier NAT at the venue), so the
+		// tight 10-cap/1-per-min claim bucket would starve it. Matches the
+		// guest-bookings polling bucket instead.
+		claimedQR := tickets.Group("")
+		if rateLimitManager != nil {
+			claimedQR.Use(middleware.RateLimitByIP(rateLimitManager,
+				ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
+				"claimed-ticket-qr"))
+		}
+		claimedQR.GET("/claimed/:assignmentId/qr", handlers.GetClaimedRotatingQRTokenHandler(pool, rotatingQRService))
 
 		// Authenticated: rotating QR token (ticket holder) + organiser scan
 		authTickets := tickets.Group("")

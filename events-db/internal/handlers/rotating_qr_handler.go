@@ -393,3 +393,106 @@ func ScanRotatingQRHandler(
 		}()
 	}
 }
+
+// GetClaimedRotatingQRTokenHandler godoc
+//
+//	GET /v1/tickets/claimed/:assignmentId/qr?email=<claimant email>
+//
+// Issues a rotating QR token for a CLAIMED ticket, authenticated by the
+// assignment ID (a UUID the claimant received via their claim link/email)
+// plus the email address they claimed the ticket with. This mirrors the
+// guest endpoint's auth model (unguessable ID + email) and exists because:
+//
+//   - the authed endpoint only allows the BOOKING OWNER (buyer), and
+//   - the guest endpoint only covers guest bookings authed by the BUYER's
+//     email — a claimant invited from an account-holder's booking had no
+//     way to mint a live entry QR at all.
+//
+// Returns the exact same token payload shape as the other QR endpoints so
+// claimed tickets scan identically at the gate.
+//
+// Auth: none (public) — authorised by assignment UUID + claimant email match.
+func GetClaimedRotatingQRTokenHandler(
+	pool *pgxpool.Pool,
+	rotatingQR *services.RotatingQRService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		assignmentID := c.Param("assignmentId")
+		email := strings.TrimSpace(c.Query("email"))
+
+		if email == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required"})
+			return
+		}
+		if _, err := uuid.Parse(assignmentID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assignment ID"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		var (
+			bookingID     string
+			eventID       *string // nullable — merch-only bookings have no event
+			slotNumber    int
+			assignStatus  string
+			bookingStatus string
+			assigneeEmail *string
+		)
+
+		err := pool.QueryRow(ctx, `
+			SELECT
+				ta.booking_id,
+				b.event_id,
+				ta.slot_number,
+				ta.status,
+				b.booking_status,
+				ta.assignee_email
+			FROM ticket_assignments ta
+			JOIN bookings b ON ta.booking_id = b.id
+			WHERE ta.id = $1
+		`, assignmentID).Scan(
+			&bookingID,
+			&eventID,
+			&slotNumber,
+			&assignStatus,
+			&bookingStatus,
+			&assigneeEmail,
+		)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
+			return
+		}
+
+		// The email on file for this claimed slot must match the caller's.
+		// Same 404-vs-403 shape as the guest endpoint: reveal nothing about
+		// whether the assignment exists to a caller with the wrong email.
+		if assigneeEmail == nil || !strings.EqualFold(*assigneeEmail, email) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+
+		if assignStatus != string(models.AssignmentClaimed) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Ticket is not yet active", "status": assignStatus})
+			return
+		}
+		if bookingStatus != string(models.BookingConfirmed) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Booking is no longer valid", "booking_status": bookingStatus})
+			return
+		}
+
+		eid := ""
+		if eventID != nil {
+			eid = *eventID
+		}
+
+		token, err := rotatingQR.GenerateToken(assignmentID, bookingID, eid, slotNumber)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate QR token"})
+			return
+		}
+
+		c.JSON(http.StatusOK, token)
+	}
+}
