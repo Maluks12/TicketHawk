@@ -142,6 +142,11 @@ function ClaimTicketInner() {
         setGlobalErr('This claim link is invalid or has already been used.');
       } else if (status === 409) {
         setGlobalErr(data?.error ?? 'This ticket has already been claimed.');
+      } else if (status === 403) {
+        // Server enforces that the entered email matches the address the
+        // invitation was sent to.
+        setErrors((e) => ({ ...e, email: 'Use the email address that received the invitation' }));
+        setGlobalErr(data?.error ?? 'This ticket was assigned to a different email address.');
       } else if (status === 429) {
         setGlobalErr('Too many attempts. Please wait a few minutes and try again.');
       } else if (data?.details) {
@@ -217,7 +222,8 @@ function ClaimTicketInner() {
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text }}>Claim your ticket</h1>
             <p style={{ margin: '0 0 4px', fontSize: 13, color: colors.subText, lineHeight: 1.5 }}>
               Someone assigned you a ticket on TicketHawk. Confirm your name and
-              email address to claim it — your name will appear on the ticket.
+              the email address this invitation was sent to — your name will
+              appear on the ticket.
             </p>
 
             {globalErr && (
@@ -235,7 +241,8 @@ function ClaimTicketInner() {
             </button>
 
             <p style={{ textAlign: 'center', fontSize: 12, color: colors.subText, margin: 0, lineHeight: 1.5 }}>
-              We&apos;ll email your ticket link to this address. Use an email you can access.
+              For security, this must be the email address the invitation was sent to.
+              Your ticket link will be emailed there.
             </p>
           </div>
         )}

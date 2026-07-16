@@ -49,26 +49,51 @@ api.interceptors.request.use((config) => {
 });
 
 // ── Response interceptor ──────────────────────────────────────────────────────
+// SINGLE-FLIGHT REFRESH: the backend rotates refresh tokens and treats a
+// replayed (already-rotated) token as theft, revoking EVERY session for that
+// user. A page like home fires several requests in parallel; if the access
+// token has expired they all 401 together, and the old interceptor launched
+// one refresh call PER request. The first one won and rotated the token — the
+// rest then presented the just-rotated token and tripped reuse detection,
+// nuking the user's brand-new session and leaving the page unable to load.
+// Now all concurrent 401s share ONE in-flight refresh promise.
+let refreshInFlight: Promise<string> | null = null;
+
+function refreshAccessToken(): Promise<string> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+      if (!refresh) throw new Error('no refresh token');
+      const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, { refresh_token: refresh });
+      saveTokens(data.access_token, data.refresh_token);
+      return data.access_token as string;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
-      const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-      if (!refresh) {
-        clearTokens();
-        if (typeof window !== 'undefined') window.location.href = '/auth/login';
-        return Promise.reject(error);
-      }
       try {
-        const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, { refresh_token: refresh });
-        saveTokens(data.access_token, data.refresh_token);
-        original.headers.Authorization = `Bearer ${data.access_token}`;
+        const accessToken = await refreshAccessToken();
+        original.headers.Authorization = `Bearer ${accessToken}`;
         return api(original);
       } catch {
         clearTokens();
-        if (typeof window !== 'undefined') window.location.href = '/auth/login';
+        // Don't hard-redirect from public pages — anonymous browsing (home,
+        // event pages) works without a session. Only bounce to login if the
+        // user is somewhere that requires one.
+        if (typeof window !== 'undefined') {
+          const p = window.location.pathname;
+          const needsAuth = p.startsWith('/profile') || p.startsWith('/tickets') || p.startsWith('/booking');
+          if (needsAuth) window.location.href = '/auth/login';
+        }
         return Promise.reject(error);
       }
     }

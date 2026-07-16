@@ -5,6 +5,7 @@ import (
 	"errors"
 	"events-db/internal/models"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -15,6 +16,7 @@ var ErrAssignmentNotFound    = errors.New("ticket assignment not found")
 var ErrAlreadyClaimed        = errors.New("ticket has already been claimed")
 var ErrAssignmentNotPending  = errors.New("ticket is not in a pending state")
 var ErrClaimTokenExpired     = errors.New("claim link has expired")
+var ErrClaimEmailMismatch    = errors.New("this ticket was assigned to a different email address")
 var ErrNotAssignmentOwner    = errors.New("you do not own this booking")
 var ErrAlreadyAdmitted       = errors.New("ticket has already been admitted at the gate")
 
@@ -267,6 +269,17 @@ func ClaimTicket(
 	}
 	if a.ExpiresAt != nil && time.Now().After(*a.ExpiresAt) {
 		return nil, ErrClaimTokenExpired
+	}
+
+	// The claim token proves the person has the invite LINK, but links get
+	// forwarded and inboxes get shared — the claimant must also confirm the
+	// email address the invitation was actually sent to. Without this check
+	// anyone holding the link could claim the ticket under any identity.
+	// (Nil/empty stored email would mean a legacy row assigned before the
+	// email was recorded; only then do we accept the claimant's input as-is.)
+	if a.AssigneeEmail != nil && *a.AssigneeEmail != "" &&
+		!strings.EqualFold(strings.TrimSpace(*a.AssigneeEmail), strings.TrimSpace(claimantEmail)) {
+		return nil, ErrClaimEmailMismatch
 	}
 
 	now := time.Now()

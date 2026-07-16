@@ -178,6 +178,8 @@ func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService, fro
 				c.JSON(http.StatusNotFound, gin.H{"error": "This claim link is invalid or has already been used"})
 			case errors.Is(err, repository.ErrClaimTokenExpired):
 				c.JSON(http.StatusGone, gin.H{"error": "This claim link has expired. Ask the ticket holder to resend the invitation."})
+			case errors.Is(err, repository.ErrClaimEmailMismatch):
+				c.JSON(http.StatusForbidden, gin.H{"error": "This ticket was assigned to a different email address. Enter the email address that received the invitation."})
 			case errors.Is(err, repository.ErrAssignmentNotPending):
 				c.JSON(http.StatusConflict, gin.H{"error": "This ticket has already been claimed or is no longer available"})
 			default:

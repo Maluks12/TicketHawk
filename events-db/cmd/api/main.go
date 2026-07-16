@@ -137,7 +137,27 @@ func main() {
 	// Setup Router
 	// ==========================================
 	router := gin.New()
+	// Keep the trusted-proxy list empty (never honour X-Forwarded-For), but
+	// take the client IP from Cloudflare's CF-Connecting-IP header.
+	//
+	// WHY: in production the request path is
+	//   client → Cloudflare edge → cloudflared container → api:8080
+	// so c.ClientIP() used to resolve to the cloudflared container's docker
+	// IP (e.g. 172.18.0.4) for EVERY request. That collapsed all per-IP rate
+	// limit buckets (login, password reset, ticket claims…) into ONE global
+	// bucket shared by every user on the platform — one abusive client could
+	// rate-limit everyone, and audit logs were useless.
+	//
+	// SAFETY: trusting this header is only sound because the API is not
+	// directly reachable — port 8080 binds to 127.0.0.1 on the EC2 host, the
+	// security group blocks all inbound traffic, and the Cloudflare Tunnel is
+	// the sole ingress. Cloudflare always overwrites CF-Connecting-IP at its
+	// edge, so clients can't spoof it. If you EVER expose the API another way
+	// (open port, ALB, nginx proxy), revisit this line — a direct caller could
+	// then forge the header. In local dev the header is simply absent and Gin
+	// falls back to the socket address, so nothing changes there.
 	router.SetTrustedProxies(nil)
+	router.TrustedPlatform = gin.PlatformCloudflare
 
 	router.Use(middleware.RequestID())
 	router.Use(middleware.Logger())

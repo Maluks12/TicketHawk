@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, clearTokens } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
 
 /**
@@ -103,6 +103,14 @@ function ResetPasswordInner() {
     setLoading(true);
     try {
       await api.post('/v1/auth/reset_password', { token, new_password: password });
+      // The reset just revoked EVERY refresh token for this account, but this
+      // browser may still hold the old (now-revoked) pair in localStorage.
+      // If we leave it there, the next 401 makes the axios interceptor present
+      // the revoked refresh token, which trips the backend's reuse detection
+      // and revokes ALL the user's sessions — including the brand-new one they
+      // create by logging in seconds later. Clear it now so the fresh login
+      // starts from a clean slate.
+      clearTokens();
       setDone(true);
     } catch (err: any) {
       const data = err?.response?.data;
