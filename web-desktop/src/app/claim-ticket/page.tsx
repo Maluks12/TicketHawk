@@ -143,14 +143,10 @@ function ClaimTicketInner() {
       } else if (status === 409) {
         setGlobalErr(data?.error ?? 'This ticket has already been claimed.');
       } else if (status === 403) {
-        // Server enforces that the entered name AND email match the identity
-        // the invitation was issued to; `field` says which one failed.
-        if (data?.field === 'name') {
-          setErrors((e) => ({ ...e, name: 'Enter your name exactly as it appears in the invitation email' }));
-        } else {
-          setErrors((e) => ({ ...e, email: 'Use the email address that received the invitation' }));
-        }
-        setGlobalErr(data?.error ?? 'The details entered do not match this invitation.');
+        // Server enforces that the entered email matches the address the
+        // invitation was sent to.
+        setErrors((e) => ({ ...e, email: 'Use the email address that received the invitation' }));
+        setGlobalErr(data?.error ?? 'This ticket was assigned to a different email address.');
       } else if (status === 429) {
         setGlobalErr('Too many attempts. Please wait a few minutes and try again.');
       } else if (data?.details) {
@@ -225,9 +221,9 @@ function ClaimTicketInner() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text }}>Claim your ticket</h1>
             <p style={{ margin: '0 0 4px', fontSize: 13, color: colors.subText, lineHeight: 1.5 }}>
-              Someone assigned you a ticket on TicketHawk. Enter your name and
-              email exactly as they appear in the invitation email — both must
-              match for the claim to succeed.
+              Someone assigned you a ticket on TicketHawk. Confirm your name and
+              the email address this invitation was sent to — your name will
+              appear on the ticket.
             </p>
 
             {globalErr && (
