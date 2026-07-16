@@ -297,8 +297,12 @@ export const authLogin = (email: string, password: string) =>
 export const authRegister = (dto: RegisterDTO) =>
   api.post('/v1/auth/register', dto);
 
+// Send our refresh token so the server revokes ONLY this session — logging
+// out here no longer kills your other devices and tabs.
 export const authLogout = () =>
-  api.post('/v1/auth/logout');
+  api.post('/v1/auth/logout', {
+    refresh_token: typeof window !== 'undefined' ? localStorage.getItem('refresh_token') ?? '' : '',
+  });
 
 export const getMe = () =>
   api.get<AuthUser>('/v1/user/me');

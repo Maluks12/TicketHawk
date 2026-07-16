@@ -361,7 +361,35 @@ func LogoutHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		if err := repository.RevokeAllUserTokens(pool, userID); err != nil {
+		// SCOPED LOGOUT: if the client tells us which refresh token it holds,
+		// revoke only that session — signing out on your phone should not
+		// log out your laptop and every open tab (which is what the old
+		// revoke-everything behaviour did, and a big source of "why do I
+		// keep getting logged out" during multi-device use). Clients that
+		// don't send a token (e.g. older app builds) keep the old
+		// revoke-all behaviour as a safe fallback.
+		var input struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		_ = c.ShouldBindJSON(&input) // body is optional
+
+		if input.RefreshToken != "" {
+			revoked, err := repository.RevokeRefreshTokenByHash(pool, userID, utils.HashResetToken(input.RefreshToken))
+			if err != nil {
+				log.Error().Err(err).Str("user_id", userID).Msg("logout: failed to revoke refresh token")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log out"})
+				return
+			}
+			if revoked {
+				c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
+				return
+			}
+			// Token didn't match a live session for this user (already
+			// rotated, or stale) — fall through to revoke-all so logout
+			// always leaves the account in a signed-out state.
+		}
+
+		if err := repository.RevokeAllUserTokens(pool, userID, "logout"); err != nil {
 			log.Error().Err(err).Str("user_id", userID).Msg("logout: failed to revoke refresh tokens")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to log out"})
 			return

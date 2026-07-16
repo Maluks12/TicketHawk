@@ -148,14 +148,30 @@ func CreateRefreshToken(pool *pgxpool.Pool, userID string, tokenHash string, exp
 // ErrRefreshTokenReused so the handler can log it. The attacker AND the
 // legitimate user are both logged out; the legitimate user simply logs in
 // again, the attacker is locked out.
+// rotationGraceWindow is how long after a rotation the OLD token is still
+// forgiven if presented again. This exists because refresh-token rotation +
+// strict reuse detection self-destructs on innocent concurrency: two browser
+// tabs share one refresh token in localStorage; when the access token expires
+// they both refresh, the winner rotates the token, and the loser presents the
+// just-rotated one — which used to be read as theft, revoking EVERY session
+// the user had (all tabs, phone, app). Within this window a rotated token is
+// treated as a concurrent-tab race and granted a fresh session instead.
+// Genuine replays (long after rotation, or of tokens revoked by logout,
+// password reset, or a previous reuse detection) still nuke the family.
+// Industry-standard leeway (Auth0 et al. use similar reuse intervals).
+const rotationGraceWindow = 60 * time.Second
+
 func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID string, role string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Happy path: token is live → revoke it and hand back the user.
+	// Happy path: token is live → revoke it (reason: rotated) and hand back
+	// the user.
 	query := `
 		UPDATE refresh_tokens rt
-		SET revoked = TRUE
+		SET revoked = TRUE,
+		    revoked_at = NOW(),
+		    revoked_reason = 'rotated'
 		FROM users u
 		WHERE rt.user_id = u.id
 		AND rt.token_hash = $1
@@ -172,19 +188,35 @@ func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID stri
 	}
 
 	// No live token matched. Check whether this hash belongs to a token that
-	// was already revoked — that's a replay of a rotated token.
-	var reusedUserID string
+	// was already revoked — and if so, when and why.
+	var (
+		reusedUserID string
+		reusedRole   string
+		revokedAt    *time.Time
+		reason       *string
+	)
 	checkErr := pool.QueryRow(ctx, `
-		SELECT user_id
-		FROM refresh_tokens
-		WHERE token_hash = $1
-		  AND revoked = TRUE
+		SELECT rt.user_id, u.role, rt.revoked_at, rt.revoked_reason
+		FROM refresh_tokens rt
+		JOIN users u ON u.id = rt.user_id
+		WHERE rt.token_hash = $1
+		  AND rt.revoked = TRUE
 		LIMIT 1
-	`, tokenHash).Scan(&reusedUserID)
+	`, tokenHash).Scan(&reusedUserID, &reusedRole, &revokedAt, &reason)
 
 	if checkErr == nil {
-		// Reuse detected → nuke the whole session family.
-		_ = RevokeAllUserTokens(pool, reusedUserID)
+		// Innocent concurrent-refresh race: the token was rotated moments
+		// ago. Grant this caller its own fresh session (the handler mints a
+		// new refresh token); the presented token stays revoked.
+		if reason != nil && *reason == "rotated" &&
+			revokedAt != nil && time.Since(*revokedAt) <= rotationGraceWindow {
+			return reusedUserID, reusedRole, nil
+		}
+
+		// Anything else — a rotated token replayed long after, or a token
+		// killed by logout/password-reset/previous-reuse — is treated as
+		// theft: nuke the whole session family.
+		_ = RevokeAllUserTokens(pool, reusedUserID, "reuse_detected")
 		return "", "", ErrRefreshTokenReused
 	}
 
@@ -192,16 +224,45 @@ func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID stri
 	return "", "", err
 }
 
-func RevokeAllUserTokens(pool *pgxpool.Pool, userID string) error {
+// RevokeAllUserTokens revokes every refresh token the user holds, recording
+// why. Reasons in use: 'logout', 'password_reset', 'reuse_detected'.
+func RevokeAllUserTokens(pool *pgxpool.Pool, userID string, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `
-		UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = $1
+		UPDATE refresh_tokens
+		SET revoked = TRUE,
+		    revoked_at = COALESCE(revoked_at, NOW()),
+		    revoked_reason = COALESCE(revoked_reason, $2)
+		WHERE user_id = $1
 	`
-	_, err := pool.Exec(ctx, query, userID)
+	_, err := pool.Exec(ctx, query, userID, reason)
 
 	return err
+}
+
+// RevokeRefreshTokenByHash revokes a single session (used by logout so that
+// signing out on one device no longer kills every other device and tab).
+// Scoped to the user so a stray hash can't touch anyone else's session.
+// Returns true if a live token was revoked.
+func RevokeRefreshTokenByHash(pool *pgxpool.Pool, userID string, tokenHash string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tag, err := pool.Exec(ctx, `
+		UPDATE refresh_tokens
+		SET revoked = TRUE,
+		    revoked_at = NOW(),
+		    revoked_reason = 'logout'
+		WHERE user_id = $1
+		  AND token_hash = $2
+		  AND revoked = FALSE
+	`, userID, tokenHash)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func GetUserByIDForEmail(pool *pgxpool.Pool, id string) (*models.User, error) {

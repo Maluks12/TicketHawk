@@ -32,45 +32,42 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// ── Single-flight token refresh ────────────────────────────────────────────
+// The backend ROTATES refresh tokens: every /v1/auth/refresh call revokes the
+// presented token and issues a new one. A screen firing several requests with
+// an expired access token used to launch one refresh call PER failed request —
+// the first one won and rotated the token, and the rest presented the
+// just-rotated (now revoked) token. All concurrent 401s now share ONE
+// in-flight refresh promise, so the app makes exactly one refresh call,
+// performs one SecureStore write, and creates one new session.
+let refreshInFlight: Promise<string> | null = null;
+
+function refreshAccessToken(): Promise<string> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refresh = await SecureStore.getItemAsync('refresh_token');
+      if (!refresh) throw new Error('no refresh token');
+      const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, {
+        refresh_token: refresh,
+      });
+      await SecureStore.setItemAsync('access_token', data.access_token);
+      await SecureStore.setItemAsync('refresh_token', data.refresh_token);
+      return data.access_token as string;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    const status = error.response?.status;
-
-    // ── 429 Too Many Requests: retry with backoff ──────────────────────────
-    // A 429 means the request was rejected by the rate limiter *before* being
-    // processed, so replaying it is safe for any HTTP method. We wait — honouring
-    // a Retry-After header when present, otherwise exponential backoff + jitter —
-    // and replay up to MAX_429_RETRIES times before surfacing the error. This
-    // keeps read-heavy screens (tickets, booking detail) and payment polls from
-    // failing on a momentary limit.
-    if (status === 429 && original) {
-      const MAX_429_RETRIES = 4;
-      original._retry429 = (original._retry429 ?? 0) + 1;
-      if (original._retry429 <= MAX_429_RETRIES) {
-        const retryAfterHeader = Number(error.response?.headers?.['retry-after']);
-        const backoffMs =
-          Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
-            ? retryAfterHeader * 1000
-            : Math.min(500 * 2 ** (original._retry429 - 1), 4000) + Math.floor(Math.random() * 250);
-        await new Promise((r) => setTimeout(r, backoffMs));
-        return api(original);
-      }
-    }
-
-    // ── 401 Unauthorized: refresh the access token once, then replay ───────
-    if (status === 401 && !original._retry) {
+    if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
-      const refresh = await SecureStore.getItemAsync('refresh_token');
-      if (!refresh) throw error;
       try {
-        const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, {
-          refresh_token: refresh,
-        });
-        const newToken = data.access_token;
-        await SecureStore.setItemAsync('access_token', newToken);
-        await SecureStore.setItemAsync('refresh_token', data.refresh_token);
+        const newToken = await refreshAccessToken();
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       } catch {
@@ -341,8 +338,13 @@ export const authLogin    = (email: string, password: string) =>
 export const authRegister = (dto: RegisterDTO) =>
   api.post('/v1/auth/register', dto);
 
-export const authLogout   = () =>
-  api.post('/v1/auth/logout');
+// Send our refresh token so the server revokes ONLY this device's session —
+// logging out of the app no longer logs you out of the web (and vice versa).
+// Older backend builds ignore the body, so this is backwards-compatible.
+export const authLogout = async () =>
+  api.post('/v1/auth/logout', {
+    refresh_token: (await SecureStore.getItemAsync('refresh_token')) ?? '',
+  });
 
 export const getMe = () =>
   api.get<AuthUser>('/v1/user/me');

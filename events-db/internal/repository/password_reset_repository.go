@@ -72,10 +72,15 @@ func ResetPassword(pool *pgxpool.Pool, token_hash string, new_password_hash stri
 		return err
 	}
 
-	// 3. Revoke every refresh token the user holds, on every device.
+	// 3. Revoke every refresh token the user holds, on every device. The
+	//    reason tag matters: 'password_reset' revocations must NEVER get the
+	//    rotation-grace treatment in GetAndRevokeRefreshToken — after a
+	//    reset, old sessions die immediately and unconditionally.
 	if _, err := tx.Exec(ctx, `
 		UPDATE refresh_tokens
-		SET revoked = TRUE
+		SET revoked = TRUE,
+		    revoked_at = COALESCE(revoked_at, NOW()),
+		    revoked_reason = COALESCE(revoked_reason, 'password_reset')
 		WHERE user_id = $1
 		  AND revoked = FALSE
 	`, userID); err != nil {
