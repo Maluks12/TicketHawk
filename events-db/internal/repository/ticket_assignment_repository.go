@@ -17,6 +17,15 @@ var ErrAlreadyClaimed        = errors.New("ticket has already been claimed")
 var ErrAssignmentNotPending  = errors.New("ticket is not in a pending state")
 var ErrClaimTokenExpired     = errors.New("claim link has expired")
 var ErrClaimEmailMismatch    = errors.New("this ticket was assigned to a different email address")
+var ErrClaimNameMismatch     = errors.New("this ticket was assigned to a different name")
+
+// normalizeClaimName makes name comparison forgiving of casing and spacing:
+// "  jane   DOE " matches "Jane Doe". It does NOT forgive spelling — "Jon"
+// will not match "John"; the claimant must enter the name as the buyer wrote
+// it on the invitation (it's shown in their invite email).
+func normalizeClaimName(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
 var ErrNotAssignmentOwner    = errors.New("you do not own this booking")
 var ErrAlreadyAdmitted       = errors.New("ticket has already been admitted at the gate")
 
@@ -250,13 +259,13 @@ func ClaimTicket(
 
 	var a models.TicketAssignment
 	err = tx.QueryRow(ctx, `
-		SELECT id, booking_id, slot_number, status, expires_at, assignee_email
+		SELECT id, booking_id, slot_number, status, expires_at, assignee_email, assignee_name
 		FROM ticket_assignments
 		WHERE claim_token = $1
 		FOR UPDATE
 	`, claimToken).Scan(
 		&a.ID, &a.BookingID, &a.SlotNumber, &a.Status,
-		&a.ExpiresAt, &a.AssigneeEmail,
+		&a.ExpiresAt, &a.AssigneeEmail, &a.AssigneeName,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrAssignmentNotFound
@@ -273,13 +282,19 @@ func ClaimTicket(
 
 	// The claim token proves the person has the invite LINK, but links get
 	// forwarded and inboxes get shared — the claimant must also confirm the
-	// email address the invitation was actually sent to. Without this check
-	// anyone holding the link could claim the ticket under any identity.
-	// (Nil/empty stored email would mean a legacy row assigned before the
-	// email was recorded; only then do we accept the claimant's input as-is.)
+	// identity the invitation was actually issued to. Both the email address
+	// AND the name entered must match what the buyer put on the invitation
+	// (case-insensitive, whitespace-normalized). Without this, anyone holding
+	// the link could claim the ticket under any identity.
+	// (Nil/empty stored values would mean a legacy row assigned before these
+	// were recorded; only then do we accept the claimant's input as-is.)
 	if a.AssigneeEmail != nil && *a.AssigneeEmail != "" &&
 		!strings.EqualFold(strings.TrimSpace(*a.AssigneeEmail), strings.TrimSpace(claimantEmail)) {
 		return nil, ErrClaimEmailMismatch
+	}
+	if a.AssigneeName != nil && *a.AssigneeName != "" &&
+		normalizeClaimName(*a.AssigneeName) != normalizeClaimName(claimantName) {
+		return nil, ErrClaimNameMismatch
 	}
 
 	now := time.Now()
