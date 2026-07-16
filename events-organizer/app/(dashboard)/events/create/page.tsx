@@ -225,7 +225,7 @@ export default function CreateEventPage() {
 
   // ── Load categories ───────────────────────────────────────────────────────
   useEffect(() => {
-    api.get('/v1/categories')
+    api.get('/categories')
       .then(r => setCategories(r.data.categories ?? r.data ?? []))
       .catch(() => {});
   }, []);

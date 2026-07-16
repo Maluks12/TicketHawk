@@ -140,15 +140,16 @@ export default function LoginPage() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{
-            width: 52, height: 52, borderRadius: 12, background: '#1877f2',
+            width: 60, height: 60, borderRadius: 14, background: '#0a0a0a',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
           }}>
-            <svg viewBox="0 0 24 24" fill="white" width="26" height="26">
-              <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 6a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
-            </svg>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand-logo.png" alt="TicketHawk" width={44} height={44} />
           </div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: '#1c1e21' }}>EventsProject</div>
-          <div style={{ fontSize: 14, color: '#606770', marginTop: 4 }}>Organizer Dashboard</div>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: '#1c1e21' }}>
+            TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+          </div>
+          <div style={{ fontSize: 14, color: '#606770', marginTop: 4 }}>Organiser Dashboard</div>
         </div>
 
         {/* Card */}

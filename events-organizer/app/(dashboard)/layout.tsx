@@ -79,8 +79,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </svg>
                 </div>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1c1e21', lineHeight: 1.2 }}>Events</div>
-                  <div style={{ fontSize: 11, color: '#606770', lineHeight: 1 }}>Organizer</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.4, color: '#1c1e21', lineHeight: 1.2 }}>TICKET<span style={{ color: '#FF2D55' }}>HAWK</span></div>
+                  <div style={{ fontSize: 11, color: '#606770', lineHeight: 1 }}>Organiser</div>
                 </div>
               </div>
             </div>
@@ -116,9 +116,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1e21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
-                  <div style={{ fontSize: 11, color: '#606770' }}>Organizer</div>
+                  <div style={{ fontSize: 11, color: '#606770' }}>Organiser</div>
                 </div>
-                <button onClick={() => { logout(); router.replace('/login'); }} title="Sign out"
+                <button onClick={async () => { await logout(); router.replace('/login'); }} title="Sign out"
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#606770', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
                   <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
                     <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1H3zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd"/>

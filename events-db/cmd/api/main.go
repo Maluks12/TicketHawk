@@ -776,6 +776,11 @@ func main() {
 		orgRoutes.GET("/dashboard/events/:id/merch",    handlers.GetOrganizerEventMerchHandler(pool))
 		orgRoutes.GET("/dashboard/payouts",             handlers.GetOrganizerPayoutSummaryHandler(pool))
 
+		// Lists all the organiser's merch across their events. The dashboard
+		// Merch page depended on this route but it was never registered --
+		// both paths it tried 404'd, so the page rendered permanently empty.
+		orgRoutes.GET("/merch", handlers.GetOrganizerMerchListHandler(pool))
+
 		// Resubmit rejected merch for review
 		orgRoutes.POST("/merch/:id/resubmit", handlers.OrgResubmitMerchHandler(pool))
 	}

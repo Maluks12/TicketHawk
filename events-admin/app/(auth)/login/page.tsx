@@ -38,8 +38,11 @@ export default function LoginPage() {
         background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
         padding: '2.5rem 2rem', width: '100%', maxWidth: '420px', position: 'relative', zIndex: 1,
       }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 600, color: 'var(--accent)', letterSpacing: '.05em', marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '.5rem' }}>
-          ⬡ events<span style={{ color: 'var(--text-2)', fontWeight: 400 }}>/admin</span>
+        <div style={{ fontSize: '1.1rem', fontWeight: 800, letterSpacing: '.05em', marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '.6rem', color: 'var(--text)' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand-logo.png" alt="" width={30} height={30} style={{ borderRadius: 6 }} />
+          TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+          <span style={{ color: 'var(--text-2)', fontWeight: 400, fontFamily: 'var(--font-mono)', fontSize: '.9rem' }}>/admin</span>
         </div>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 600, marginBottom: '.25rem', color: 'var(--text)' }}>Admin Dashboard</h1>
         <p style={{ color: 'var(--text-2)', marginBottom: '1.75rem', fontSize: '.9rem' }}>

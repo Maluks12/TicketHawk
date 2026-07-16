@@ -73,7 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return pathname === href || pathname.startsWith(href + '/');
   }
 
-  function handleLogout() { logout(); router.replace('/login'); }
+  async function handleLogout() { await logout(); router.replace('/login'); }
   const initials = (user.email ?? '??').slice(0, 2).toUpperCase();
 
   return (
@@ -101,7 +101,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </svg>
                 </div>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1c1e21', lineHeight: 1.2 }}>Events</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.4, color: '#1c1e21', lineHeight: 1.2 }}>TICKET<span style={{ color: '#FF2D55' }}>HAWK</span></div>
                   <div style={{ fontSize: 11, color: '#606770', lineHeight: 1 }}>Admin Panel</div>
                 </div>
               </div>

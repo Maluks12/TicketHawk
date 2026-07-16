@@ -313,3 +313,29 @@ func GetOrganizerPayoutSummaryHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		c.JSON(http.StatusOK, summary)
 	}
 }
+// ── GET /organiser/merch ──────────────────────────────────────────────────────
+//
+// Lists every merchandise item across all of the organiser's events, shaped
+// for the organiser dashboard's Merch page. This route did not exist before:
+// the dashboard tried GET /organiser/events/all/merch then GET /organiser/merch
+// as a fallback, and BOTH 404'd — the page has been permanently empty.
+//
+// Status is derived for display: rejected → 'rejected', pending_review →
+// 'pending', approved+active → 'active', approved+inactive → 'inactive'.
+// Stock is the SUM of variant stock (null when the item has no variants).
+func GetOrganizerMerchListHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		orgID := c.MustGet("user_id").(string)
+
+		items, err := repository.GetMerchandiseByOrganizer(pool, orgID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load merchandise"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"merch": items,
+			"count": len(items),
+		})
+	}
+}

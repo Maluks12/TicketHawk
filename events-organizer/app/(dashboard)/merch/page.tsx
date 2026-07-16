@@ -31,10 +31,8 @@ export default function MerchPage() {
 
   const fetchMerch = useCallback(async () => {
     try {
-      const res = await api.get('/organiser/events/all/merch').catch(() =>
-        api.get('/organiser/merch')
-      );
-      setMerch(res.data.merch ?? res.data ?? []);
+      const res = await api.get('/organiser/merch');
+      setMerch(res.data.merch ?? []);
     } catch { /* handled below */ }
   }, []);
 

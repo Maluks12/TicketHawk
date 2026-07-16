@@ -816,3 +816,71 @@ func AdminUpdateVariant(pool *pgxpool.Pool, variantID string, dto *models.Update
 	if err != nil { return nil, ErrMerchNotFound }
 	return &v, nil
 }
+// OrganizerMerchRow is shaped for the organiser dashboard's merch list page.
+type OrganizerMerchRow struct {
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Status          string     `json:"status"`
+	Price           float64    `json:"price"`
+	Currency        string     `json:"currency"`
+	StockQuantity   *int       `json:"stock_quantity"`
+	EventID         *string    `json:"event_id"`
+	EventTitle      *string    `json:"event_title,omitempty"`
+	FulfillmentType string     `json:"fulfillment_type"`
+	SaleStart       *time.Time `json:"sale_start"`
+	SaleEnd         *time.Time `json:"sale_end"`
+	CreatedAt       time.Time  `json:"created_at"`
+}
+
+// GetMerchandiseByOrganizer lists all merch belonging to the organiser's
+// events, newest first. Ownership is via events.organizer_id — standalone
+// merch (event_id IS NULL) has no organiser owner and is excluded.
+func GetMerchandiseByOrganizer(pool *pgxpool.Pool, organizerID string) ([]OrganizerMerchRow, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pool.Query(ctx, `
+		SELECT
+			m.id,
+			m.name,
+			CASE
+				WHEN m.approval_status = 'rejected'       THEN 'rejected'
+				WHEN m.approval_status = 'pending_review' THEN 'pending'
+				WHEN m.is_active                          THEN 'active'
+				ELSE 'inactive'
+			END AS status,
+			m.base_price,
+			COALESCE(e.currency, 'ZAR') AS currency,
+			(SELECT SUM(mv.stock_quantity)::int
+			   FROM merchandise_variants mv
+			  WHERE mv.merchandise_id = m.id) AS stock_quantity,
+			m.event_id,
+			e.title AS event_title,
+			m.fulfillment_mode,
+			m.sale_start,
+			m.sale_end,
+			m.created_at
+		FROM merchandise m
+		JOIN events e ON e.id = m.event_id
+		WHERE e.organizer_id = $1
+		ORDER BY m.created_at DESC
+	`, organizerID)
+	if err != nil {
+		return nil, fmt.Errorf("query organiser merch: %w", err)
+	}
+	defer rows.Close()
+
+	out := []OrganizerMerchRow{}
+	for rows.Next() {
+		var r OrganizerMerchRow
+		if err := rows.Scan(
+			&r.ID, &r.Name, &r.Status, &r.Price, &r.Currency,
+			&r.StockQuantity, &r.EventID, &r.EventTitle,
+			&r.FulfillmentType, &r.SaleStart, &r.SaleEnd, &r.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan organiser merch row: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
