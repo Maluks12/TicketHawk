@@ -8,6 +8,10 @@ import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
 type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
 
+// Launch gate: merch is built but NOT launching — the tab and its section
+// are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
+const MERCH_ENABLED = false;
+
 interface EventStats {
   event: {
     id: string; title: string; status: string; start_time: string; end_time: string;
@@ -76,7 +80,7 @@ export default function EventDetailPage() {
 
   useEffect(() => {
     if (tab === 'bookings') fetchBookings();
-    if (tab === 'merch') fetchMerch();
+    if (MERCH_ENABLED && tab === 'merch') fetchMerch();
   }, [tab, fetchBookings, fetchMerch]);
 
   async function handleCoverUpload(file: File) {
@@ -187,8 +191,8 @@ export default function EventDetailPage() {
         {([
           { id: 'overview' as Tab, label: 'Overview' },
           { id: 'bookings' as Tab, label: `Bookings (${stats.total_bookings})` },
-          { id: 'merch'    as Tab, label: 'Merch' },
-        ] as const).map(t => (
+          ...(MERCH_ENABLED ? [{ id: 'merch' as Tab, label: 'Merch' }] : []),
+        ]).map(t => (
           <button key={t.id} className={`tab-item${tab === t.id ? ' active' : ''}`}
             onClick={() => setTab(t.id)}>
             {t.label}
@@ -432,7 +436,7 @@ export default function EventDetailPage() {
           </div>
         )}
 
-        {tab === 'merch' && (
+        {MERCH_ENABLED && tab === 'merch' && (
           <div>
             {merch.length === 0 ? (
               <div className="empty-state">

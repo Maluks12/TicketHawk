@@ -254,6 +254,7 @@ type OrganizerEventStats struct {
 	Currency      string             `json:"currency"`
 	Views         int                `json:"views"`
 	CoverImageURL *string            `json:"cover_image_url"`
+	BannerImageURL *string           `json:"banner_image_url"`
 
 	// Capacity
 	MaxCapacity  *int    `json:"max_capacity,omitempty"`
@@ -292,13 +293,13 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 	err := pool.QueryRow(ctx, `
 		SELECT id, title, status, start_time, end_time, city, venue_name,
 		       price, currency, max_capacity, tickets_sold,
-		       COALESCE(views, 0), cover_image_url
+		       COALESCE(views, 0), cover_image_url, banner_image_url
 		FROM events
 		WHERE id = $1 AND organizer_id = $2
 	`, eventID, organizerID).Scan(
 		&s.EventID, &s.Title, &s.Status, &s.StartTime, &s.EndTime,
 		&s.City, &s.VenueName, &s.Price, &s.Currency,
-		&s.MaxCapacity, &s.TicketsSold, &s.Views, &s.CoverImageURL,
+		&s.MaxCapacity, &s.TicketsSold, &s.Views, &s.CoverImageURL, &s.BannerImageURL,
 	)
 	if err != nil {
 		return nil, ErrEventNotFound

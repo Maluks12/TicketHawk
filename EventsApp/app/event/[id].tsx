@@ -190,7 +190,11 @@ export default function EventDetail() {
   }
 
   const ev           = event as any;
-  const heroImage    = event.banner_image_url ?? event.cover_image_url;
+  // Prefer the COVER for the app hero: covers are card/portrait-shaped and
+  // fill the tall hero frame, while banners are wide web-hero artwork — using
+  // a banner here guarantees the letterboxed look (blur bars above/below).
+  // The banner remains the web desktop hero; falls back for cover-less events.
+  const heroImage    = event.cover_image_url ?? event.banner_image_url;
   const maxCap       = ev.max_capacity ?? 0;
   const isSoldOut    = event.is_sold_out ?? false;
   const isASport     = event.category?.toLowerCase() === 'sports';

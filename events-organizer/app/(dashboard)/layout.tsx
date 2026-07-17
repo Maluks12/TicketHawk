@@ -6,6 +6,10 @@ import { useOrgAuth } from '../../store/authStore';
 import { ToastProvider } from '../../lib/toast';
 import { ConfirmProvider } from '../../lib/confirm';
 
+// Launch gate: merch is built but NOT launching — the tab and the event-page
+// merch sections are hidden, not deleted. Flip to true to bring merch back.
+const MERCH_ENABLED = false;
+
 const NAV: Array<
   | { type: 'item'; icon: React.ReactNode; label: string; href: string; exact?: boolean }
   | { type: 'divider' }
@@ -24,12 +28,11 @@ const NAV: Array<
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>,
   },
   { type: 'divider' },
-  {
+  ...(MERCH_ENABLED ? [{
     // Collections removed from sidebar — accessible as a tab inside Merch
-    type: 'item', href: '/merch', label: 'Merch',
+    type: 'item' as const, href: '/merch', label: 'Merch',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M10 2a4 4 0 00-4 4v1H5a1 1 0 00-.994.89l-1 9A1 1 0 004 18h12a1 1 0 00.994-1.11l-1-9A1 1 0 0015 7h-1V6a4 4 0 00-4-4zm2 5V6a2 2 0 10-4 0v1h4zm-6 3a1 1 0 112 0 1 1 0 01-2 0zm7-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd"/></svg>,
-  },
-  { type: 'divider' },
+  }, { type: 'divider' as const }] : []),
   {
     type: 'item', href: '/payouts', label: 'Billing & Payments',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"/><path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd"/></svg>,
