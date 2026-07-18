@@ -46,7 +46,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const defaultTestRecipient = "ribnoma@gmail.com"
+const defaultTestRecipient = "tawongak@ticket-hawk.com"
 
 func testRecipient() string {
 	if v := os.Getenv("EMAIL_TEST_RECIPIENT"); v != "" {
