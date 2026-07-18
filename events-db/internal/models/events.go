@@ -3,8 +3,7 @@ package models
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"fmt"
-	"strings"
+	//"fmt"
 	"time"
 )
 
@@ -38,7 +37,7 @@ type Event struct {
 	City           string      `json:"city" db:"city"`
 	Latitude       *float64    `json:"latitude,omitempty" db:"latitude"`
 	Longitude      *float64    `json:"longitude,omitempty" db:"longitude"`
-	CategoryID     int         `json:"-" db:"category_id"`
+	CategoryID     int         `json:"category_id" db:"category_id"`
 	Category       string      `json:"category" db:"category"`
 	// Price reflects the cheapest visible ticket type (kept in sync by a DB
 	// trigger). For flat-priced events with no types it is the organiser's
@@ -106,65 +105,15 @@ func (a ImageArray) Value() (driver.Value, error) {
 	return json.Marshal(a)
 }
 
-func (a *TagArray) Scan(value interface{}) error {
-    if value == nil {
-        *a = TagArray{}
-        return nil
-    }
-    b, ok := value.([]byte)
-    if !ok {
-        return fmt.Errorf("cannot scan %T into TagArray", value)
-    }
-    // Handle null bytes or empty
-    if len(b) == 0 || b[0] == 0 {
-        *a = TagArray{}
-        return nil
-    }
-    str := string(b)
-    if str == "{}" || str == "" {
-        *a = TagArray{}
-        return nil
-    }
-    // PostgreSQL text[] format: {val1,"val2"}
-    if str[0] == '{' {
-        inner := str[1 : len(str)-1]
-        if inner == "" {
-            *a = TagArray{}
-            return nil
-        }
-        parts := strings.Split(inner, ",")
-        result := make(TagArray, 0, len(parts))
-        for _, p := range parts {
-            p = strings.TrimSpace(p)
-            p = strings.Trim(p, `"`)
-            if p != "" {
-                result = append(result, p)
-            }
-        }
-        *a = result
-        return nil
-    }
-    // JSON array format: ["val1","val2"]
-    return json.Unmarshal(b, a)
-}
+// NOTE: TagArray deliberately has NO custom Scan/Value implementation.
+// pgx v5 natively encodes/decodes Postgres text[] into any []string-derived
+// type, in both text and binary wire formats. The previous custom Scan was
+// written for the TEXT format ({a,b}) but pgx delivers arrays in BINARY
+// format, whose payload always begins with a 0x00 dimensions header — the
+// old "null bytes" guard (b[0] == 0) therefore treated EVERY array as empty
+// and silently returned nothing, which is why tags/performers/teams never
+// appeared in any API response despite being stored correctly.
 
-func (a TagArray) Value() (driver.Value, error) {
-    if len(a) == 0 {
-        return "{}", nil
-    }
-    var sb strings.Builder
-    sb.WriteString("{")
-    for i, v := range a {
-        if i > 0 {
-            sb.WriteString(",")
-        }
-        sb.WriteString(`"`)
-        sb.WriteString(strings.ReplaceAll(v, `"`, `\"`))
-        sb.WriteString(`"`)
-    }
-    sb.WriteString("}")
-    return sb.String(), nil
-}
 
 const UnlimitedTickets = -1
 

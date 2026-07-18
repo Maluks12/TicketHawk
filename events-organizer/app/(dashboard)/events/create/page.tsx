@@ -55,6 +55,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) 
       ))}
       <input className="tag-bare-input" value={val} placeholder="Add…"
         onChange={e => setVal(e.target.value)}
+        onBlur={commit}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
           else if (e.key === 'Backspace' && !val) onChange(tags.slice(0, -1));
