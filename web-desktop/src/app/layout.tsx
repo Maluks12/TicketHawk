@@ -2,10 +2,11 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './styles/global.css';
 import NavBar from '@/components/navBar';
+import Footer from '@/components/footer';
 
 export const metadata: Metadata = {
   title: 'TicketHawk',
-  description: 'Discover and book events across South Africa',
+  description: 'TicketHawk, a product of Self Hawk Tech Pty Ltd, is South Africa\'s home for discovering, booking, and managing live events.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <NavBar />
 
         <main className="pb-[60px] md:pb-0">{children}</main>
-        
+
+        <Footer />
+
       </body>
     </html>
   );

@@ -699,13 +699,6 @@ export default function HomePage() {
         </>
       )}
 
-      {/* Footer attribution */}
-      <div className="px-5 pb-8 pt-2 text-center">
-        <p className="text-[11px]" style={{ color: colors.subText }}>
-          TicketHawk is a product of Self Hawk Tech Pty Ltd
-        </p>
-      </div>
-
       <div className="h-24" />
 
       <FilterModal visible={filterOpen} onClose={() => setFilterOpen(false)} initialParams={filterParams} onApply={handleFilterApply} />
