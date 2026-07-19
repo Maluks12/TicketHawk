@@ -16,11 +16,24 @@ const (
 	EventRejected      EventStatus = "rejected"       // admin rejected; organiser can revise and resubmit
 	EventCancelled     EventStatus = "cancelled"
 	EventCompleted     EventStatus = "completed"
+	// EventPublishedPrivate: live but link-only. Discovery queries filter on
+	// EventPublished, so private events are excluded from feed/search/home
+	// automatically; functional paths (booking, slug access, completion)
+	// explicitly accept both. See IsLive().
+	EventPublishedPrivate EventStatus = "published_private"
 )
+
+// IsLive reports whether a status accepts bookings/scans — published events
+// (public) and published_private events (link-only) alike.
+func (s EventStatus) IsLive() bool {
+	return s == EventPublished || s == EventPublishedPrivate
+}
 
 type Event struct {
 	ID             string      `json:"id" db:"id"`
 	Slug           string      `json:"slug" db:"slug"`
+	Visibility     string      `json:"visibility" db:"visibility"`
+	RightsDeclaredAt *time.Time `json:"rights_declared_at,omitempty" db:"rights_declared_at"`
 	Title          string      `json:"title" db:"title"`
 	Description    string      `json:"description" db:"description"`
 	OrganizerID    string      `json:"organizer_id" db:"organizer_id"`
@@ -161,6 +174,12 @@ type CreateEventDTO struct {
 	// Optional: create ticket types inline with the event. When provided the
 	// cheapest type price overwrites the Price field above via DB trigger.
 	TicketTypes        []CreateTicketTypeDTO `json:"ticket_types"`
+	// Visibility: 'public' (default, discoverable, admin-reviewed) or
+	// 'private_link' (link-only, skips review, hidden from feed/search).
+	Visibility         *string `json:"visibility" binding:"omitempty,oneof=public private_link"`
+	// RightsDeclarationAccepted: organizer confirms they hold the rights to
+	// host/sell this event. Can also be accepted later at publish time.
+	RightsDeclarationAccepted bool `json:"rights_declaration_accepted"`
 	// Optional (admin create only): hand the event to an organiser at creation
 	// time. The organiser is invited + auto-approved if needed, ownership is
 	// set to them, and the handover email fires immediately.

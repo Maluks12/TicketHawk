@@ -129,6 +129,15 @@ func main() {
 	rotatingQRService := services.NewRotatingQRService(cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
+	// KYC: identity verification for organizers. Uses Didit's DHA registry
+	// check when DIDIT_API_KEY is set, manual admin review otherwise.
+	idVerifier := services.NewIDVerifier(cfg.DiditAPIKey)
+	kycService, err := services.NewKYCService(pool, idVerifier, cfg.KYCEncryptionKey)
+	if err != nil {
+		log.Fatal().Err(err).Msg("kyc service init failed — check KYC_ENCRYPTION_KEY / QR_ENCRYPTION_KEY length (16/24/32 bytes)")
+	}
+	log.Info().Str("verifier", kycService.VerifierName()).Msg("kyc service ready")
+
 	// Two-tier organizer payouts: ledger creation for completed events +
 	// Paystack balance transfers for held-tier settlements and reserve releases.
 	payoutService := services.NewPayoutService(pool, paymentService.Paystack())
@@ -673,6 +682,15 @@ func main() {
 		// Organiser account management
 		admin.GET("/organizers",            handlers.AdminGetOrganizersHandler(pool))
 		admin.PUT("/organizers/:id/status", handlers.AdminUpdateOrganizerStatusHandler(pool))
+
+		// KYC review queue
+		admin.GET("/kyc",                        handlers.AdminListKYCHandler(pool))
+		admin.GET("/kyc/:id",                    handlers.AdminGetKYCDetailHandler(pool, kycService))
+		admin.GET("/kyc/:id/document",           handlers.AdminGetKYCDocumentHandler(pool, "document"))
+		admin.GET("/kyc/:id/proof-of-address",   handlers.AdminGetKYCDocumentHandler(pool, "proof-of-address"))
+		admin.POST("/kyc/:id/decision",          handlers.AdminDecideKYCHandler(pool))
+		admin.POST("/kyc/:id/registry-check",    handlers.AdminRunRegistryCheckHandler(kycService))
+
 		// ── Payouts ───────────────────────────────────────────────────────
 		admin.GET("/organizers/payouts",             handlers.AdminListOrganizerPayoutProfilesHandler(pool))
 		admin.PUT("/organizers/:id/tier",            handlers.AdminSetOrganizerTierHandler(pool))
@@ -717,6 +735,9 @@ func main() {
 		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))
 		orgRoutes.POST("/events/:id/listing-fee/initiate", handlers.InitiateListingFeePaymentHandler(pool, paymentService))
 
+		// KYC — identity verification for publishing paid events
+		orgRoutes.GET("/kyc",  handlers.GetKYCStatusHandler(pool))
+		orgRoutes.POST("/kyc", handlers.SubmitKYCHandler(pool, kycService))
 		// Merch linked to an event
 		orgRoutes.POST("/events/:id/merch",   handlers.OrgCreateMerchHandler(pool, eventCache))
 		orgRoutes.PUT("/merch/:id",           handlers.OrgUpdateMerchHandler(pool, eventCache))

@@ -20,6 +20,13 @@ var ErrEventNotFound = errors.New("event not found")
 var ErrEventHasBookings = errors.New("event has bookings or orders and cannot be deleted")
 var ErrEventSoldOut = errors.New("event is sold out")
 var ErrEventNotPublishable = errors.New("event not found or not in a submittable state")
+
+// KYC / requirements-matrix gates (design doc section 4).
+var (
+	ErrKYCRequired           = errors.New("identity verification required before publishing a paid event")
+	ErrPayoutDetailsRequired = errors.New("payout bank details required before publishing a paid event")
+	ErrDeclarationRequired   = errors.New("event rights declaration must be accepted before publishing")
+)
 var ErrEventNotCancellable = errors.New("event not found or cannot be cancelled")
 
 type OrganizerEventSummary struct {
@@ -58,6 +65,20 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		publishedAt = &now
 	}
 
+	visibility := string(models.VisibilityPublic)
+	if dto.Visibility != nil && *dto.Visibility != "" {
+		visibility = *dto.Visibility
+	}
+	// Stamp the rights declaration when accepted at creation. Publish enforces
+	// its presence, and PublishEvent can also stamp it for older drafts.
+	var rightsAt *time.Time
+	var rightsVersion *int
+	if dto.RightsDeclarationAccepted {
+		now := time.Now()
+		v := models.RightsDeclarationVersion
+		rightsAt, rightsVersion = &now, &v
+	}
+
 	query := `
         INSERT INTO events (
             id, slug,
@@ -67,9 +88,10 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             category_id, price, currency, max_capacity, allow_waitlist,
             max_tickets_per_user, venue_type,
             refund_policy, terms_and_conditions, tags, performers, teams,
-            organizer_id, status, listing_fee_paid, published_at
+            organizer_id, status, listing_fee_paid, published_at,
+            visibility, rights_declared_at, rights_declaration_version
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
         RETURNING id, slug, title, description, cover_image_url, start_time, end_time,
                   price, currency, max_capacity, tickets_sold, status, organizer_id, created_at, updated_at
     `
@@ -84,6 +106,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		dto.MaxTicketsPerUser, dto.VenueType,
 		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags, dto.Performers, dto.Teams,
 		organizerID, status, listingFeePaid, publishedAt,
+		visibility, rightsAt, rightsVersion,
 	).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
 		&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
@@ -100,50 +123,118 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 
 // PublishEvent submits a draft or rejected event for admin review.
 // Status moves to pending_review; event goes live only after AdminApproveEvent.
-func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// PublishOutcome tells the handler what actually happened, since the two
+// visibility classes publish differently.
+type PublishOutcome struct {
+	LiveImmediately bool   // private_link events go live without review
+	Slug            string // for "share this link" responses
+}
+
+// PublishEvent enforces the KYC / requirements matrix (design doc section 4)
+// and routes the event by visibility:
+//
+//	public       → draft/rejected → pending_review (existing admin approval)
+//	private_link → draft/rejected → published_private, live immediately
+//
+// Matrix, evaluated here as the single organizer-side chokepoint (the admin
+// create path bypasses this function and stays exempt):
+//
+//	paid (any visibility) → organizer KYC verified + payout bank details
+//	all events            → rights declaration accepted (creation or now)
+//	free public           → existing listing-fee rule
+//	free private          → listing fee exempt (no feed placement to pay for)
+//
+// declarationAccepted lets older drafts (created before the declaration
+// existed) accept it at publish time.
+func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string, declarationAccepted bool) (*PublishOutcome, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Guard: free events (price = 0) with capacity >= 20 must pay the listing
-	// fee before submitting for review. Paid-ticket events are never blocked.
 	var (
-		eventPrice  float64
-		maxCap      *int
-		feePaid     bool
-		ttCapSum    *int
+		eventPrice float64
+		maxCap     *int
+		feePaid    bool
+		ttCapSum   *int
+		visibility string
+		slug       string
+		rightsAt   *time.Time
+		paidTiers  bool
 	)
 	err := pool.QueryRow(ctx, `
-		SELECT e.price, e.max_capacity, e.listing_fee_paid,
+		SELECT e.price, e.max_capacity, e.listing_fee_paid, e.visibility, e.slug,
+		       e.rights_declared_at,
 		       (SELECT SUM(t.capacity)
 		        FROM   ticket_types t
-		        WHERE  t.event_id = e.id AND t.is_visible = TRUE) AS tt_cap_sum
+		        WHERE  t.event_id = e.id AND t.is_visible = TRUE) AS tt_cap_sum,
+		       EXISTS (SELECT 1 FROM ticket_types t
+		               WHERE t.event_id = e.id AND t.is_visible = TRUE AND t.price > 0) AS paid_tiers
 		FROM   events e
 		WHERE  e.id = $1 AND e.organizer_id = $2
-	`, eventID, organizerID).Scan(&eventPrice, &maxCap, &feePaid, &ttCapSum)
+	`, eventID, organizerID).Scan(&eventPrice, &maxCap, &feePaid, &visibility, &slug,
+		&rightsAt, &ttCapSum, &paidTiers)
 	if err != nil {
-		return ErrEventNotPublishable
+		return nil, ErrEventNotPublishable
 	}
 
-	// Only free events are subject to the listing fee
-	if eventPrice == 0 {
+	isPaid := eventPrice > 0 || paidTiers
+	reqs := models.RequirementsFor(models.EventVisibility(visibility), isPaid)
+
+	// Rights declaration: stamped at creation, or accepted right now.
+	if reqs.RightsDeclaration && rightsAt == nil {
+		if !declarationAccepted {
+			return nil, ErrDeclarationRequired
+		}
+		if _, dErr := pool.Exec(ctx, `
+			UPDATE events SET rights_declared_at = CURRENT_TIMESTAMP,
+			                  rights_declaration_version = $1
+			WHERE id = $2 AND organizer_id = $3
+		`, models.RightsDeclarationVersion, eventID, organizerID); dErr != nil {
+			return nil, fmt.Errorf("recording rights declaration: %w", dErr)
+		}
+	}
+
+	// Paid events require a verified identity and payout bank details.
+	if reqs.KYCVerifiedRequired || reqs.BankDetailsRequired {
+		gates, gErr := GetOrganizerPublishGates(pool, ctx, organizerID)
+		if gErr != nil {
+			return nil, gErr
+		}
+		if reqs.KYCVerifiedRequired && !gates.KYCVerified {
+			return nil, ErrKYCRequired
+		}
+		if reqs.BankDetailsRequired && !gates.PayoutEnabled {
+			return nil, ErrPayoutDetailsRequired
+		}
+	}
+
+	// Listing fee: free public events with 20+ capacity, as before.
+	if reqs.ListingFeeApplies && eventPrice == 0 && !isPaid {
 		effectiveCapacity := computeEffectiveCapacity(maxCap, ttCapSum)
 		if effectiveCapacity >= ListingFeeThreshold && !feePaid {
-			return ErrListingFeeRequired
+			return nil, ErrListingFeeRequired
 		}
+	}
+
+	targetStatus := models.EventPendingReview
+	outcome := &PublishOutcome{Slug: slug}
+	if !reqs.GoesThroughAdminReview {
+		targetStatus = models.EventPublishedPrivate
+		outcome.LiveImmediately = true
 	}
 
 	cmd, err := pool.Exec(ctx, `
 		UPDATE events
-		SET status = $1, rejection_reason = NULL
+		SET status = $1, rejection_reason = NULL,
+		    published_at = CASE WHEN $1 = 'published_private' THEN CURRENT_TIMESTAMP ELSE published_at END
 		WHERE id = $2 AND organizer_id = $3 AND status IN ($4, $5)
-	`, models.EventPendingReview, eventID, organizerID, models.EventDraft, models.EventRejected)
+	`, targetStatus, eventID, organizerID, models.EventDraft, models.EventRejected)
 	if err != nil {
-		return fmt.Errorf("failed to submit event for review: %w", err)
+		return nil, fmt.Errorf("failed to submit event for review: %w", err)
 	}
 	if cmd.RowsAffected() == 0 {
-		return ErrEventNotPublishable
+		return nil, ErrEventNotPublishable
 	}
-	return nil
+	return outcome, nil
 }
 
 // AdminApproveEvent approves a pending_review event, making it publicly visible.
@@ -291,8 +382,8 @@ func CheckAvailability(pool *pgxpool.Pool, eventID string, quantity int) (bool, 
 	err := pool.QueryRow(ctx, `
 		SELECT max_capacity, tickets_sold
 		FROM events
-		WHERE id = $1 AND status = $2
-	`, eventID, models.EventPublished).Scan(&maxCapacity, &ticketsSold)
+		WHERE id = $1 AND status = ANY($2)
+	`, eventID, []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}).Scan(&maxCapacity, &ticketsSold)
 	if err != nil {
 		return false, fmt.Errorf("failed to check availability: %w", err)
 	}
@@ -397,9 +488,10 @@ func CompleteEndedEvents(pool *pgxpool.Pool, ctx context.Context) ([]string, err
 	rows, err := pool.Query(ctx, `
 		UPDATE events
 		SET    status = $1, updated_at = NOW()
-		WHERE  status = $2 AND end_time < NOW()
+		WHERE  status = ANY($2) AND end_time < NOW()
 		RETURNING id
-	`, models.EventCompleted, models.EventPublished)
+	`, models.EventCompleted,
+		[]models.EventStatus{models.EventPublished, models.EventPublishedPrivate})
 	if err != nil {
 		return nil, err
 	}
@@ -429,8 +521,9 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 	cmd, err := tx.Exec(ctx, `
 		UPDATE events
 		SET status = $1, cancelled_at = CURRENT_TIMESTAMP, cancellation_reason = $2
-		WHERE id = $3 AND organizer_id = $4 AND status = $5
-	`, models.EventCancelled, reason, eventID, organizerID, models.EventPublished)
+		WHERE id = $3 AND organizer_id = $4 AND status = ANY($5)
+	`, models.EventCancelled, reason, eventID, organizerID,
+		[]models.EventStatus{models.EventPublished, models.EventPublishedPrivate})
 	if err != nil {
 		return fmt.Errorf("failed to cancel event: %w", err)
 	}
@@ -954,13 +1047,17 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
         WHERE e.id = $1
     `
 
+    // Live statuses include published_private: a direct ID/slug link is the
+    // intended access path for private events. Discovery queries elsewhere
+    // still filter on EventPublished only.
+    liveStatuses := []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}
     args := []interface{}{id}
     if requestingUserID == nil {
-        query += ` AND e.status = $2`
-        args = append(args, models.EventPublished)
+        query += ` AND e.status = ANY($2)`
+        args = append(args, liveStatuses)
     } else {
-        query += ` AND (e.status = $2 OR e.organizer_id = $3)`
-        args = append(args, models.EventPublished, *requestingUserID)
+        query += ` AND (e.status = ANY($2) OR e.organizer_id = $3)`
+        args = append(args, liveStatuses, *requestingUserID)
     }
 
     var event models.Event
@@ -1019,8 +1116,8 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
         FROM events e
         JOIN categories c ON e.category_id = c.id
         WHERE e.slug = $1
-          AND e.status = $2
-    `, slug, models.EventPublished).Scan(
+          AND e.status = ANY($2)
+    `, slug, []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 		&event.BannerVideoURL,
 		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,

@@ -31,7 +31,7 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 			return
 		}
 
-		if event.Status != models.EventPublished {
+		if !event.Status.IsLive() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Event is not available for booking"})
 			return
 		}

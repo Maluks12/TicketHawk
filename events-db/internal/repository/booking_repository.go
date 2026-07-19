@@ -65,9 +65,9 @@ func createBookingTx(
 	err = tx.QueryRow(ctx, `
 		SELECT max_capacity, tickets_sold
 		FROM events
-		WHERE id = $1 AND status = $2
+		WHERE id = $1 AND status = ANY($2)
 		FOR UPDATE
-	`, eventID, models.EventPublished).Scan(&maxCapacity, &ticketsSold)
+	`, eventID, []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}).Scan(&maxCapacity, &ticketsSold)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lock event: %w", err)
 	}

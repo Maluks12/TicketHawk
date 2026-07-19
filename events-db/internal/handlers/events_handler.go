@@ -622,10 +622,41 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
 
-		err := repository.PublishEvent(pool, eventID, userID.(string))
+		// Optional body: older drafts can accept the rights declaration here
+		// instead of at creation. Absent/invalid body = not accepted.
+		var body struct {
+			RightsDeclarationAccepted bool `json:"rights_declaration_accepted"`
+		}
+		_ = c.ShouldBindJSON(&body)
+
+		outcome, err := repository.PublishEvent(pool, eventID, userID.(string), body.RightsDeclarationAccepted)
 		if err != nil {
 			if errors.Is(err, repository.ErrEventNotPublishable) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Event not found or not in a submittable state (must be draft or rejected)"})
+				return
+			}
+			if errors.Is(err, repository.ErrKYCRequired) {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "Identity verification is required before publishing a paid event.",
+					"hint":  "Submit your ID via POST /organiser/kyc, then try again once verified.",
+					"code":  "kyc_required",
+				})
+				return
+			}
+			if errors.Is(err, repository.ErrPayoutDetailsRequired) {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "Payout bank details are required before publishing a paid event, so we know where to send your money.",
+					"hint":  "Add them via POST /organiser/payouts/details.",
+					"code":  "payout_details_required",
+				})
+				return
+			}
+			if errors.Is(err, repository.ErrDeclarationRequired) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "Please confirm you hold the rights to host this event and sell tickets for it.",
+					"hint":  "Resend this request with {\"rights_declaration_accepted\": true}.",
+					"code":  "declaration_required",
+				})
 				return
 			}
 			if errors.Is(err, repository.ErrListingFeeRequired) {
@@ -646,6 +677,13 @@ func PublishEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			ec.BustOnPublish(c.Request.Context())
 		}
 
+		if outcome.LiveImmediately {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Your private event is live. It won't appear in the feed or search — share the link to invite people.",
+				"slug":    outcome.Slug,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Event submitted for admin review. It will go live once an admin approves it.",
 			"note":    "Event is now visible to all users",
