@@ -10,7 +10,7 @@ export default function Footer() {
   return (
     <footer
       className="px-6 py-6 text-center border-t"
-      style={{ borderColor: colors.dividerColor }}
+      style={{ borderColor: colors.dividerColor, backgroundColor: colors.background }}
     >
       <p className="text-[12px]" style={{ color: colors.subText }}>
         TicketHawk is a product of Self Hawk Tech Pty Ltd
