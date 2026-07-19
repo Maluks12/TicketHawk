@@ -129,6 +129,11 @@ func main() {
 	rotatingQRService := services.NewRotatingQRService(cfg)
 	paymentService := services.NewPaymentService(pool, cfg, bookingJobs)
 
+	// Two-tier organizer payouts: ledger creation for completed events +
+	// Paystack balance transfers for held-tier settlements and reserve releases.
+	payoutService := services.NewPayoutService(pool, paymentService.Paystack())
+	workers.StartPayoutWorker(pool, payoutService, ctx, 10*time.Minute)
+
 	workers.StartAdWorker(pool, ctx)
 	log.Info().Msg("ad worker started (pre-paid wallet mode)")
 	imgService := services.NewImageService(cfg)
@@ -668,6 +673,13 @@ func main() {
 		// Organiser account management
 		admin.GET("/organizers",            handlers.AdminGetOrganizersHandler(pool))
 		admin.PUT("/organizers/:id/status", handlers.AdminUpdateOrganizerStatusHandler(pool))
+		// ── Payouts ───────────────────────────────────────────────────────
+		admin.GET("/organizers/payouts",             handlers.AdminListOrganizerPayoutProfilesHandler(pool))
+		admin.PUT("/organizers/:id/tier",            handlers.AdminSetOrganizerTierHandler(pool))
+		admin.POST("/organizers/:id/payout-details", handlers.AdminSetOrganizerPayoutDetailsHandler(payoutService))
+		admin.GET("/payouts",                        handlers.AdminListPayoutsHandler(pool))
+		admin.GET("/payouts/banks",                  handlers.GetPayoutBanksHandler(payoutService))
+		admin.POST("/payouts/:id/retry",             handlers.AdminRetryPayoutHandler(pool, payoutService))
 	}
 
 	// ==========================================
@@ -729,7 +741,12 @@ func main() {
 		orgRoutes.PUT("/events/:id/ticket-types",  handlers.OrgReplaceTicketTypesHandler(pool))
 		orgRoutes.PATCH("/ticket-types/:typeId",   handlers.OrgUpdateTicketTypeHandler(pool))
 		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool))
-
+		// ── Payouts ───────────────────────────────────────────────────────
+		orgRoutes.GET("/payouts/banks",    handlers.GetPayoutBanksHandler(payoutService))
+		orgRoutes.POST("/payouts/details", handlers.SetPayoutDetailsHandler(pool, payoutService))
+		orgRoutes.GET("/payouts/profile",  handlers.GetPayoutProfileHandler(pool))
+		orgRoutes.GET("/payouts/history",  handlers.GetPayoutHistoryHandler(pool))
+		
 		// ── Ad Accounts ───────────────────────────────────────────────────────
 		// Ad account routes get tighter rate limiting than the general organiser
 		// bucket — creating and managing ad accounts are low-frequency operations.

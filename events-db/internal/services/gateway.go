@@ -45,6 +45,15 @@ type InitInput struct {
 	CallbackURL string            // where the gateway returns the customer after completion
 	Channels    []string          // Paystack channels, e.g. ["card"]. Apple Pay surfaces under "card".
 	Metadata    map[string]string // free-form; echoed back where the provider supports it
+
+	// ── Split-payment fields (Paystack only; PayPal ignores them) ────────────
+	// When SubaccountCode is set, Paystack settles the transaction to that
+	// subaccount's bank, minus the flat TransactionChargeCents which goes to
+	// the platform's main account. Bearer decides who pays Paystack's
+	// processing fee: "account" (platform, our default) or "subaccount".
+	SubaccountCode         string
+	TransactionChargeCents int64
+	Bearer                 string
 }
 
 // InitResult is the normalized response from starting a payment. The client

@@ -138,6 +138,14 @@ type paystackInitRequest struct {
 	CallbackURL string            `json:"callback_url,omitempty"`
 	Channels    []string          `json:"channels,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
+
+	// Split-payment fields. Subaccount routes settlement to an organizer's
+	// bank; TransactionCharge (minor units) is the flat platform cut that
+	// overrides the subaccount's percentage_charge; Bearer picks who pays
+	// Paystack's processing fee ("account" = platform main account).
+	Subaccount        string `json:"subaccount,omitempty"`
+	TransactionCharge int64  `json:"transaction_charge,omitempty"`
+	Bearer            string `json:"bearer,omitempty"`
 }
 
 type paystackInitData struct {
@@ -153,8 +161,7 @@ func (g *PaystackGateway) Initialize(ctx context.Context, in InitInput) (*InitRe
 		channels = []string{"card"}
 	}
 
-	var data paystackInitData
-	err := g.do(ctx, http.MethodPost, "/transaction/initialize", paystackInitRequest{
+	req := paystackInitRequest{
 		Email:       in.Email,
 		Amount:      in.AmountCents,
 		Currency:    in.Currency,
@@ -162,7 +169,18 @@ func (g *PaystackGateway) Initialize(ctx context.Context, in InitInput) (*InitRe
 		CallbackURL: in.CallbackURL,
 		Channels:    channels,
 		Metadata:    in.Metadata,
-	}, &data)
+	}
+	// Attach the organizer split only when the caller resolved one. A zero
+	// TransactionCharge with a subaccount would hand the platform cut to the
+	// organizer, so both must be present together.
+	if in.SubaccountCode != "" && in.TransactionChargeCents > 0 {
+		req.Subaccount = in.SubaccountCode
+		req.TransactionCharge = in.TransactionChargeCents
+		req.Bearer = in.Bearer
+	}
+
+	var data paystackInitData
+	err := g.do(ctx, http.MethodPost, "/transaction/initialize", req, &data)
 	if err != nil {
 		return nil, fmt.Errorf("paystack initialize: %w", err)
 	}

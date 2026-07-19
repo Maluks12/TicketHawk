@@ -109,6 +109,89 @@ func (s *PaymentService) userEmail(ctx context.Context, userID string) string {
 	return fmt.Sprintf("organiser+%s@checkout.local", userID)
 }
 
+// ── Organizer split resolution (two-tier payouts) ─────────────────────────────
+
+// bookingSplit is the resolved split for one booking's transaction, or the
+// zero value when the money should be platform-collected (tier 'held', no
+// subaccount, merch-only booking, PayPal, etc.).
+type bookingSplit struct {
+	SubaccountCode    string
+	TransactionCharge float64 // ZAR: platform cut (service fee + commission) + reserve
+	ReserveAmount     float64 // ZAR: 10% of subtotal, released post-event via the ledger
+}
+
+// splitForBooking decides whether this booking's payment carries a Paystack
+// subaccount split, and computes the platform's flat transaction_charge:
+//
+//	transaction_charge = platform_fee + organizer_fee + reserve(10% × subtotal)
+//	organizer receives = total_amount − transaction_charge
+//	                   = subtotal − commission − reserve   (reserve released post-event)
+//
+// Splits apply only to instant-tier organizers with an active subaccount.
+// Everything else — held tier, missing subaccount, merch-only bookings —
+// returns the zero value and flows through the tier-1 payout ledger instead.
+// Errors degrade to "no split": a lookup failure must never block checkout,
+// it just means the money is platform-collected and settled by the worker.
+func (s *PaymentService) splitForBooking(ctx context.Context, booking *models.Booking) bookingSplit {
+	if booking.EventID == nil || *booking.EventID == "" {
+		return bookingSplit{} // merch-only bookings are always platform-collected
+	}
+
+	var subaccountCode string
+	err := s.pool.QueryRow(ctx, `
+		SELECT o.paystack_subaccount_code
+		FROM events e
+		JOIN organizers o ON o.user_id = e.organizer_id
+		WHERE e.id = $1
+		  AND o.payout_tier = 'instant'
+		  AND o.payout_enabled = TRUE
+		  -- status::text: the live enum has no 'active' label (legacy rows are
+		  -- 'approved'); a bare enum IN ('active', ...) would error at runtime.
+		  AND o.status::text IN ('active', 'approved')
+		  AND o.paystack_subaccount_code IS NOT NULL
+	`, *booking.EventID).Scan(&subaccountCode)
+	if err != nil {
+		// No row = organizer is held-tier (the normal case) — not an error.
+		return bookingSplit{}
+	}
+
+	reserve := roundMoney(models.InstantReserveRate * booking.Subtotal)
+	charge := roundMoney(booking.PlatformFee + booking.OrganizerFee + reserve)
+
+	// Sanity: the charge must leave the organizer a positive share, or the
+	// initialize call would be rejected. Fall back to platform-collected.
+	if charge <= 0 || charge >= booking.TotalAmount {
+		return bookingSplit{}
+	}
+
+	return bookingSplit{
+		SubaccountCode:    subaccountCode,
+		TransactionCharge: charge,
+		ReserveAmount:     reserve,
+	}
+}
+
+func roundMoney(v float64) float64 {
+	return float64(int64(v*100+0.5)) / 100
+}
+
+// recordSplitOnPayment persists the split audit trail on the payments row so
+// the reserve-release ledger and reconciliation never re-derive it.
+func (s *PaymentService) recordSplitOnPayment(ctx context.Context, bookingID string, sp bookingSplit) {
+	if sp.SubaccountCode == "" {
+		return
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE payments
+		SET subaccount_code = $1, transaction_charge = $2, reserve_amount = $3,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE booking_id = $4
+	`, sp.SubaccountCode, sp.TransactionCharge, sp.ReserveAmount, bookingID); err != nil {
+		log.Warn().Err(err).Str("booking_id", bookingID).
+			Msg("payment: split initialized but audit columns not persisted")
+	}
+}
+
 // ── Ticket / booking payments ─────────────────────────────────────────────────
 
 // CreatePaymentIntent starts a card (Paystack) payment for a booking — the
@@ -125,6 +208,16 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 	defer cancel()
 
 	gw := s.gatewayForMethod(method)
+
+	// Instant-tier organizers get a Paystack subaccount split: they're settled
+	// directly as tickets sell, the platform keeps fee + commission + reserve.
+	// PayPal has no split support, so PayPal payments are always platform-
+	// collected and settle through the tier-1 ledger regardless of tier.
+	var sp bookingSplit
+	if gw.Name() == GatewayPaystack {
+		sp = s.splitForBooking(ctx, booking)
+	}
+
 	res, err := gw.Initialize(ctx, InitInput{
 		Reference:   newRef("bk_"),
 		AmountCents: int64(booking.TotalAmount * 100),
@@ -134,6 +227,10 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 		CallbackURL: s.callbackURLFor(channel),
 		Channels:    method.PaystackChannels(),
 		Metadata:    map[string]string{"booking_id": booking.ID, "booking_number": booking.BookingNumber},
+
+		SubaccountCode:         sp.SubaccountCode,
+		TransactionChargeCents: int64(sp.TransactionCharge * 100),
+		Bearer:                 "account", // platform absorbs Paystack's processing fee from its cut
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("initializing %s payment: %w", gw.Name(), err)
@@ -142,6 +239,7 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 	if err := s.createPaymentRecord(ctx, booking, gw.Name(), res.Reference, &res.RedirectURL, method, nil); err != nil {
 		return "", "", fmt.Errorf("persisting payment record for booking %s: %w", booking.ID, err)
 	}
+	s.recordSplitOnPayment(ctx, booking.ID, sp)
 	return res.RedirectURL, res.Reference, nil
 }
 
@@ -151,6 +249,13 @@ func (s *PaymentService) CreateCartPaymentIntent(primaryBooking *models.Booking,
 }
 
 // CreateCartPaymentIntentWithMethod starts a cart payment using the chosen method.
+//
+// Cart payments are deliberately NEVER split: a cart can span events from
+// multiple organizers, and Paystack's single `subaccount` field can't express
+// a multi-way split (that needs the dynamic Split API — a later phase). All
+// cart money is platform-collected, and each organizer's share flows through
+// the tier-1 payout ledger, which computes owed amounts per booking and works
+// identically for both tiers.
 func (s *PaymentService) CreateCartPaymentIntentWithMethod(primaryBooking *models.Booking, cartID string, totalAmount float64, method models.PaymentMethod, channel string) (redirectURL string, reference string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
