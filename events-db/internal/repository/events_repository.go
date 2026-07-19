@@ -388,8 +388,8 @@ func CheckAvailability(pool *pgxpool.Pool, eventID string, quantity int) (bool, 
 	err := pool.QueryRow(ctx, `
 		SELECT max_capacity, tickets_sold
 		FROM events
-		WHERE id = $1 AND status = ANY($2)
-	`, eventID, []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}).Scan(&maxCapacity, &ticketsSold)
+		WHERE id = $1 AND status = ANY($2::event_status[])
+	`, eventID, []string{string(models.EventPublished), string(models.EventPublishedPrivate)}).Scan(&maxCapacity, &ticketsSold)
 	if err != nil {
 		return false, fmt.Errorf("failed to check availability: %w", err)
 	}
@@ -494,10 +494,10 @@ func CompleteEndedEvents(pool *pgxpool.Pool, ctx context.Context) ([]string, err
 	rows, err := pool.Query(ctx, `
 		UPDATE events
 		SET    status = $1, updated_at = NOW()
-		WHERE  status = ANY($2) AND end_time < NOW()
+		WHERE  status = ANY($2::event_status[]) AND end_time < NOW()
 		RETURNING id
 	`, models.EventCompleted,
-		[]models.EventStatus{models.EventPublished, models.EventPublishedPrivate})
+		[]string{string(models.EventPublished), string(models.EventPublishedPrivate)})
 	if err != nil {
 		return nil, err
 	}
@@ -527,9 +527,9 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 	cmd, err := tx.Exec(ctx, `
 		UPDATE events
 		SET status = $1, cancelled_at = CURRENT_TIMESTAMP, cancellation_reason = $2
-		WHERE id = $3 AND organizer_id = $4 AND status = ANY($5)
+		WHERE id = $3 AND organizer_id = $4 AND status = ANY($5::event_status[])
 	`, models.EventCancelled, reason, eventID, organizerID,
-		[]models.EventStatus{models.EventPublished, models.EventPublishedPrivate})
+		[]string{string(models.EventPublished), string(models.EventPublishedPrivate)})
 	if err != nil {
 		return fmt.Errorf("failed to cancel event: %w", err)
 	}
@@ -1056,13 +1056,13 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
     // Live statuses include published_private: a direct ID/slug link is the
     // intended access path for private events. Discovery queries elsewhere
     // still filter on EventPublished only.
-    liveStatuses := []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}
+    liveStatuses := []string{string(models.EventPublished), string(models.EventPublishedPrivate)}
     args := []interface{}{id}
     if requestingUserID == nil {
-        query += ` AND e.status = ANY($2)`
+        query += ` AND e.status = ANY($2::event_status[])`
         args = append(args, liveStatuses)
     } else {
-        query += ` AND (e.status = ANY($2) OR e.organizer_id = $3)`
+        query += ` AND (e.status = ANY($2::event_status[]) OR e.organizer_id = $3)`
         args = append(args, liveStatuses, *requestingUserID)
     }
 
@@ -1122,8 +1122,8 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
         FROM events e
         JOIN categories c ON e.category_id = c.id
         WHERE e.slug = $1
-          AND e.status = ANY($2)
-    `, slug, []models.EventStatus{models.EventPublished, models.EventPublishedPrivate}).Scan(
+          AND e.status = ANY($2::event_status[])
+    `, slug, []string{string(models.EventPublished), string(models.EventPublishedPrivate)}).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 		&event.BannerVideoURL,
 		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,

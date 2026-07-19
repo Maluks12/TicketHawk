@@ -152,14 +152,19 @@ func CheckInstantEligibility(pool *pgxpool.Pool, ctx context.Context, organizerI
 // is admin-initiated only; the DB constraint additionally guarantees a
 // subaccount exists. Demotion always succeeds (it's the safe direction).
 func SetOrganizerTier(pool *pgxpool.Pool, ctx context.Context, organizerID string, tier models.PayoutTier, adminID string) error {
+	// NOTE: the promotion condition is computed here and passed as $4 rather
+	// than comparing $1 = 'instant' in SQL — reusing one parameter in both an
+	// assignment (varchar) and a comparison (text) makes Postgres fail with
+	// "inconsistent types deduced for parameter $1" (SQLSTATE 42P08).
+	isInstant := tier == models.PayoutTierInstant
 	tag, err := pool.Exec(ctx, `
 		UPDATE organizers
 		SET payout_tier      = $1,
-		    tier_upgraded_at = CASE WHEN $1 = 'instant' THEN CURRENT_TIMESTAMP ELSE tier_upgraded_at END,
-		    tier_upgraded_by = CASE WHEN $1 = 'instant' THEN $2::uuid ELSE tier_upgraded_by END,
+		    tier_upgraded_at = CASE WHEN $4 THEN CURRENT_TIMESTAMP ELSE tier_upgraded_at END,
+		    tier_upgraded_by = CASE WHEN $4 THEN $2::uuid ELSE tier_upgraded_by END,
 		    updated_at       = CURRENT_TIMESTAMP
 		WHERE id = $3
-	`, string(tier), adminID, organizerID)
+	`, string(tier), adminID, organizerID, isInstant)
 	if err != nil {
 		return fmt.Errorf("SetOrganizerTier: %w", err)
 	}
