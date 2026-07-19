@@ -173,7 +173,13 @@ func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string, declar
 	`, eventID, organizerID).Scan(&eventPrice, &maxCap, &feePaid, &visibility, &slug,
 		&rightsAt, &ttCapSum, &paidTiers)
 	if err != nil {
-		return nil, ErrEventNotPublishable
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrEventNotPublishable
+		}
+		// A real infrastructure/SQL error, not "event doesn't exist" — surface
+		// it distinctly so it doesn't get misread as a routine 400/404 and
+		// silently hidden from logs as a generic "not publishable".
+		return nil, fmt.Errorf("loading event for publish: %w", err)
 	}
 
 	isPaid := eventPrice > 0 || paidTiers
@@ -225,9 +231,9 @@ func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string, declar
 	cmd, err := pool.Exec(ctx, `
 		UPDATE events
 		SET status = $1, rejection_reason = NULL,
-		    published_at = CASE WHEN $1 = 'published_private' THEN CURRENT_TIMESTAMP ELSE published_at END
+		    published_at = CASE WHEN $6 THEN CURRENT_TIMESTAMP ELSE published_at END
 		WHERE id = $2 AND organizer_id = $3 AND status IN ($4, $5)
-	`, targetStatus, eventID, organizerID, models.EventDraft, models.EventRejected)
+	`, targetStatus, eventID, organizerID, models.EventDraft, models.EventRejected, outcome.LiveImmediately)
 	if err != nil {
 		return nil, fmt.Errorf("failed to submit event for review: %w", err)
 	}
