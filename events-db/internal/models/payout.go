@@ -102,6 +102,9 @@ type SetPayoutDetailsDTO struct {
 	BankName      string `json:"bank_name" binding:"required,max=100"`
 	AccountNumber string `json:"account_number" binding:"required,min=6,max=20"`
 	AccountName   string `json:"account_name" binding:"required,min=2,max=255"`
+	// AccountType is used by the bank-ownership check ("Savings"/"Current"/…).
+	// Optional; defaults to "Savings" when omitted.
+	AccountType   string `json:"account_type" binding:"omitempty,max=20"`
 }
 
 // AdminSetTierDTO — admin promotes/demotes an organizer's payout tier.

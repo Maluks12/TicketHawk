@@ -79,7 +79,7 @@ func AdminListOrganizerPayoutProfilesHandler(pool *pgxpool.Pool) gin.HandlerFunc
 // The DB constraint still hard-blocks 'instant' without a subaccount.
 //
 //	PUT /v1/admin/organizers/:id/tier
-func AdminSetOrganizerTierHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func AdminSetOrganizerTierHandler(pool *pgxpool.Pool, payoutService *services.PayoutService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID := c.Param("id")
 		adminID, _ := c.Get("user_id")
@@ -102,6 +102,28 @@ func AdminSetOrganizerTierHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			if !profile.HasSubaccount || !profile.PayoutEnabled {
 				c.JSON(http.StatusConflict, gin.H{"error": "Organizer has no verified bank details / subaccount — instant settlement is impossible without one"})
 				return
+			}
+
+			// Auto-run the paid DHA ID check (bank ownership was checked at detail
+			// entry). Full ID match + verified bank → auto-approve. Anything else
+			// stops here with the reason, unless the admin explicitly overrides
+			// with ?override=true (their judgement, logged).
+			if c.Query("override") != "true" {
+				check, cErr := payoutService.RunPromotionChecks(ctx, organizerID)
+				if cErr != nil {
+					log.Error().Err(cErr).Str("organizer_id", organizerID).Msg("admin: promotion check errored")
+					c.JSON(http.StatusBadGateway, gin.H{"error": "Verification check failed to run", "detail": cErr.Error()})
+					return
+				}
+				if !check.AutoApprove {
+					c.JSON(http.StatusConflict, gin.H{
+						"error":  "Automated verification did not clear this organizer for instant payouts.",
+						"reason": check.Reason,
+						"checks": check,
+						"hint":   "Review the details and re-send with ?override=true to promote anyway.",
+					})
+					return
+				}
 			}
 		}
 

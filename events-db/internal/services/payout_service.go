@@ -26,12 +26,25 @@ import (
 //	             stuck 'processing' row is reconciled via FetchTransfer rather
 //	             than re-initiated.
 type PayoutService struct {
-	pool     *pgxpool.Pool
-	paystack *PaystackGateway
+	pool      *pgxpool.Pool
+	paystack  *PaystackGateway
+	verifynow *VerifyNow // optional; when set, bank details are ownership-checked at entry
+	decryptID func([]byte) (string, error) // optional; recovers full SA ID for the bank check
 }
 
 func NewPayoutService(pool *pgxpool.Pool, paystack *PaystackGateway) *PayoutService {
 	return &PayoutService{pool: pool, paystack: paystack}
+}
+
+// WithVerifyNow attaches the VerifyNow client so SetPayoutDetails runs a
+// bank-account ownership check while the full account number is in hand.
+// decryptID recovers the organizer's full SA ID (stored encrypted by the KYC
+// layer) for the check — pass kycService.Decrypt. Optional: without this,
+// bank details save exactly as before (unverified).
+func (s *PayoutService) WithVerifyNow(vn *VerifyNow, decryptID func([]byte) (string, error)) *PayoutService {
+	s.verifynow = vn
+	s.decryptID = decryptID
+	return s
 }
 
 func (s *PayoutService) Gateway() *PaystackGateway { return s.paystack }
@@ -75,7 +88,70 @@ func (s *PayoutService) SetPayoutDetails(ctx context.Context, organizerID string
 	if err := repository.SavePayoutDetails(s.pool, ctx, organizerID, subCode, recipientCode, dto); err != nil {
 		return nil, err
 	}
+
+	// Bank-account ownership check — this is the only point we hold the full
+	// account number (SavePayoutDetails keeps only last 4). Verify now, store
+	// the result, discard the number. Runs best-effort: a provider failure
+	// leaves bank_account_verified = false, which the Tier-2 promotion gate
+	// treats as "not yet confirmed" rather than blocking payout setup itself.
+	if s.verifynow != nil {
+		s.runBankVerification(ctx, organizerID, dto)
+	}
+
 	return repository.GetPayoutProfileByOrganizerID(s.pool, ctx, organizerID)
+}
+
+// runBankVerification confirms the payout account belongs to the organizer.
+// It recovers the full SA ID from the KYC-encrypted column (via the injected
+// decryptor); if no verified ID is on file it skips the check and marks the
+// account unverified, since VerifyNow needs the ID number to match ownership.
+func (s *PayoutService) runBankVerification(ctx context.Context, organizerID string, dto *models.SetPayoutDetailsDTO) {
+	var encrypted []byte
+	if err := s.pool.QueryRow(ctx,
+		`SELECT sa_id_encrypted FROM organizers WHERE id = $1`, organizerID).Scan(&encrypted); err != nil || len(encrypted) == 0 || s.decryptID == nil {
+		log.Info().Str("organizer_id", organizerID).
+			Msg("payouts: no KYC ID on file — bank ownership check skipped, saved unverified")
+		_ = repository.SaveBankVerification(s.pool, ctx, organizerID, false, "", nil)
+		return
+	}
+	idNumber, dErr := s.decryptID(encrypted)
+	if dErr != nil {
+		log.Warn().Err(dErr).Str("organizer_id", organizerID).Msg("payouts: decrypting ID for bank check")
+		_ = repository.SaveBankVerification(s.pool, ctx, organizerID, false, "", nil)
+		return
+	}
+
+	first, last := splitAccountName(dto.AccountName)
+	res, vErr := s.verifynow.VerifyBankAccount(ctx, BankAccountCheckInput{
+		FirstName:     first,
+		Surname:       last,
+		IDNumber:      idNumber,
+		AccountNumber: dto.AccountNumber,
+		BranchCode:    dto.BankCode,
+		AccountType:   dto.AccountType,
+	})
+	if vErr != nil {
+		log.Warn().Err(vErr).Str("organizer_id", organizerID).
+			Msg("payouts: bank verification call failed — saved unverified")
+		_ = repository.SaveBankVerification(s.pool, ctx, organizerID, false, "", nil)
+		return
+	}
+	if sErr := repository.SaveBankVerification(s.pool, ctx, organizerID, res.Verified, res.TransactionID, res.Raw); sErr != nil {
+		log.Warn().Err(sErr).Str("organizer_id", organizerID).Msg("payouts: storing bank verification result")
+	}
+}
+
+// splitAccountName splits an account holder name into (first, surname) for the
+// bank check. Best-effort: last token is the surname, the rest first names.
+func splitAccountName(full string) (first, surname string) {
+	parts := strings.Fields(full)
+	if len(parts) == 0 {
+		return "", ""
+	}
+	if len(parts) == 1 {
+		return "", parts[0]
+	}
+	return strings.Join(parts[:len(parts)-1], " "), parts[len(parts)-1]
 }
 
 // ── Ledger processing ─────────────────────────────────────────────────────────
@@ -179,4 +255,80 @@ func (s *PayoutService) applyTransferStatus(ctx context.Context, payoutID string
 		// Leave as processing; it resolves once OTP is disabled/approved.
 	default: // pending / queued — leave as processing, next tick reconciles.
 	}
+}
+
+// ── Tier-2 promotion identity check ──────────────────────────────────────────
+
+// PromotionCheckResult reports what the automated Tier-2 checks found so the
+// caller (admin handler) can auto-approve or surface the reason for review.
+type PromotionCheckResult struct {
+	IDChecked       bool   `json:"id_checked"`        // the DHA check actually ran
+	IDFullMatch     bool   `json:"id_full_match"`     // DHA name == legal name
+	IDMatchType     string `json:"id_match_type"`     // full_match | partial_match | name_mismatch | id_not_found | …
+	BankVerified    bool   `json:"bank_verified"`     // stored result from bank-detail entry
+	AutoApprove     bool   `json:"auto_approve"`      // both gates green
+	Reason          string `json:"reason,omitempty"`  // why not, when AutoApprove is false
+}
+
+// RunPromotionChecks runs the paid DHA ID check for a Tier-2 request and reads
+// the stored bank-verification flag. It requires a KYC-verified organizer with
+// an ID on file. The DHA result is persisted for audit. AutoApprove is true
+// only when the ID is a full name match AND the bank account was verified at
+// detail entry.
+//
+// When no VerifyNow client is configured, IDChecked is false and the caller
+// falls back to manual admin judgement (unchanged legacy behaviour).
+func (s *PayoutService) RunPromotionChecks(ctx context.Context, organizerID string) (*PromotionCheckResult, error) {
+	ident, err := repository.GetPromotionIdentity(s.pool, ctx, organizerID)
+	if err != nil {
+		return nil, err
+	}
+	res := &PromotionCheckResult{BankVerified: ident.BankAccountVerified}
+
+	// No provider wired → nothing to auto-run; admin decides manually.
+	if s.verifynow == nil || s.decryptID == nil {
+		res.Reason = "automated ID check not configured — review manually"
+		return res, nil
+	}
+	if ident.KYCStatus != "verified" {
+		res.Reason = "organizer is not KYC-verified yet"
+		return res, nil
+	}
+	if len(ident.IDEncrypted) == 0 {
+		res.Reason = "no ID number on file for the DHA check"
+		return res, nil
+	}
+
+	idNumber, dErr := s.decryptID(ident.IDEncrypted)
+	if dErr != nil {
+		return res, fmt.Errorf("decrypting ID for DHA check: %w", dErr)
+	}
+
+	vr, vErr := s.verifynow.Verify(ctx, VerifyIdentityInput{
+		FirstName: ident.LegalFirstName,
+		LastName:  ident.LegalLastName,
+		IDNumber:  idNumber,
+	})
+	// Persist the raw result regardless of outcome (audit trail).
+	if vr != nil {
+		_ = repository.SaveDHAIDVerification(s.pool, ctx, organizerID, vr.FullMatch, vr.Raw)
+	}
+	if vErr != nil {
+		res.Reason = "DHA ID check failed: " + vErr.Error()
+		return res, nil
+	}
+
+	res.IDChecked = true
+	res.IDFullMatch = vr.FullMatch
+	res.IDMatchType = vr.MatchType
+
+	switch {
+	case !res.BankVerified:
+		res.Reason = "bank account was not confirmed as belonging to the organizer"
+	case !vr.FullMatch:
+		res.Reason = "DHA name did not fully match the organizer's legal name (" + vr.MatchType + ")"
+	default:
+		res.AutoApprove = true
+	}
+	return res, nil
 }

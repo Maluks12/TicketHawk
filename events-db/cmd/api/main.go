@@ -131,16 +131,28 @@ func main() {
 
 	// KYC: identity verification for organizers. Uses Didit's DHA registry
 	// check when DIDIT_API_KEY is set, manual admin review otherwise.
-	idVerifier := services.NewIDVerifier(cfg.DiditAPIKey)
+	// DHA ID check: VerifyNow (SA-local) when its key is set, else Didit, else manual.
+	idVerifier := services.NewIDVerifier(cfg.VerifyNowAPIKey, cfg.VerifyNowMode, cfg.DiditAPIKey)
 	kycService, err := services.NewKYCService(pool, idVerifier, cfg.KYCEncryptionKey)
 	if err != nil {
-		log.Fatal().Err(err).Msg("kyc service init failed — check KYC_ENCRYPTION_KEY / QR_ENCRYPTION_KEY length (16/24/32 bytes)")
+		log.Fatal().Err(err).Msg("kyc service init failed")
 	}
 	log.Info().Str("verifier", kycService.VerifierName()).Msg("kyc service ready")
+
+	// Bank-account ownership check runs at payout-detail entry. Optional:
+	// without a key, bank details save exactly as before (unverified).
+	var verifyNow *services.VerifyNow
+	if cfg.VerifyNowAPIKey != "" {
+		verifyNow = services.NewVerifyNow(cfg.VerifyNowAPIKey, cfg.VerifyNowMode)
+		log.Info().Str("mode", verifyNow.Mode()).Msg("verifynow ready")
+	}
 
 	// Two-tier organizer payouts: ledger creation for completed events +
 	// Paystack balance transfers for held-tier settlements and reserve releases.
 	payoutService := services.NewPayoutService(pool, paymentService.Paystack())
+	if verifyNow != nil {
+		payoutService = payoutService.WithVerifyNow(verifyNow, kycService.Decrypt)
+	}
 	workers.StartPayoutWorker(pool, payoutService, ctx, 10*time.Minute)
 
 	workers.StartAdWorker(pool, ctx)
@@ -693,7 +705,7 @@ func main() {
 
 		// ── Payouts ───────────────────────────────────────────────────────
 		admin.GET("/organizers/payouts",             handlers.AdminListOrganizerPayoutProfilesHandler(pool))
-		admin.PUT("/organizers/:id/tier",            handlers.AdminSetOrganizerTierHandler(pool))
+		admin.PUT("/organizers/:id/tier", handlers.AdminSetOrganizerTierHandler(pool, payoutService))
 		admin.POST("/organizers/:id/payout-details", handlers.AdminSetOrganizerPayoutDetailsHandler(payoutService))
 		admin.GET("/payouts",                        handlers.AdminListPayoutsHandler(pool))
 		admin.GET("/payouts/banks",                  handlers.GetPayoutBanksHandler(payoutService))

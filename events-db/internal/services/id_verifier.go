@@ -47,9 +47,14 @@ type VerifyIdentityResult struct {
 	Raw        json.RawMessage // full provider response, persisted for audit
 }
 
-// NewIDVerifier picks the implementation from config: Didit when an API key
-// is present, manual otherwise.
-func NewIDVerifier(diditAPIKey string) IDVerifier {
+// NewIDVerifier picks the DHA ID-check implementation from config, in order
+// of preference: VerifyNow (SA-local, cheaper) when its key is set, then
+// Didit, then manual review. VerifyNow needs its mode ("sandbox"/"production")
+// too; sandbox costs zero credits.
+func NewIDVerifier(verifyNowKey, verifyNowMode, diditAPIKey string) IDVerifier {
+	if strings.TrimSpace(verifyNowKey) != "" {
+		return NewVerifyNow(verifyNowKey, verifyNowMode)
+	}
 	if strings.TrimSpace(diditAPIKey) != "" {
 		return NewDiditVerifier(diditAPIKey)
 	}

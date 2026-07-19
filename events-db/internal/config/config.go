@@ -23,6 +23,8 @@ type Config struct {
 	QREncryptionKey string // AES-GCM key for static QR codes (email/offline)
 	KYCEncryptionKey string // AES-GCM key for stored SA ID numbers (falls back to QR key)
 	DiditAPIKey      string // enables automatic DHA registry checks when set
+	VerifyNowAPIKey  string // SA-local DHA + bank verification (verifynow.co.za)
+	VerifyNowMode    string // "sandbox" (default) | "production"
 	QRHMACSecret    string // HMAC-SHA256 secret for rotating in-app QR tokens
 
 	R2AccountID string
@@ -82,6 +84,8 @@ func Load() (*Config, error) {
 		QREncryptionKey: os.Getenv("QR_ENCRYPTION_KEY"),
 		KYCEncryptionKey: firstNonEmpty(os.Getenv("KYC_ENCRYPTION_KEY"), os.Getenv("QR_ENCRYPTION_KEY")),
 		DiditAPIKey:      os.Getenv("DIDIT_API_KEY"),
+		VerifyNowAPIKey:  os.Getenv("VERIFYNOW_API_KEY"),
+		VerifyNowMode:    os.Getenv("VERIFYNOW_MODE"),
 		QRHMACSecret:    os.Getenv("QR_HMAC_SECRET"),
 
 		R2AccountID: os.Getenv("R2_ACCOUNT_ID"),
