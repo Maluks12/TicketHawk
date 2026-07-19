@@ -7,7 +7,7 @@ import ThemedMain from '@/components/themedMain';
 
 export const metadata: Metadata = {
   title: 'TicketHawk',
-  description: 'TicketHawk, a product of Self Hawk Tech Pty Ltd, is South Africa\'s home for discovering, booking, and managing live events.',
+  description: 'TicketHawk is South Africa\u2019s event ticket platform. Discover concerts, festivals, sports, nightlife, comedy shows, and more\u2014or create your own event and sell tickets with ease.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
