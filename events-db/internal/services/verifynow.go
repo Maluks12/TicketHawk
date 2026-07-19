@@ -243,18 +243,36 @@ func (v *VerifyNow) VerifyBankAccount(ctx context.Context, in BankAccountCheckIn
 		return &BankAccountResult{Verified: false, Raw: raw}, err
 	}
 
-	// Defensive parse: pull top-level success and scan the results object for
-	// any account-verification truthy flag.
+	// VerifyNow returns a purpose-built verdict at
+	// results.identity_and_account_verified (bool), with a field-level
+	// breakdown under results.verification_results (nameMatch, identityMatch,
+	// accountFound, … each "Yes"/"No"). We trust the boolean as the primary
+	// signal; the truthy walker stays as a fallback in case the field is
+	// absent for some bank/response variant. Fail closed on ambiguity.
 	var envelope struct {
-		Success       bool           `json:"success"`
-		TransactionID string         `json:"requestId"`
-		Results       map[string]any `json:"results"`
+		Success       bool   `json:"success"`
+		TransactionID string `json:"requestId"`
+		Results       struct {
+			IdentityAndAccountVerified *bool          `json:"identity_and_account_verified"`
+			VerificationResults        map[string]any `json:"verification_results"`
+			Raw                        map[string]any `json:"-"`
+		} `json:"results"`
 	}
 	if jErr := json.Unmarshal(raw, &envelope); jErr != nil {
 		return &BankAccountResult{Verified: false, Raw: raw}, nil
 	}
 
-	verified := envelope.Success && bankResultLooksVerified(envelope.Results)
+	verified := false
+	switch {
+	case envelope.Results.IdentityAndAccountVerified != nil:
+		// Primary path: the provider's own verdict.
+		verified = envelope.Success && *envelope.Results.IdentityAndAccountVerified
+	default:
+		// Fallback: no explicit verdict field — scan the breakdown for a
+		// truthy ownership/name-match signal.
+		verified = envelope.Success && bankResultLooksVerified(envelope.Results.VerificationResults)
+	}
+
 	return &BankAccountResult{
 		Verified:      verified,
 		TransactionID: envelope.TransactionID,
