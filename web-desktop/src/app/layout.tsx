@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import './styles/global.css';
 import NavBar from '@/components/navBar';
 import Footer from '@/components/footer';
+import ThemedMain from '@/components/themedMain';
 
 export const metadata: Metadata = {
   title: 'TicketHawk',
@@ -15,7 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <NavBar />
 
-        <main className="pb-[60px] md:pb-0">{children}</main>
+        <ThemedMain>{children}</ThemedMain>
 
         <Footer />
 
