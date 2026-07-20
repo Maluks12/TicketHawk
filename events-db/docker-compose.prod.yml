@@ -40,6 +40,32 @@ services:
       redis:
         condition: service_healthy
 
+   # ── Admin dashboard (admin.ticket-hawk.com) ─────────────────────────────────
+  admin:
+    build:
+      context: ../events-admin
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "https://api.ticket-hawk.com/v1"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"   # host 3001 → container 3000
+    depends_on:
+      - api
+ 
+  # ── Organiser dashboard (organiser.ticket-hawk.com) ─────────────────────────
+  organiser:
+    build:
+      context: ../events-organizer
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "https://api.ticket-hawk.com/v1"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3000"   # host 3002 → container 3000
+    depends_on:
+      - api
+
   # ── Cloudflare Tunnel ───────────────────────────────────────────────────────
   # Token-based tunnel: create it in the Cloudflare Zero Trust dashboard, set the
   # public hostname (api.yourdomain.co.za) → http://api:8080, and paste the token
