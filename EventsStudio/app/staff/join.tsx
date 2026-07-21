@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform,
+  ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { STUDIO } from '../../components/studio/theme';
 import { redeemStaffCode, listMyScanEvents, type ScannableEvent } from '../../lib/staff';
+import { useAuthStore } from '../../store/authStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Join event staff — the staffer's single entry point.
@@ -64,6 +65,31 @@ export default function JoinEventStaff() {
   const openScanner = (ev: ScannableEvent) =>
     router.push({ pathname: '/organiser/scan', params: { eventId: ev.id, title: ev.title } } as any);
 
+  // For organisers arriving from the dashboard this is a plain back. For door
+  // staff this screen IS home (nothing to go back to), so the same button
+  // becomes sign-out.
+  const { logout } = useAuthStore();
+  const leave = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    Alert.alert('Sign out', 'Sign out of TicketHawk Studio on this device?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await logout();
+          } finally {
+            router.replace('/auth/login' as any);
+          }
+        },
+      },
+    ]);
+  };
+
   const roleBadge = (role: ScannableEvent['role']) =>
     role === 'owner' ? 'OWNER' : role === 'manager' ? 'MANAGER' : 'SCANNER';
 
@@ -71,8 +97,12 @@ export default function JoinEventStaff() {
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={22} color={STUDIO.text} />
+        <TouchableOpacity onPress={leave} hitSlop={12} style={styles.backBtn}>
+          <Ionicons
+            name={router.canGoBack() ? 'chevron-back' : 'log-out-outline'}
+            size={22}
+            color={STUDIO.text}
+          />
         </TouchableOpacity>
         <Text style={styles.title}>Event staff</Text>
         <View style={{ width: 34 }} />

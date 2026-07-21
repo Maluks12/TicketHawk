@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -94,9 +95,24 @@ export default function StudioHome() {
     .toUpperCase()
     .slice(0, 2);
 
+  // Standalone Studio app: the dashboard IS home, so the top-right action is
+  // sign-out rather than "close back to the consumer profile".
+  const { logout } = useAuthStore();
   const exit = () => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/(tabs)/profile' as any);
+    Alert.alert('Sign out', 'Sign out of TicketHawk Studio on this device?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await logout();
+          } finally {
+            router.replace('/auth/login' as any);
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -120,7 +136,7 @@ export default function StudioHome() {
           </View>
         </View>
         <TouchableOpacity onPress={exit} style={styles.closeBtn} hitSlop={10}>
-          <Feather name="x" size={20} color={STUDIO.text} />
+          <Feather name="log-out" size={18} color={STUDIO.text} />
         </TouchableOpacity>
       </View>
 

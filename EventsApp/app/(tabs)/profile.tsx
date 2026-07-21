@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
+import { openStudioApp } from '../../lib/studiolink';
 import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 import { useAppTheme } from '../../theme/colors';
@@ -164,7 +165,7 @@ export default function ProfileScreen() {
             <Text className={s.sectionTitle} style={{ color: colors.subText }}>ORGANISER</Text>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => router.push('/organiser' as any)}
+              onPress={() => openStudioApp()}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -207,7 +208,7 @@ export default function ProfileScreen() {
                   </View>
                 </View>
                 <Text style={{ fontSize: 12.5, color: colors.subText, marginTop: 2 }}>
-                  Stats, campaigns & scan tickets
+                  Opens the TicketHawk Studio app
                 </Text>
               </View>
               <Feather name="arrow-up-right" size={18} color="#7C8CFF" />
@@ -251,7 +252,7 @@ export default function ProfileScreen() {
               <Row
                 icon={<Ionicons name="qr-code-outline" size={16} color={colors.iconColor} />}
                 label="Event staff"
-                onPress={() => router.push('/staff/join' as any)}
+                onPress={() => openStudioApp()}
                 colors={colors}
               />
             </Section>
