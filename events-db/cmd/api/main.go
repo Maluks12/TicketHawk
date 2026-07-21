@@ -85,6 +85,17 @@ func main() {
 		rdb = rateLimitManager.Client()
 	}
 
+	// LOAD_TEST_MODE=true drops every general rate-limit middleware so a
+	// single-IP load test (e.g. k6 from one machine) measures real capacity
+	// instead of the limiter. The Redis client above is extracted FIRST, so
+	// feed/event caching keeps working. Auth endpoints keep their in-memory
+	// fail-closed brute-force protection regardless (see rate_limit_auth.go).
+	// NEVER leave this enabled in normal production operation.
+	if os.Getenv("LOAD_TEST_MODE") == "true" {
+		log.Warn().Msg("LOAD_TEST_MODE ENABLED — general rate limiting DISABLED; revert after testing")
+		rateLimitManager = nil
+	}
+
 	var eventCache *cache.EventCache
 	if rdb != nil {
 		eventCache = cache.NewEventCache(rdb)
