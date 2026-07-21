@@ -10,10 +10,6 @@ interface DashStats {
   published_events: number;
   total_bookings: number;
   total_revenue: number;
-  active_campaigns: number;
-  total_impressions: number;
-  total_clicks: number;
-  total_ad_spend: number;
 }
 
 interface RecentEvent {
@@ -26,32 +22,19 @@ interface RecentEvent {
   price: number;
 }
 
-interface RecentCampaign {
-  id: string;
-  status: string;
-  daily_budget: number;
-  today_spent: number;
-  total_impressions: number;
-  total_clicks: number;
-  event?: { title: string };
-}
-
 export default function DashboardPage() {
   const toast = useToast();
   const [stats, setStats] = useState<DashStats | null>(null);
   const [events, setEvents] = useState<RecentEvent[]>([]);
-  const [campaigns, setCampaigns] = useState<RecentCampaign[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       api.get('/organiser/dashboard/stats'),
       api.get('/organiser/dashboard/events'),
-      api.get('/organiser/campaigns'),
-    ]).then(([statsRes, evRes, campRes]) => {
+    ]).then(([statsRes, evRes]) => {
       setStats(statsRes.data);
       setEvents((evRes.data.events ?? []).slice(0, 5));
-      setCampaigns((campRes.data.campaigns ?? []).filter((c: RecentCampaign) => c.status === 'active').slice(0, 4));
     }).catch(() => toast('Failed to load dashboard', 'error'))
       .finally(() => setLoading(false));
   }, []);
@@ -76,8 +59,8 @@ export default function DashboardPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Link href="/campaigns/create" className="btn btn-primary">
-            + Create campaign
+          <Link href="/events/create" className="btn btn-primary">
+            + Create event
           </Link>
         </div>
       </div>
@@ -121,9 +104,9 @@ export default function DashboardPage() {
             }
           />
           <StatCard
-            label="Active campaigns"
-            value={stats?.active_campaigns ?? 0}
-            sub={`${(stats?.total_impressions ?? 0).toLocaleString()} total impressions`}
+            label="Total events"
+            value={stats?.total_events ?? 0}
+            sub="across all statuses"
             accent="blue"
             icon={
               <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
@@ -183,95 +166,27 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Active Campaigns */}
+          {/* Quick actions — campaigns removed for launch; ads may return later */}
           <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '14px 16px', borderBottom: '1px solid #ebedf0',
-            }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Active campaigns</div>
-              <Link href="/campaigns" style={{ fontSize: 13, color: '#1877f2' }}>Manage</Link>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #ebedf0' }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Quick actions</div>
             </div>
-            {campaigns.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center' }}>
-                <div style={{ fontSize: 13, color: '#8a8d91', marginBottom: 12 }}>
-                  No active campaigns. Boost an event to reach more people.
-                </div>
-                <Link href="/campaigns/create" className="btn btn-primary btn-sm">
-                  Create campaign
-                </Link>
-              </div>
-            ) : (
-              <div>
-                {campaigns.map((c, i) => {
-                  const ctr = c.total_impressions > 0
-                    ? ((c.total_clicks / c.total_impressions) * 100).toFixed(2)
-                    : '0.00';
-                  const budgetUsed = c.daily_budget > 0
-                    ? Math.min((c.today_spent / c.daily_budget) * 100, 100)
-                    : 0;
-                  return (
-                    <div key={c.id} style={{
-                      padding: '12px 16px',
-                      borderBottom: i < campaigns.length - 1 ? '1px solid #f0f2f5' : 'none',
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>
-                          {c.event?.title ?? 'Unknown'}
-                        </div>
-                        <span className="badge badge-active" style={{ flexShrink: 0 }}>Active</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: 16, fontSize: 12, color: '#606770', marginBottom: 8 }}>
-                        <span>Today: {fmtMoney(c.today_spent)}</span>
-                        <span>Budget: {fmtMoney(c.daily_budget)}/day</span>
-                        <span>CTR: {ctr}%</span>
-                      </div>
-                      {/* Budget progress bar */}
-                      <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${budgetUsed}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Ad performance summary row ───────────────────────────────── */}
-        {(stats?.active_campaigns ?? 0) > 0 && (
-          <div style={{
-            marginTop: 16, background: '#fff', border: '1px solid #dddfe2',
-            borderRadius: 8, padding: '16px 20px',
-          }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-              Ad performance summary
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0 }}>
+            <div style={{ padding: 8 }}>
               {[
-                { label: 'Total impressions', value: (stats?.total_impressions ?? 0).toLocaleString() },
-                { label: 'Total clicks', value: (stats?.total_clicks ?? 0).toLocaleString() },
-                {
-                  label: 'Average CTR',
-                  value: stats && stats.total_impressions > 0
-                    ? `${((stats.total_clicks / stats.total_impressions) * 100).toFixed(2)}%`
-                    : '0.00%',
-                },
-                { label: 'Total ad spend', value: fmtMoney(stats?.total_ad_spend ?? 0) },
-              ].map((item, i, arr) => (
-                <div key={item.label} style={{
-                  padding: '0 20px',
-                  borderRight: i < arr.length - 1 ? '1px solid #ebedf0' : 'none',
+                { href: '/events/create', title: 'Create an event', desc: 'Publish free or paid events — they appear in the TicketHawk feed organically.' },
+                { href: '/events', title: 'Manage events', desc: 'Edit details, track sales, and manage door staff per event.' },
+              ].map((a) => (
+                <Link key={a.href} href={a.href} style={{
+                  display: 'block', padding: '12px 10px', borderRadius: 6,
+                  textDecoration: 'none', color: 'inherit',
                 }}>
-                  <div style={{ fontSize: 12, color: '#606770', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>
-                    {item.label}
-                  </div>
-                  <div style={{ fontSize: 22, fontWeight: 700, color: '#1c1e21' }}>{item.value}</div>
-                </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#1877f2' }}>{a.title}</div>
+                  <div style={{ fontSize: 12, color: '#606770', marginTop: 2 }}>{a.desc}</div>
+                </Link>
               ))}
             </div>
           </div>
-        )}
+        </div>
 
       </div>
     </div>

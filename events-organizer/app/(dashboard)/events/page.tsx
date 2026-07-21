@@ -364,11 +364,6 @@ export default function EventsPage() {
                             Submit
                           </button>
                         )}
-                        {e.status === 'published' && (
-                          <button className="btn btn-xs" onClick={() => router.push(`/campaigns/create`)}>
-                            Boost
-                          </button>
-                        )}
                         {!['cancelled', 'completed'].includes(e.status) && (
                           <button className="btn btn-xs btn-danger" onClick={() => cancelEvent(e.id)}>
                             Cancel

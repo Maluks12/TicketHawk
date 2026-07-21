@@ -24,10 +24,6 @@ interface EventStats {
   total_bookings: number;
   confirmed_bookings: number;
   pending_bookings: number;
-  active_campaign: {
-    id: string; daily_budget: number; today_spent: number;
-    total_impressions: number; total_clicks: number; status: string;
-  } | null;
 }
 
 interface Booking {
@@ -156,35 +152,8 @@ export default function EventDetailPage() {
             {fmtDate(ev.start_time)} · {ev.venue_name}, {ev.city}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {ev.status === 'published' && !stats.active_campaign && (
-            <Link href="/campaigns/create" className="btn btn-primary btn-sm">
-              Boost this event
-            </Link>
-          )}
-        </div>
+        {/* Boost/campaign CTA removed — ads disabled for launch */}
       </div>
-
-      {/* ── Campaign banner if active ─────────────────────────────────── */}
-      {stats.active_campaign && (
-        <div style={{
-          background: '#e7f3ff', borderBottom: '1px solid #b8d9ff',
-          padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12,
-          fontSize: 13,
-        }}>
-          <svg viewBox="0 0 20 20" fill="#1877f2" width="16" height="16">
-            <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
-          </svg>
-          <span style={{ fontWeight: 600, color: '#1877f2' }}>Active campaign</span>
-          <span style={{ color: '#606770' }}>·</span>
-          <span>{fmtMoney(stats.active_campaign.today_spent)} spent today</span>
-          <span style={{ color: '#606770' }}>·</span>
-          <span>{stats.active_campaign.total_impressions.toLocaleString()} impressions</span>
-          <Link href="/campaigns" style={{ marginLeft: 'auto', color: '#1877f2', fontWeight: 600 }}>
-            Manage →
-          </Link>
-        </div>
-      )}
 
       {/* ── Tab bar ──────────────────────────────────────────────────── */}
       <div className="tab-bar">
@@ -360,35 +329,6 @@ export default function EventDetailPage() {
               </div>
             )}
 
-            {/* Campaign performance */}
-            {stats.active_campaign && (
-              <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden' }}>
-                <div style={{ padding: '14px 16px', borderBottom: '1px solid #ebedf0', fontWeight: 700, fontSize: 15 }}>
-                  Ad campaign performance
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', padding: '16px' }}>
-                  {[
-                    { label: 'Today spend', value: fmtMoney(stats.active_campaign.today_spent) },
-                    { label: 'Daily budget', value: fmtMoney(stats.active_campaign.daily_budget) },
-                    { label: 'Impressions', value: stats.active_campaign.total_impressions.toLocaleString() },
-                    {
-                      label: 'CTR',
-                      value: stats.active_campaign.total_impressions > 0
-                        ? `${((stats.active_campaign.total_clicks / stats.active_campaign.total_impressions) * 100).toFixed(2)}%`
-                        : '0.00%',
-                    },
-                  ].map((item, i, arr) => (
-                    <div key={item.label} style={{
-                      padding: '0 16px',
-                      borderRight: i < arr.length - 1 ? '1px solid #ebedf0' : 'none',
-                    }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: '#606770', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>{item.label}</div>
-                      <div style={{ fontSize: 20, fontWeight: 700 }}>{item.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 

@@ -17,19 +17,17 @@ import { StatCard, Card, Chip, ProgressBar, Loader, Empty } from '../../componen
 import {
   getOrgStats,
   getOrgEvents,
-  getOrgCampaigns,
   OrgStats,
   OrgEventRow,
-  OrgCampaign,
   fmtMoney,
   fmtMoneyCompact,
   fmtNum,
   fmtDate,
-  ctr,
   capacityPct,
 } from '../../lib/organiser';
 
-type TabId = 'overview' | 'events' | 'campaigns';
+// Campaigns tab removed for launch — ads are disabled platform-wide.
+type TabId = 'overview' | 'events';
 
 const capColor = (pct: number) =>
   pct >= 90 ? STUDIO.red : pct >= 70 ? STUDIO.amber : STUDIO.accent;
@@ -42,7 +40,6 @@ export default function StudioHome() {
   const [tab, setTab] = useState<TabId>('overview');
   const [stats, setStats] = useState<OrgStats | null>(null);
   const [events, setEvents] = useState<OrgEventRow[]>([]);
-  const [campaigns, setCampaigns] = useState<OrgCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
@@ -59,19 +56,16 @@ export default function StudioHome() {
     // allSettled instead of all: one slow/failed endpoint no longer sinks the
     // whole screen — we render whatever arrived and only error out if
     // EVERYTHING failed.
-    const [s, e, c] = await Promise.allSettled([
+    const [s, e] = await Promise.allSettled([
       getOrgStats(),
       getOrgEvents(),
-      getOrgCampaigns(),
     ]);
     if (seq !== loadSeq.current) return; // a newer load superseded this one
 
     if (s.status === 'fulfilled') setStats(s.value);
     if (e.status === 'fulfilled') setEvents(e.value);
-    if (c.status === 'fulfilled') setCampaigns(c.value);
 
-    const allFailed =
-      s.status === 'rejected' && e.status === 'rejected' && c.status === 'rejected';
+    const allFailed = s.status === 'rejected' && e.status === 'rejected';
     setError(allFailed);
     setLoading(false);
     setRefreshing(false);
@@ -89,17 +83,6 @@ export default function StudioHome() {
     setRefreshing(true);
     load();
   }, [load]);
-
-  const eventTitleById = useMemo(() => {
-    const m: Record<string, string> = {};
-    events.forEach((e) => (m[e.id] = e.title));
-    return m;
-  }, [events]);
-
-  const activeCampaigns = useMemo(
-    () => campaigns.filter((c) => c.status === 'active'),
-    [campaigns],
-  );
 
   const fullName =
     user?.first_name ?? user?.email?.split('@')[0] ?? 'Organiser';
@@ -186,11 +169,8 @@ export default function StudioHome() {
               <OverviewTab
                 stats={stats}
                 events={events}
-                activeCampaigns={activeCampaigns}
-                eventTitleById={eventTitleById}
                 onOpenEvent={(id) => router.push(`/organiser/event/${id}` as any)}
                 onSeeEvents={() => setTab('events')}
-                onSeeCampaigns={() => setTab('campaigns')}
               />
               {/* Organisers can ALSO be door staff for someone else's event —
                   membership is per-event, not per-role. This is their only
@@ -221,10 +201,6 @@ export default function StudioHome() {
               onOpenEvent={(id) => router.push(`/organiser/event/${id}` as any)}
             />
           )}
-
-          {tab === 'campaigns' && (
-            <CampaignsTab campaigns={campaigns} eventTitleById={eventTitleById} />
-          )}
         </ScrollView>
       )}
 
@@ -242,13 +218,7 @@ export default function StudioHome() {
           active={tab === 'events'}
           onPress={() => setTab('events')}
         />
-        <NavItem
-          icon="bar-chart-2"
-          label="Campaigns"
-          active={tab === 'campaigns'}
-          onPress={() => setTab('campaigns')}
-        />
-        <TouchableOpacity
+                <TouchableOpacity
           style={styles.scanCta}
           activeOpacity={0.85}
           onPress={() => router.push('/organiser/scan' as any)}
@@ -293,19 +263,13 @@ function NavItem({
 function OverviewTab({
   stats,
   events,
-  activeCampaigns,
-  eventTitleById,
   onOpenEvent,
   onSeeEvents,
-  onSeeCampaigns,
 }: {
   stats: OrgStats | null;
   events: OrgEventRow[];
-  activeCampaigns: OrgCampaign[];
-  eventTitleById: Record<string, string>;
   onOpenEvent: (id: string) => void;
   onSeeEvents: () => void;
-  onSeeCampaigns: () => void;
 }) {
   const recent = events.slice(0, 4);
   return (
@@ -356,17 +320,11 @@ function OverviewTab({
           icon={<Feather name="calendar" size={15} color={STUDIO.blue} />}
         />
         <StatCard
-          label="Active campaigns"
-          value={fmtNum(activeCampaigns.length)}
-          sub={
-            activeCampaigns.length
-              ? `${fmtNum(
-                  activeCampaigns.reduce((a, c) => a + c.total_impressions, 0),
-                )} impressions`
-              : 'none running'
-          }
+          label="Tickets sold"
+          value={fmtNum(stats?.total_tickets_sold ?? 0)}
+          sub={`${fmtNum(stats?.total_bookings ?? 0)} bookings`}
           accent="amber"
-          icon={<Feather name="bar-chart-2" size={15} color={STUDIO.amber} />}
+          icon={<Feather name="tag" size={15} color={STUDIO.amber} />}
         />
       </View>
 
@@ -394,34 +352,6 @@ function OverviewTab({
         )}
       </Card>
 
-      {/* Active campaigns */}
-      <Card
-        title="Active campaigns"
-        action={
-          <TouchableOpacity onPress={onSeeCampaigns}>
-            <Text style={styles.linkTxt}>Manage</Text>
-          </TouchableOpacity>
-        }
-        noPad
-      >
-        {activeCampaigns.length === 0 ? (
-          <Empty
-            title="No active campaigns"
-            desc="Boosted events will show their live performance here."
-          />
-        ) : (
-          activeCampaigns
-            .slice(0, 3)
-            .map((c, i) => (
-              <CampaignRow
-                key={c.id}
-                c={c}
-                title={c.event?.title ?? eventTitleById[c.event_id] ?? 'Event'}
-                divider={i < Math.min(activeCampaigns.length, 3) - 1}
-              />
-            ))
-        )}
-      </Card>
     </View>
   );
 }
@@ -500,40 +430,6 @@ function EventsTab({
   );
 }
 
-// ── Campaigns tab ─────────────────────────────────────────────────────────────
-function CampaignsTab({
-  campaigns,
-  eventTitleById,
-}: {
-  campaigns: OrgCampaign[];
-  eventTitleById: Record<string, string>;
-}) {
-  if (campaigns.length === 0) {
-    return (
-      <Card noPad>
-        <Empty
-          icon={<Feather name="bar-chart-2" size={24} color={STUDIO.muted} />}
-          title="No campaigns yet"
-          desc="Campaigns you've created to boost events will appear here with their live performance."
-        />
-      </Card>
-    );
-  }
-  return (
-    <Card noPad>
-      {campaigns.map((c, i) => (
-        <CampaignRow
-          key={c.id}
-          c={c}
-          title={c.event?.title ?? eventTitleById[c.event_id] ?? 'Event'}
-          divider={i < campaigns.length - 1}
-          detailed
-        />
-      ))}
-    </Card>
-  );
-}
-
 // ── Reusable rows ─────────────────────────────────────────────────────────────
 function EventRow({
   ev,
@@ -585,48 +481,6 @@ function EventRow({
       </View>
       <Feather name="chevron-right" size={18} color={STUDIO.faint} />
     </TouchableOpacity>
-  );
-}
-
-function CampaignRow({
-  c,
-  title,
-  divider,
-  detailed,
-}: {
-  c: OrgCampaign;
-  title: string;
-  divider: boolean;
-  detailed?: boolean;
-}) {
-  const used =
-    c.daily_budget > 0 ? Math.min((c.today_spent / c.daily_budget) * 100, 100) : 0;
-  return (
-    <View style={[styles.row, divider && styles.rowDivider]}>
-      <View style={{ flex: 1, minWidth: 0, gap: 7 }}>
-        <View style={styles.rowTitleLine}>
-          <Text style={styles.rowTitle} numberOfLines={1}>
-            {title}
-          </Text>
-          <Chip status={c.status} />
-        </View>
-        <View style={styles.metricRow}>
-          <Metric label="Today" value={fmtMoney(c.today_spent)} />
-          <Metric label="Budget" value={`${fmtMoney(c.daily_budget)}/d`} />
-          <Metric label="CTR" value={ctr(c.total_clicks, c.total_impressions)} />
-        </View>
-        {detailed && (
-          <View style={styles.metricRow}>
-            <Metric label="Impressions" value={fmtNum(c.total_impressions)} />
-            <Metric label="Clicks" value={fmtNum(c.total_clicks)} />
-            <Metric label="Spent" value={fmtMoney(c.total_spent)} />
-          </View>
-        )}
-        <View style={{ marginTop: 2 }}>
-          <ProgressBar pct={used} color={STUDIO.accent} height={5} />
-        </View>
-      </View>
-    </View>
   );
 }
 

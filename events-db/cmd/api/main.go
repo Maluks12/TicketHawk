@@ -155,8 +155,10 @@ func main() {
 	}
 	workers.StartPayoutWorker(pool, payoutService, ctx, 10*time.Minute)
 
-	workers.StartAdWorker(pool, ctx)
-	log.Info().Msg("ad worker started (pre-paid wallet mode)")
+	// Ads/campaigns DISABLED for launch — the ad worker, ad-account, campaign
+	// and ad-wallet routes are unregistered below. Feed placement is fully
+	// organic. Re-enable by restoring these blocks (handlers/repos still exist).
+	// workers.StartAdWorker(pool, ctx)
 	imgService := services.NewImageService(cfg)
 
 	// ==========================================
@@ -677,7 +679,7 @@ func main() {
 		admin.PUT("/users/promote/:id",       controllers.PromoteUserHandler(pool))
 		admin.PUT("/users/demote/:id",        controllers.DemoteUserHandler(pool))
 		admin.DELETE("/users/delete/:id",     handlers.DeleteUserHandler(pool))
-		admin.GET("/campaigns",               handlers.AdminGetCampaignsHandler(pool))
+		// admin.GET("/campaigns", handlers.AdminGetCampaignsHandler(pool)) // ads disabled for launch
 
 		// Event approval queue
 		admin.GET("/events/pending",     handlers.AdminGetPendingEventsHandler(pool))
@@ -777,43 +779,7 @@ func main() {
 		orgRoutes.GET("/payouts/profile",  handlers.GetPayoutProfileHandler(pool))
 		orgRoutes.GET("/payouts/history",  handlers.GetPayoutHistoryHandler(pool))
 		
-		// ── Ad Accounts ───────────────────────────────────────────────────────
-		// Ad account routes get tighter rate limiting than the general organiser
-		// bucket — creating and managing ad accounts are low-frequency operations.
-		adAccountRoutes := orgRoutes.Group("")
-		if rateLimitManager != nil {
-			adAccountRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
-				ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
-				"ad-accounts"))
-		}
-		{
-			adAccountRoutes.POST("/ad-accounts",                    handlers.CreateAdAccountHandler(pool))
-			adAccountRoutes.GET("/ad-accounts",                     handlers.GetAdAccountsHandler(pool))
-			adAccountRoutes.GET("/ad-accounts/:id",                 handlers.GetAdAccountHandler(pool))
-			adAccountRoutes.PATCH("/ad-accounts/:id",               handlers.UpdateAdAccountHandler(pool))
-		}
-
-		// ── Ad Campaigns ──────────────────────────────────────────────────────
-		// Campaign mutations (create/update/delete) get a stricter bucket than
-		// reads — abusive campaign creation would burn ad spend.
-		adCampaignWriteRoutes := orgRoutes.Group("")
-		if rateLimitManager != nil {
-			adCampaignWriteRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
-				ratelimit.BucketConfig{Capacity: 30, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
-				"ad-campaigns-write"))
-		}
-		{
-			adCampaignWriteRoutes.POST("/events/:id/campaigns", handlers.CreateCampaignHandler(pool))
-			adCampaignWriteRoutes.PATCH("/campaigns/:id",       handlers.UpdateCampaignHandler(pool))
-			adCampaignWriteRoutes.DELETE("/campaigns/:id",      handlers.EndCampaignHandler(pool))
-		}
-		orgRoutes.GET("/campaigns",    handlers.GetMyCampaignsHandler(pool))
-		orgRoutes.GET("/campaigns/:id", handlers.GetCampaignHandler(pool))
-
-		// ── Ad Wallet (pre-paid; card top-ups via Paystack) ───────────────────
-		orgRoutes.GET("/ad-wallet",        handlers.GetWalletBalanceHandler(pool))
-		orgRoutes.POST("/ad-wallet/topup", handlers.InitiateWalletTopupHandler(pool, paymentService))
-		orgRoutes.GET("/ad-wallet/topups", handlers.GetWalletTopupHistoryHandler(pool))
+		// ── Ads/campaigns/wallet ── DISABLED for launch (see note at ad worker) ─
 
 		// ── Dashboard ─────────────────────────────────────────────────────────
 		orgRoutes.GET("/dashboard/stats",               handlers.GetOrganizerDashboardStatsHandler(pool))

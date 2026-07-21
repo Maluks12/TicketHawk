@@ -80,11 +80,12 @@ func runSections(pool *pgxpool.Pool, fetchers []sectionFetcher, sponsoredUserID 
 	results := make([]result, len(fetchers))
 	var wg sync.WaitGroup
 
-	// Pre-fetch sponsored (paid) ad cards ONCE and share across all sections.
-	// Admin-promoted events are NOT injected here — they appear organically in
-	// the normal rows (via the admin_promoted eligibility gate), not as cards.
-	const maxAdsPerSection = 2
-	sponsored, _ := GetSponsoredForFeed(pool, sponsoredUserID, maxAdsPerSection)
+	// Ads DISABLED for launch: no sponsored cards are fetched or injected —
+	// every section is fully organic. Admin-promoted events still appear
+	// organically via the admin_promoted eligibility gate. To re-enable paid
+	// placement, restore the GetSponsoredForFeed fetch + InjectPreFetched call.
+	const maxAdsPerSection = 0
+	var sponsored []SponsoredEvent
 
 	for i, f := range fetchers {
 		wg.Add(1)
