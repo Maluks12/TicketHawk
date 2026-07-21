@@ -74,6 +74,14 @@ services:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN}"]
+    # Multiple connectors sharing ONE tunnel token. Cloudflare's edge
+    # load-balances incoming requests across every healthy connector, so this
+    # multiplies concurrent-stream throughput and removes the single-connector
+    # ceiling that a single-origin load test saturates. It also adds HA: if one
+    # replica dies, the others keep serving. No per-replica config needed — the
+    # token is identical; each container registers itself as a separate connector.
+    deploy:
+      replicas: 3
     depends_on:
       - api
 
