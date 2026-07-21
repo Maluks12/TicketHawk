@@ -51,6 +51,14 @@ type Config struct {
 	PaystackPublicKey   string
 	PaystackEnvironment string // "test" | "live" (used only for logging/sanity)
 
+	// WalletPaymentsEnabled gates the device-wallet methods (Apple Pay, Google
+	// Pay, Samsung Pay). Default OFF for launch. These surface through Paystack
+	// as normal card transactions, so the "gateway" isn't the issue — the flag
+	// simply controls whether a client may select a wallet method. Apple Pay
+	// for ZAR was impractical at last review; flip WALLET_PAYMENTS_ENABLED=true
+	// once a wallet method is actually supported and tested.
+	WalletPaymentsEnabled bool
+
 	// ── PayPal (Orders v2) ────────────────────────────────────────────────────
 	// PayPalEnabled gates whether PayPal can be selected as a payment method.
 	// Default OFF: for a ZAR-only, SA-only launch PayPal adds FX risk, an FNB
@@ -113,6 +121,7 @@ func Load() (*Config, error) {
 		PaystackPublicKey:   os.Getenv("PAYSTACK_PUBLIC_KEY"),
 		PaystackEnvironment: os.Getenv("PAYSTACK_ENVIRONMENT"),
 
+		WalletPaymentsEnabled: os.Getenv("WALLET_PAYMENTS_ENABLED") == "true",
 		PayPalEnabled:      os.Getenv("PAYPAL_ENABLED") == "true",
 		PayPalClientID:     os.Getenv("PAYPAL_CLIENT_ID"),
 		PayPalClientSecret: os.Getenv("PAYPAL_CLIENT_SECRET"),

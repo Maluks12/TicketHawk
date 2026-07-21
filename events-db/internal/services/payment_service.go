@@ -55,6 +55,11 @@ func (s *PaymentService) PayPalEnabled() bool { return s.cfg.PayPalEnabled }
 // the dormant PayPal path.
 var ErrPayPalDisabled = errors.New("paypal payments are not currently available")
 
+// ErrWalletDisabled is returned when a client requests a device-wallet method
+// (Apple Pay / Google Pay / Samsung Pay) while wallet payments are switched off
+// (WALLET_PAYMENTS_ENABLED != "true").
+var ErrWalletDisabled = errors.New("wallet payments are not currently available")
+
 // guardMethod rejects any payment method that is disabled by configuration.
 // Called at the top of every payment entry point so the check lives in one
 // place regardless of how the request arrived (single booking or cart).
@@ -62,7 +67,20 @@ func (s *PaymentService) guardMethod(m models.PaymentMethod) error {
 	if m == models.PaymentPayPal && !s.cfg.PayPalEnabled {
 		return ErrPayPalDisabled
 	}
+	if isWalletMethod(m) && !s.cfg.WalletPaymentsEnabled {
+		return ErrWalletDisabled
+	}
 	return nil
+}
+
+// isWalletMethod reports whether a method is a device wallet (Apple/Google/
+// Samsung Pay). These all route through Paystack as card transactions.
+func isWalletMethod(m models.PaymentMethod) bool {
+	switch m {
+	case models.PaymentApplePay, models.PaymentGooglePay, models.PaymentSamsungPay:
+		return true
+	}
+	return false
 }
 
 func (s *PaymentService) gatewayForMethod(m models.PaymentMethod) PaymentGateway {

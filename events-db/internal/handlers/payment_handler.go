@@ -94,6 +94,10 @@ func CreatePaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 				c.JSON(http.StatusBadRequest, gin.H{"error": "PayPal is not currently available. Please choose another payment method.", "code": "paypal_disabled"})
 				return
 			}
+			if errors.Is(err, services.ErrWalletDisabled) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Apple Pay / wallet payments are not currently available. Please choose another payment method.", "code": "wallet_disabled"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
 			return
 		}
@@ -208,6 +212,10 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 		if err != nil {
 			if errors.Is(err, services.ErrPayPalDisabled) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "PayPal is not currently available. Please choose another payment method.", "code": "paypal_disabled"})
+				return
+			}
+			if errors.Is(err, services.ErrWalletDisabled) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Apple Pay / wallet payments are not currently available. Please choose another payment method.", "code": "wallet_disabled"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
