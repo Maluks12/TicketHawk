@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
-import { openStudioApp } from '../../lib/studiolink';
+import { openStudioApp } from '../../lib/studioLink';
 import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 import { useAppTheme } from '../../theme/colors';
