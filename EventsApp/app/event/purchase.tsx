@@ -861,27 +861,6 @@ export default function TicketPurchaseScreen() {
           Payments
         </Text>
 
-        {/* Apple Pay */}
-        <TouchableOpacity onPress={() => selectPaymentMethod('apple_pay')} activeOpacity={0.7}
-          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: T.text, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, marginRight: 14 }}>
-            <AppleLogo size={13} color={T.text} weight="fill" />
-            <Text style={{ fontSize: 13, fontWeight: '800', color: T.text, letterSpacing: -0.5 }}>Pay</Text>
-          </View>
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: T.text }}>Apple Pay</Text>
-          {paymentMethod === 'apple_pay' && <Check size={18} color={T.text} weight="bold" />}
-        </TouchableOpacity>
-
-        {/* PayPal */}
-        <TouchableOpacity onPress={() => selectPaymentMethod('paypal')} activeOpacity={0.7}
-          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-          <View style={{ width: 52, height: 34, borderRadius: 8, backgroundColor: '#003087', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
-            <PaypalLogo size={20} color="#ffffff" weight="fill" />
-          </View>
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: T.text }}>PayPal</Text>
-          {paymentMethod === 'paypal' && <Check size={18} color={T.text} weight="bold" />}
-        </TouchableOpacity>
-
         {/* Instant EFT (Paystack/Ozow) — signed-in users only for now;
             guest checkout is card-only until a method-aware guest route exists. */}
         {user && (

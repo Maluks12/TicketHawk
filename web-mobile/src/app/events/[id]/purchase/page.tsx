@@ -551,7 +551,6 @@ return (
             <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payments</h3>
             {([
               { id: 'card',        Icon: CreditCard, label: 'Credit / Debit Card' },
-              { id: 'paypal',      Icon: PayPalLogo, label: 'PayPal' },
               { id: 'instant_eft', Icon: Landmark,   label: 'Instant EFT' },
             ] as const).map(({ id, Icon, label }) => (
               <div

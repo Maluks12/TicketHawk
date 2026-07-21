@@ -209,7 +209,6 @@ export default function CartCheckoutPage() {
           <div style={{ display: 'flex', gap: 10 }}>
             {[
               { id: 'card',        emoji: '💳', label: 'Credit / Debit Card' },
-              { id: 'paypal',      emoji: '🅿️', label: 'PayPal'              },
               { id: 'instant_eft', emoji: '🏦', label: 'Instant EFT'         },
             ].filter((opt) => !authReady || user || opt.id === 'card').map((opt) => (
               <button key={opt.id} onClick={() => setPayMethod(opt.id as any)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderRadius: 12, border: `2px solid ${payMethod === opt.id ? '#ff2d55' : border}`, background: payMethod === opt.id ? (isDark ? '#1a0008' : '#fff0f3') : cardBg, cursor: 'pointer' }}>
