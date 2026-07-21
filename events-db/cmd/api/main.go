@@ -747,9 +747,6 @@ func main() {
 		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))
 		orgRoutes.POST("/events/:id/listing-fee/initiate", handlers.InitiateListingFeePaymentHandler(pool, paymentService))
 
-		// KYC — identity verification for publishing paid events
-		orgRoutes.GET("/kyc",  handlers.GetKYCStatusHandler(pool))
-		orgRoutes.POST("/kyc", handlers.SubmitKYCHandler(pool, kycService))
 		// Merch linked to an event
 		orgRoutes.POST("/events/:id/merch",   handlers.OrgCreateMerchHandler(pool, eventCache))
 		orgRoutes.PUT("/merch/:id",           handlers.OrgUpdateMerchHandler(pool, eventCache))
@@ -859,10 +856,22 @@ func main() {
 	// ==========================================
 	v1.GET("/protected-test", middleware.AuthMiddleware(cfg), handlers.TestProtectedHandler())
 
-	// Organiser self-registration (no admin approval gate)
+	// Organiser application — creates a PENDING profile; the organiser role
+	// is only granted once KYC identity verification passes.
 	v1.POST("/register-organizer",
 		middleware.AuthMiddleware(cfg),
 		handlers.RegisterAsOrganizerHandler(pool),
+	)
+	// KYC — auth-only (NOT organiser-only): applicants must be able to
+	// submit identity verification BEFORE they hold the organiser role,
+	// since passing KYC is now what grants the role.
+	v1.GET("/organiser/kyc",
+		middleware.AuthMiddleware(cfg),
+		handlers.GetKYCStatusHandler(pool),
+	)
+	v1.POST("/organiser/kyc",
+		middleware.AuthMiddleware(cfg),
+		handlers.SubmitKYCHandler(pool, kycService),
 	)
 	v1.GET("/organiser/profile",
 		middleware.AuthMiddleware(cfg),

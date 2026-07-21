@@ -101,13 +101,13 @@ func SubmitKYCHandler(pool *pgxpool.Pool, kycService *services.KYCService) gin.H
 
 		if status == models.KYCVerified {
 			c.JSON(http.StatusOK, gin.H{
-				"message": "Identity verified — you can now publish paid events.",
+				"message": "Identity verified — your organiser account is now active. Sign in again to open your dashboard.",
 				"status":  status,
 			})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"message": "Identity submitted for review. You'll be able to publish paid events once it's approved (usually within 1 business day).",
+			"message": "Identity submitted for review. Your organiser account will be activated once it's approved (usually within 1 business day).",
 			"status":  status,
 		})
 	}

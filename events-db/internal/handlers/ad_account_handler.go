@@ -21,7 +21,9 @@ func resolveOrganizerID(c *gin.Context, pool *pgxpool.Pool) (string, bool) {
 	userID := c.GetString("user_id")
 	org, err := repository.GetOrganizerByUserID(pool, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Organizer profile not found"})
+		// In the KYC-gated flow this is reachable by plain attendees who hit
+		// /v1/organiser/kyc before applying — point them at the right step.
+		c.JSON(http.StatusNotFound, gin.H{"error": "No organiser application found — register as an organiser first"})
 		return "", false
 	}
 	return org.ID, true

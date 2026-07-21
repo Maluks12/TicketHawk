@@ -190,6 +190,18 @@ func (s *KYCService) Submit(ctx context.Context, sub KYCSubmission) (models.KYCS
 
 	log.Info().Str("organizer_id", sub.OrganizerID).Str("status", string(status)).
 		Str("method", method).Msg("kyc: submission processed")
+
+	// KYC-gated role: a full registry match verifies identity on the spot, so
+	// activate the organiser immediately. Best-effort — the submission itself
+	// is already saved as verified, and an admin registry re-run or manual
+	// approval also promotes, so a transient failure here self-heals.
+	if status == models.KYCVerified {
+		if pErr := repository.PromoteOrganizerAfterKYC(s.pool, ctx, sub.OrganizerID); pErr != nil {
+			log.Warn().Err(pErr).Str("organizer_id", sub.OrganizerID).
+				Msg("kyc: verified but organiser promotion failed — will resolve on admin re-run")
+		}
+	}
+
 	return status, nil
 }
 
@@ -222,6 +234,13 @@ func (s *KYCService) RunRegistryCheck(ctx context.Context, organizerID string) (
 
 	if err := repository.SaveRegistryResult(s.pool, ctx, organizerID, res.Raw, res.FullMatch); err != nil {
 		return nil, err
+	}
+	// A full match verifies the pending submission — activate the organiser.
+	// Idempotent, so calling it when the status was already verified is safe.
+	if res.FullMatch {
+		if err := repository.PromoteOrganizerAfterKYC(s.pool, ctx, organizerID); err != nil {
+			return nil, fmt.Errorf("registry check verified but promotion failed: %w", err)
+		}
 	}
 	return res, nil
 }

@@ -13,9 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// RegisterAsOrganizerHandler allows any authenticated user to self-register as
-// an organiser with a single POST and an empty body. All required DTO fields are
-// derived from the user's own account so no form is needed on the frontend.
+// RegisterAsOrganizerHandler records an authenticated user's APPLICATION to
+// become an organiser (empty body allowed; DTO fields derived from the account).
+// KYC-gated: this creates a PENDING organizer profile only — the organiser role
+// is granted when identity verification passes (see PromoteOrganizerAfterKYC).
 //
 //	POST /v1/register-organizer
 //	Body: {} - all fields optional; backend fills in sensible defaults.
@@ -84,7 +85,10 @@ func RegisterAsOrganizerHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			// If the organizer row already exists, treat it as success so
 			// the frontend can re-login and get the organizer role JWT.
 			if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
-				c.JSON(http.StatusOK, gin.H{"message": "Already an organizer"})
+				c.JSON(http.StatusOK, gin.H{
+					"message": "Application already exists — complete identity verification to activate your organiser account",
+					"kyc_required": true,
+				})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create organizer account"})
@@ -92,8 +96,9 @@ func RegisterAsOrganizerHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusCreated, gin.H{
-			"message":   "Organizer account created successfully",
-			"organizer": organizer,
+			"message":      "Application received — complete identity verification to activate your organiser account",
+			"organizer":    organizer,
+			"kyc_required": true,
 		})
 	}
 }

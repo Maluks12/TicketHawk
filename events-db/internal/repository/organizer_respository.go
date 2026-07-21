@@ -12,13 +12,15 @@ import (
 
 var ErrOrganizerNotFound = errors.New("organizer not found")
 
-// CreateOrganizer self-registers a user as an organiser.
+// CreateOrganizer records a user's APPLICATION to become an organiser.
 //
-// Unlike the old flow (admin approval queue), this atomically:
-//  1. Inserts the organizer row with status = 'approved' and verified = TRUE
-//  2. Upgrades the user's role to 'organizer' immediately
+// KYC-gated flow (changed from the old Meta-style instant self-service):
+//  1. Inserts the organizer row with status = 'pending' and verified = FALSE
+//  2. Does NOT touch users.role — the account stays an attendee
 //
-// This mirrors Meta Business self-service: no waiting, no admin gate.
+// The role upgrade happens exclusively in PromoteOrganizerAfterKYC, which
+// fires when the applicant's identity verification passes (auto registry
+// match, admin KYC approval, or admin registry re-run).
 func CreateOrganizer(pool *pgxpool.Pool, dto *models.CreateOrganizerDTO, userID string) (*models.Organizer, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -29,27 +31,21 @@ func CreateOrganizer(pool *pgxpool.Pool, dto *models.CreateOrganizerDTO, userID 
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Insert organizer — immediately active, no pending queue.
+	// 1. Insert organizer — pending until identity verification passes.
 	var org models.Organizer
 	err = tx.QueryRow(ctx, `
 		INSERT INTO organizers (
 			user_id, business_name, business_email, business_phone,
 			website_url, description, status, verified, verified_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, CURRENT_TIMESTAMP)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, NULL)
 		RETURNING id, user_id, business_name, status, created_at
 	`,
 		userID, dto.BusinessName, dto.BusinessEmail, dto.BusinessPhone,
-		dto.WebsiteURL, dto.Description, models.OrganizerApproved,
+		dto.WebsiteURL, dto.Description, models.OrganizerPending,
 	).Scan(&org.ID, &org.UserID, &org.BusinessName, &org.Status, &org.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create organizer: %w", err)
-	}
-
-	// 2. Immediately upgrade the user's role — no admin step required.
-	if _, err = tx.Exec(ctx, `UPDATE users SET role = $1 WHERE id = $2`,
-		models.RoleOrganizer, userID); err != nil {
-		return nil, fmt.Errorf("failed to upgrade user role: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -57,6 +53,40 @@ func CreateOrganizer(pool *pgxpool.Pool, dto *models.CreateOrganizerDTO, userID 
 	}
 
 	return &org, nil
+}
+
+// PromoteOrganizerAfterKYC activates an organiser whose identity verification
+// has passed: flips users.role attendee → organizer and marks the organizer
+// row approved/verified. Idempotent — safe to call from every place KYC can
+// become 'verified' (submission auto-match, admin approval, registry re-run).
+// Admin accounts are never downgraded: only 'attendee' is upgraded.
+func PromoteOrganizerAfterKYC(pool *pgxpool.Pool, ctx context.Context, organizerID string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("PromoteOrganizerAfterKYC: begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx, `
+		UPDATE users u
+		SET role = $1, updated_at = NOW()
+		FROM organizers o
+		WHERE o.id = $2 AND u.id = o.user_id AND u.role = $3
+	`, models.RoleOrganizer, organizerID, models.RoleAttendee); err != nil {
+		return fmt.Errorf("PromoteOrganizerAfterKYC: role: %w", err)
+	}
+
+	if _, err = tx.Exec(ctx, `
+		UPDATE organizers
+		SET status = $1, verified = TRUE,
+		    verified_at = COALESCE(verified_at, CURRENT_TIMESTAMP),
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`, models.OrganizerApproved, organizerID); err != nil {
+		return fmt.Errorf("PromoteOrganizerAfterKYC: organizer: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 // GetOrganizerByUserID returns the organizer profile for an authenticated user.

@@ -105,6 +105,17 @@ func AdminDecideKYCHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// KYC-gated role: approval is the moment the applicant becomes a real
+		// organiser (users.role flips, organizer row goes approved/verified).
+		if dto.Approve {
+			if err := repository.PromoteOrganizerAfterKYC(pool, c.Request.Context(), c.Param("id")); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "Identity approved but organiser activation failed — re-run the decision or registry check",
+				})
+				return
+			}
+		}
+
 		msg := "Identity verified"
 		if !dto.Approve {
 			msg = "Submission rejected — the organizer can fix and resubmit"
