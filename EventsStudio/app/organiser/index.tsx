@@ -182,15 +182,37 @@ export default function StudioHome() {
           }
         >
           {tab === 'overview' && (
-            <OverviewTab
-              stats={stats}
-              events={events}
-              activeCampaigns={activeCampaigns}
-              eventTitleById={eventTitleById}
-              onOpenEvent={(id) => router.push(`/organiser/event/${id}` as any)}
-              onSeeEvents={() => setTab('events')}
-              onSeeCampaigns={() => setTab('campaigns')}
-            />
+            <>
+              <OverviewTab
+                stats={stats}
+                events={events}
+                activeCampaigns={activeCampaigns}
+                eventTitleById={eventTitleById}
+                onOpenEvent={(id) => router.push(`/organiser/event/${id}` as any)}
+                onSeeEvents={() => setTab('events')}
+                onSeeCampaigns={() => setTab('campaigns')}
+              />
+              {/* Organisers can ALSO be door staff for someone else's event —
+                  membership is per-event, not per-role. This is their only
+                  path to the join/redeem screen, since the auth gate routes
+                  organisers straight to this dashboard. */}
+              <TouchableOpacity
+                style={styles.staffJoinRow}
+                activeOpacity={0.8}
+                onPress={() => router.push('/staff/join' as any)}
+              >
+                <View style={styles.staffJoinIcon}>
+                  <Ionicons name="people-outline" size={18} color={STUDIO.accent} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.staffJoinTitle}>Join an event as staff</Text>
+                  <Text style={styles.staffJoinSub}>
+                    Scanning for another organiser? Redeem their join code here.
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={STUDIO.muted} />
+              </TouchableOpacity>
+            </>
           )}
 
           {tab === 'events' && (
@@ -756,6 +778,32 @@ const styles = StyleSheet.create({
   },
   navItem: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 },
   navLabel: { fontSize: 10.5, fontWeight: '600' },
+
+  staffJoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: STUDIO.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: STUDIO.border,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    marginTop: 2,
+  },
+  staffJoinIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: STUDIO.accentSoft,
+    borderWidth: 1,
+    borderColor: STUDIO.accentBorder,
+  },
+  staffJoinTitle: { color: STUDIO.text, fontSize: 14, fontWeight: '700' },
+  staffJoinSub: { color: STUDIO.sub, fontSize: 12, marginTop: 2, lineHeight: 16 },
+
   scanCta: {
     flexDirection: 'row',
     alignItems: 'center',

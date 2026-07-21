@@ -64,7 +64,8 @@ export default function StudioLogin() {
             </View>
           </View>
           <Text style={styles.tagline}>
-            Scan tickets at the door and track your events — sign in with your TicketHawk account.
+            Door staff and organisers sign in with the same TicketHawk account.
+            Got a join code? Sign in and enter it on the next screen.
           </Text>
         </View>
 
