@@ -37,7 +37,7 @@ const capColor = (pct: number) =>
 export default function StudioHome() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, authReady } = useAuthStore();
 
   const [tab, setTab] = useState<TabId>('overview');
   const [stats, setStats] = useState<OrgStats | null>(null);
@@ -47,28 +47,43 @@ export default function StudioHome() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
 
+  // Monotonic id for in-flight loads. Only the LATEST call may write state:
+  // without this, a slow first request (cold API, token refresh) that finally
+  // times out AFTER a successful Retry would setError(true) and stomp the
+  // already-rendered dashboard.
+  const loadSeq = React.useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setError(false);
-    try {
-      const [s, e, c] = await Promise.all([
-        getOrgStats(),
-        getOrgEvents(),
-        getOrgCampaigns(),
-      ]);
-      setStats(s);
-      setEvents(e);
-      setCampaigns(c);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    // allSettled instead of all: one slow/failed endpoint no longer sinks the
+    // whole screen — we render whatever arrived and only error out if
+    // EVERYTHING failed.
+    const [s, e, c] = await Promise.allSettled([
+      getOrgStats(),
+      getOrgEvents(),
+      getOrgCampaigns(),
+    ]);
+    if (seq !== loadSeq.current) return; // a newer load superseded this one
+
+    if (s.status === 'fulfilled') setStats(s.value);
+    if (e.status === 'fulfilled') setEvents(e.value);
+    if (c.status === 'fulfilled') setCampaigns(c.value);
+
+    const allFailed =
+      s.status === 'rejected' && e.status === 'rejected' && c.status === 'rejected';
+    setError(allFailed);
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
   useEffect(() => {
+    // Wait for the session restore to settle before the first fetch — firing
+    // before the token is attached is what made cold launches land on the
+    // error screen while an immediate Retry succeeded.
+    if (!authReady) return;
     load();
-  }, [load]);
+  }, [authReady, load]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -142,7 +157,7 @@ export default function StudioHome() {
 
       {loading ? (
         <Loader label="Loading your numbers…" />
-      ) : error ? (
+      ) : error && !stats ? (
         <View style={{ flex: 1 }}>
           <Empty
             icon={<Feather name="wifi-off" size={26} color={STUDIO.muted} />}
