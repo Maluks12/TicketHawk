@@ -52,6 +52,15 @@ type Config struct {
 	PaystackEnvironment string // "test" | "live" (used only for logging/sanity)
 
 	// ── PayPal (Orders v2) ────────────────────────────────────────────────────
+	// PayPalEnabled gates whether PayPal can be selected as a payment method.
+	// Default OFF: for a ZAR-only, SA-only launch PayPal adds FX risk, an FNB
+	// dependency, a mandatory 30-day withdrawal window, and 4–6 day settlement,
+	// with no split support — so it stays dormant until there's a clear reason
+	// (e.g. meaningful international buyer volume) to turn it on. The gateway
+	// code is fully retained; flip PAYPAL_ENABLED=true to re-enable, and
+	// re-test against PayPal's sandbox first — dormant integrations can drift
+	// out of date with the provider's API.
+	PayPalEnabled      bool
 	PayPalClientID     string
 	PayPalClientSecret string
 	PayPalWebhookID    string // configured in the PayPal dashboard; needed to verify webhooks
@@ -104,6 +113,7 @@ func Load() (*Config, error) {
 		PaystackPublicKey:   os.Getenv("PAYSTACK_PUBLIC_KEY"),
 		PaystackEnvironment: os.Getenv("PAYSTACK_ENVIRONMENT"),
 
+		PayPalEnabled:      os.Getenv("PAYPAL_ENABLED") == "true",
 		PayPalClientID:     os.Getenv("PAYPAL_CLIENT_ID"),
 		PayPalClientSecret: os.Getenv("PAYPAL_CLIENT_SECRET"),
 		PayPalWebhookID:    os.Getenv("PAYPAL_WEBHOOK_ID"),

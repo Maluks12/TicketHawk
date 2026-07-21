@@ -21,6 +21,16 @@ import (
 //	POST /webhooks/paypal
 func PayPalWebhookHandler(paymentService *services.PaymentService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// PayPal is disabled: no PayPal payments are ever initiated, so no
+		// legitimate webhook should arrive. Acknowledge with 200 (so PayPal,
+		// or anything probing the endpoint, stops retrying) and process
+		// nothing. Defence-in-depth alongside the payment-initiation guard.
+		if !paymentService.PayPalEnabled() {
+			log.Info().Msg("paypal webhook received while PayPal is disabled — ignoring")
+			c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+			return
+		}
+
 		body, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Unreadable body"})

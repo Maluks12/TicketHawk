@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
@@ -89,6 +90,10 @@ func CreatePaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 		method := parsePaymentMethod(c)
 		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
+			if errors.Is(err, services.ErrPayPalDisabled) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "PayPal is not currently available. Please choose another payment method.", "code": "paypal_disabled"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
 			return
 		}
@@ -201,6 +206,10 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 		method := parsePaymentMethod(c)
 		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
+			if errors.Is(err, services.ErrPayPalDisabled) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "PayPal is not currently available. Please choose another payment method.", "code": "paypal_disabled"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create payment"})
 			return
 		}

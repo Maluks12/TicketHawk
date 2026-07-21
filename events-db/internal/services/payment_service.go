@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -43,6 +44,26 @@ func NewPaymentService(pool *pgxpool.Pool, cfg *config.Config, jobChan chan<- st
 // verification and authoritative status re-fetch.
 func (s *PaymentService) Paystack() *PaystackGateway { return s.paystack }
 func (s *PaymentService) PayPal() *PayPalGateway     { return s.paypal }
+
+// PayPalEnabled reports whether PayPal is currently switched on. Used by the
+// webhook handler to short-circuit while PayPal is dormant.
+func (s *PaymentService) PayPalEnabled() bool { return s.cfg.PayPalEnabled }
+
+// ErrPayPalDisabled is returned when a client requests a PayPal payment while
+// PayPal is switched off (PAYPAL_ENABLED != "true"). It's a clean, explicit
+// rejection so a hand-crafted request can't slip past the UI omission and hit
+// the dormant PayPal path.
+var ErrPayPalDisabled = errors.New("paypal payments are not currently available")
+
+// guardMethod rejects any payment method that is disabled by configuration.
+// Called at the top of every payment entry point so the check lives in one
+// place regardless of how the request arrived (single booking or cart).
+func (s *PaymentService) guardMethod(m models.PaymentMethod) error {
+	if m == models.PaymentPayPal && !s.cfg.PayPalEnabled {
+		return ErrPayPalDisabled
+	}
+	return nil
+}
 
 func (s *PaymentService) gatewayForMethod(m models.PaymentMethod) PaymentGateway {
 	if m == models.PaymentPayPal {
@@ -204,6 +225,10 @@ func (s *PaymentService) CreatePaymentIntent(booking *models.Booking, channel st
 // method: card/apple_pay route to Paystack, paypal routes to PayPal. Returns the
 // hosted-checkout URL the client opens, plus the provider reference.
 func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, method models.PaymentMethod, channel string) (redirectURL string, reference string, err error) {
+	if err := s.guardMethod(method); err != nil {
+		return "", "", err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -257,6 +282,10 @@ func (s *PaymentService) CreateCartPaymentIntent(primaryBooking *models.Booking,
 // the tier-1 payout ledger, which computes owed amounts per booking and works
 // identically for both tiers.
 func (s *PaymentService) CreateCartPaymentIntentWithMethod(primaryBooking *models.Booking, cartID string, totalAmount float64, method models.PaymentMethod, channel string) (redirectURL string, reference string, err error) {
+	if err := s.guardMethod(method); err != nil {
+		return "", "", err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
