@@ -244,6 +244,8 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 // OrganizerEventStats is the full financial breakdown for one event.
 type OrganizerEventStats struct {
 	EventID       string             `json:"event_id"`
+	Slug          string             `json:"slug"`
+	Visibility    string             `json:"visibility"`
 	Title         string             `json:"title"`
 	Status        models.EventStatus `json:"status"`
 	StartTime     time.Time          `json:"start_time"`
@@ -291,13 +293,13 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 
 	// Verify ownership and pull basic event fields
 	err := pool.QueryRow(ctx, `
-		SELECT id, title, status, start_time, end_time, city, venue_name,
+		SELECT id, slug, visibility, title, status, start_time, end_time, city, venue_name,
 		       price, currency, max_capacity, tickets_sold,
 		       COALESCE(views, 0), cover_image_url, banner_image_url
 		FROM events
 		WHERE id = $1 AND organizer_id = $2
 	`, eventID, organizerID).Scan(
-		&s.EventID, &s.Title, &s.Status, &s.StartTime, &s.EndTime,
+		&s.EventID, &s.Slug, &s.Visibility, &s.Title, &s.Status, &s.StartTime, &s.EndTime,
 		&s.City, &s.VenueName, &s.Price, &s.Currency,
 		&s.MaxCapacity, &s.TicketsSold, &s.Views, &s.CoverImageURL, &s.BannerImageURL,
 	)

@@ -89,9 +89,10 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             max_tickets_per_user, venue_type,
             refund_policy, terms_and_conditions, tags, performers, teams,
             organizer_id, status, listing_fee_paid, published_at,
-            visibility, rights_declared_at, rights_declaration_version
+            visibility, rights_declared_at, rights_declaration_version,
+            scan_open_offset_min, scan_close_offset_min
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
         RETURNING id, slug, title, description, cover_image_url, start_time, end_time,
                   price, currency, max_capacity, tickets_sold, status, organizer_id, created_at, updated_at
     `
@@ -107,6 +108,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags, dto.Performers, dto.Teams,
 		organizerID, status, listingFeePaid, publishedAt,
 		visibility, rightsAt, rightsVersion,
+		dto.ScanOpenOffsetMin, dto.ScanCloseOffsetMin,
 	).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL,
 		&event.StartTime, &event.EndTime, &event.Price, &event.Currency,

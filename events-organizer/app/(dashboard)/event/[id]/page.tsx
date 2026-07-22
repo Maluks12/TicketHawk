@@ -14,7 +14,7 @@ const MERCH_ENABLED = false;
 
 interface EventStats {
   event: {
-    id: string; title: string; status: string; start_time: string; end_time: string;
+    id: string; slug?: string; visibility?: string; title: string; status: string; start_time: string; end_time: string;
     city: string; venue_name: string; price: number; currency: string;
     tickets_sold: number; max_capacity: number | null; views: number;
     cover_image_url: string | null;
@@ -127,6 +127,24 @@ export default function EventDetailPage() {
   }
 
   const ev = stats.event;
+
+  // ── Shareable event link ──────────────────────────────────────────────────
+  // Only meaningful once the event is live (published / published_private).
+  // Uses the public web base (NEXT_PUBLIC_SITE_URL) and the event slug, falling
+  // back to the id and to the production domain if the env var isn't set.
+  const [copied, setCopied] = useState(false);
+  const isLive = ev.status === 'published' || ev.status === 'published_private';
+  const siteBase = process.env.NEXT_PUBLIC_SITE_URL || 'https://ticket-hawk.com';
+  const shareUrl = `${siteBase}/events/${ev.slug || ev.id}`;
+  const copyShare = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast('Could not copy — long-press the link to copy it manually', 'error');
+    }
+  };
   const capacityPct = ev.max_capacity
     ? Math.min((ev.tickets_sold / ev.max_capacity) * 100, 100)
     : null;
@@ -151,6 +169,27 @@ export default function EventDetailPage() {
           <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
             {fmtDate(ev.start_time)} · {ev.venue_name}, {ev.city}
           </div>
+
+          {isLive && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, maxWidth: 360,
+                background: '#f0f2f5', border: '1px solid #dddfe2', borderRadius: 6,
+                padding: '6px 10px', fontSize: 12.5, color: '#1c1e21',
+                overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+              }}>
+                <svg viewBox="0 0 20 20" fill="#606770" width="14" height="14" style={{ flexShrink: 0 }}>
+                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
+                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
+                </svg>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{shareUrl}</span>
+              </div>
+              <button className="btn btn-sm" onClick={copyShare}>
+                {copied ? '✓ Copied' : 'Copy link'}
+              </button>
+              <a className="btn btn-sm" href={shareUrl} target="_blank" rel="noopener noreferrer">Open</a>
+            </div>
+          )}
         </div>
         {/* Boost/campaign CTA removed — ads disabled for launch */}
       </div>

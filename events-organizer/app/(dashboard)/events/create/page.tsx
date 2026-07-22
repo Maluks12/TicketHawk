@@ -202,6 +202,11 @@ export default function CreateEventPage() {
   const [startTime,           setStartTime]           = useState('');
   const [endTime,             setEndTime]             = useState('');
   const [expiresAt,           setExpiresAt]           = useState('');
+  // Scan (admission) window. 'default' keeps the 2h-before / 2h-after grace.
+  // 'custom' exposes minute offsets for all-day or tight-door events.
+  const [scanWindowMode, setScanWindowMode] = useState<'default' | 'custom'>('default');
+  const [scanOpenMin,  setScanOpenMin]  = useState('120');   // minutes before start
+  const [scanCloseMin, setScanCloseMin] = useState('120');   // minutes after end
   const [isFree,              setIsFree]              = useState(true);
   // Event class — drives visibility + what verification tier is needed.
   // private_free is the only class every organiser (tier 1) can publish.
@@ -394,6 +399,10 @@ export default function CreateEventPage() {
         terms_and_conditions: termsAndConditions.trim() || null,
         visibility:           eventType === 'public' ? 'public' : 'private_link',
       };
+      if (scanWindowMode === 'custom') {
+        body.scan_open_offset_min  = parseInt(scanOpenMin, 10)  || 0;
+        body.scan_close_offset_min = parseInt(scanCloseMin, 10) || 0;
+      }
       // Note: backend DTO spells this "max_capicity" (typo kept intentionally to match backend)
       if (maxCapacity)       body.max_capicity          = parseInt(maxCapacity);
       if (maxTicketsPerUser) body.max_tickets_per_user  = parseInt(maxTicketsPerUser);
@@ -532,6 +541,38 @@ export default function CreateEventPage() {
                   <input type="datetime-local" value={expiresAt}
                     onChange={e => setExpiresAt(e.target.value)} style={inp} />
                   <div className="field-hint">Tickets stop selling after this date</div>
+                </div>
+
+                <div style={{ marginTop: 16 }}>
+                  <label>Ticket scanning window</label>
+                  <select value={scanWindowMode}
+                    onChange={e => setScanWindowMode(e.target.value as 'default' | 'custom')}
+                    style={inp}>
+                    <option value="default">Default — opens 2 hours before, closes 2 hours after</option>
+                    <option value="custom">Custom — set my own window</option>
+                  </select>
+                  <div className="field-hint">
+                    When staff can scan tickets at the door. All-day events may want a wider window.
+                  </div>
+
+                  {scanWindowMode === 'custom' && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+                      <div>
+                        <label style={{ fontSize: 12.5 }}>Opens before start (minutes)</label>
+                        <input type="number" min={0} max={10080} value={scanOpenMin}
+                          onChange={e => setScanOpenMin(e.target.value)} style={inp}
+                          placeholder="120" />
+                        <div className="field-hint">e.g. 120 = 2 hours</div>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12.5 }}>Closes after end (minutes)</label>
+                        <input type="number" min={0} max={10080} value={scanCloseMin}
+                          onChange={e => setScanCloseMin(e.target.value)} style={inp}
+                          placeholder="120" />
+                        <div className="field-hint">e.g. 720 = 12 hours (all-day)</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </FormCard>
 

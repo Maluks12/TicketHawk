@@ -275,6 +275,8 @@ func ScanRotatingQRHandler(
 			bookingStatus   string
 			startTime       time.Time
 			endTime         time.Time
+			scanOpenOff     *int   // custom scan-open offset (min before start); nil = default 2h
+			scanCloseOff    *int   // custom scan-close offset (min after end);  nil = default 2h
 			organizerUserID string // equals events.organizer_id which REFERENCES users(id)
 			isStaff         bool   // active event_staff membership for the scanner
 		)
@@ -285,6 +287,8 @@ func ScanRotatingQRHandler(
 				b.booking_status,
 				e.start_time,
 				e.end_time,
+				e.scan_open_offset_min,
+				e.scan_close_offset_min,
 				e.organizer_id AS organizer_user_id,
 				(es.user_id IS NOT NULL) AS is_staff
 			FROM ticket_assignments ta
@@ -300,6 +304,8 @@ func ScanRotatingQRHandler(
 			&bookingStatus,
 			&startTime,
 			&endTime,
+			&scanOpenOff,
+			&scanCloseOff,
 			&organizerUserID,
 			&isStaff,
 		)
@@ -332,7 +338,8 @@ func ScanRotatingQRHandler(
 
 		// ── Step 3: event admission window ────────────────────────────────────
 		now := time.Now()
-		if now.Before(startTime.Add(-2*time.Hour)) || now.After(endTime.Add(2*time.Hour)) {
+		scanOpen, scanClose := models.ScanWindow(startTime, endTime, scanOpenOff, scanCloseOff)
+		if now.Before(scanOpen) || now.After(scanClose) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Outside event admission window"})
 			return
 		}

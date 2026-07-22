@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"events-db/internal/models"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -264,13 +265,17 @@ func CreateStaffCode(
 	}
 	if expiresAt.IsZero() {
 		var endTime time.Time
-		if err := pool.QueryRow(ctx, `SELECT end_time FROM events WHERE id = $1`, eventID).Scan(&endTime); err != nil {
+		var scanCloseOff *int
+		if err := pool.QueryRow(ctx,
+			`SELECT end_time, scan_close_offset_min FROM events WHERE id = $1`, eventID,
+		).Scan(&endTime, &scanCloseOff); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, ErrEventNotFound
 			}
 			return nil, err
 		}
-		expiresAt = endTime.Add(2 * time.Hour)
+		// Join codes expire when the (possibly custom) admission window closes.
+		expiresAt = models.ScanCloses(endTime, scanCloseOff)
 	}
 
 	// Retry on the (astronomically unlikely) unique collision.

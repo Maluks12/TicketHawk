@@ -177,6 +177,11 @@ type CreateEventDTO struct {
 	// Visibility: 'public' (default, discoverable, admin-reviewed) or
 	// 'private_link' (link-only, skips review, hidden from feed/search).
 	Visibility         *string `json:"visibility" binding:"omitempty,oneof=public private_link"`
+	// Scan (admission) window overrides, in MINUTES. nil = default 2h grace on
+	// that side. ScanOpenOffsetMin = minutes before start_time scanning opens;
+	// ScanCloseOffsetMin = minutes after end_time it closes. Ceiling 7 days.
+	ScanOpenOffsetMin  *int `json:"scan_open_offset_min" binding:"omitempty,min=0,max=10080"`
+	ScanCloseOffsetMin *int `json:"scan_close_offset_min" binding:"omitempty,min=0,max=10080"`
 	// RightsDeclarationAccepted: organizer confirms they hold the rights to
 	// host/sell this event. Can also be accepted later at publish time.
 	RightsDeclarationAccepted bool `json:"rights_declaration_accepted"`
