@@ -47,10 +47,6 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    // A 401 from an AUTH endpoint (login / register / refresh) means "bad
-    // credentials", NOT "session expired" — let the caller show the error.
-    // Redirecting/reloading here caused the login page to reload on every
-    // wrong-password attempt and swallowed the error message.
     const url: string = original?.url ?? '';
     const isAuthCall = url.includes('/auth/login')
       || url.includes('/auth/register')
@@ -59,11 +55,22 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && original && !original._retry
         && !isAuthCall && typeof window !== 'undefined') {
       original._retry = true;
+
+      // If there's no refresh token at all, there is no session to restore —
+      // this is a not-yet-authenticated call (e.g. a race right after login),
+      // NOT an expired session. Reject quietly and let the caller decide;
+      // do NOT hard-redirect/reload the page.
+      const hasRefresh = !!localStorage.getItem('evt_refresh');
+      if (!hasRefresh) {
+        return Promise.reject(error);
+      }
+
       try {
         const token = await refreshAccessToken();
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
       } catch {
+        // A real refresh failure = genuinely expired/revoked session.
         clearSession();
         window.location.href = '/login';
       }
