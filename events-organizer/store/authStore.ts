@@ -47,7 +47,13 @@ export const useOrgAuth = create<OrgAuthState>((set) => ({
     // (or any exception) left localStorage empty and every later request went
     // out unauthenticated. Storage must never be gated behind the decode.
     localStorage.setItem('evt_token', token);
+    // Always OVERWRITE the refresh token — and if this login didn't return one,
+    // drop any leftover from a previous session. Replaying a stale/rotated
+    // refresh token makes the backend treat it as token reuse (theft) and
+    // revoke the whole session family, which 401s the fresh session and bounces
+    // the user back to a wiped login screen.
     if (data.refresh_token) localStorage.setItem('evt_refresh', data.refresh_token);
+    else localStorage.removeItem('evt_refresh');
 
     // Decode defensively. A base64url JWT segment needs padding fixups before
     // atob; if anything is off we still have a working session and just fall

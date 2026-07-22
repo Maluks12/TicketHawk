@@ -52,27 +52,53 @@ api.interceptors.response.use(
       || url.includes('/auth/register')
       || url.includes('/auth/refresh');
 
-    if (error.response?.status === 401 && original && !original._retry
+    if (error.response?.status === 401 && original
         && !isAuthCall && typeof window !== 'undefined') {
-      original._retry = true;
+      const token = localStorage.getItem('evt_token');
 
-      // If there's no refresh token at all, there is no session to restore —
-      // this is a not-yet-authenticated call (e.g. a race right after login),
-      // NOT an expired session. Reject quietly and let the caller decide;
-      // do NOT hard-redirect/reload the page.
-      const hasRefresh = !!localStorage.getItem('evt_refresh');
-      if (!hasRefresh) {
-        return Promise.reject(error);
-      }
-
-      try {
-        const token = await refreshAccessToken();
+      // ── Race retry ─────────────────────────────────────────────────────
+      // The request went out WITHOUT an Authorization header even though we
+      // now hold a token. This is the long-standing post-login propagation
+      // race: a gate fires its first authenticated call in the same tick the
+      // token is written, the request interceptor read localStorage a moment
+      // too early, and the backend rejected the bare request with 401
+      // "authorization header required". The access token is perfectly valid
+      // — it just wasn't on the request. Re-attach it and retry ONCE.
+      //
+      // This is the fix for the "login just reloads the page" loop: the old
+      // code funnelled this race into the refresh-or-reload path below, and a
+      // failed refresh ran window.location + clearSession, bouncing the user
+      // back to a wiped login screen. A plain retry spends no refresh token,
+      // rotates nothing, and never reloads.
+      if (token && !original.headers?.Authorization && !original._authRetry) {
+        original._authRetry = true;
+        original.headers = original.headers ?? {};
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
-      } catch {
-        // A real refresh failure = genuinely expired/revoked session.
-        clearSession();
-        window.location.href = '/login';
+      }
+
+      // ── Refresh retry ──────────────────────────────────────────────────
+      // A token WAS sent and still came back 401 → genuinely expired. Swap it
+      // via the single-flight refresh and replay the request.
+      if (!original._retry) {
+        original._retry = true;
+
+        // No refresh token = no session to restore. Reject quietly and let
+        // the caller decide; do NOT hard-redirect/reload the page.
+        if (!localStorage.getItem('evt_refresh')) {
+          return Promise.reject(error);
+        }
+
+        try {
+          const fresh = await refreshAccessToken();
+          original.headers = original.headers ?? {};
+          original.headers.Authorization = `Bearer ${fresh}`;
+          return api(original);
+        } catch {
+          // A real refresh failure = genuinely expired/revoked session.
+          clearSession();
+          window.location.href = '/login';
+        }
       }
     }
     return Promise.reject(error);
