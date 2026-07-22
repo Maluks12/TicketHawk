@@ -37,6 +37,26 @@ const (
 	KYCMethodDidit  = "didit"
 )
 
+// ── KYC tiers ────────────────────────────────────────────────────────────────
+// Tier 1 (basic): legal name + SA ID number, locally validated. Grants the
+// organiser role; unlocks private free events.
+// Tier 2 (full): + ID document + registry verification. Unlocks paid & public.
+const (
+	KYCLevelNone  = 0
+	KYCLevelBasic = 1
+	KYCLevelFull  = 2
+)
+
+// MinLevelFor is the KYC tier an organiser must hold to PUBLISH an event of
+// the given class. Private free → basic. Anything paid, or anything public
+// (feed-visible), → full.
+func MinLevelFor(visibility EventVisibility, isPaid bool) int {
+	if isPaid || visibility == VisibilityPublic {
+		return KYCLevelFull
+	}
+	return KYCLevelBasic
+}
+
 // KYCDocMaxBytes caps uploaded identity documents (ID photo, proof of
 // address). They're stored as BYTEA, so the cap protects the DB.
 const KYCDocMaxBytes = 5 << 20 // 5 MiB
@@ -69,7 +89,9 @@ type EventRequirements struct {
 func RequirementsFor(visibility EventVisibility, isPaid bool) EventRequirements {
 	private := visibility == VisibilityPrivateLink
 	return EventRequirements{
-		KYCVerifiedRequired:    isPaid,
+		// "Verified" here means FULL KYC (tier 2). Public events now require
+		// it as well as paid ones — feed visibility demands a verified human.
+		KYCVerifiedRequired:    isPaid || !private,
 		BankDetailsRequired:    isPaid,
 		RightsDeclaration:      true,
 		GoesThroughAdminReview: !private,

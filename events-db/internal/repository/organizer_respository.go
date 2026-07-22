@@ -78,7 +78,7 @@ func PromoteOrganizerAfterKYC(pool *pgxpool.Pool, ctx context.Context, organizer
 
 	if _, err = tx.Exec(ctx, `
 		UPDATE organizers
-		SET status = $1, verified = TRUE,
+		SET status = $1, verified = TRUE, kyc_level = 2,
 		    verified_at = COALESCE(verified_at, CURRENT_TIMESTAMP),
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2
@@ -256,4 +256,37 @@ func GetPendingOrganizers(pool *pgxpool.Pool) ([]models.Organizer, error) {
 		organizers = append(organizers, org)
 	}
 	return organizers, nil
+}
+
+// PromoteOrganizerBasic activates a TIER-1 organiser: basic KYC (name + SA ID,
+// locally validated) grants the organiser role and an approved profile so they
+// can create PRIVATE FREE events. verified stays FALSE and kyc_status stays
+// 'none' — those are tier-2 (full KYC) semantics. Idempotent; never downgrades
+// an admin.
+func PromoteOrganizerBasic(pool *pgxpool.Pool, ctx context.Context, organizerID string) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("PromoteOrganizerBasic: begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx, `
+		UPDATE users u
+		SET role = $1, updated_at = NOW()
+		FROM organizers o
+		WHERE o.id = $2 AND u.id = o.user_id AND u.role = $3
+	`, models.RoleOrganizer, organizerID, models.RoleAttendee); err != nil {
+		return fmt.Errorf("PromoteOrganizerBasic: role: %w", err)
+	}
+
+	if _, err = tx.Exec(ctx, `
+		UPDATE organizers
+		SET status = $1, kyc_level = GREATEST(kyc_level, 1),
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`, models.OrganizerApproved, organizerID); err != nil {
+		return fmt.Errorf("PromoteOrganizerBasic: organizer: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }

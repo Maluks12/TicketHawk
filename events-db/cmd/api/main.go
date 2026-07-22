@@ -850,6 +850,10 @@ func main() {
 		middleware.AuthMiddleware(cfg),
 		handlers.SubmitKYCHandler(pool, kycService),
 	)
+	v1.POST("/organiser/kyc/basic",
+		middleware.AuthMiddleware(cfg),
+		handlers.SubmitBasicKYCHandler(pool, kycService),
+	)
 	v1.GET("/organiser/profile",
 		middleware.AuthMiddleware(cfg),
 		middleware.OrganizerOnlyMiddleware(),

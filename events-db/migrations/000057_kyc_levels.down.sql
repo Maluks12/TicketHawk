@@ -1,0 +1,2 @@
+ALTER TABLE organizers DROP CONSTRAINT IF EXISTS chk_kyc_level;
+ALTER TABLE organizers DROP COLUMN IF EXISTS kyc_level;

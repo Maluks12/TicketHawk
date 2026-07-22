@@ -313,6 +313,7 @@ func GetKYCDocument(pool *pgxpool.Pool, ctx context.Context, organizerID, kind s
 type OrganizerPublishGates struct {
 	KYCVerified   bool
 	PayoutEnabled bool
+	KYCLevel       int
 }
 
 // GetOrganizerPublishGates fetches gate state by the events.organizer_id
@@ -320,9 +321,9 @@ type OrganizerPublishGates struct {
 func GetOrganizerPublishGates(pool *pgxpool.Pool, ctx context.Context, userID string) (OrganizerPublishGates, error) {
 	var g OrganizerPublishGates
 	err := pool.QueryRow(ctx, `
-		SELECT kyc_status = 'verified', payout_enabled
+		SELECT kyc_status = 'verified', payout_enabled, kyc_level
 		FROM organizers WHERE user_id = $1
-	`, userID).Scan(&g.KYCVerified, &g.PayoutEnabled)
+	`, userID).Scan(&g.KYCVerified, &g.PayoutEnabled, &g.KYCLevel)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return OrganizerPublishGates{}, nil
@@ -330,4 +331,55 @@ func GetOrganizerPublishGates(pool *pgxpool.Pool, ctx context.Context, userID st
 		return g, fmt.Errorf("GetOrganizerPublishGates: %w", err)
 	}
 	return g, nil
+}
+
+// ── Basic KYC (tier 1) ───────────────────────────────────────────────────────
+
+// BasicKYCRecord is the tier-1 identity: legal name + encrypted SA ID. No
+// document, no registry call — validated locally by the service layer.
+type BasicKYCRecord struct {
+	OrganizerID    string
+	LegalFirstName string
+	LegalLastName  string
+	IDEncrypted    []byte
+	IDLast4        string
+	DOB            time.Time
+}
+
+// SaveBasicKYC stores the tier-1 identity and raises kyc_level to at least 1.
+// Same overwrite guard as full submissions: a pending or verified identity
+// can never be silently replaced (that would let a verified account swap in a
+// different person). kyc_status is left untouched — basic KYC does not verify.
+func SaveBasicKYC(pool *pgxpool.Pool, ctx context.Context, r BasicKYCRecord) error {
+	tag, err := pool.Exec(ctx, `
+		UPDATE organizers
+		SET legal_first_name = $2,
+		    legal_last_name  = $3,
+		    sa_id_encrypted  = $4,
+		    sa_id_last4      = $5,
+		    sa_id_dob        = $6,
+		    kyc_level         = GREATEST(kyc_level, 1),
+		    updated_at       = CURRENT_TIMESTAMP
+		WHERE id = $1
+		  AND kyc_status IN ('none', 'rejected')
+	`, r.OrganizerID, r.LegalFirstName, r.LegalLastName,
+		r.IDEncrypted, r.IDLast4, r.DOB)
+	if err != nil {
+		return fmt.Errorf("SaveBasicKYC: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("identity already submitted or verified — contact support to change it")
+	}
+	return nil
+}
+
+// GetKYCLevel returns the organiser's current tier (0 if the row is missing).
+func GetKYCLevel(pool *pgxpool.Pool, ctx context.Context, organizerID string) (int, error) {
+	var tier int
+	err := pool.QueryRow(ctx,
+		`SELECT kyc_level FROM organizers WHERE id = $1`, organizerID).Scan(&tier)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return tier, err
 }

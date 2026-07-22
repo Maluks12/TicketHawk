@@ -128,6 +128,29 @@ type KYCSubmission struct {
 
 // Submit processes a KYC submission end to end. Returns the resulting status
 // so the handler can tell the organizer whether they were auto-verified.
+// SubmitBasic performs TIER-1 verification: validates the SA ID number
+// locally (Luhn, DOB, 18+, citizen/PR digit) and stores the legal identity
+// encrypted. Deliberately free and instant — no document, no VerifyNow call,
+// no admin queue. The caller is responsible for the role promotion.
+func (s *KYCService) SubmitBasic(ctx context.Context, organizerID, firstName, lastName, idNumber string) error {
+	dob, err := models.ValidateSAIDNumber(idNumber, time.Now())
+	if err != nil {
+		return fmt.Errorf("invalid ID number: %w", err)
+	}
+	encrypted, err := s.encrypt(idNumber)
+	if err != nil {
+		return fmt.Errorf("securing ID number: %w", err)
+	}
+	return repository.SaveBasicKYC(s.pool, ctx, repository.BasicKYCRecord{
+		OrganizerID:    organizerID,
+		LegalFirstName: firstName,
+		LegalLastName:  lastName,
+		IDEncrypted:    encrypted,
+		IDLast4:        idNumber[len(idNumber)-4:],
+		DOB:            dob,
+	})
+}
+
 func (s *KYCService) Submit(ctx context.Context, sub KYCSubmission) (models.KYCStatus, error) {
 	dob, err := models.ValidateSAIDNumber(sub.SAIDNumber, time.Now())
 	if err != nil {

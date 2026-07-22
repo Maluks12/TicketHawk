@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import { validateRequired, validateMinLength, firstError } from '../../../../lib/validation';
+import { getKycStatus } from '../../../../lib/kyc';
 
 // ── Draft ─────────────────────────────────────────────────────────────────────
 export const DRAFT_KEY = 'org_event_draft';
@@ -202,6 +203,10 @@ export default function CreateEventPage() {
   const [endTime,             setEndTime]             = useState('');
   const [expiresAt,           setExpiresAt]           = useState('');
   const [isFree,              setIsFree]              = useState(true);
+  // Event class — drives visibility + what verification tier is needed.
+  // private_free is the only class every organiser (tier 1) can publish.
+  const [eventType, setEventType] = useState<'private_free' | 'private_paid' | 'public'>('private_free');
+  const [kycLevel, setKycLevel] = useState<number>(1);
   const [price,               setPrice]               = useState('0');
   const [currency,            setCurrency]            = useState('ZAR');
   const [maxCapacity,         setMaxCapacity]         = useState('');
@@ -341,12 +346,30 @@ export default function CreateEventPage() {
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    getKycStatus().then((k) => setKycLevel(k.kyc_level)).catch(() => {});
+  }, []);
+
+  // Choosing "private free" locks pricing to free — the backend enforces this
+  // at publish, the UI just keeps the two controls from contradicting.
+  useEffect(() => {
+    if (eventType === 'private_free') setIsFree(true);
+  }, [eventType]);
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const err = validate();
     if (err) { toast(err, 'error'); return; }
     if (new Date(endTime) <= new Date(startTime)) {
       toast('End time must be after start time', 'error'); return;
+    }
+    const hasPaidTier = ticketTypes.some(t => t.name && Number(t.price) > 0);
+    if (eventType === 'private_free' && (!isFree || hasPaidTier)) {
+      toast('Private free events can\'t have paid tickets — switch the event type or make tickets free', 'error'); return;
+    }
+    if (eventType !== 'private_free' && kycLevel < 2) {
+      toast('Paid and public events need full verification first', 'error');
+      router.push('/kyc'); return;
     }
     setSubmitting(true);
     try {
@@ -369,6 +392,7 @@ export default function CreateEventPage() {
         teams,
         refund_policy:        refundPolicy.trim()       || null,
         terms_and_conditions: termsAndConditions.trim() || null,
+        visibility:           eventType === 'public' ? 'public' : 'private_link',
       };
       // Note: backend DTO spells this "max_capicity" (typo kept intentionally to match backend)
       if (maxCapacity)       body.max_capicity          = parseInt(maxCapacity);
@@ -700,6 +724,34 @@ export default function CreateEventPage() {
                 background: 'var(--surface)', border: '1px solid var(--border)',
                 borderRadius: 'var(--r-lg)', padding: 16, position: 'sticky', top: 16,
               }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Event type</div>
+                <select className="input" value={eventType}
+                  onChange={(e) => {
+                    const v = e.target.value as typeof eventType;
+                    if (v !== 'private_free' && kycLevel < 2) { router.push('/kyc'); return; }
+                    setEventType(v);
+                  }}
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13.5, marginBottom: 8 }}>
+                  <option value="private_free">Private free event</option>
+                  <option value="private_paid" disabled={kycLevel < 2}>
+                    Private paid event{kycLevel < 2 ? ' — needs full verification' : ''}
+                  </option>
+                  <option value="public" disabled={kycLevel < 2}>
+                    Public event{kycLevel < 2 ? ' — needs full verification' : ''}
+                  </option>
+                </select>
+                <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                  {eventType === 'private_free' && 'Invite-only via a shareable link. Free tickets only. Goes live immediately — no admin review.'}
+                  {eventType === 'private_paid' && 'Invite-only via a shareable link, with paid tickets. Goes live immediately — no admin review. Requires full verification and payout bank details.'}
+                  {eventType === 'public' && 'Listed in the TicketHawk feed and search for everyone. Requires full verification and admin review before going live.'}
+                </p>
+                {kycLevel < 2 && (
+                  <button type="button" className="btn btn-sm" style={{ width: '100%', marginBottom: 12 }}
+                    onClick={() => router.push('/kyc')}>
+                    🔒 Unlock paid &amp; public — verify your ID
+                  </button>
+                )}
+                <div style={{ height: 1, background: 'var(--border)', margin: '4px 0 12px' }} />
                 <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Before you submit</div>
                 {checklist.map(item => (
                   <div key={item.label} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
@@ -725,7 +777,9 @@ export default function CreateEventPage() {
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style={{ flexShrink: 0 }}>
                     <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/>
                   </svg>
-                  <span>Events need admin approval before going live. You&apos;ll be notified once approved.</span>
+                  <span>{eventType === 'public'
+                    ? 'Public events need admin approval before going live. You\u2019ll be notified once approved.'
+                    : 'Private events go live immediately after you publish \u2014 no admin review.'}</span>
                 </div>
               </div>
             </div>
@@ -740,7 +794,7 @@ export default function CreateEventPage() {
             <button type="button" className="btn" disabled={submitting}
               onClick={() => router.push('/events')}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Submitting…' : 'Submit for review'}
+              {submitting ? 'Submitting…' : eventType === 'public' ? 'Submit for review' : 'Create event'}
             </button>
             {draftSavedAt && !submitting && (
               <span style={{ fontSize: 12, color: 'var(--text-3)', marginLeft: 4 }}>

@@ -199,13 +199,16 @@ func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string, declar
 		}
 	}
 
-	// Paid events require a verified identity and payout bank details.
-	if reqs.KYCVerifiedRequired || reqs.BankDetailsRequired {
+	// Tiered KYC gate: private free needs tier 1 (implied by holding the
+	// organiser role at all); anything paid OR public needs tier 2 (full
+	// verification). Bank details remain a separate paid-event gate.
+	minTier := models.MinLevelFor(models.EventVisibility(visibility), isPaid)
+	if minTier > models.KYCLevelBasic || reqs.BankDetailsRequired {
 		gates, gErr := GetOrganizerPublishGates(pool, ctx, organizerID)
 		if gErr != nil {
 			return nil, gErr
 		}
-		if reqs.KYCVerifiedRequired && !gates.KYCVerified {
+		if gates.KYCLevel < minTier {
 			return nil, ErrKYCRequired
 		}
 		if reqs.BankDetailsRequired && !gates.PayoutEnabled {

@@ -1,10 +1,11 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useOrgAuth } from '../../store/authStore';
 import { ToastProvider } from '../../lib/toast';
 import { ConfirmProvider } from '../../lib/confirm';
+import { getKycStatus } from '../../lib/kyc';
 
 // Launch gate: merch is built but NOT launching — the tab and the event-page
 // merch sections are hidden, not deleted. Flip to true to bring merch back.
@@ -51,7 +52,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!isLoading && !user) router.replace('/login');
   }, [user, isLoading, router]);
 
-  if (isLoading || !user) {
+  // ── Onboarding gate ──────────────────────────────────────────────────────
+  // Tier 0 (no organiser profile / no basic identity) cannot use the
+  // dashboard: everything here needs the organiser role, which basic KYC is
+  // what grants. Bounce them to /onboarding. Admin accounts are exempt — they
+  // may legitimately have no organizer profile.
+  const [kycChecked, setKycChecked] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    if ((user as { role?: string }).role === 'admin') { setKycChecked(true); return; }
+    getKycStatus()
+      .then((s) => {
+        if (s.kyc_level === 0) router.replace('/onboarding');
+        else setKycChecked(true);
+      })
+      .catch(() => setKycChecked(true)); // network hiccup: don't lock them out
+  }, [user, router]);
+
+  if (isLoading || !user || !kycChecked) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f0f2f5' }}>
         <div className="spinner spinner-lg" />

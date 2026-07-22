@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"errors"
 	"io"
 	"net/http"
@@ -32,8 +33,15 @@ func GetKYCStatusHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not load verification status"})
 			return
 		}
+		tier, _ := repository.GetKYCLevel(pool, c.Request.Context(), organizerID)
 		c.JSON(http.StatusOK, gin.H{
-			"kyc": profile,
+			"kyc":      profile,
+			"kyc_level": tier,
+			// What each tier unlocks — the create-event UI renders this.
+			"tiers": gin.H{
+				"basic": gin.H{"tier": 1, "unlocks": "Private free events"},
+				"full":  gin.H{"tier": 2, "unlocks": "Paid events and public events"},
+			},
 			"requirements": gin.H{
 				"free_private": models.RequirementsFor(models.VisibilityPrivateLink, false),
 				"free_public":  models.RequirementsFor(models.VisibilityPublic, false),
@@ -143,4 +151,68 @@ func readKYCUpload(c *gin.Context, field string, allowPDF bool) ([]byte, string,
 		return nil, "", err
 	}
 	return data, mime, nil
+}
+
+// SubmitBasicKYCHandler performs the TIER-1 onboarding step in one call:
+// validates name + SA ID locally, creates the organizer profile if the user
+// doesn't have one yet, stores the identity, and grants the organiser role.
+// Auth-only (NOT organiser-only) — this IS how a plain account becomes an
+// organiser able to create private free events.
+//
+//	POST /v1/organiser/kyc/basic
+//	Body: { "legal_first_name", "legal_last_name", "sa_id_number" }
+func SubmitBasicKYCHandler(pool *pgxpool.Pool, kycService *services.KYCService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+
+		var dto struct {
+			LegalFirstName string `json:"legal_first_name" binding:"required,min=2,max=100"`
+			LegalLastName  string `json:"legal_last_name" binding:"required,min=2,max=100"`
+			SAIDNumber     string `json:"sa_id_number" binding:"required,len=13"`
+		}
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Provide your legal first name, last name and 13-digit SA ID number"})
+			return
+		}
+
+		ctx := c.Request.Context()
+
+		// Get-or-create the organizer profile (mirrors register-organizer's
+		// derivation, but the business name comes from the LEGAL name the
+		// person just gave us — better default than an email prefix).
+		org, err := repository.GetOrganizerByUserID(pool, userID.(string))
+		if err != nil {
+			var email string
+			_ = pool.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID.(string)).Scan(&email)
+			org, err = repository.CreateOrganizer(pool, &models.CreateOrganizerDTO{
+				BusinessName:  strings.TrimSpace(dto.LegalFirstName + " " + dto.LegalLastName),
+				BusinessEmail: email,
+				BusinessPhone: "N/A",
+				Description:   "Organiser profile created during identity onboarding. This description can be edited later from the organiser dashboard settings.",
+			}, userID.(string))
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create your organiser profile"})
+				return
+			}
+		}
+
+		if err := kycService.SubmitBasic(ctx, org.ID,
+			strings.TrimSpace(dto.LegalFirstName), strings.TrimSpace(dto.LegalLastName), strings.TrimSpace(dto.SAIDNumber)); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := repository.PromoteOrganizerBasic(pool, ctx, org.ID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Identity saved but activation failed — try again"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "Profile complete — you can now create private free events. Complete full verification to unlock paid and public events.",
+			"kyc_level": models.KYCLevelBasic,
+			// The client's current access token still carries the old role;
+			// it must refresh the session to pick up 'organizer'.
+			"session_refresh_required": true,
+		})
+	}
 }

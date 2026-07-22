@@ -22,7 +22,9 @@ api.interceptors.request.use((config) => {
 // had. One in-flight refresh promise, shared by all concurrent 401s.
 let refreshInFlight: Promise<string> | null = null;
 
-function refreshAccessToken(): Promise<string> {
+// Exported: after basic KYC promotes attendee → organizer, the current access
+// token still carries the OLD role; callers force a refresh to pick it up.
+export function refreshAccessToken(): Promise<string> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const refresh = typeof window !== 'undefined' ? localStorage.getItem('evt_refresh') : null;
