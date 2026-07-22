@@ -18,7 +18,10 @@ export async function getKycStatus(): Promise<KycStatus> {
     return { kyc_level: data.kyc_level ?? 0, kyc: data.kyc ?? null };
   } catch (e: unknown) {
     const status = (e as { response?: { status?: number } })?.response?.status;
-    if (status === 404) return { kyc_level: 0, kyc: null };
+    // 404 = no organiser profile yet; 401 = token not settled on this call.
+    // Either way, treat as level 0 rather than throwing — the gate stays
+    // functional and simply routes to onboarding.
+    if (status === 404 || status === 401) return { kyc_level: 0, kyc: null };
     throw e;
   }
 }

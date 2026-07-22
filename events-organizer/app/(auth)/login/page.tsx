@@ -29,6 +29,8 @@ export default function LoginPage() {
   const [regEmail,         setRegEmail]          = useState('');
   const [regPassword,      setRegPassword]       = useState('');
   const [confirmPassword,  setConfirmPassword]   = useState('');
+  const [phoneNumber,      setPhoneNumber]       = useState('');
+  const [dob,              setDob]               = useState('');
   const [showRegPass,      setShowRegPass]       = useState(false);
   const [showConfirmPass,  setShowConfirmPass]   = useState(false);
 
@@ -37,16 +39,13 @@ export default function LoginPage() {
 
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => {
-    if (!isLoading && user &&
-        (user.role === 'organizer' || user.role === 'admin')) {
+    if (isLoading || !user) return;
+    if (user.role === 'organizer' || user.role === 'admin') {
       router.replace('/dashboard');
+    } else {
+      router.replace('/onboarding');
     }
   }, [user, isLoading, router]);
-
-  async function upgradeToOrganizer(loginEmail: string, loginPassword: string) {
-    await api.post('/register-organizer', {});
-    await login(loginEmail, loginPassword);
-  }
 
   // ── Login ──────────────────────────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
@@ -60,11 +59,13 @@ export default function LoginPage() {
     setError(''); setSubmitting(true);
     try {
       const { role } = await login(email, password);
+      // Organisers/admins go straight to the dashboard. Everyone else goes to
+      // onboarding, where basic KYC (name + SA ID) grants the organiser role
+      // and unlocks private free events. No more auto-register-organizer.
       if (role === 'organizer' || role === 'admin') {
         router.replace('/dashboard');
       } else {
-        await upgradeToOrganizer(email, password);
-        router.replace('/dashboard');
+        router.replace('/onboarding');
       }
     } catch (e: unknown) {
       setError(
@@ -81,6 +82,8 @@ export default function LoginPage() {
       firstName: validateRequired(firstName, 'First name'),
       lastName:  validateRequired(lastName, 'Last name'),
       email:     validateEmail(regEmail),
+      phone:     validateRequired(phoneNumber, 'Phone number'),
+      dob:       validateRequired(dob, 'Date of birth'),
       password:  validatePassword(regPassword),
       confirm:   validatePasswordMatch(regPassword, confirmPassword),
     });
@@ -91,10 +94,12 @@ export default function LoginPage() {
       await api.post('/auth/register', {
         first_name: firstName, last_name: lastName,
         email: regEmail, password: regPassword,
+        phone_number: phoneNumber.trim(),
+        date_of_birth: new Date(dob).toISOString(),
       });
       await login(regEmail, regPassword);
-      await upgradeToOrganizer(regEmail, regPassword);
-      router.replace('/dashboard');
+      // New account is a plain user — onboarding turns them into an organiser.
+      router.replace('/onboarding');
     } catch (e: unknown) {
       setError(
         (e as { response?: { data?: { error?: string } } })?.response?.data?.error
@@ -235,6 +240,19 @@ export default function LoginPage() {
                     onChange={e => setRegEmail(e.target.value)}
                     placeholder="you@example.com" />
                 </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <Field label="Phone number">
+                    <input className="org-input" type="tel" value={phoneNumber}
+                      autoComplete="tel"
+                      onChange={e => setPhoneNumber(e.target.value)}
+                      placeholder="+27 82 123 4567" />
+                  </Field>
+                  <Field label="Date of birth">
+                    <input className="org-input" type="date" value={dob}
+                      max={new Date().toISOString().split('T')[0]}
+                      onChange={e => setDob(e.target.value)} />
+                  </Field>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Password">
                     <div className="pass-wrap">

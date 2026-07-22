@@ -47,7 +47,17 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config;
-    if (error.response?.status === 401 && original && !original._retry && typeof window !== 'undefined') {
+    // A 401 from an AUTH endpoint (login / register / refresh) means "bad
+    // credentials", NOT "session expired" — let the caller show the error.
+    // Redirecting/reloading here caused the login page to reload on every
+    // wrong-password attempt and swallowed the error message.
+    const url: string = original?.url ?? '';
+    const isAuthCall = url.includes('/auth/login')
+      || url.includes('/auth/register')
+      || url.includes('/auth/refresh');
+
+    if (error.response?.status === 401 && original && !original._retry
+        && !isAuthCall && typeof window !== 'undefined') {
       original._retry = true;
       try {
         const token = await refreshAccessToken();
