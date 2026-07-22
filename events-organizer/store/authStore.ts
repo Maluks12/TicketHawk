@@ -42,17 +42,33 @@ export const useOrgAuth = create<OrgAuthState>((set) => ({
     const token = data.token || data.access_token;
     if (!token) throw new Error('No token returned');
 
-    // Persist the refresh token too — without it the session died with the
-    // 15-minute access token and forced a re-login every quarter hour.
+    // Persist tokens FIRST — before any decode that could throw. Previously the
+    // JWT was decoded before storing the access token, so a malformed payload
+    // (or any exception) left localStorage empty and every later request went
+    // out unauthenticated. Storage must never be gated behind the decode.
+    localStorage.setItem('evt_token', token);
     if (data.refresh_token) localStorage.setItem('evt_refresh', data.refresh_token);
 
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    // The JWT does not carry an email claim — use the address they typed.
-    const user = { id: payload.user_id, email, role: payload.role };
-    localStorage.setItem('evt_token', token);
+    // Decode defensively. A base64url JWT segment needs padding fixups before
+    // atob; if anything is off we still have a working session and just fall
+    // back to a minimal user (role unknown → treated as non-organiser → the
+    // gate routes to onboarding, which is the safe default).
+    let role = 'user';
+    let userId = '';
+    try {
+      const seg = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      const pad = seg.length % 4 ? '='.repeat(4 - (seg.length % 4)) : '';
+      const payload = JSON.parse(atob(seg + pad));
+      role = payload.role ?? 'user';
+      userId = payload.user_id ?? '';
+    } catch {
+      /* keep the safe defaults */
+    }
+
+    const user = { id: userId, email, role };
     localStorage.setItem('org_user', JSON.stringify(user));
     set({ user });
-    return { role: payload.role };
+    return { role };
   },
 
   logout: async () => {
