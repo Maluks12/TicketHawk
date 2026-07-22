@@ -28,8 +28,14 @@ export default function OnboardingPage() {
   }, [user, isLoading, router]);
 
   // Already onboarded (e.g. deep link back here)? Straight to the dashboard.
+  // Guard on the token being present in this browser first — on a fresh
+  // post-login navigation the request interceptor reads evt_token from
+  // localStorage, so firing before it's written sends a bare request that the
+  // API rejects with "authorization header required".
   useEffect(() => {
     if (!user) return;
+    if (typeof window === 'undefined') return;
+    if (!localStorage.getItem('evt_token')) return; // token not yet in this browser
     getKycStatus().then((s) => {
       if (s.kyc_level >= 1) router.replace('/dashboard');
     }).catch(() => {});

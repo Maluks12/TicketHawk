@@ -61,6 +61,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!user) return;
     if ((user as { role?: string }).role === 'admin') { setKycChecked(true); return; }
+    if (typeof window !== 'undefined' && !localStorage.getItem('evt_token')) return; // token not ready
     getKycStatus()
       .then((s) => {
         if (s.kyc_level === 0) router.replace('/onboarding');
