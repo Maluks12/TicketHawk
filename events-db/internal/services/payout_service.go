@@ -185,6 +185,22 @@ func (s *PayoutService) payRow(ctx context.Context, row repository.PendingPayout
 		return
 	}
 
+	// Net off anything this organiser owes the platform before moving money.
+	// Debt accrues when a cancellation refund exceeded the reserve held against
+	// it — see RefundService.accrueClawback. Paying out in full while a balance
+	// is outstanding would mean the platform never recovers it.
+	if settled, err := repository.ApplyPayoutDebt(s.pool, ctx, row.OrganizerID, row.PayoutID, row.Amount); err != nil {
+		log.Error().Err(err).Str("payout_id", row.PayoutID).
+			Msg("payouts: could not apply outstanding debt — skipping row this tick")
+		return
+	} else if settled {
+		// The debt swallowed the entire payout. The row is closed out as paid
+		// with a zero transfer; nothing leaves the platform balance.
+		log.Info().Str("payout_id", row.PayoutID).Str("organizer", row.BusinessName).
+			Msg("payouts: fully absorbed by outstanding debt, no transfer needed")
+		return
+	}
+
 	ref := "po_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	claimed, reference, err := repository.ClaimPayoutForProcessing(s.pool, ctx, row.PayoutID, ref)
 	if err != nil {
@@ -331,4 +347,59 @@ func (s *PayoutService) RunPromotionChecks(ctx context.Context, organizerID stri
 		res.AutoApprove = true
 	}
 	return res, nil
+}
+// ApplyTransferWebhook reconciles an asynchronous transfer outcome pushed by
+// Paystack against the payout ledger.
+//
+// InitiateTransfer returns immediately, often with status "pending" or "otp",
+// and the real outcome lands minutes or hours later. Before this existed
+// nothing consumed transfer.success / transfer.failed, so a transfer that was
+// accepted and then reversed by the receiving bank left the payout row stuck in
+// 'processing' forever while the organiser was never paid and nobody knew.
+//
+// Matching is by transfer_reference — the po_… value the platform generated —
+// which is what Paystack echoes back in the webhook.
+func (s *PayoutService) ApplyTransferWebhook(ctx context.Context, reference, status, reason string) error {
+	if reference == "" {
+		return nil
+	}
+
+	switch status {
+	case "success":
+		res, err := s.pool.Exec(ctx, `
+			UPDATE organizer_payouts
+			SET status = 'paid', paid_at = CURRENT_TIMESTAMP,
+			    failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE transfer_reference = $1 AND status <> 'paid'
+		`, reference)
+		if err != nil {
+			return fmt.Errorf("marking payout paid from webhook: %w", err)
+		}
+		if res.RowsAffected() > 0 {
+			log.Info().Str("reference", reference).Msg("payouts: confirmed paid via webhook")
+		}
+		return nil
+
+	default:
+		// Back to 'pending', not 'failed': FetchPayableRows picks pending rows
+		// up again, and payRow reuses the same transfer_reference, so Paystack
+		// dedupes rather than double-paying. A genuinely dead recipient will
+		// simply keep failing and stay visible in admin.
+		if reason == "" {
+			reason = "Transfer " + status + " at gateway"
+		}
+		res, err := s.pool.Exec(ctx, `
+			UPDATE organizer_payouts
+			SET status = 'pending', failure_reason = $2, updated_at = CURRENT_TIMESTAMP
+			WHERE transfer_reference = $1 AND status <> 'paid'
+		`, reference, reason)
+		if err != nil {
+			return fmt.Errorf("marking payout failed from webhook: %w", err)
+		}
+		if res.RowsAffected() > 0 {
+			log.Warn().Str("reference", reference).Str("reason", reason).
+				Msg("payouts: transfer failed at gateway, requeued for retry")
+		}
+		return nil
+	}
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"math"
 	"errors"
 	"fmt"
 	"time"
@@ -406,6 +407,9 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 		FROM organizer_payouts op
 		JOIN organizers o ON o.id = op.organizer_id
 		WHERE op.status IN ('pending', 'processing')
+		  -- refund_clawback rows are debt owed TO the platform, never a
+		  -- transfer. They live in this table for the audit trail only.
+		  AND op.kind <> 'refund_clawback'
 		ORDER BY op.created_at ASC
 		LIMIT $1
 	`, limit)
@@ -425,4 +429,88 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+// ApplyPayoutDebt deducts any outstanding organiser debt from a pending payout
+// before it is transferred.
+//
+// Returns settled=true when the debt consumed the payout entirely — the row is
+// closed out as paid with a zero transfer and the caller must not proceed to
+// the gateway. Returns settled=false when there is either no debt or a positive
+// remainder to send, with organizer_payouts.amount already reduced.
+//
+// The whole thing runs in one transaction with SELECT ... FOR UPDATE on the
+// organiser, because two payout rows for the same organiser processing
+// concurrently would otherwise both see the full debt and each deduct it.
+func ApplyPayoutDebt(
+	pool *pgxpool.Pool,
+	ctx context.Context,
+	organizerID string,
+	payoutID string,
+	amount float64,
+) (settled bool, err error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin debt tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var debt float64
+	if err := tx.QueryRow(ctx, `
+		SELECT payout_debt FROM organizers WHERE id = $1 FOR UPDATE
+	`, organizerID).Scan(&debt); err != nil {
+		return false, fmt.Errorf("locking organizer for debt check: %w", err)
+	}
+	if debt <= 0 {
+		return false, tx.Commit(ctx)
+	}
+
+	applied := debt
+	if applied > amount {
+		applied = amount
+	}
+	remaining := roundZAR(amount - applied)
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE organizers
+		SET payout_debt = payout_debt - $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`, applied, organizerID); err != nil {
+		return false, fmt.Errorf("reducing organizer debt: %w", err)
+	}
+
+	if remaining <= 0 {
+		// Nothing left to send. Mark paid so the worker stops re-queuing it,
+		// and record why the organiser saw no money arrive.
+		if _, err := tx.Exec(ctx, `
+			UPDATE organizer_payouts
+			SET amount         = 0,
+			    status         = 'paid',
+			    paid_at        = CURRENT_TIMESTAMP,
+			    failure_reason = $1,
+			    updated_at     = CURRENT_TIMESTAMP
+			WHERE id = $2
+		`, fmt.Sprintf("Fully offset against outstanding balance of R%.2f", applied), payoutID); err != nil {
+			return false, fmt.Errorf("closing fully-offset payout: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit full offset: %w", err)
+		}
+		return true, nil
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE organizer_payouts
+		SET amount = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`, remaining, payoutID); err != nil {
+		return false, fmt.Errorf("reducing payout by debt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit partial offset: %w", err)
+	}
+	return false, nil
+}
+
+func roundZAR(v float64) float64 {
+	return math.Round(v*100) / 100
 }

@@ -161,6 +161,9 @@ func main() {
 	// Two-tier organizer payouts: ledger creation for completed events +
 	// Paystack balance transfers for held-tier settlements and reserve releases.
 	payoutService := services.NewPayoutService(pool, paymentService.Paystack())
+	// Cancellation refunds, clawback accrual, dispute logging, and
+	// reconciliation of refunds issued outside the app.
+	refundService := services.NewRefundService(pool, paymentService)
 	if verifyNow != nil {
 		payoutService = payoutService.WithVerifyNow(verifyNow, kycService.Decrypt)
 	}
@@ -260,7 +263,7 @@ func main() {
 			"webhooks"))
 	}
 	{
-		webhooks.POST("/paystack", handlers.PaystackWebhookHandler(paymentService))
+		webhooks.POST("/paystack", handlers.PaystackWebhookHandler(paymentService, refundService, payoutService))
 		webhooks.POST("/paypal",   handlers.PayPalWebhookHandler(paymentService))
 	}
 	webReturnBase := "https://ticket-hawk.com"
@@ -450,6 +453,8 @@ func main() {
 		guest.GET("/bookings/:bookingNumber/payment",        handlers.GuestPaymentStatusHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/start", handlers.GuestStartPaymentHandler(pool, paymentService))
 		guest.POST("/bookings/:bookingNumber/payment/retry", handlers.GuestRetryPaymentHandler(pool, paymentService))
+		guest.GET("/bookings/:bookingNumber/refund-quote",   handlers.GuestRefundQuoteHandler(pool))
+		guest.POST("/bookings/:bookingNumber/refund",        handlers.GuestRefundHandler(pool, paymentService, emailService))
 	}
 
 	// ==========================================
@@ -484,6 +489,7 @@ func main() {
 		bookings.GET("",     handlers.GetUserBookingsHandler(bookingRepo))
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
 		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
+		bookings.GET("/:id/refund-quote",                 handlers.RefundQuoteHandler(bookingRepo, eventRepo))
 		bookings.GET("/:id/assignments",                  handlers.GetTicketAssignmentsHandler(pool))
 		bookings.GET("/:id/pool-qr",                      handlers.GetPoolQRTokenHandler(pool, rotatingQRService))
 		bookings.GET("/:id/offline",                      handlers.GetOfflineTicketsHandler(pool, rotatingQRService))
@@ -752,7 +758,7 @@ func main() {
 	}
 	{
 		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
-		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache))
+		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
 		orgRoutes.POST("/upload",         middleware.ExtendWriteTimeout(5*time.Minute), handlers.UploadOrganiserImageHandler(imgService))

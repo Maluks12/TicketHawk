@@ -190,6 +190,9 @@ func (s *PaymentService) splitForBooking(ctx context.Context, booking *models.Bo
 		  -- 'approved'); a bare enum IN ('active', ...) would error at runtime.
 		  AND o.status::text IN ('active', 'approved')
 		  AND o.paystack_subaccount_code IS NOT NULL
+		  -- A subaccount Paystack has already rejected must not be attached
+		  -- again: initialize returns 404 and the whole checkout fails.
+		  AND o.subaccount_invalid_at IS NULL
 	`, *booking.EventID).Scan(&subaccountCode, &eventStart)
 	if err != nil {
 		// No row = organizer is held-tier (the normal case) — not an error.
@@ -224,6 +227,40 @@ func (s *PaymentService) splitForBooking(ctx context.Context, booking *models.Bo
 		TransactionCharge: charge,
 		ReserveAmount:     reserve,
 	}
+}
+
+// flagInvalidSubaccount marks an organiser's stored subaccount as unusable.
+//
+// Paystack answers "404 Invalid Subaccount" when the code no longer resolves —
+// deleted from the dashboard, or created under a different API key. Before this
+// existed that error killed checkout outright for every event the organiser
+// ran, with no fallback and no signal to anyone. Flagging lets splitForBooking
+// skip the split so sales keep flowing (the money simply settles through the
+// ledger instead), and surfaces the organiser for re-onboarding.
+func (s *PaymentService) flagInvalidSubaccount(ctx context.Context, subaccountCode string) {
+	if subaccountCode == "" {
+		return
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE organizers
+		SET subaccount_invalid_at = CURRENT_TIMESTAMP,
+		    payout_tier           = 'held',
+		    updated_at            = CURRENT_TIMESTAMP
+		WHERE paystack_subaccount_code = $1
+		  AND subaccount_invalid_at IS NULL
+	`, subaccountCode); err != nil {
+		log.Error().Err(err).Str("subaccount", subaccountCode).
+			Msg("payment: could not flag invalid subaccount")
+		return
+	}
+	log.Warn().Str("subaccount", subaccountCode).
+		Msg("payment: subaccount rejected by Paystack — splits disabled, organiser needs re-onboarding")
+}
+
+// isInvalidSubaccountErr detects Paystack's rejection of a stale subaccount so
+// the caller can retry the charge without a split rather than failing the sale.
+func isInvalidSubaccountErr(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "invalid subaccount")
 }
 
 func roundMoney(v float64) float64 {
@@ -279,7 +316,7 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 
 	res, err := gw.Initialize(ctx, InitInput{
 		Reference:   newRef("bk_"),
-		AmountCents: int64(booking.TotalAmount * 100),
+		AmountCents: int64(math.Round(booking.TotalAmount * 100)),
 		Currency:    booking.Currency,
 		Email:       s.resolvePayerEmail(ctx, booking),
 		Description: "Booking " + booking.BookingNumber,
@@ -288,9 +325,34 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 		Metadata:    map[string]string{"booking_id": booking.ID, "booking_number": booking.BookingNumber},
 
 		SubaccountCode:         sp.SubaccountCode,
-		TransactionChargeCents: int64(sp.TransactionCharge * 100),
+		TransactionChargeCents: int64(math.Round(sp.TransactionCharge * 100)),
 		Bearer:                 "account", // platform absorbs Paystack's processing fee from its cut
 	})
+	// A stale subaccount code is fatal to the sale but not to the platform: the
+	// only thing the split does is route the organiser's share early. If
+	// Paystack rejects the code, flag the organiser and charge the buyer again
+	// with no split at all, so the money is simply collected centrally and
+	// settles through the payout ledger after the event.
+	//
+	// Without this a deleted or re-keyed subaccount silently kills checkout for
+	// every event that organiser runs, with a 500 and no diagnostic.
+	if err != nil && sp.SubaccountCode != "" && isInvalidSubaccountErr(err) {
+		log.Warn().Str("booking_id", booking.ID).Str("subaccount", sp.SubaccountCode).
+			Msg("payment: subaccount rejected, retrying charge without split")
+		s.flagInvalidSubaccount(ctx, sp.SubaccountCode)
+		sp = bookingSplit{}
+		res, err = gw.Initialize(ctx, InitInput{
+			Reference:   newRef("bk_"),
+			AmountCents: int64(math.Round(booking.TotalAmount * 100)),
+			Currency:    booking.Currency,
+			Email:       s.resolvePayerEmail(ctx, booking),
+			Description: "Booking " + booking.BookingNumber,
+			CallbackURL: s.callbackURLFor(channel),
+			Channels:    method.PaystackChannels(),
+			Metadata:    map[string]string{"booking_id": booking.ID, "booking_number": booking.BookingNumber},
+			Bearer:      "account",
+		})
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("initializing %s payment: %w", gw.Name(), err)
 	}

@@ -369,3 +369,42 @@ func VerifyQRCodeHandler(
 		})
 	}
 }
+// RefundQuoteHandler previews a refund for a logged-in buyer without executing
+// it, so the app can show "you will get R200 of your R420 back" before they
+// commit. Read-only and safe to poll.
+//
+//	GET /v1/bookings/:id/refund-quote
+func RefundQuoteHandler(bookings repository.BookingQuerier, events repository.EventQuerier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+		bookingID := c.Param("id")
+
+		booking, err := bookings.GetBookingByID(bookingID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+		if booking.UserID == nil || *booking.UserID != userID.(string) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to view this booking"})
+			return
+		}
+
+		eventID := ""
+		if booking.EventID != nil {
+			eventID = *booking.EventID
+		}
+		event, err := events.GetEventByID(eventID, nil)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+
+		quote := models.QuoteBuyerRefund(booking.Subtotal, booking.PlatformFee, event.StartTime, time.Now())
+		c.JSON(http.StatusOK, gin.H{
+			"booking_number": booking.BookingNumber,
+			"total_paid":     booking.TotalAmount,
+			"quote":          quote,
+			"schedule":       models.RefundSchedule,
+		})
+	}
+}
