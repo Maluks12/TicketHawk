@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -177,8 +178,9 @@ func (s *PaymentService) splitForBooking(ctx context.Context, booking *models.Bo
 	}
 
 	var subaccountCode string
+	var eventStart time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT o.paystack_subaccount_code
+		SELECT o.paystack_subaccount_code, e.start_time
 		FROM events e
 		JOIN organizers o ON o.user_id = e.organizer_id
 		WHERE e.id = $1
@@ -188,13 +190,27 @@ func (s *PaymentService) splitForBooking(ctx context.Context, booking *models.Bo
 		  -- 'approved'); a bare enum IN ('active', ...) would error at runtime.
 		  AND o.status::text IN ('active', 'approved')
 		  AND o.paystack_subaccount_code IS NOT NULL
-	`, *booking.EventID).Scan(&subaccountCode)
+	`, *booking.EventID).Scan(&subaccountCode, &eventStart)
 	if err != nil {
 		// No row = organizer is held-tier (the normal case) — not an error.
 		return bookingSplit{}
 	}
 
-	reserve := roundMoney(models.InstantReserveRate * booking.Subtotal)
+	// The reserve is sized to the largest refund this ticket could ever trigger,
+	// which is fixed at the moment of sale because the refund rate only ever
+	// falls as the event approaches. See models/refund_policy.go.
+	//
+	// A rate of 1.0 (sold 30+ days out, fully refundable) means the platform
+	// cannot safely release anything yet, so we decline the split entirely and
+	// let the money settle through the ledger after the event — identical to
+	// held tier. Returning a 100% reserve as a "split" would also push
+	// transaction_charge above total_amount and be rejected by Paystack.
+	reserveRate := models.ReserveRateForSale(eventStart, time.Now())
+	if reserveRate >= 1.0 {
+		return bookingSplit{}
+	}
+
+	reserve := roundMoney(reserveRate * booking.Subtotal)
 	charge := roundMoney(booking.PlatformFee + booking.OrganizerFee + reserve)
 
 	// Sanity: the charge must leave the organizer a positive share, or the
@@ -413,7 +429,14 @@ func (s *PaymentService) createPaymentRecord(ctx context.Context, booking *model
 
 // ── Refunds ───────────────────────────────────────────────────────────────────
 
-func (s *PaymentService) ProcessRefund(bookingID string) error {
+// ProcessRefund refunds `amount` (in ZAR) against the booking's gateway
+// transaction. Pass 0 to refund the full payment — the legacy behaviour, still
+// used by paths that have no sliding scale to apply.
+//
+// Partial refunds are real at the gateway: Paystack accepts an amount lower
+// than the original charge and leaves the remainder settled. The payments row
+// records refunded_amount so reconciliation never has to re-derive it.
+func (s *PaymentService) ProcessRefund(bookingID string, amount float64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -433,21 +456,38 @@ func (s *PaymentService) ProcessRefund(bookingID string) error {
 		txnID = *payment.TransactionID
 	}
 
+	// A zero or over-large request means "refund everything", which keeps the
+	// old single-argument behaviour intact for callers that have no schedule.
+	refundAmount := amount
+	if refundAmount <= 0 || refundAmount > payment.Amount {
+		refundAmount = payment.Amount
+	}
+
+	// math.Round, not a truncating cast: float64(2.01)*100 truncates to 200 and
+	// silently under-refunds the buyer by a cent.
+	minorUnits := int64(math.Round(refundAmount * 100))
+	if minorUnits <= 0 {
+		return fmt.Errorf("refund amount for booking %s rounds to zero", bookingID)
+	}
+
 	gw := s.gatewayByName(payment.PaymentGateway)
-	res, err := gw.Refund(ctx, *payment.GatewayReference, txnID, int64(payment.Amount*100), payment.Currency, "Customer requested refund")
+	res, err := gw.Refund(ctx, *payment.GatewayReference, txnID, minorUnits, payment.Currency, "Customer requested refund")
 	if err != nil {
 		return fmt.Errorf("%s refund: %w", gw.Name(), err)
 	}
 
+	// refunded_amount is what we actually returned, NOT the full payment —
+	// a partial refund leaves the remainder settled and the reserve-release
+	// ledger reads this column to work out what is still owed.
 	if _, err := s.pool.Exec(ctx, `
 		UPDATE payments
 		SET refund_id       = $1,
 		    status          = $2::payment_status,
-		    refunded_amount = amount,
+		    refunded_amount = $3,
 		    refunded_at     = CURRENT_TIMESTAMP,
 		    updated_at      = CURRENT_TIMESTAMP
-		WHERE booking_id = $3
-	`, res.RefundID, string(res.Status), bookingID); err != nil {
+		WHERE booking_id = $4
+	`, res.RefundID, string(res.Status), refundAmount, bookingID); err != nil {
 		log.Warn().Err(err).Str("booking_id", bookingID).Msg("payment: refund OK but DB update failed")
 	}
 	return nil

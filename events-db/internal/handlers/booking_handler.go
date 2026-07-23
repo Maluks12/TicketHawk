@@ -230,13 +230,28 @@ func RequestRefundHandler(
 			return
 		}
 
-		cancelledAssignees, err := bookings.RequestRefundWithCascade(bookingID, userID.(string), input.Reason)
+		// Price the refund BEFORE touching the booking. The sliding scale keys
+		// off how far the event still is right now, not off when the ticket was
+		// bought, and the buyer service fee is never returned on a
+		// buyer-initiated refund. An ineligible quote (inside 7 days, or the
+		// event already started) is a 400 with the reason, not a silent no-op.
+		quote := models.QuoteBuyerRefund(booking.Subtotal, booking.PlatformFee, event.StartTime, time.Now())
+		if !quote.Eligible {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": quote.Reason,
+				"quote": quote,
+			})
+			return
+		}
+
+		cancelledAssignees, err := bookings.RequestRefundWithCascade(
+			bookingID, userID.(string), input.Reason, quote.RefundAmount, quote.Rate)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		if err := paymentService.ProcessRefund(bookingID); err != nil {
+		if err := paymentService.ProcessRefund(bookingID, quote.RefundAmount); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process payment refund"})
 			return
 		}
@@ -265,6 +280,10 @@ func RequestRefundHandler(
 		c.JSON(http.StatusOK, gin.H{
 			"message":            "Refund processed successfully",
 			"refund_status":      "processing",
+			"refund_amount":      quote.RefundAmount,
+			"refund_rate":        quote.Rate,
+			"service_fee_kept":   quote.ServiceFeeKept,
+			"days_until_event":   quote.DaysUntilEvent,
 			"assignees_notified": len(cancelledAssignees) - emailsFailed,
 		})
 	}

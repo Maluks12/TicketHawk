@@ -191,45 +191,87 @@ func SetOrganizerTier(pool *pgxpool.Pool, ctx context.Context, organizerID strin
 func CreatePayoutsForCompletedEvents(pool *pgxpool.Pool, ctx context.Context, delay time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-delay)
 
+	// Refunded bookings are now INCLUDED rather than filtered out, because a
+	// partial refund still leaves the organiser owed the unrefunded remainder.
+	// The organiser commission is charged on gross sold, so it is subtracted in
+	// full regardless of how much came back.
+	//
+	// The CASE is a safety net for rows that predate migration 000058: a
+	// 'refunded' booking with a NULL refund_amount is treated as fully refunded,
+	// so a legacy row can never be settled as if it were still confirmed.
+	// GREATEST(...,0) stops a fully-refunded booking contributing a negative
+	// amount that would silently reduce what other bookings earned.
+	const settlementAmount = `
+		GREATEST(
+		    b.subtotal
+		    - CASE WHEN b.booking_status = 'refunded'
+		           THEN COALESCE(b.refund_amount, b.subtotal)
+		           ELSE COALESCE(b.refund_amount, 0) END
+		    - b.organizer_fee,
+		    0)`
+
 	settled, err := pool.Exec(ctx, `
 		INSERT INTO organizer_payouts (organizer_id, event_id, kind, amount, currency)
 		SELECT o.id, ev.id, 'event_settlement',
-		       SUM(b.subtotal - b.organizer_fee), MAX(b.currency)
+		       SUM(`+settlementAmount+`), MAX(b.currency)
 		FROM events ev
 		JOIN organizers o ON o.user_id = ev.organizer_id
 		JOIN bookings b   ON b.event_id = ev.id
 		WHERE ev.status = 'completed'
 		  AND ev.end_time <= $1
-		  AND b.booking_status = 'confirmed'
+		  AND b.booking_status IN ('confirmed', 'refunded')
 		  AND b.subtotal > 0
 		  AND NOT EXISTS (
 		      SELECT 1 FROM payments p
 		      WHERE p.booking_id = b.id AND p.subaccount_code IS NOT NULL
 		  )
 		GROUP BY o.id, ev.id
-		HAVING SUM(b.subtotal - b.organizer_fee) > 0
+		HAVING SUM(`+settlementAmount+`) > 0
 		ON CONFLICT (event_id, kind) DO NOTHING
 	`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("CreatePayoutsForCompletedEvents settlements: %w", err)
 	}
 
+	// The reserve is what FUNDS a refund on an instant-tier booking: Paystack
+	// already settled the organiser's share at sale time, so the withheld
+	// portion is the only money the platform still controls. Whatever the
+	// refund did not consume belongs to the organiser and is released here.
+	//
+	// Because the reserve rate is sized to the refund rate applicable on the
+	// day of sale (models.ReserveRateForSale), and the refund rate only falls
+	// as the event nears, this subtraction can never go negative on a booking
+	// priced under the current schedule — GREATEST is belt-and-braces for rows
+	// created before migration 000058, where a flat 10% reserve may be smaller
+	// than the refund that was issued against it.
+	//
+	// Refunded bookings must be INCLUDED (previously they were filtered out by
+	// booking_status = 'confirmed'), otherwise a partial refund would strand
+	// the unconsumed remainder of the reserve on the platform permanently.
+	const releasableReserve = `
+		GREATEST(
+		    p.reserve_amount
+		    - CASE WHEN b.booking_status = 'refunded'
+		           THEN COALESCE(b.refund_amount, p.reserve_amount)
+		           ELSE COALESCE(b.refund_amount, 0) END,
+		    0)`
+
 	reserves, err := pool.Exec(ctx, `
 		INSERT INTO organizer_payouts (organizer_id, event_id, kind, amount, currency)
 		SELECT o.id, ev.id, 'reserve_release',
-		       SUM(p.reserve_amount), MAX(p.currency)
+		       SUM(`+releasableReserve+`), MAX(p.currency)
 		FROM events ev
 		JOIN organizers o ON o.user_id = ev.organizer_id
 		JOIN bookings b   ON b.event_id = ev.id
 		JOIN payments p   ON p.booking_id = b.id
 		WHERE ev.status = 'completed'
 		  AND ev.end_time <= $1
-		  AND b.booking_status = 'confirmed'
-		  AND p.status = 'completed'
+		  AND b.booking_status IN ('confirmed', 'refunded')
+		  AND p.status IN ('completed', 'refunded')
 		  AND p.subaccount_code IS NOT NULL
 		  AND p.reserve_amount > 0
 		GROUP BY o.id, ev.id
-		HAVING SUM(p.reserve_amount) > 0
+		HAVING SUM(`+releasableReserve+`) > 0
 		ON CONFLICT (event_id, kind) DO NOTHING
 	`, cutoff)
 	if err != nil {

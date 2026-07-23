@@ -515,11 +515,18 @@ func emailsMatch(a, b string) bool {
 // RequestRefundWithCascade updates the booking to refund-requested status and
 // simultaneously cancels all ticket assignment slots. It returns the list of
 // assignees who had already claimed their tickets so the caller can notify them.
+// refundAmount is what the buyer actually gets back under the sliding scale in
+// models/refund_policy.go, and refundRate is the fraction of subtotal it
+// represents. Both are persisted so a later change to the schedule can never
+// rewrite what a past buyer was told, and so the payout ledger can settle the
+// organiser on the unrefunded remainder.
 func RequestRefundWithCascade(
 	pool *pgxpool.Pool,
 	bookingID string,
 	userID string,
 	reason string,
+	refundAmount float64,
+	refundRate float64,
 ) ([]CancelledAssignee, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -535,7 +542,10 @@ func RequestRefundWithCascade(
 		UPDATE bookings b
 		SET refund_requested_at = CURRENT_TIMESTAMP,
 		    refund_reason        = $1,
-		    booking_status       = $2
+		    booking_status       = $2,
+		    refund_amount        = $6,
+		    refund_rate          = $7,
+		    refunded_at          = CURRENT_TIMESTAMP
 		WHERE b.id        = $3
 		  AND b.user_id   = $4
 		  AND b.booking_status = $5
@@ -544,7 +554,8 @@ func RequestRefundWithCascade(
 		      WHERE e.id = b.event_id
 		        AND e.start_time > CURRENT_TIMESTAMP
 		  )
-	`, reason, models.BookingRefunded, bookingID, userID, models.BookingConfirmed)
+	`, reason, models.BookingRefunded, bookingID, userID, models.BookingConfirmed,
+		refundAmount, refundRate)
  
 	if err != nil {
 		return nil, fmt.Errorf("update booking: %w", err)

@@ -18,7 +18,7 @@ type BookingQuerier interface {
 	GetBookingByID(id string) (*models.Booking, error)
 	GetUserBookings(userID string, limit int, cursor *utils.Cursor) ([]models.Booking, *utils.Cursor, error)
 	CreateBooking(dto *models.CreateBookingDTO, userID string, event *models.Event) (*models.Booking, error)
-	RequestRefundWithCascade(bookingID, userID, reason string) ([]CancelledAssignee, error)
+	RequestRefundWithCascade(bookingID, userID, reason string, refundAmount, refundRate float64) ([]CancelledAssignee, error)
 	GetUnsentConfirmedBookingIDs() ([]string, error)
 	SumBookingTotalsByIDs(ids []string) (float64, error) // FIX 3
 	// CreateMerchOnlyBooking creates a placeholder booking row for a cart that
@@ -78,8 +78,8 @@ func (q *PgxBookingQuerier) GetUserBookings(userID string, limit int, cursor *ut
 func (q *PgxBookingQuerier) CreateBooking(dto *models.CreateBookingDTO, userID string, event *models.Event) (*models.Booking, error) {
 	return CreateBooking(q.pool, dto, userID, event)
 }
-func (q *PgxBookingQuerier) RequestRefundWithCascade(bookingID, userID, reason string) ([]CancelledAssignee, error) {
-	return RequestRefundWithCascade(q.pool, bookingID, userID, reason)
+func (q *PgxBookingQuerier) RequestRefundWithCascade(bookingID, userID, reason string, refundAmount, refundRate float64) ([]CancelledAssignee, error) {
+	return RequestRefundWithCascade(q.pool, bookingID, userID, reason, refundAmount, refundRate)
 }
 func (q *PgxBookingQuerier) GetUnsentConfirmedBookingIDs() ([]string, error) {
 	return GetUnsentConfirmedBookingIDs(q.pool)
