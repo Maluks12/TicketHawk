@@ -61,6 +61,11 @@ type paystackEnvelope struct {
 	Data    json.RawMessage `json:"data"`
 }
 
+// isHTTPSuccess reports whether a status code is in the 2xx range. Paystack is
+// not uniform about which success code it returns — creation endpoints answer
+// 201, everything else 200 — so every check must span the range.
+func isHTTPSuccess(code int) bool { return code >= 200 && code < 300 }
+
 // do performs a Paystack REST call through the circuit breaker and unmarshals
 // the data field into out. 4xx responses are wrapped as clientError so they do
 // not trip the breaker; 5xx and network errors do.
@@ -96,14 +101,25 @@ func (g *PaystackGateway) do(ctx context.Context, method, path string, body inte
 
 		var env paystackEnvelope
 		if err := json.Unmarshal(respBody, &env); err != nil {
-			if resp.StatusCode != http.StatusOK {
+			if !isHTTPSuccess(resp.StatusCode) {
 				return nil, &clientError{err: fmt.Errorf("paystack %s returned %d: %s", path, resp.StatusCode, string(respBody))}
 			}
 			return nil, fmt.Errorf("decoding paystack response: %w", err)
 		}
 
-		if resp.StatusCode != http.StatusOK || !env.Status {
-			return nil, &clientError{err: fmt.Errorf("paystack %s: %s", path, env.Message)}
+		// Paystack returns 201 Created for POST /subaccount and
+		// POST /transferrecipient, so success is the whole 2xx range, not just
+		// 200. Comparing against http.StatusOK alone treated those two calls as
+		// failures and surfaced Paystack's SUCCESS message ("Subaccount
+		// created") as the error text, while the object really had been created
+		// — orphaning one subaccount at Paystack per attempt and making payout
+		// onboarding impossible. Only /transaction/initialize returns a plain
+		// 200, which is why payments worked and this stayed latent.
+		//
+		// The status code is now included in the error so a future mismatch is
+		// obvious from the log line instead of reading like a success.
+		if !isHTTPSuccess(resp.StatusCode) || !env.Status {
+			return nil, &clientError{err: fmt.Errorf("paystack %s returned %d: %s", path, resp.StatusCode, env.Message)}
 		}
 		return &env, nil
 	})
