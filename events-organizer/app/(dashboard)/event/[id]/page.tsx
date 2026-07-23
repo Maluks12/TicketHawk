@@ -12,18 +12,54 @@ type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
 const MERCH_ENABLED = false;
 
+interface TicketTypeRow {
+  id: string; name: string; description?: string | null;
+  price: number; capacity: number | null; tickets_sold: number;
+  sort_order: number; is_visible: boolean;
+  sale_starts_at?: string | null; sale_ends_at?: string | null;
+}
+
 interface EventStats {
   event: {
-    id: string; slug?: string; visibility?: string; title: string; status: string; start_time: string; end_time: string;
-    city: string; venue_name: string; price: number; currency: string;
-    tickets_sold: number; max_capacity: number | null; views: number;
+    id: string; slug?: string; visibility?: string; title: string; status: string;
+    description?: string;
+    start_time: string; end_time: string; expires_at?: string; timezone?: string;
+    city: string; venue_name: string; address?: string; venue_type?: string | null;
+    latitude?: number | null; longitude?: number | null;
+    category?: string; category_id?: number;
+    price: number; currency: string;
+    tickets_sold: number; max_capacity: number | null;
+    max_tickets_per_user?: number | null; allow_waitlist?: boolean;
+    views: number;
     cover_image_url: string | null;
     banner_image_url: string | null;
+    banner_video_url?: string | null;
+    gallery_images?: string[];
+    scan_open_offset_min?: number | null;
+    scan_close_offset_min?: number | null;
+    refund_policy?: string | null;
+    terms_and_conditions?: string | null;
+    tags?: string[]; performers?: string[]; teams?: string[];
+    ticket_types?: TicketTypeRow[];
+    listing_fee_paid?: boolean; listing_fee_amount?: number;
+    is_featured?: boolean; admin_promoted?: boolean;
+    rights_declared_at?: string | null;
+    published_at?: string | null;
+    rejection_reason?: string | null;
+    cancelled_at?: string | null;
+    cancellation_reason?: string | null;
+    created_at?: string; updated_at?: string;
   };
   total_revenue: number;
   total_bookings: number;
   confirmed_bookings: number;
   pending_bookings: number;
+  cancelled_bookings?: number;
+  refunded_bookings?: number;
+  gross_ticket_revenue?: number;
+  platform_fees_paid?: number;
+  net_ticket_earnings?: number;
+  total_refunded?: number;
 }
 
 interface Booking {
@@ -378,6 +414,162 @@ export default function EventDetailPage() {
               </div>
             )}
 
+            {/* ── Status notices ─────────────────────────────────────────── */}
+            {ev.rejection_reason && (
+              <Panel title="Rejected by review">
+                <div style={{ color: '#b91c1c', fontSize: 13.5, lineHeight: 1.6 }}>{ev.rejection_reason}</div>
+              </Panel>
+            )}
+            {ev.cancelled_at && (
+              <Panel title="Cancelled">
+                <Row label="Cancelled at" value={fmtDateTime(ev.cancelled_at)} />
+                <Row label="Reason" value={ev.cancellation_reason || '—'} />
+              </Panel>
+            )}
+
+            {/* ── Description ────────────────────────────────────────────── */}
+            <Panel title="Description">
+              <div style={{ fontSize: 13.5, lineHeight: 1.65, color: '#1c1e21', whiteSpace: 'pre-wrap' }}>
+                {ev.description?.trim() || <span style={{ color: '#8a8d91' }}>No description</span>}
+              </div>
+            </Panel>
+
+            {/* ── Schedule ───────────────────────────────────────────────── */}
+            <Panel title="Schedule">
+              <Row label="Starts"           value={fmtDateTime(ev.start_time)} />
+              <Row label="Ends"             value={fmtDateTime(ev.end_time)} />
+              <Row label="Bookings close"   value={ev.expires_at ? fmtDateTime(ev.expires_at) : '—'} />
+              <Row label="Timezone"         value={ev.timezone || '—'} />
+              <Row label="Scanning opens"
+                   value={ev.scan_open_offset_min != null
+                     ? `${ev.scan_open_offset_min} min before start`
+                     : 'Default window'} />
+              <Row label="Scanning closes"
+                   value={ev.scan_close_offset_min != null
+                     ? `${ev.scan_close_offset_min} min after end`
+                     : 'Default window'} />
+            </Panel>
+
+            {/* ── Location ───────────────────────────────────────────────── */}
+            <Panel title="Location">
+              <Row label="Venue"      value={ev.venue_name} />
+              <Row label="Address"    value={ev.address || '—'} />
+              <Row label="City"       value={ev.city} />
+              <Row label="Venue type" value={ev.venue_type || 'Auto'} />
+              <Row label="Coordinates"
+                   value={ev.latitude != null && ev.longitude != null
+                     ? `${ev.latitude}, ${ev.longitude}`
+                     : '—'} />
+            </Panel>
+
+            {/* ── Tickets & pricing ──────────────────────────────────────── */}
+            <Panel title="Tickets & pricing">
+              <Row label="Base price"        value={ev.price > 0 ? fmtMoney(ev.price, ev.currency) : 'Free'} />
+              <Row label="Currency"          value={ev.currency} />
+              <Row label="Capacity"          value={ev.max_capacity ? ev.max_capacity.toLocaleString() : 'Unlimited'} />
+              <Row label="Max per attendee"  value={ev.max_tickets_per_user ? String(ev.max_tickets_per_user) : 'No limit'} />
+              <Row label="Waitlist"          value={ev.allow_waitlist ? 'Enabled' : 'Disabled'} />
+
+              {ev.ticket_types && ev.ticket_types.length > 0 ? (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
+                    Ticket tiers
+                  </div>
+                  <table className="meta-table" style={{ width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th>Tier</th><th>Price</th><th>Sold</th><th>Capacity</th><th>Visible</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...ev.ticket_types].sort((a, b) => a.sort_order - b.sort_order).map(t => (
+                        <tr key={t.id}>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{t.name}</div>
+                            {t.description && (
+                              <div style={{ fontSize: 12, color: '#8a8d91' }}>{t.description}</div>
+                            )}
+                          </td>
+                          <td>{t.price > 0 ? fmtMoney(t.price, ev.currency) : 'Free'}</td>
+                          <td>{t.tickets_sold}</td>
+                          <td>{t.capacity ?? '∞'}</td>
+                          <td>{t.is_visible ? 'Yes' : 'Hidden'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: '#8a8d91', marginTop: 10 }}>
+                  Flat pricing — no separate tiers.
+                </div>
+              )}
+            </Panel>
+
+            {/* ── Classification ─────────────────────────────────────────── */}
+            <Panel title="Classification">
+              <Row label="Category"   value={ev.category || '—'} />
+              <Row label="Visibility" value={ev.visibility === 'private_link' ? 'Private (link only)' : 'Public'} />
+              <ChipRow label="Tags"       items={ev.tags} />
+              <ChipRow label="Performers" items={ev.performers} />
+              <ChipRow label="Teams"      items={ev.teams} />
+            </Panel>
+
+            {/* ── Policies ───────────────────────────────────────────────── */}
+            <Panel title="Policies">
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', marginBottom: 4 }}>Refund policy</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 14 }}>
+                {ev.refund_policy?.trim() || <span style={{ color: '#8a8d91' }}>Not set</span>}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', marginBottom: 4 }}>Terms &amp; conditions</div>
+              <div style={{ fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                {ev.terms_and_conditions?.trim() || <span style={{ color: '#8a8d91' }}>Not set</span>}
+              </div>
+            </Panel>
+
+            {/* ── Financial breakdown ────────────────────────────────────── */}
+            <Panel title="Financial breakdown">
+              <Row label="Gross ticket revenue" value={fmtMoney(stats.gross_ticket_revenue ?? 0, ev.currency)} />
+              <Row label="Platform commission"  value={`− ${fmtMoney(stats.platform_fees_paid ?? 0, ev.currency)}`} />
+              <Row label="Net ticket earnings"  value={fmtMoney(stats.net_ticket_earnings ?? 0, ev.currency)} />
+              <Row label="Refunded"             value={fmtMoney(stats.total_refunded ?? 0, ev.currency)} />
+              <Row label="Confirmed bookings"   value={String(stats.confirmed_bookings)} />
+              <Row label="Pending bookings"     value={String(stats.pending_bookings)} />
+              <Row label="Cancelled bookings"   value={String(stats.cancelled_bookings ?? 0)} />
+              <Row label="Refunded bookings"    value={String(stats.refunded_bookings ?? 0)} />
+            </Panel>
+
+            {/* ── Gallery ────────────────────────────────────────────────── */}
+            {ev.gallery_images && ev.gallery_images.length > 0 && (
+              <Panel title={`Gallery (${ev.gallery_images.length})`}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {ev.gallery_images.map((url, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={i} src={url} alt={`Gallery ${i + 1}`}
+                      style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2' }} />
+                  ))}
+                </div>
+              </Panel>
+            )}
+
+            {/* ── Record ─────────────────────────────────────────────────── */}
+            <Panel title="Record">
+              <Row label="Event ID"    value={ev.id} mono />
+              <Row label="Slug"        value={ev.slug || '—'} mono />
+              <Row label="Status"      value={ev.status} />
+              <Row label="Published"   value={ev.published_at ? fmtDateTime(ev.published_at) : 'Not published'} />
+              <Row label="Rights declared"
+                   value={ev.rights_declared_at ? fmtDateTime(ev.rights_declared_at) : 'Not declared'} />
+              <Row label="Listing fee"
+                   value={ev.listing_fee_amount
+                     ? `${fmtMoney(ev.listing_fee_amount, ev.currency)} — ${ev.listing_fee_paid ? 'paid' : 'unpaid'}`
+                     : 'Not applicable'} />
+              <Row label="Featured"        value={ev.is_featured ? 'Yes' : 'No'} />
+              <Row label="Admin promoted"  value={ev.admin_promoted ? 'Yes' : 'No'} />
+              <Row label="Created"         value={ev.created_at ? fmtDateTime(ev.created_at) : '—'} />
+              <Row label="Last updated"    value={ev.updated_at ? fmtDateTime(ev.updated_at) : '—'} />
+            </Panel>
+
           </div>
         )}
 
@@ -462,6 +654,67 @@ export default function EventDetailPage() {
             )}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+// ── Detail presentation helpers ───────────────────────────────────────────────
+// Plain presentational components — no hooks, so they can safely live at module
+// scope and be used anywhere in the tree.
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
+      overflow: 'hidden', marginBottom: 16,
+    }}>
+      <div style={{
+        padding: '14px 16px', borderBottom: '1px solid #ebedf0',
+        fontWeight: 700, fontSize: 15,
+      }}>
+        {title}
+      </div>
+      <div style={{ padding: 16 }}>{children}</div>
+    </div>
+  );
+}
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 16, padding: '7px 0',
+      borderBottom: '1px solid #f5f6f7', fontSize: 13.5,
+    }}>
+      <div style={{ width: 180, flexShrink: 0, color: '#606770' }}>{label}</div>
+      <div style={{
+        flex: 1, color: '#1c1e21', wordBreak: 'break-word',
+        fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit',
+        fontSize: mono ? 12.5 : 13.5,
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ChipRow({ label, items }: { label: string; items?: string[] }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 16, padding: '7px 0',
+      borderBottom: '1px solid #f5f6f7', fontSize: 13.5,
+    }}>
+      <div style={{ width: 180, flexShrink: 0, color: '#606770' }}>{label}</div>
+      <div style={{ flex: 1, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {items && items.length > 0
+          ? items.map((t, i) => (
+              <span key={i} style={{
+                background: '#f0f2f5', border: '1px solid #dddfe2', borderRadius: 999,
+                padding: '2px 10px', fontSize: 12.5, color: '#1c1e21',
+              }}>
+                {t}
+              </span>
+            ))
+          : <span style={{ color: '#8a8d91' }}>None</span>}
       </div>
     </div>
   );

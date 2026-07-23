@@ -258,6 +258,43 @@ type OrganizerEventStats struct {
 	CoverImageURL *string            `json:"cover_image_url"`
 	BannerImageURL *string           `json:"banner_image_url"`
 
+	// ── Full event record ────────────────────────────────────────────────
+	// The organiser dashboard's event page is the one place an organiser can
+	// review everything they entered, so this endpoint returns the complete
+	// row rather than the handful of headline fields it used to.
+	Description        string     `json:"description"`
+	BannerVideoURL     *string    `json:"banner_video_url"`
+	GalleryImages      []string   `json:"gallery_images"`
+	Address            string     `json:"address"`
+	Timezone           string     `json:"timezone"`
+	Latitude           *float64   `json:"latitude"`
+	Longitude          *float64   `json:"longitude"`
+	VenueType          *string    `json:"venue_type"`
+	CategoryID         int        `json:"category_id"`
+	Category           string     `json:"category"`
+	ExpiresAt          time.Time  `json:"expires_at"`
+	AllowWaitlist      bool       `json:"allow_waitlist"`
+	MaxTicketsPerUser  *int       `json:"max_tickets_per_user"`
+	ScanOpenOffsetMin  *int       `json:"scan_open_offset_min"`
+	ScanCloseOffsetMin *int       `json:"scan_close_offset_min"`
+	RefundPolicy       *string    `json:"refund_policy"`
+	TermsAndConditions *string    `json:"terms_and_conditions"`
+	Tags               models.TagArray `json:"tags"`
+	Performers         models.TagArray `json:"performers"`
+	Teams              models.TagArray `json:"teams"`
+	ListingFeePaid     bool       `json:"listing_fee_paid"`
+	ListingFeeAmount   float64    `json:"listing_fee_amount"`
+	IsFeatured         bool       `json:"is_featured"`
+	AdminPromoted      bool       `json:"admin_promoted"`
+	RightsDeclaredAt   *time.Time `json:"rights_declared_at"`
+	PublishedAt        *time.Time `json:"published_at"`
+	RejectionReason    *string    `json:"rejection_reason"`
+	CancelledAt        *time.Time `json:"cancelled_at"`
+	CancellationReason *string    `json:"cancellation_reason"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	TicketTypes        []*models.TicketType `json:"ticket_types"`
+
 	// Capacity
 	MaxCapacity  *int    `json:"max_capacity,omitempty"`
 	TicketsSold  int     `json:"tickets_sold"`
@@ -291,20 +328,62 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 
 	var s OrganizerEventStats
 
-	// Verify ownership and pull basic event fields
+	// gallery_images is JSONB. Scan it as raw bytes and parse with the shared
+	// helper rather than binding straight to a custom Scanner — pgx v5 delivers
+	// these in binary and a hand-rolled Scan is how the tags/performers/teams
+	// columns silently returned empty for months.
+	var rawGallery []byte
+
+	// Verify ownership and pull the full event record. The organiser owns this
+	// data and the dashboard is where they review it, so select everything
+	// rather than a headline subset.
 	err := pool.QueryRow(ctx, `
-		SELECT id, slug, visibility, title, status, start_time, end_time, city, venue_name,
-		       price, currency, max_capacity, tickets_sold,
-		       COALESCE(views, 0), cover_image_url, banner_image_url
-		FROM events
-		WHERE id = $1 AND organizer_id = $2
+		SELECT e.id, e.slug, e.visibility, e.title, e.status, e.start_time, e.end_time,
+		       e.city, e.venue_name, e.price, e.currency, e.max_capacity, e.tickets_sold,
+		       COALESCE(e.views, 0), e.cover_image_url, e.banner_image_url,
+		       e.description, e.banner_video_url, e.gallery_images,
+		       e.address, e.timezone, e.latitude, e.longitude, e.venue_type,
+		       e.category_id, COALESCE(c.name, ''), e.expires_at,
+		       e.allow_waitlist, e.max_tickets_per_user,
+		       e.scan_open_offset_min, e.scan_close_offset_min,
+		       e.refund_policy, e.terms_and_conditions,
+		       e.tags, e.performers, e.teams,
+		       e.listing_fee_paid, e.listing_fee_amount, e.is_featured, e.admin_promoted,
+		       e.rights_declared_at, e.published_at, e.rejection_reason,
+		       e.cancelled_at, e.cancellation_reason,
+		       e.created_at, e.updated_at
+		FROM   events e
+		LEFT   JOIN categories c ON e.category_id = c.id
+		WHERE  e.id = $1 AND e.organizer_id = $2
 	`, eventID, organizerID).Scan(
 		&s.EventID, &s.Slug, &s.Visibility, &s.Title, &s.Status, &s.StartTime, &s.EndTime,
 		&s.City, &s.VenueName, &s.Price, &s.Currency,
 		&s.MaxCapacity, &s.TicketsSold, &s.Views, &s.CoverImageURL, &s.BannerImageURL,
+		&s.Description, &s.BannerVideoURL, &rawGallery,
+		&s.Address, &s.Timezone, &s.Latitude, &s.Longitude, &s.VenueType,
+		&s.CategoryID, &s.Category, &s.ExpiresAt,
+		&s.AllowWaitlist, &s.MaxTicketsPerUser,
+		&s.ScanOpenOffsetMin, &s.ScanCloseOffsetMin,
+		&s.RefundPolicy, &s.TermsAndConditions,
+		&s.Tags, &s.Performers, &s.Teams,
+		&s.ListingFeePaid, &s.ListingFeeAmount, &s.IsFeatured, &s.AdminPromoted,
+		&s.RightsDeclaredAt, &s.PublishedAt, &s.RejectionReason,
+		&s.CancelledAt, &s.CancellationReason,
+		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, ErrEventNotFound
+	}
+
+	s.GalleryImages = parseJSONBStrings(rawGallery)
+
+	// Pricing tiers. Non-fatal: an event may legitimately have none (flat
+	// price), and a tier-loading hiccup shouldn't blank the whole page.
+	if tts, ttErr := GetTicketTypesByEventID(pool, eventID); ttErr == nil {
+		s.TicketTypes = tts
+	}
+	if s.TicketTypes == nil {
+		s.TicketTypes = []*models.TicketType{}
 	}
 
 	if s.MaxCapacity != nil && *s.MaxCapacity > 0 {

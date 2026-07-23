@@ -150,6 +150,13 @@ func GetOrganizerEventStatsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		// Reshape to match the frontend EventStats interface:
 		// { event: { id, title, ... }, total_bookings, confirmed_bookings, ... }
+		//
+		// NOTE: this block is hand-built field by field, which is exactly how
+		// banner_image_url went missing — the column was selected and carried
+		// on the struct, but never copied out here, so the dashboard always saw
+		// `undefined` and rendered the "Upload banner" placeholder over an
+		// event that already had a banner. Anything added to the struct must be
+		// added here too.
 		c.JSON(http.StatusOK, gin.H{
 			"event": gin.H{
 				"id":              stats.EventID,
@@ -157,21 +164,61 @@ func GetOrganizerEventStatsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				"title":           stats.Title,
 				"status":          stats.Status,
 				"visibility":      stats.Visibility,
+				"description":     stats.Description,
 				"start_time":      stats.StartTime,
 				"end_time":        stats.EndTime,
+				"expires_at":      stats.ExpiresAt,
+				"timezone":        stats.Timezone,
 				"city":            stats.City,
 				"venue_name":      stats.VenueName,
+				"address":         stats.Address,
+				"venue_type":      stats.VenueType,
+				"latitude":        stats.Latitude,
+				"longitude":       stats.Longitude,
+				"category_id":     stats.CategoryID,
+				"category":        stats.Category,
 				"price":           stats.Price,
 				"currency":        stats.Currency,
 				"tickets_sold":    stats.TicketsSold,
 				"max_capacity":    stats.MaxCapacity,
+				"max_tickets_per_user": stats.MaxTicketsPerUser,
+				"allow_waitlist":  stats.AllowWaitlist,
 				"views":           stats.Views,
 				"cover_image_url": stats.CoverImageURL,
+				"banner_image_url": stats.BannerImageURL,
+				"banner_video_url": stats.BannerVideoURL,
+				"gallery_images":   stats.GalleryImages,
+				"scan_open_offset_min":  stats.ScanOpenOffsetMin,
+				"scan_close_offset_min": stats.ScanCloseOffsetMin,
+				"refund_policy":         stats.RefundPolicy,
+				"terms_and_conditions":  stats.TermsAndConditions,
+				"tags":            stats.Tags,
+				"performers":      stats.Performers,
+				"teams":           stats.Teams,
+				"ticket_types":    stats.TicketTypes,
+				"listing_fee_paid":   stats.ListingFeePaid,
+				"listing_fee_amount": stats.ListingFeeAmount,
+				"is_featured":        stats.IsFeatured,
+				"admin_promoted":     stats.AdminPromoted,
+				"rights_declared_at": stats.RightsDeclaredAt,
+				"published_at":       stats.PublishedAt,
+				"rejection_reason":   stats.RejectionReason,
+				"cancelled_at":       stats.CancelledAt,
+				"cancellation_reason": stats.CancellationReason,
+				"created_at":      stats.CreatedAt,
+				"updated_at":      stats.UpdatedAt,
 			},
 			"total_revenue":      stats.TotalNetEarnings,
 			"total_bookings":     stats.TotalBookings + stats.PendingBookings,
 			"confirmed_bookings": stats.TotalBookings,
 			"pending_bookings":   stats.PendingBookings,
+			"cancelled_bookings": stats.CancelledBookings,
+			"refunded_bookings":  stats.RefundedBookings,
+			"gross_ticket_revenue": stats.GrossTicketRevenue,
+			"platform_fees_paid":   stats.PlatformFeesPaid,
+			"net_ticket_earnings":  stats.NetTicketEarnings,
+			"total_refunded":       stats.TotalRefunded,
+			"capacity_used_pct":    stats.Availability,
 			"active_campaign":    nil,
 		})
 	}
