@@ -49,6 +49,15 @@ export default function EventDetailPage() {
   const [loading, setLoading] = useState(true);
   const [coverUploading, setCoverUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
+  // "Copied!" flash on the share-link button. This MUST be declared here with
+  // every other hook, above the `if (loading)` / `if (!stats)` early returns.
+  // It used to sit below them: on the first render `loading` was true, the
+  // component bailed early and this useState never ran; once stats arrived the
+  // render continued past the returns and the hook appeared, so React saw more
+  // hooks than the previous render, threw "Rendered more hooks than during the
+  // previous render", and — with no error boundary on the route — took the
+  // whole render tree down. That is the browser's "This page couldn't load".
+  const [copied, setCopied] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -132,7 +141,8 @@ export default function EventDetailPage() {
   // Only meaningful once the event is live (published / published_private).
   // Uses the public web base (NEXT_PUBLIC_SITE_URL) and the event slug, falling
   // back to the id and to the production domain if the env var isn't set.
-  const [copied, setCopied] = useState(false);
+  // NOTE: `copied` state lives with the other hooks at the top of the
+  // component — it must NOT be declared here, below the early returns.
   const isLive = ev.status === 'published' || ev.status === 'published_private';
   const siteBase = process.env.NEXT_PUBLIC_SITE_URL || 'https://ticket-hawk.com';
   const shareUrl = `${siteBase}/events/${ev.slug || ev.id}`;

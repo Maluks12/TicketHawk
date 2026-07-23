@@ -129,15 +129,40 @@ export default function EventsPage() {
     });
   }
 
+  // Publishing requires the rights declaration. The backend
+  // (models.RequirementsFor) sets RightsDeclaration: true for EVERY event
+  // class, and PublishEvent rejects with ErrDeclarationRequired →
+  // 400 "Please confirm you hold the rights…" unless events.rights_declared_at
+  // is already stamped or the request body carries the flag. Neither the
+  // create form nor this call ever sent it, so publishing was a hard dead end
+  // for every event on the platform.
+  //
+  // A rights declaration is a legal attestation, so it must be an explicit act
+  // by the organiser — never a hardcoded `true` posted on their behalf. We put
+  // the wording in front of them and only send the flag once they accept.
   async function publishEvent(id: string) {
-    try {
-      await api.post(`/organiser/events/${id}/publish`);
-      toast('Event submitted for review', 'success');
-      fetchEvents();
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast(msg ?? 'Failed to publish', 'error');
-    }
+    confirm(
+      'Confirm you hold the rights',
+      'You confirm that you hold the rights to host this event and to sell '
+      + 'tickets for it, and that the details you have provided are accurate. '
+      + 'TicketHawk may remove events and withhold payouts where these rights '
+      + 'cannot be evidenced.',
+      async () => {
+        try {
+          const res = await api.post(`/organiser/events/${id}/publish`, {
+            rights_declaration_accepted: true,
+          });
+          // Private events go live instantly; public ones go to admin review.
+          // The backend already words this correctly — surface its message
+          // rather than always claiming "submitted for review".
+          toast(res.data?.message ?? 'Event published', 'success');
+          fetchEvents();
+        } catch (e: unknown) {
+          const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+          toast(msg ?? 'Failed to publish', 'error');
+        }
+      },
+    );
   }
 
   // ── Capacity fill % ─────────────────────────────────────────────────────────
