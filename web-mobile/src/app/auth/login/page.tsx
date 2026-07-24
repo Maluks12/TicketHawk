@@ -133,7 +133,7 @@ export default function AuthPage() {
 
         {/* Brand */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 28 }}>
-          <img src="/brand-logo.png" alt="TicketHawk" style={{ width: 64, height: 64, objectFit: 'contain' }} />
+          <img src="/brand-logo_v2.png" alt="TicketHawk" style={{ width: 64, height: 64, objectFit: 'contain' }} />
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text }}>
             {mode === 'login' ? 'Welcome back' : 'Create account'}
           </h1>

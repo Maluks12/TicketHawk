@@ -59,12 +59,15 @@ func NewEmailService(cfg *config.Config) *EmailService {
 // ═══════════════════════════════════════════════════════════════════════════
 // Brand layout
 //
-// Every email shares one look: a black TicketHawk header band (logo +
-// wordmark, "HAWK" in the brand pink #FF2D55), a white content card on a
-// light-grey page, and a consistent footer. Layout is table-based and all
-// styles are inline, because email clients (Outlook, Gmail apps) ignore most
-// <style> blocks and modern CSS. Deliberately: NO emojis, NO QR codes — entry
-// QR codes are live/rotating and only exist in the app and web ticket pages.
+// Every email shares one look: the TicketHawk logo + wordmark ("HAWK" in the
+// brand pink #FF2D55) sit at the top of a single content card, on a light-grey
+// page, with a consistent footer. The header shares the card's surface (no
+// separate dark band) so it inverts together with the body in dark-mode mail
+// clients (Gmail, Outlook) instead of flipping to a mismatched white strip.
+// Layout is table-based and all styles are inline, because email clients
+// (Outlook, Gmail apps) ignore most <style> blocks and modern CSS.
+// Deliberately: NO emojis, NO QR codes — entry QR codes are live/rotating and
+// only exist in the app and web ticket pages.
 // ═══════════════════════════════════════════════════════════════════════════
 
 const (
@@ -112,11 +115,11 @@ func (s *EmailService) brandEmail(title string, bodyHTML string) string {
       <td align="center">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%%;">
 
-          <!-- Header band -->
+          <!-- Header (shares the card surface — no separate dark band) -->
           <tr>
-            <td bgcolor="%s" style="background:%s; border-radius:14px 14px 0 0; padding:22px 28px;" align="center">
-              <img src="cid:%s" alt="TicketHawk" width="44" height="44" style="vertical-align:middle; border:0; margin-right:10px;">
-              <span style="font-family:Arial,Helvetica,sans-serif; font-size:22px; font-weight:900; letter-spacing:0.5px; color:#ffffff; vertical-align:middle; -webkit-text-stroke:0.4px #ffffff; text-shadow:0.3px 0 0 currentColor, -0.3px 0 0 currentColor;">TICKET<span style="color:%s; -webkit-text-stroke:0.4px %s; text-shadow:0.3px 0 0 currentColor, -0.3px 0 0 currentColor;">HAWK</span></span>
+            <td bgcolor="%s" style="background:%s; border:1px solid #e5e7eb; border-bottom:none; border-radius:14px 14px 0 0; padding:28px 28px 22px;" align="center">
+              <img src="cid:%s" alt="TicketHawk" width="88" height="88" style="vertical-align:middle; border:0; margin-right:12px;">
+              <span style="font-family:Arial,Helvetica,sans-serif; font-size:26px; font-weight:900; letter-spacing:0.5px; color:#111114; vertical-align:middle; -webkit-text-stroke:1px #111114; text-shadow:0.5px 0 0 currentColor, -0.5px 0 0 currentColor, 0 0.5px 0 currentColor, 0 -0.5px 0 currentColor;">TICKET<span style="color:%s; -webkit-text-stroke:1px %s; text-shadow:0.5px 0 0 currentColor, -0.5px 0 0 currentColor, 0 0.5px 0 currentColor, 0 -0.5px 0 currentColor;">HAWK</span></span>
             </td>
           </tr>
 
@@ -142,7 +145,7 @@ func (s *EmailService) brandEmail(title string, bodyHTML string) string {
 </body>
 </html>`,
 		esc(title), pageBg, pageBg, pageBg,
-		brandDark, brandDark, brandLogoCID, brandPink, brandPink,
+		cardBg, cardBg, brandLogoCID, brandPink, brandPink,
 		cardBg, cardBg, borderCol, textDark,
 		bodyHTML,
 		textMuted, time.Now().Year(),
