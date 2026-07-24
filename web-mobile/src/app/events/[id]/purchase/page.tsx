@@ -112,12 +112,17 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
     ? Math.round(Math.min(10, 0.2 * (selectedType?.price ?? 0)) * quantity * 100) / 100
     : 0;
   const grandTotal   = totalAmount + platformFee;
-  const venueType = (() => {
+  // Seating maps are disabled for launch (like the merch tab). All events go
+  // straight from ticket selection to the order summary. Flip this to true to
+  // restore the Choose Seats step -- all its code below is intact.
+  const SEATING_ENABLED = false;
+  const rawVenueType = (() => {
   if (!event) return 'none' as const;
   const override = (event as any).venue_type as string | undefined;
   if (override && override !== 'auto') return override as 'stadium' | 'auditorium' | 'none';
   return detectVenueType(event.category ?? '', event.venue_name);
 })();
+  const venueType = SEATING_ENABLED ? rawVenueType : 'none';
 
   const handleBuyNow = async () => {
     if (!selectedType || !event) return;

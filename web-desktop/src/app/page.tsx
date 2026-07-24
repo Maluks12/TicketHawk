@@ -662,7 +662,7 @@ export default function HomePage() {
       {/* Error banner */}
       {error && (
         <div className="mx-5 mt-5 p-3.5 rounded-sm border" style={{ backgroundColor: 'rgba(255,60,110,0.12)', borderColor: colors.dividerColor }}>
-          <p className="font-black text-[12px] tracking-[1px] mb-1" style={{ color: colors.text }}>⚠ COULD NOT LOAD SECTIONS</p>
+          <p className="font-black text-[12px] tracking-[1px] mb-1" style={{ color: colors.text }}>⚠ NO EVENTS FOUND</p>
           <p className="text-[11px]" style={{ color: colors.subText }}>{error}</p>
           <button onClick={() => fetchSections()} className="mt-2.5 border px-3.5 py-1.5 rounded-sm text-[10px] font-black tracking-[1.5px]" style={{ borderColor: colors.text, color: colors.text }}>RETRY</button>
         </div>

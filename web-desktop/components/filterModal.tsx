@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { MapPin, Calendar, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useAppTheme } from '@/themes/colors';
 
 // ── Types & exports ───────────────────────────────────────────────────────────
 export type DatePreset = 'any' | 'today' | 'tomorrow' | 'weekend' | 'custom';
@@ -90,6 +91,7 @@ function CityAutocomplete({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const { colors } = useAppTheme();
   const [isFocused,   setIsFocused]   = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const justSelected = useRef(false);
@@ -112,7 +114,12 @@ function CityAutocomplete({
   return (
     <div className="relative">
       <input
-        className="w-full border border-black/10 dark:border-white/10 dark:bg-transparent dark:text-white rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-300 dark:placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FF2D55]/30"
+        className="w-full rounded-full px-4 py-2.5 text-sm focus:outline-none transition-colors duration-150"
+        style={{
+          border: `1px solid ${colors.dividerColor}`,
+          backgroundColor: colors.sectionCardBg,
+          color: colors.text,
+        }}
         placeholder="e.g. Cape Town"
         value={value}
         autoComplete="off"
@@ -123,13 +130,19 @@ function CityAutocomplete({
       />
 
       {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-[#1c1c1c] rounded-xl border border-black/10 dark:border-white/10 shadow-2xl z-30 overflow-hidden">
+        <div
+          className="absolute top-full left-0 right-0 mt-1.5 rounded-2xl shadow-2xl z-30 overflow-hidden"
+          style={{ backgroundColor: colors.cardBg, border: `1px solid ${colors.dividerColor}` }}
+        >
           {suggestions.map((city) => (
             <button
               key={city}
               type="button"
-              className="w-full text-left px-4 py-2.5 text-sm dark:text-gray-200 hover:bg-[#FF2D55]/10 transition-colors flex items-center gap-2.5"
+              className="w-full text-left px-4 py-2.5 text-sm transition-colors flex items-center gap-2.5"
+              style={{ color: colors.text }}
               onMouseDown={(e) => e.preventDefault()} /* keep input focused */
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = colors.sectionCardBg; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
               onClick={() => {
                 justSelected.current = true;
                 onChange(city);
@@ -137,8 +150,8 @@ function CityAutocomplete({
                 setIsFocused(false);
               }}
             >
-              <MapPin size={11} className="shrink-0 text-gray-400" />
-              <span className="dark:text-gray-200">{highlightMatch(city, value)}</span>
+              <MapPin size={11} className="shrink-0" color={colors.iconColor} />
+              <span>{highlightMatch(city, value)}</span>
             </button>
           ))}
         </div>
@@ -172,6 +185,7 @@ function RangePicker({
   to: string;
   onChange: (from: string, to: string) => void;
 }) {
+  const { colors } = useAppTheme();
   const today = getTodayStr();
 
   const [viewYear,  setViewYear]  = useState(() =>
@@ -239,17 +253,23 @@ function RangePicker({
         <button
           type="button"
           onClick={goPrev}
-          className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 hover:text-black dark:hover:text-white transition-colors"
+          className="w-7 h-7 flex items-center justify-center rounded-full transition-colors"
+          style={{ color: colors.subText }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = colors.sectionCardBg; e.currentTarget.style.color = colors.text; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = colors.subText; }}
         >
           <ChevronLeft size={14} />
         </button>
-        <span className="text-[13px] font-bold dark:text-white">
+        <span className="text-[13px] font-bold" style={{ color: colors.text }}>
           {MONTH_NAMES[viewMonth]} {viewYear}
         </span>
         <button
           type="button"
           onClick={goNext}
-          className="w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 hover:text-black dark:hover:text-white transition-colors"
+          className="w-7 h-7 flex items-center justify-center rounded-full transition-colors"
+          style={{ color: colors.subText }}
+          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = colors.sectionCardBg; e.currentTarget.style.color = colors.text; }}
+          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = colors.subText; }}
         >
           <ChevronRight size={14} />
         </button>
@@ -258,7 +278,7 @@ function RangePicker({
       {/* Weekday headers */}
       <div className="grid grid-cols-7 mb-1">
         {WEEKDAY_LABELS.map(d => (
-          <div key={d} className="text-center text-[9px] font-black tracking-wider text-gray-400 py-1">
+          <div key={d} className="text-center text-[9px] font-black tracking-wider py-1" style={{ color: colors.subText }}>
             {d}
           </div>
         ))}
@@ -304,20 +324,22 @@ function RangePicker({
                 disabled={isPast}
                 onClick={() => handleDayClick(dateStr)}
                 onMouseEnter={() => !isPast && setHover(dateStr)}
-                className={[
-                  'w-7 h-7 rounded-full text-[12px] relative z-10 transition-colors',
-                  isPast
-                    ? 'text-gray-600 dark:text-gray-700 cursor-not-allowed'
-                    : isHighlight
-                      ? 'bg-[#FF2D55] text-white font-bold cursor-pointer'
-                      : 'dark:text-white cursor-pointer hover:bg-black/8 dark:hover:bg-white/10',
-                  isToday && !isHighlight ? 'font-bold' : '',
-                ].join(' ')}
+                className="w-7 h-7 rounded-full text-[12px] relative z-10 transition-colors"
+                style={{
+                  cursor: isPast ? 'not-allowed' : 'pointer',
+                  color: isPast ? colors.dividerColor : isHighlight ? '#ffffff' : colors.text,
+                  backgroundColor: isHighlight ? '#FF2D55' : 'transparent',
+                  fontWeight: isHighlight ? 700 : isToday ? 700 : 400,
+                  boxShadow: isHighlight ? '0 3px 10px rgba(255,45,85,0.35)' : 'none',
+                }}
               >
                 {day}
-                {/* Today dot */}
+                {/* Today indicator — navy, distinct from the pink selection state */}
                 {isToday && !isHighlight && (
-                  <span className="absolute bottom-[3px] left-1/2 -translate-x-1/2 w-[3px] h-[3px] rounded-full bg-[#FF2D55]" />
+                  <span
+                    className="absolute bottom-[3px] left-1/2 -translate-x-1/2 w-[3px] h-[3px] rounded-full"
+                    style={{ backgroundColor: colors.secondaryBg }}
+                  />
                 )}
               </button>
             </div>
@@ -326,21 +348,21 @@ function RangePicker({
       </div>
 
       {/* Status bar */}
-      <div className="mt-3 py-2 px-3 rounded-lg bg-black/[0.03] dark:bg-white/[0.04] text-center min-h-[32px] flex items-center justify-center">
+      <div className="mt-3 py-2 px-3 rounded-2xl text-center min-h-[32px] flex items-center justify-center" style={{ backgroundColor: colors.sectionCardBg }}>
         {!start ? (
-          <p className="text-[11px] text-gray-400">Click to select a start date</p>
+          <p className="text-[11px]" style={{ color: colors.subText }}>Click to select a start date</p>
         ) : !end ? (
-          <p className="text-[11px] text-[#FF2D55]">
+          <p className="text-[11px]" style={{ color: '#FF2D55' }}>
             <span className="font-bold">
               {new Date(start + 'T00:00:00').toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}
             </span>
-            <span className="text-gray-400 mx-1.5">→</span>
-            <span className="text-gray-400">pick an end date</span>
+            <span className="mx-1.5" style={{ color: colors.subText }}>→</span>
+            <span style={{ color: colors.subText }}>pick an end date</span>
           </p>
         ) : (
-          <p className="text-[11px] font-semibold dark:text-white">
+          <p className="text-[11px] font-semibold" style={{ color: colors.text }}>
             {new Date(start + 'T00:00:00').toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}
-            <span className="mx-2 text-gray-400">–</span>
+            <span className="mx-2" style={{ color: colors.subText }}>–</span>
             {new Date(end + 'T00:00:00').toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })}
           </p>
         )}
@@ -371,6 +393,8 @@ export default function FilterModal({
   onApply,
   initialParams,
 }: FilterModalProps) {
+  const { colors } = useAppTheme();
+
   const [city,       setCity]       = useState(initialParams?.city       ?? '');
   const [province,   setProvince]   = useState(initialParams?.province   ?? '');
   const [date,       setDate]       = useState<DatePreset>(initialParams?.date ?? 'any');
@@ -458,54 +482,55 @@ export default function FilterModal({
     >
       {/* Dialog — no overflow-hidden so city autocomplete can escape */}
       <div
-        className="w-full max-w-2xl bg-white dark:bg-[#0d0d0d] rounded-2xl shadow-2xl"
+        className="relative w-full max-w-2xl rounded-2xl shadow-2xl"
+        style={{ backgroundColor: colors.cardBg }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ── Header ─────────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-8 pt-7 pb-5 border-b border-black/[0.06] dark:border-white/[0.06] rounded-t-2xl bg-white dark:bg-[#0d0d0d]">
-          <h2 className="text-base font-black tracking-[1.5px] dark:text-white">
-            FILTER EVENTS
-          </h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-full bg-black/[0.05] dark:bg-white/[0.08] hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
-            aria-label="Close"
-          >
-            <X size={15} className="text-black dark:text-white" />
-          </button>
-        </div>
+        <h2 className="sr-only">Filter events</h2>
+        {/* Close button floats over the corner — no header row, no dead space */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full transition-colors"
+          style={{ backgroundColor: colors.sectionCardBg }}
+          aria-label="Close"
+        >
+          <X size={15} color={colors.text} />
+        </button>
 
         {/* ── Body (two columns) ──────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 divide-x divide-black/[0.06] dark:divide-white/[0.06]">
+        <div className="grid grid-cols-2 rounded-t-2xl overflow-hidden" style={{ borderTop: 'none' }}>
 
           {/* LEFT: Location */}
-          <div className="px-8 py-6 space-y-5">
+          <div className="px-8 pt-6 pb-6 space-y-5" style={{ borderRight: `1px solid ${colors.dividerColor}` }}>
             <div className="flex items-center gap-2">
-              <MapPin size={13} className="text-[#FF2D55]" />
-              <span className="text-[10px] font-black tracking-[1.8px] text-gray-400">LOCATION</span>
+              <MapPin size={13} color="#FF2D55" />
+              <span className="text-[10px] font-black tracking-[1.8px]" style={{ color: colors.subText }}>LOCATION</span>
+
             </div>
 
             {/* Nearby toggle */}
             <div className="flex items-center justify-between py-1">
               <div>
-                <p className="text-sm font-bold dark:text-white leading-tight">
+                <p className="text-sm font-bold leading-tight" style={{ color: colors.text }}>
                   {gpsLoading ? 'Detecting location…' : 'Use my location'}
                 </p>
-                <p className="text-[11px] text-gray-400 mt-0.5">Find events near you</p>
+                <p className="text-[11px] mt-0.5" style={{ color: colors.subText }}>Find events near you</p>
               </div>
               <button
                 type="button"
                 onClick={handleNearbyToggle}
                 aria-pressed={nearbyMode}
-                className={`relative w-12 h-6 rounded-full shrink-0 transition-colors duration-200 focus:outline-none ${
-                  nearbyMode    ? 'bg-[#FF2D55]'              : 'bg-gray-200 dark:bg-gray-700'
-                } ${gpsLoading ? 'cursor-wait'               : 'cursor-pointer'}`}
+                className="relative w-12 h-6 rounded-full shrink-0 transition-colors duration-200 focus:outline-none"
+                style={{
+                  backgroundColor: nearbyMode ? '#FF2D55' : colors.sectionCardBg,
+                  cursor: gpsLoading ? 'wait' : 'pointer',
+                  boxShadow: nearbyMode ? '0 4px 14px rgba(255,45,85,0.35)' : 'none',
+                }}
               >
                 {/* Thumb — left-[2px] anchors it; translate shifts it on/off */}
                 <span
-                  className={`absolute top-[2px] left-[2px] w-5 h-5 rounded-full bg-white shadow-md transition-transform duration-200 ${
-                    nearbyMode ? 'translate-x-[22px]' : 'translate-x-0'
-                  }`}
+                  className="absolute top-[2px] left-[2px] w-5 h-5 rounded-full bg-white shadow-md transition-transform duration-200"
+                  style={{ transform: nearbyMode ? 'translateX(22px)' : 'translateX(0)' }}
                 />
                 {/* Spinner overlay while GPS is loading */}
                 {gpsLoading && (
@@ -523,8 +548,8 @@ export default function FilterModal({
             {nearbyMode && (
               <div className="space-y-2 pt-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-black tracking-[1.5px] text-gray-400">RADIUS</label>
-                  <span className="text-sm font-bold dark:text-white">{radiusKm} km</span>
+                  <label className="text-[10px] font-black tracking-[1.5px]" style={{ color: colors.subText }}>RADIUS</label>
+                  <span className="text-sm font-bold" style={{ color: colors.text }}>{radiusKm} km</span>
                 </div>
                 <input
                   type="range" min={5} max={100} step={5}
@@ -532,7 +557,7 @@ export default function FilterModal({
                   onChange={(e) => setRadiusKm(Number(e.target.value))}
                   className="w-full accent-[#FF2D55]"
                 />
-                <div className="flex justify-between text-[10px] text-gray-400">
+                <div className="flex justify-between text-[10px]" style={{ color: colors.subText }}>
                   <span>5 km</span><span>100 km</span>
                 </div>
               </div>
@@ -542,7 +567,7 @@ export default function FilterModal({
               <div className="space-y-4">
                 {/* City with autocomplete */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black tracking-[1.5px] text-gray-400">CITY</label>
+                  <label className="text-[10px] font-black tracking-[1.5px]" style={{ color: colors.subText }}>CITY</label>
                   <CityAutocomplete
                     value={city}
                     onChange={(v) => {
@@ -551,13 +576,13 @@ export default function FilterModal({
                     }}
                   />
                   {city.length > 0 && city.length < 2 && (
-                    <p className="text-[10px] text-gray-400 pl-1">Type at least 2 letters to search…</p>
+                    <p className="text-[10px] pl-1" style={{ color: colors.subText }}>Type at least 2 letters to search…</p>
                   )}
                 </div>
 
                 {/* Province chips */}
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black tracking-[1.5px] text-gray-400">PROVINCE</label>
+                  <label className="text-[10px] font-black tracking-[1.5px]" style={{ color: colors.subText }}>PROVINCE</label>
                   <div className="flex flex-wrap gap-1.5">
                     {PROVINCES.map((p) => {
                       const val    = p === 'Any' ? '' : p;
@@ -570,11 +595,13 @@ export default function FilterModal({
                             setProvince(val);
                             if (val !== '') setCity(''); // province takes priority
                           }}
-                          className={`px-3 py-1.5 rounded-full border text-[11px] font-bold tracking-wide transition-colors ${
-                            active
-                              ? 'bg-black dark:bg-white text-white dark:text-black border-black dark:border-white'
-                              : 'border-black/10 dark:border-white/15 text-gray-500 dark:text-gray-400 hover:border-black/25 dark:hover:border-white/30'
-                          }`}
+                          className="px-3 py-1.5 rounded-full text-[11px] font-bold tracking-wide transition-all duration-200 ease-out"
+                          style={{
+                            backgroundColor: active ? '#FF2D55' : 'transparent',
+                            color: active ? '#ffffff' : colors.subText,
+                            border: `1px solid ${active ? '#FF2D55' : colors.dividerColor}`,
+                            boxShadow: active ? '0 4px 14px rgba(255,45,85,0.35)' : 'none',
+                          }}
                         >
                           {p}
                         </button>
@@ -587,10 +614,10 @@ export default function FilterModal({
           </div>
 
           {/* RIGHT: Date */}
-          <div className="px-8 py-6 space-y-4">
+          <div className="px-8 pt-6 pb-6 space-y-4">
             <div className="flex items-center gap-2">
-              <Calendar size={13} className="text-[#FF2D55]" />
-              <span className="text-[10px] font-black tracking-[1.8px] text-gray-400">DATE</span>
+              <Calendar size={13} color="#FF2D55" />
+              <span className="text-[10px] font-black tracking-[1.8px]" style={{ color: colors.subText }}>DATE</span>
             </div>
 
             {/* Preset buttons */}
@@ -602,16 +629,15 @@ export default function FilterModal({
                     key={value}
                     type="button"
                     onClick={() => setDate(value)}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-semibold transition-all ${
-                      active
-                        ? 'bg-black dark:bg-white text-white dark:text-black border-black dark:border-white'
-                        : 'border-black/08 dark:border-white/08 text-gray-700 dark:text-gray-300 hover:border-black/20 dark:hover:border-white/20 hover:bg-black/[0.02] dark:hover:bg-white/[0.02]'
-                    }`}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl text-sm font-semibold transition-all duration-200 ease-out"
+                    style={{
+                      backgroundColor: active ? '#FF2D55' : 'transparent',
+                      color: active ? '#ffffff' : colors.text,
+                      border: `1px solid ${active ? '#FF2D55' : colors.dividerColor}`,
+                      boxShadow: active ? '0 4px 14px rgba(255,45,85,0.35)' : 'none',
+                    }}
                   >
                     <span>{label}</span>
-                    {active && (
-                      <span className="text-[#FF2D55] text-xs font-black">✓</span>
-                    )}
                   </button>
                 );
               })}
@@ -619,7 +645,7 @@ export default function FilterModal({
 
             {/* Calendar — shown only for custom range */}
             {date === 'custom' && (
-              <div className="pt-1 border-t border-black/[0.06] dark:border-white/[0.06]">
+              <div className="pt-1" style={{ borderTop: `1px solid ${colors.dividerColor}` }}>
                 <RangePicker
                   key={calKey}
                   from={dateFrom}
@@ -632,18 +658,23 @@ export default function FilterModal({
         </div>
 
         {/* ── Footer ─────────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-3 px-8 py-5 border-t border-black/[0.06] dark:border-white/[0.06] rounded-b-2xl bg-white dark:bg-[#0d0d0d]">
+        <div
+          className="flex items-center gap-3 px-8 py-5 rounded-b-2xl"
+          style={{ borderTop: `1px solid ${colors.dividerColor}`, backgroundColor: colors.cardBg }}
+        >
           <button
             type="button"
             onClick={handleReset}
-            className="px-5 py-2.5 rounded-lg text-[12px] font-extrabold tracking-[1px] border border-black/10 dark:border-white/15 text-gray-500 dark:text-gray-400 hover:border-black/25 dark:hover:border-white/30 transition-colors"
+            className="px-5 py-2.5 rounded-full text-[12px] font-extrabold tracking-[1px] transition-all duration-150 hover:opacity-80"
+            style={{ backgroundColor: colors.sectionCardBg, color: colors.text }}
           >
             RESET
           </button>
           <button
             type="button"
             onClick={handleApply}
-            className="flex-1 bg-[#FF2D55] text-white font-extrabold text-[12px] tracking-[1.5px] py-2.5 rounded-lg hover:bg-[#e0263f] transition-colors"
+            className="flex-1 font-extrabold text-[12px] tracking-[1.5px] py-2.5 rounded-full transition-all duration-150 hover:opacity-90 hover:scale-[1.01]"
+            style={{ backgroundColor: '#FF2D55', color: '#ffffff', boxShadow: '0 4px 14px rgba(255,45,85,0.35)' }}
           >
             APPLY FILTERS
           </button>
