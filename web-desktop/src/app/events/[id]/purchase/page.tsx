@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, use } from 'react';
-import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check } from 'lucide-react';
+import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check, AlertCircle, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
@@ -53,6 +53,15 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [guestSurname,   setGuestSurname]   = useState('');
   const [guestEmail,     setGuestEmail]     = useState('');
   const [error,          setError]          = useState('');
+
+  // Errors are surfaced as a floating toast (see below) so they're visible
+  // no matter where the person is scrolled to, or whether a sheet is open.
+  // Auto-dismiss after a few seconds; a fresh error resets the timer.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(''), 5000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   // ── Gate: redirect to details if not navigated from there ─────────────
   // Use a ref so this check only runs once, even if the component re-renders
@@ -111,7 +120,13 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
     ? Math.round(Math.min(10, 0.2 * (selectedType?.price ?? 0)) * quantity * 100) / 100
     : 0;
   const grandTotal   = totalAmount + platformFee;
+  // NOTE: Seating map UI is temporarily disabled (feature-flagged off) rather
+  // than removed — flip SEATING_MAP_ENABLED back to true to restore it.
+  // All the original detection/rendering logic below is left untouched for
+  // future reference.
+  const SEATING_MAP_ENABLED = false;
   const venueType = (() => {
+  if (!SEATING_MAP_ENABLED) return 'none' as const;
   if (!event) return 'none' as const;
   const override = (event as any).venue_type as string | undefined;
   if (override && override !== 'auto') return override as 'stadium' | 'auditorium' | 'none';
@@ -469,13 +484,39 @@ return (
                 <p style={{ margin: 0, fontSize: 16, fontWeight: 800, color: colors.text }}>{fmtPrice(grandTotal)}</p>
               </div>
             </div>
-
-            {error && <p style={{ color: '#ff3c6e', fontSize: 13, margin: 0 }}>{error}</p>}
           </div>
         )}
       </div>
 
-       {/* CTA bar */}
+      {/* ── Error toast ── fixed to the top of the viewport so it's visible
+           no matter where the person has scrolled to, and it sits above the
+           contact/payment sheets (z-index 200 > 100) instead of being hidden
+           behind them. */}
+      {error && (
+        <div
+          style={{
+            position: 'fixed', top: 16, left: 16, right: 16, zIndex: 200,
+            maxWidth: 520, margin: '0 auto',
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+            background: '#2a0e14', border: '1px solid #ff3c6e',
+            borderRadius: 12, padding: '12px 14px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          }}
+          role="alert"
+        >
+          <AlertCircle size={18} color="#ff3c6e" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ flex: 1, margin: 0, fontSize: 13, fontWeight: 600, color: '#fff', lineHeight: 1.4 }}>{error}</p>
+          <button
+            onClick={() => setError('')}
+            aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', flexShrink: 0, lineHeight: 0 }}
+          >
+            <X size={16} color="#ffb3c2" />
+          </button>
+        </div>
+      )}
+
+      {/* CTA bar */}
     {selectedType && !isSoldOut(selectedType) && (
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, maxWidth: 640, margin: '0 auto' }}>
         <div>

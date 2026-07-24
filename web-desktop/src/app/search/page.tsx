@@ -261,8 +261,10 @@ export default function SearchPage() {
     return () => { active = false; };
   }, []);
 
+  const MIN_QUERY_LENGTH = 2;
+
   const runSearch = useCallback(async (q: string) => {
-    if (!q.trim()) { setMode('idle'); setResults([]); return; }
+    if (q.trim().length < MIN_QUERY_LENGTH) { setMode('idle'); setResults([]); return; }
     setLoading(true);
     setMode('results');
     const data = await searchEvents(q);
