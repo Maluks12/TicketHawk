@@ -465,6 +465,14 @@ func GuestRefundHandler(
 			return
 		}
 
+		// Return the seats to the pool. Nothing decremented tickets_sold on a
+		// refund before this, so refunded tickets permanently consumed capacity.
+		// Idempotent — a retried refund cannot release the same seats twice.
+		if relErr := repository.ReleaseRefundedSeats(pool, ctx, booking.ID); relErr != nil {
+			log.Error().Err(relErr).Str("booking_id", booking.ID).
+				Msg("guest refund: seats not returned to the pool — event capacity understated")
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"message":          "Refund processed successfully",
 			"refund_amount":    quote.RefundAmount,

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"events-db/internal/models"
+	"events-db/internal/repository"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -104,6 +105,14 @@ func (s *RefundService) RefundEventCancellation(
 			// a bookkeeping problem, not a financial one. Log loudly and carry on.
 			log.Error().Err(err).Str("booking_number", t.BookingNumber).
 				Msg("cancellation: refunded at gateway but booking row not updated")
+		}
+
+		// Return the seats. Resale is moot on a cancelled event, but the counter
+		// should still reflect reality for reporting and for the organiser's
+		// dashboard. Idempotent, so a re-run cancellation sweep is harmless.
+		if relErr := repository.ReleaseRefundedSeats(s.pool, ctx, t.BookingID); relErr != nil {
+			log.Error().Err(relErr).Str("booking_number", t.BookingNumber).
+				Msg("cancellation: seats not returned to the pool")
 		}
 
 		out.BookingsRefunded++

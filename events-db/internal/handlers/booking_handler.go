@@ -263,6 +263,15 @@ func RequestRefundHandler(
 			return
 		}
 
+		// Put the seats back on sale. Nothing decremented tickets_sold on a
+		// refund before this, so every refunded ticket permanently consumed
+		// capacity and events drifted towards a false sold-out. Idempotent, so
+		// a retried refund cannot release the same seats twice and oversell.
+		if relErr := bookings.ReleaseRefundedSeats(bookingID); relErr != nil {
+			log.Error().Err(relErr).Str("booking_id", bookingID).
+				Msg("refund: seats not returned to the pool — event capacity understated")
+		}
+
 		// FIX 4: send synchronously — no goroutine. The count is bounded by
 		// ticket quantity so latency is negligible. Errors are logged but do
 		// not fail the request since the refund itself has already succeeded.

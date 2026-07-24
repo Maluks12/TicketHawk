@@ -22,6 +22,7 @@ type BookingQuerier interface {
 	CreateBooking(dto *models.CreateBookingDTO, userID string, event *models.Event) (*models.Booking, error)
 	RequestRefundWithCascade(bookingID, userID, reason string, refundAmount, refundRate float64) ([]CancelledAssignee, error)
 	ReleaseFailedBooking(bookingID string) error
+	ReleaseRefundedSeats(bookingID string) error
 	GetUnsentConfirmedBookingIDs() ([]string, error)
 	SumBookingTotalsByIDs(ids []string) (float64, error) // FIX 3
 	// CreateMerchOnlyBooking creates a placeholder booking row for a cart that
@@ -90,6 +91,11 @@ func (q *PgxBookingQuerier) RequestRefundWithCascade(bookingID, userID, reason s
 // takes interfaces rather than a raw pool.
 func (q *PgxBookingQuerier) ReleaseFailedBooking(bookingID string) error {
 	return ReleaseFailedBooking(q.pool, context.Background(), bookingID)
+}
+
+// ReleaseRefundedSeats puts a refunded booking's tickets back on sale.
+func (q *PgxBookingQuerier) ReleaseRefundedSeats(bookingID string) error {
+	return ReleaseRefundedSeats(q.pool, context.Background(), bookingID)
 }
 func (q *PgxBookingQuerier) GetUnsentConfirmedBookingIDs() ([]string, error) {
 	return GetUnsentConfirmedBookingIDs(q.pool)
