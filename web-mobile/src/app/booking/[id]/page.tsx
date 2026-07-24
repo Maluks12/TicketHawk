@@ -18,7 +18,7 @@ interface BookingDetail {
   event?: { title: string; start_time: string; venue_name: string; city: string; cover_image_url?: string; address?: string };
 }
 
-interface TicketAssignment { id: string; slot_number: number; status: string; assignee_name?: string; assignee_email?: string; }
+interface TicketAssignment { id: string; slot_number: number; status: string; assignee_name?: string; assignee_email?: string; qr_scanned_at?: string | null; }
 
 const STATUS_COLOR: Record<string, string> = { confirmed: '#00e5a0', pending: '#ffb830', cancelled: '#ff4d4d', refunded: '#888' };
 const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -75,6 +75,10 @@ export default function BookingDetailPage() {
   const [assignEmail, setAssignEmail] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignErr, setAssignErr] = useState('');
+  // Pool: admissions remaining, reported by the group QR on each refresh.
+  const [poolRemaining, setPoolRemaining] = useState<number | null>(null);
+  // Which assigned slot is currently being revoked (spinner state).
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   const refreshAssignments = useCallback(async () => {
     if (!id && !isGuest) return;
@@ -126,6 +130,16 @@ export default function BookingDetailPage() {
     finally { setAssignLoading(false); }
   };
 
+  // Revoke a still-pending invite; the slot returns to the buyer's pool.
+  const handleRevoke = async (assignmentId: string) => {
+    setRevoking(assignmentId);
+    try {
+      await api.delete(`/v1/bookings/${id}/assignments/${assignmentId}`);
+      await refreshAssignments();
+    } catch {}
+    finally { setRevoking(null); }
+  };
+
   const bg = isDark ? '#0a0a0a' : '#f5f5f7';
   const cardBg = isDark ? '#111' : '#fff';
   const border = isDark ? '#222' : '#e5e5e5';
@@ -139,6 +153,22 @@ export default function BookingDetailPage() {
   const statusCol = STATUS_COLOR[status] ?? '#888';
   const canRefund = status === 'confirmed' && !refunded && !!user;
   const hasAssignments = assignments.length > 0;
+
+  // ── Pool model (mirrors the app) ────────────────────────────────────────────
+  // Pool slots = unassigned AND not yet scanned at the gate. They're the buyer's
+  // own admissions, covered by a single live GROUP QR. Assigned slots (pending
+  // or claimed) are tickets handed to other people and listed separately.
+  const showQRs        = status === 'confirmed' || status === 'pending';
+  const poolSlots      = assignments.filter((a) => a.status === 'unassigned' && !a.qr_scanned_at);
+  const assignedSlots  = assignments.filter((a) => a.status === 'pending' || a.status === 'claimed');
+  const poolCount      = poolSlots.length;
+  const firstUnassigned = poolSlots[0] ?? null;
+
+  // The web RotatingQR takes an `endpoint` override; point it at the pool-QR
+  // route (authed vs guest) so the group token loads exactly like the app's.
+  const poolEndpoint = isGuest
+    ? `/v1/guest/bookings/${encodeURIComponent(guestBn)}/pool-qr?email=${encodeURIComponent(guestEmail)}`
+    : `/v1/bookings/${id}/pool-qr`;
 
   return (
     <div style={{ minHeight: '100vh', background: bg }}>
@@ -163,59 +193,102 @@ export default function BookingDetailPage() {
           </div>
         )}
 
-        {/* QR / Entry passes — one card per ticket slot */}
+        {/* QR / Entry passes — group POOL pass + assigned tickets, matching the app.
+            The old version only rendered a QR when a slot was `claimed`, so the
+            buyer's own ticket sat forever on "Ticket not yet claimed". The pool
+            model is what the app uses: one live group QR admits everyone still
+            with the buyer, and each ticket handed off shows in the ASSIGNED list. */}
 <div style={{ marginTop: 24 }}>
-  <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: 'rgba(128,128,128,0.6)', margin: '0 0 12px' }}>ENTRY PASSES</p>
+  <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.4, color: 'rgba(128,128,128,0.6)', margin: '0 0 12px' }}>
+    {booking.ticket_quantity > 1 ? `ENTRY PASSES (${booking.ticket_quantity} tickets)` : 'ENTRY PASS'}
+  </p>
 
-  {booking.booking_status === 'refunded' || booking.booking_status === 'cancelled' ? (
+  {status === 'refunded' || status === 'cancelled' ? (
     <div style={{ textAlign: 'center', padding: 24, background: 'rgba(255,255,255,0.03)', borderRadius: 12, opacity: 0.4 }}>
-      <p style={{ margin: 0, fontSize: 13, color: '#888' }}>This ticket has been {booking.booking_status}</p>
+      <p style={{ margin: 0, fontSize: 13, color: '#888' }}>This ticket has been {status}</p>
     </div>
-  ) : assignments.length > 0 ? (
-    assignments.map((slot: any) => {
-      const isClaimed  = slot.status === 'claimed';
-      const isPending  = slot.status === 'pending';
-      const isInactive = slot.status === 'inactive' || slot.status === 'revoked';
-      const status     = booking.booking_status;
-      const showQR     = (status === 'confirmed' || status === 'pending') && !isInactive;
-
-      return (
-        <div key={slot.id} style={{ marginBottom: 12, borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', opacity: isInactive ? 0.35 : 1 }}>
-          <div style={{ background: 'rgba(255,255,255,0.04)', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#aaa' }}>
-              {isPending ? `Invite sent to ${slot.assignee_email ?? 'recipient'}` : isClaimed ? 'Assigned' : isInactive ? 'Invalidated' : 'Unassigned'}
-            </p>
-            <span style={{ fontSize: 10, fontWeight: 800, color: STATUS_COLOR[booking.booking_status] ?? '#888', letterSpacing: 1 }}>
-              #{booking.booking_number}
+  ) : hasAssignments ? (
+    <>
+      {/* Group pool pass — one live QR covering everyone still with the buyer.
+          poolCount = unassigned slots not yet scanned at the gate. */}
+      {poolCount > 0 && showQRs && (
+        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          {booking.ticket_quantity > 1 && (
+            <span style={{ alignSelf: 'flex-start', fontSize: 10, fontWeight: 800, letterSpacing: 1, color: statusCol, background: `${statusCol}18`, border: `1px solid ${statusCol}44`, borderRadius: 6, padding: '3px 8px' }}>
+              GROUP PASS
             </span>
-          </div>
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            {showQR && isClaimed ? (
-              <RotatingQR assignmentId={slot.id} size={200} />
-            ) : (
-              <div style={{ width: 200, height: 200, borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <span style={{ fontSize: 40 }}>{isPending ? '📧' : isInactive ? '🚫' : '⏳'}</span>
-                <p style={{ margin: 0, fontSize: 12, color: '#888', textAlign: 'center', maxWidth: 160 }}>
-                  {isPending ? `Invite sent to ${slot.assignee_email ?? 'recipient'}` : isInactive ? 'Ticket invalidated' : status === 'confirmed' ? 'Ticket not yet claimed' : 'Complete payment to activate'}
-                </p>
-              </div>
-            )}
-            <p style={{ margin: 0, fontSize: 11, color: '#666', textAlign: 'center' }}>
-              {isClaimed ? 'Live QR — present at venue entrance' : isPending ? 'Waiting for recipient to claim' : isInactive ? 'This slot has been invalidated' : status === 'confirmed' ? 'QR will appear once claimed' : 'Complete payment to activate your ticket'}
-            </p>
-          </div>
+          )}
+          <RotatingQR
+            size={220}
+            endpoint={poolEndpoint}
+            onRemaining={setPoolRemaining}
+          />
+          <p style={{ margin: '4px 0 0', fontSize: 14, fontWeight: 700, color: colors.text }}>
+            {(() => { const n = poolRemaining ?? poolCount; return `Covers your group · ${n} admission${n === 1 ? '' : 's'}`; })()}
+          </p>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 800, letterSpacing: 1, color: statusCol }}>#{booking.booking_number}</p>
+          <p style={{ margin: 0, fontSize: 11, color: '#666', textAlign: 'center' }}>Live QR — one scan admits your group at the entrance</p>
         </div>
-      );
-    })
+      )}
+
+      {/* Pool fully handed off */}
+      {poolCount === 0 && assignedSlots.length > 0 && showQRs && (
+        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 20, textAlign: 'center', marginBottom: 12 }}>
+          <span style={{ fontSize: 40 }}>👥</span>
+          <p style={{ margin: '8px 0 0', fontSize: 13, color: colors.subText }}>You&apos;ve assigned all your tickets — everyone below has their own pass.</p>
+        </div>
+      )}
+
+      {/* Assigned tickets list */}
+      {assignedSlots.length > 0 && (
+        <>
+          <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: 'rgba(128,128,128,0.6)', margin: '4px 0 8px' }}>ASSIGNED ({assignedSlots.length})</p>
+          {assignedSlots.map((slot) => {
+            const isClaimed = slot.status === 'claimed';
+            return (
+              <div key={slot.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: '12px 14px', marginBottom: 8 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isClaimed ? 'rgba(0,229,160,0.12)' : 'rgba(255,184,48,0.14)', color: isClaimed ? '#00e5a0' : '#ffb830', flexShrink: 0 }}>
+                  {isClaimed ? '✓' : '✉'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{slot.assignee_name ?? 'Guest'}</p>
+                  <p style={{ margin: 0, fontSize: 12, color: isClaimed ? '#00e5a0' : '#c79249', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {isClaimed ? 'Claimed · has their ticket' : `Invite sent · ${slot.assignee_email ?? 'awaiting claim'}`}
+                  </p>
+                </div>
+                {slot.status === 'pending' && status === 'confirmed' && !isGuest && (
+                  <button onClick={() => handleRevoke(slot.id)} disabled={revoking === slot.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(128,128,128,0.7)', fontSize: 18, padding: 4, flexShrink: 0 }} title="Revoke invite">
+                    {revoking === slot.id ? '…' : '✕'}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Assign a ticket — peel one off the pool (authed buyer only) */}
+      {poolCount > 0 && status === 'confirmed' && !isGuest && firstUnassigned && (
+        <button onClick={() => setAssignTarget(firstUnassigned)} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: '14px 16px', cursor: 'pointer', marginTop: 4, textAlign: 'left' }}>
+          <div style={{ width: 30, height: 30, borderRadius: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>📤</div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>Assign a ticket</p>
+            <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>Send one to someone arriving separately</p>
+          </div>
+          <span style={{ color: 'rgba(128,128,128,0.5)', fontSize: 18 }}>›</span>
+        </button>
+      )}
+    </>
   ) : (
-    /* Fallback for older bookings without per-assignment QR */
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 16 }}>
+    /* Fallback for older bookings without per-assignment rows */
+    <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
       {booking.qr_code_url
         ? <img src={booking.qr_code_url} alt="QR Code" style={{ width: 200, height: 200, borderRadius: 8 }} />
         : <span style={{ fontSize: 48 }}>⏳</span>
       }
-      <p style={{ margin: '8px 0 0', fontSize: 12, color: '#888', textAlign: 'center' }}>
-        {booking.booking_status === 'confirmed'
+      <p style={{ margin: 0, fontSize: 13, fontWeight: 800, letterSpacing: 1, color: statusCol }}>#{booking.booking_number}</p>
+      <p style={{ margin: 0, fontSize: 12, color: '#888', textAlign: 'center' }}>
+        {status === 'confirmed'
           ? (booking.qr_code_url ? 'Present this at the venue entrance' : 'QR code is being generated…')
           : 'Complete payment to activate your ticket'}
       </p>

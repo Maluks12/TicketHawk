@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { MapPin, Calendar, Ticket, AlertCircle, RefreshCw } from 'lucide-react';
+import { MapPin, Calendar, Ticket, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
@@ -49,6 +49,20 @@ const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 const isUpcoming = (b: Booking) =>
   !!b.event?.start_time && new Date(b.event.start_time) > new Date();
+
+// A "real" ticket is one the buyer actually holds: booking confirmed/refunded,
+// or payment completed/refunded. Pending and failed bookings are NOT shown.
+// (Mirrors EventsApp/app/(tabs)/tickets.tsx so web and app agree.)
+const isRealTicket = (b: Booking) =>
+  b.booking_status === 'confirmed' || b.booking_status === 'refunded' ||
+  b.payment_status === 'completed' || b.payment_status === 'refunded';
+
+// Upcoming = future-dated AND still active. Cancelled/refunded bookings drop to
+// the Past tab even when the event date is still ahead — a cancelled booking is
+// not an upcoming ticket. This is the fix for cancelled events showing under
+// "Upcoming"; the app already does exactly this.
+const isUpcomingActive = (b: Booking) =>
+  isUpcoming(b) && b.booking_status !== 'cancelled' && b.booking_status !== 'refunded';
 const daysUntil = (iso: string) =>
   Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
 const dedup = (list: Booking[]) => {
@@ -286,18 +300,19 @@ function GuestLookup() {
 
 // ── Tickets list view ─────────────────────────────────────────────────────────
 function TicketsView({
-  bookings, loading, refreshing, onRefresh, error, onRetry,
+  bookings, loading, error, onRetry,
 }: {
-  bookings: Booking[]; loading: boolean; refreshing: boolean;
-  onRefresh: () => void; error: string | null; onRetry: () => void;
+  bookings: Booking[]; loading: boolean;
+  error: string | null; onRetry: () => void;
 }) {
   const router = useRouter();
   const { colors } = useAppTheme();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
 
-  const all      = dedup(bookings);
-  const upcoming = all.filter(isUpcoming);
-  const past     = all.filter((b) => !isUpcoming(b));
+  // Only real tickets, and cancelled/refunded never count as "upcoming".
+  const all      = dedup(bookings).filter(isRealTicket);
+  const upcoming = all.filter(isUpcomingActive);
+  const past     = all.filter((b) => !isUpcomingActive(b));
 
   if (loading) {
     return (
@@ -350,7 +365,6 @@ function TicketsView({
         style={{ borderColor: colors.dividerColor }}
       >
         {(['upcoming', 'past'] as const).map((t) => {
-          const count = t === 'upcoming' ? upcoming.length : past.length;
           const active = activeTab === t;
           return (
             <button
@@ -360,17 +374,6 @@ function TicketsView({
               style={{ color: active ? colors.text : colors.subText }}
             >
               {t.charAt(0).toUpperCase() + t.slice(1)}
-              {count > 0 && (
-                <span
-                  className="px-1.5 py-0.5 rounded-full text-[10px] font-black"
-                  style={{
-                    backgroundColor: active ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
-                    color: active ? colors.text : colors.subText,
-                  }}
-                >
-                  {count}
-                </span>
-              )}
               {active && (
                 <span
                   className="absolute bottom-0 left-0 right-0 h-0.5"
@@ -380,19 +383,6 @@ function TicketsView({
             </button>
           );
         })}
-      </div>
-
-      {/* Refresh button */}
-      <div className="flex justify-end px-4 pt-3">
-        <button
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 text-[11px] font-bold"
-          style={{ color: colors.subText }}
-        >
-          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
       </div>
 
       {tabEmpty ? (
@@ -429,7 +419,6 @@ export default function TicketsPage() {
 
   const [bookings,   setBookings]   = useState<Booking[]>([]);
   const [loading,    setLoading]    = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
   const fetchBookings = useCallback(async () => {
@@ -450,11 +439,19 @@ export default function TicketsPage() {
   }, [user]);
 
   const load    = useCallback(async () => { setLoading(true); await fetchBookings(); setLoading(false); }, [fetchBookings]);
-  const refresh = useCallback(async () => { setRefreshing(true); await fetchBookings(); setRefreshing(false); }, [fetchBookings]);
+  const refresh = useCallback(async () => { await fetchBookings(); }, [fetchBookings]);
 
   useEffect(() => { load(); }, [user]);
 
-  const total = dedup(bookings).length;
+  // Silent background refresh whenever the tab/window regains focus, so a
+  // booking made elsewhere shows up without a manual button (the app does the
+  // equivalent via useFocusEffect). No spinner — this is invisible.
+  useEffect(() => {
+    if (!user) return;
+    const onFocus = () => { refresh(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [user, refresh]);
 
   return (
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }}>
@@ -464,14 +461,6 @@ export default function TicketsPage() {
         style={{ backgroundColor: colors.background, borderBottom: `1px solid ${colors.dividerColor}` }}
       >
         <h1 className="text-2xl font-black" style={{ color: colors.text }}>My Tickets</h1>
-        {total > 0 && (
-          <span
-            className="px-2.5 py-1 rounded-full text-xs font-black"
-            style={{ backgroundColor: colors.sectionCardBg, color: colors.text }}
-          >
-            {total}
-          </span>
-        )}
       </div>
 
       {/* Not logged in */}
@@ -481,8 +470,6 @@ export default function TicketsPage() {
         <TicketsView
           bookings={bookings}
           loading={loading}
-          refreshing={refreshing}
-          onRefresh={refresh}
           error={error}
           onRetry={load}
         />

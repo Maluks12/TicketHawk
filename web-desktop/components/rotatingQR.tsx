@@ -7,15 +7,20 @@ interface RotatingQRToken {
   token:      string;
   expires_at: string;
   window_sec: number;
+  remaining?: number; // pool tokens only — admissions left in the pool
 }
 
 interface Props {
-  assignmentId: string;
+  // Individual-assignment mode. Optional so pool mode (endpoint-only) can omit it.
+  assignmentId?: string;
   size?: number;
+  // Override the token endpoint — used for the group pool QR (`…/pool-qr`).
   endpoint?: string;
+  // Pool mode only: reports admissions remaining on each refresh.
+  onRemaining?: (n: number) => void;
 }
 
-export function RotatingQR({ assignmentId, size = 200, endpoint }: Props) {
+export function RotatingQR({ assignmentId, size = 200, endpoint, onRemaining }: Props) {
   const [token,    setToken]    = useState<string | null>(null);
   const [windowSec, setWindowSec] = useState(30);
   const [secsLeft, setSecsLeft] = useState(30);
@@ -40,7 +45,8 @@ export function RotatingQR({ assignmentId, size = 200, endpoint }: Props) {
       const res = await api.get<RotatingQRToken>(endpoint ?? `/v1/tickets/${assignmentId}/qr`);
       if (!mounted.current) return;
 
-      const { token, expires_at, window_sec } = res.data;
+      const { token, expires_at, window_sec, remaining } = res.data;
+      if (typeof remaining === 'number') onRemaining?.(remaining);
       const exp    = new Date(expires_at).getTime();
       const now    = Date.now();
       const msLeft = Math.max(exp - now, 0);
@@ -78,7 +84,7 @@ export function RotatingQR({ assignmentId, size = 200, endpoint }: Props) {
       setLoading(false);
       refreshTimer.current = setTimeout(fetchToken, 5000);
     }
-  }, [assignmentId, endpoint]);
+  }, [assignmentId, endpoint, onRemaining]);
 
   useEffect(() => {
     mounted.current = true;
