@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"events-db/internal/cache"
 	"events-db/internal/config"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -736,7 +738,7 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
-func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache, refundService *services.RefundService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -763,9 +765,39 @@ func CancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 			ec.BustOnEventUpdate(c.Request.Context())
 		}
 
+		// Actually move the money. CancelEvent above only flips statuses and
+		// notifies; until this call existed the response below promised a refund
+		// that never happened. Buyers are made whole INCLUDING the service fee —
+		// they did not choose this.
+		//
+		// Runs with its own timeout rather than the request context: a
+		// cancellation of a large event issues one gateway call per booking and
+		// must not be killed halfway by a client disconnect, which would leave
+		// some buyers repaid and others not.
+		refundCtx, cancelRefunds := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancelRefunds()
+
+		outcome, refundErr := refundService.RefundEventCancellation(refundCtx, eventID, input.Reason)
+		if refundErr != nil {
+			log.Error().Err(refundErr).Str("event_id", eventID).
+				Msg("cancel event: cancelled but refunds could not be processed")
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Event cancelled, but refunds could not be started",
+				"note":    "Support has been alerted. Attendees have not been refunded yet.",
+				"error":   "refund_processing_failed",
+			})
+			return
+		}
+
+		note := "All attendees have been refunded in full, including the service fee."
+		if outcome.BookingsFailed > 0 {
+			note = "Some refunds could not be completed and need manual review."
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Event cancelled successfully",
-			"note":    "All attendees will be automatically refunded",
+			"note":    note,
+			"refunds": outcome,
 		})
 	}
 }

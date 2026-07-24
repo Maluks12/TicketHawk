@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"events-db/internal/models"
 	"events-db/internal/repository"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
 func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentService) gin.HandlerFunc {
@@ -97,6 +99,14 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 		}
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
+			// The booking committed before this call, so its seats already count
+			// against capacity. Hand them straight back rather than waiting 15
+			// minutes for the expiry worker — a buyer retrying a failed method
+			// would otherwise burn the event's inventory one attempt at a time.
+			if relErr := repository.ReleaseFailedBooking(pool, c.Request.Context(), booking.ID); relErr != nil {
+				log.Error().Err(relErr).Str("booking_id", booking.ID).
+					Msg("guest checkout: could not release seats after payment init failure")
+			}
 			utils.InternalError(c, err, "guest checkout: failed to initialize payment")
 			return
 		}
@@ -272,6 +282,14 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 		}
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, retryMethod, paymentChannel(c))
 		if err != nil {
+			// The booking committed before this call, so its seats already count
+			// against capacity. Hand them straight back rather than waiting 15
+			// minutes for the expiry worker — a buyer retrying a failed method
+			// would otherwise burn the event's inventory one attempt at a time.
+			if relErr := repository.ReleaseFailedBooking(pool, c.Request.Context(), booking.ID); relErr != nil {
+				log.Error().Err(relErr).Str("booking_id", booking.ID).
+					Msg("guest retry payment: could not release seats after payment init failure")
+			}
 			utils.InternalError(c, err, "guest retry payment: failed to initialize payment")
 			return
 		}
@@ -330,6 +348,137 @@ func GuestStartPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 			"payment_method":     method,
 			"amount":             booking.TotalAmount,
 			"currency":           booking.Currency,
+		})
+	}
+}
+// GuestRefundQuoteHandler tells a guest what they would get back BEFORE they
+// commit to cancelling. Read-only.
+//
+//	GET /v1/guest/bookings/:bookingNumber/refund-quote?email=...
+func GuestRefundQuoteHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bookingNumber := c.Param("bookingNumber")
+		email := c.Query("email")
+		if bookingNumber == "" || email == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Booking number and email are required"})
+			return
+		}
+
+		booking, err := repository.GetGuestBooking(pool, bookingNumber, email)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+
+		var startTime time.Time
+		if err := pool.QueryRow(c.Request.Context(),
+			`SELECT start_time FROM events WHERE id = $1`, booking.EventID).Scan(&startTime); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+
+		quote := models.QuoteBuyerRefund(booking.Subtotal, booking.PlatformFee, startTime, time.Now())
+		c.JSON(http.StatusOK, gin.H{
+			"booking_number": booking.BookingNumber,
+			"total_paid":     booking.TotalAmount,
+			"quote":          quote,
+		})
+	}
+}
+
+// GuestRefundHandler lets a guest cancel and be refunded on the sliding scale.
+//
+// Guests could not refund at all before this: RequestRefundHandler requires an
+// authenticated user and compares booking.UserID, which is NULL for every guest
+// booking. That left a complete purchase path with no way out of it.
+//
+//	POST /v1/guest/bookings/:bookingNumber/refund?email=...
+func GuestRefundHandler(
+	pool *pgxpool.Pool,
+	paymentService *services.PaymentService,
+	emailService *services.EmailService,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bookingNumber := c.Param("bookingNumber")
+		email := c.Query("email")
+		if bookingNumber == "" || email == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Booking number and email are required"})
+			return
+		}
+
+		booking, err := repository.GetGuestBooking(pool, bookingNumber, email)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+		if booking.BookingStatus != models.BookingConfirmed {
+			c.JSON(http.StatusConflict, gin.H{"error": "This booking is not eligible for a refund"})
+			return
+		}
+
+		var startTime time.Time
+		var eventTitle string
+		if err := pool.QueryRow(c.Request.Context(),
+			`SELECT start_time, title FROM events WHERE id = $1`,
+			booking.EventID).Scan(&startTime, &eventTitle); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+
+		quote := models.QuoteBuyerRefund(booking.Subtotal, booking.PlatformFee, startTime, time.Now())
+		if !quote.Eligible {
+			c.JSON(http.StatusBadRequest, gin.H{"error": quote.Reason, "quote": quote})
+			return
+		}
+
+		// Gateway first, database second. If the refund fails the booking stays
+		// confirmed and the guest keeps a valid ticket — the safe direction to
+		// fail in. The reverse order would void their ticket without paying them.
+		if err := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); err != nil {
+			utils.InternalError(c, err, "guest refund: gateway refund failed")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := pool.Exec(ctx, `
+			UPDATE bookings
+			SET booking_status      = 'refunded',
+			    refund_amount       = $1,
+			    refund_rate         = $2,
+			    refunded_at         = CURRENT_TIMESTAMP,
+			    refund_requested_at = CURRENT_TIMESTAMP,
+			    refund_reason       = 'Guest requested refund',
+			    updated_at          = CURRENT_TIMESTAMP
+			WHERE id = $3
+		`, quote.RefundAmount, quote.Rate, booking.ID); err != nil {
+			// Money is already back with the guest; this is bookkeeping only.
+			utils.InternalError(c, err, "guest refund: refunded at gateway but booking not updated")
+			return
+		}
+
+		if _, err := pool.Exec(ctx, `
+			UPDATE ticket_assignments SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+			WHERE booking_id = $1 AND status <> 'cancelled'
+		`, booking.ID); err != nil {
+			utils.InternalError(c, err, "guest refund: could not void ticket assignments")
+			return
+		}
+
+		// Return the seats to the pool. Nothing decremented tickets_sold on a
+		// refund before this, so refunded tickets permanently consumed capacity.
+		// Idempotent — a retried refund cannot release the same seats twice.
+		if relErr := repository.ReleaseRefundedSeats(pool, ctx, booking.ID); relErr != nil {
+			log.Error().Err(relErr).Str("booking_id", booking.ID).
+				Msg("guest refund: seats not returned to the pool — event capacity understated")
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":          "Refund processed successfully",
+			"refund_amount":    quote.RefundAmount,
+			"refund_rate":      quote.Rate,
+			"service_fee_kept": quote.ServiceFeeKept,
+			"days_until_event": quote.DaysUntilEvent,
 		})
 	}
 }

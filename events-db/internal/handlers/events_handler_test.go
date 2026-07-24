@@ -349,7 +349,7 @@ func buildEventsRouter(pool *pgxpool.Pool) *gin.Engine {
 	org.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
 	{
 		org.POST("/events/:id/publish", handlers.PublishEventHandler(pool, nil))
-		org.POST("/events/:id/cancel", handlers.CancelEventHandler(pool, nil))
+		org.POST("/events/:id/cancel", handlers.CancelEventHandler(pool, nil, nil))
 	}
 
 	return r

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
 import { fmtMoney, fmtDate } from '../../../lib/utils';
+import { getNotifications, markRead, NOTIF_KYC_APPROVED, Notification } from '../../../lib/notifications';
 
 interface DashStats {
   total_events: number;
@@ -28,6 +29,11 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<RecentEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Unread "your verification was approved" notification, if there is one.
+  // Kept out of the Promise.all above on purpose: a notifications hiccup must
+  // never take the whole Overview screen down to an error toast.
+  const [kycNotice, setKycNotice] = useState<Notification | null>(null);
+
   useEffect(() => {
     Promise.all([
       api.get('/organiser/dashboard/stats'),
@@ -38,6 +44,18 @@ export default function DashboardPage() {
     }).catch(() => toast('Failed to load dashboard', 'error'))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    getNotifications(20).then((list) => {
+      setKycNotice(list.find((n) => n.type === NOTIF_KYC_APPROVED && !n.is_read) ?? null);
+    });
+  }, []);
+
+  // Dismiss = mark read server-side, so it doesn't reappear on the next login.
+  function dismissKycNotice() {
+    if (kycNotice) markRead(kycNotice.id);
+    setKycNotice(null);
+  }
 
   if (loading) {
     return (
@@ -66,6 +84,50 @@ export default function DashboardPage() {
       </div>
 
       <div className="page-content">
+
+        {/* ── KYC approval notice ──────────────────────────────────────────
+            Emitted once by the backend the moment full verification passes,
+            whichever path got them there. Sits above the stats because an
+            organiser who has been waiting on review shouldn't have to go
+            hunting through /kyc to find out they were approved. */}
+        {kycNotice && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 12,
+            background: '#e6f4ea', border: '1px solid #86efac', borderRadius: 8,
+            padding: '14px 16px', marginBottom: 16,
+          }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%', background: '#1e7e34',
+              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 15, fontWeight: 700, flexShrink: 0,
+            }}>
+              ✓
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700, color: '#166534' }}>
+                {kycNotice.title}
+              </div>
+              <div style={{ fontSize: 13, color: '#166534', marginTop: 3, lineHeight: 1.5 }}>
+                {kycNotice.body}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <Link href="/events/create" className="btn btn-sm btn-primary">
+                  Create a paid event
+                </Link>
+                <Link href="/kyc" className="btn btn-sm">
+                  Payout details
+                </Link>
+              </div>
+            </div>
+            <button type="button" onClick={dismissKycNotice} aria-label="Dismiss"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: '#166534', fontSize: 18, lineHeight: 1, padding: 2, flexShrink: 0,
+              }}>
+              ×
+            </button>
+          </div>
+        )}
 
         {/* ── Stat cards — 4 across like Meta's account overview ──────── */}
         <div className="stat-grid">

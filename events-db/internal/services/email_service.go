@@ -1,6 +1,8 @@
 package services
 
 import (
+	"embed"
+	"encoding/base64"
 	"events-db/internal/config"
 	"events-db/internal/models"
 	"fmt"
@@ -11,6 +13,21 @@ import (
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 )
+
+// brandLogoFS is the TicketHawk mark, embedded directly into the compiled
+// binary. Emails previously linked to the logo via a URL built from
+// FrontendURLs[0], which meant the image only rendered when that host was
+// publicly reachable (it silently broke, e.g., against a local/dev URL).
+// Embedding the file and attaching it inline (see sendHTML) removes that
+// dependency entirely — the logo always shows, in every environment and
+// every mail client, including ones that block remote image loading.
+//
+//go:embed assets/brand-logo.png
+var brandLogoFS embed.FS
+
+// brandLogoCID is the Content-ID the logo is attached under; the header
+// image references it via "cid:<brandLogoCID>".
+const brandLogoCID = "brand-logo"
 
 // EmailAPIError is returned when the email provider (SendGrid) responds with a
 // non-2xx status. A 401/403 means the API key is invalid or the sender isn't
@@ -67,10 +84,15 @@ const (
 // reasons) before they are interpolated into email markup.
 func esc(s string) string { return template.HTMLEscapeString(s) }
 
-// logoURL points at the brand mark served by the web app, so emails always
-// show whatever logo is currently deployed.
-func (s *EmailService) logoURL() string {
-	return s.cfg.FrontendURLs[0] + "/brand-logo.png"
+// money formats an amount for display in emails. ZAR (our only currency
+// today) is shown with the familiar "R" symbol instead of the ISO code, e.g.
+// "R 340.00" rather than "ZAR 340.00". Any other currency code falls back to
+// showing the code as-is.
+func money(currency string, amount float64) string {
+	if currency == "ZAR" {
+		return fmt.Sprintf("R %.2f", amount)
+	}
+	return fmt.Sprintf("%s %.2f", currency, amount)
 }
 
 // brandEmail wraps body HTML in the shared TicketHawk chrome.
@@ -80,25 +102,27 @@ func (s *EmailService) brandEmail(title string, bodyHTML string) string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
   <title>%s</title>
 </head>
 <body style="margin:0; padding:0; background:%s; -webkit-text-size-adjust:100%%;">
-  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" style="background:%s; padding:24px 12px;">
+  <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" bgcolor="%s" style="background:%s; padding:24px 12px;">
     <tr>
       <td align="center">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px; width:100%%;">
 
           <!-- Header band -->
           <tr>
-            <td style="background:%s; border-radius:14px 14px 0 0; padding:22px 28px;" align="center">
-              <img src="%s" alt="TicketHawk" width="44" height="44" style="vertical-align:middle; border:0; margin-right:10px;">
-              <span style="font-family:Arial,Helvetica,sans-serif; font-size:22px; font-weight:900; letter-spacing:1px; color:#ffffff; vertical-align:middle;">TICKET<span style="color:%s;">HAWK</span></span>
+            <td bgcolor="%s" style="background:%s; border-radius:14px 14px 0 0; padding:22px 28px;" align="center">
+              <img src="cid:%s" alt="TicketHawk" width="44" height="44" style="vertical-align:middle; border:0; margin-right:10px;">
+              <span style="font-family:Arial,Helvetica,sans-serif; font-size:22px; font-weight:900; letter-spacing:0.5px; color:#ffffff; vertical-align:middle; -webkit-text-stroke:0.4px #ffffff; text-shadow:0.3px 0 0 currentColor, -0.3px 0 0 currentColor;">TICKET<span style="color:%s; -webkit-text-stroke:0.4px %s; text-shadow:0.3px 0 0 currentColor, -0.3px 0 0 currentColor;">HAWK</span></span>
             </td>
           </tr>
 
           <!-- Content card -->
           <tr>
-            <td style="background:%s; border:1px solid %s; border-top:none; border-radius:0 0 14px 14px; padding:32px 28px; font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:1.6; color:%s;">
+            <td bgcolor="%s" style="background:%s; border:1px solid %s; border-top:none; border-radius:0 0 14px 14px; padding:32px 28px; font-family:Arial,Helvetica,sans-serif; font-size:15px; line-height:1.6; color:%s;">
 %s
             </td>
           </tr>
@@ -117,9 +141,9 @@ func (s *EmailService) brandEmail(title string, bodyHTML string) string {
   </table>
 </body>
 </html>`,
-		esc(title), pageBg, pageBg,
-		brandDark, s.logoURL(), brandPink,
-		cardBg, borderCol, textDark,
+		esc(title), pageBg, pageBg, pageBg,
+		brandDark, brandDark, brandLogoCID, brandPink, brandPink,
+		cardBg, cardBg, borderCol, textDark,
 		bodyHTML,
 		textMuted, time.Now().Year(),
 	)
@@ -175,11 +199,24 @@ func muted(text string) string {
 	return fmt.Sprintf(`<p style="margin:14px 0 0; font-size:13px; color:%s;">%s</p>`, textMuted, esc(text))
 }
 
-// sendHTML dispatches the email and returns the provider status code.
+// sendHTML dispatches the email and returns the provider status code. Every
+// email gets the TicketHawk logo attached inline (see brandLogoFS) so the
+// header image renders regardless of the recipient's mail client or network
+// conditions — it never depends on fetching an external URL.
 func (s *EmailService) sendHTML(toName, toEmail, subject, htmlContent string) (int, error) {
 	from := mail.NewEmail(s.cfg.EmailFromName, s.cfg.EmailFromAddress)
 	to := mail.NewEmail(toName, toEmail)
 	message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
+
+	if logoBytes, err := brandLogoFS.ReadFile("assets/brand-logo.png"); err == nil {
+		logoAttachment := mail.NewAttachment()
+		logoAttachment.SetContent(base64.StdEncoding.EncodeToString(logoBytes))
+		logoAttachment.SetType("image/png")
+		logoAttachment.SetFilename("brand-logo.png")
+		logoAttachment.SetDisposition("inline")
+		logoAttachment.SetContentID(brandLogoCID)
+		message.AddAttachment(logoAttachment)
+	}
 
 	resp, err := s.client.Send(message)
 	if err != nil {
@@ -205,7 +242,7 @@ func (s *EmailService) SendRefundConfirmation(booking *models.Booking, event *mo
 <p style="margin:0 0 14px;">Your refund for booking <strong>%s</strong> has been processed.</p>`,
 			esc(user.GetFullName()), esc(booking.BookingNumber)) +
 		detailBox(event.Title,
-			detailRow("Amount refunded", fmt.Sprintf("%s %.2f", booking.Currency, refunded))+
+			detailRow("Amount refunded", money(booking.Currency, refunded))+
 				detailRow("Original booking date", booking.CreatedAt.Format("2 January 2006")),
 		) +
 		`<p style="margin:0 0 14px;">The refund will reflect in your account within 5&ndash;10 business days.</p>` +
@@ -238,7 +275,7 @@ func (s *EmailService) SendEventCancellation(event *models.Event, user *models.U
 				detailRow("Venue", event.VenueName)+
 				detailRow("Reason", reason),
 		) +
-		notice(fmt.Sprintf(`A full refund of <strong>%s %.2f</strong> has been initiated and will be processed within 5&ndash;10 business days.`, esc(booking.Currency), booking.TotalAmount)) +
+		notice(fmt.Sprintf(`A full refund of <strong>%s</strong> has been initiated and will be processed within 5&ndash;10 business days.`, esc(money(booking.Currency, booking.TotalAmount)))) +
 		muted("We apologise for any inconvenience this may cause.")
 
 	status, err := s.sendHTML(user.GetFullName(), user.Email, subject, s.brandEmail(subject, body))
@@ -262,7 +299,7 @@ func (s *EmailService) SendWaitlistNotification(event *models.Event, user *model
 			esc(user.GetFullName())) +
 		detailBox(event.Title,
 			detailRow("Date", event.StartTime.Format("Monday, 2 January 2006"))+
-				detailRow("Price", fmt.Sprintf("%s %.2f per ticket", event.Currency, event.Price)),
+				detailRow("Price", fmt.Sprintf("%s per ticket", money(event.Currency, event.Price))),
 		) +
 		`<p style="margin:0;">Tickets are first come, first served &mdash; this notification expires in 24 hours.</p>` +
 		button(eventURL, "Book Now") +
@@ -410,7 +447,7 @@ func (s *EmailService) SendTicketClaimConfirmation(
 				detailRow("Ticket", fmt.Sprintf("Slot %d", slotNumber)),
 		) +
 		button(ticketURL, "View My Ticket") +
-		`<p style="margin:6px 0 0; text-align:center; font-size:13px; color:`+textMuted+`;">Open this link at the gate &mdash; it shows your live entry code, which refreshes automatically for security. Screenshots and printouts won't scan.</p>` +
+		`<p style="margin:6px 0 0; text-align:center; font-size:13px; color:` + textMuted + `;">Open this link at the gate &mdash; it shows your live entry code, which refreshes automatically for security. Screenshots and printouts won't scan.</p>` +
 		linkFallback(ticketURL) +
 		muted("Please arrive 15 minutes before the event starts.")
 
@@ -517,8 +554,8 @@ func (s *EmailService) renderBookingConfirmation(
 				detailRow("Date & time", event.StartTime.Format("Monday, 2 January 2006 at 15:04"))+
 				detailRow("Venue", event.VenueName)+
 				detailRow("Address", event.Address)+
-				detailRow("Tickets", fmt.Sprintf("%d x %s %.2f", booking.TicketQuantity, booking.Currency, booking.UnitPrice))+
-				detailRow("Total paid", fmt.Sprintf("%s %.2f", booking.Currency, booking.TotalAmount)),
+				detailRow("Tickets", fmt.Sprintf("%d x %s", booking.TicketQuantity, money(booking.Currency, booking.UnitPrice)))+
+				detailRow("Total paid", money(booking.Currency, booking.TotalAmount)),
 		) +
 		button(bookingURL, "View My Tickets") +
 		linkFallback(bookingURL) +

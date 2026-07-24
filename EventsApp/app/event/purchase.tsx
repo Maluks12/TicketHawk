@@ -30,6 +30,7 @@ import { startBookingPayment } from '../../lib/payments';
 import SeatingMap, { detectVenueType, MapLegend } from '../../components/seatingmap';
 import { makePurchaseSheet, purchaseTokens, PRIMARY } from '../../styles/purchase';
 import { useAppTheme } from '../../theme/colors';
+import { isPaymentMethodEnabled } from '../../lib/paymentMethods';
 import {
   CaretLeft, CaretDown, ArrowsDownUp, Star, CrownSimple, Check,
   CreditCard, AppleLogo, PaypalLogo, Bank,
@@ -134,6 +135,11 @@ export default function TicketPurchaseScreen() {
   }
 
   function selectPaymentMethod(method: 'card' | 'paypal' | 'apple_pay' | 'instant_eft') {
+    // Belt and braces: the row is hidden when a method is disabled, but a
+    // stale selection must never reach the gateway as an inactive channel.
+    if (method === 'instant_eft' && !isPaymentMethodEnabled('instant_eft')) {
+      method = 'card';
+    }
     setPaymentMethod(method);
     closePaymentSheet();
   }
@@ -862,8 +868,15 @@ export default function TicketPurchaseScreen() {
         </Text>
 
         {/* Instant EFT (Paystack/Ozow) — signed-in users only for now;
-            guest checkout is card-only until a method-aware guest route exists. */}
-        {user && (
+            guest checkout is card-only until a method-aware guest route exists.
+
+            Also gated on isPaymentMethodEnabled: Paystack activates EFT
+            per-account and separately for test and live, so a channel that
+            works in test can still fail in production until the extra KYC
+            review clears. Offering it while inactive fails the charge AND
+            holds the buyer's seats until the booking expires, so an
+            unavailable method must not be shown at all. */}
+        {user && isPaymentMethodEnabled('instant_eft') && (
           <TouchableOpacity onPress={() => selectPaymentMethod('instant_eft')} activeOpacity={0.7}
             style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
             <View style={{ width: 52, height: 34, borderRadius: 8, backgroundColor: '#1a7f5a', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>

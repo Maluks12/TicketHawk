@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	"events-db/internal/models"
 	"events-db/internal/utils"
 
@@ -18,7 +20,9 @@ type BookingQuerier interface {
 	GetBookingByID(id string) (*models.Booking, error)
 	GetUserBookings(userID string, limit int, cursor *utils.Cursor) ([]models.Booking, *utils.Cursor, error)
 	CreateBooking(dto *models.CreateBookingDTO, userID string, event *models.Event) (*models.Booking, error)
-	RequestRefundWithCascade(bookingID, userID, reason string) ([]CancelledAssignee, error)
+	RequestRefundWithCascade(bookingID, userID, reason string, refundAmount, refundRate float64) ([]CancelledAssignee, error)
+	ReleaseFailedBooking(bookingID string) error
+	ReleaseRefundedSeats(bookingID string) error
 	GetUnsentConfirmedBookingIDs() ([]string, error)
 	SumBookingTotalsByIDs(ids []string) (float64, error) // FIX 3
 	// CreateMerchOnlyBooking creates a placeholder booking row for a cart that
@@ -78,8 +82,20 @@ func (q *PgxBookingQuerier) GetUserBookings(userID string, limit int, cursor *ut
 func (q *PgxBookingQuerier) CreateBooking(dto *models.CreateBookingDTO, userID string, event *models.Event) (*models.Booking, error) {
 	return CreateBooking(q.pool, dto, userID, event)
 }
-func (q *PgxBookingQuerier) RequestRefundWithCascade(bookingID, userID, reason string) ([]CancelledAssignee, error) {
-	return RequestRefundWithCascade(q.pool, bookingID, userID, reason)
+func (q *PgxBookingQuerier) RequestRefundWithCascade(bookingID, userID, reason string, refundAmount, refundRate float64) ([]CancelledAssignee, error) {
+	return RequestRefundWithCascade(q.pool, bookingID, userID, reason, refundAmount, refundRate)
+}
+
+// ReleaseFailedBooking hands a booking's seats back when payment could not be
+// started. Exposed on the querier because the authenticated checkout handler
+// takes interfaces rather than a raw pool.
+func (q *PgxBookingQuerier) ReleaseFailedBooking(bookingID string) error {
+	return ReleaseFailedBooking(q.pool, context.Background(), bookingID)
+}
+
+// ReleaseRefundedSeats puts a refunded booking's tickets back on sale.
+func (q *PgxBookingQuerier) ReleaseRefundedSeats(bookingID string) error {
+	return ReleaseRefundedSeats(q.pool, context.Background(), bookingID)
 }
 func (q *PgxBookingQuerier) GetUnsentConfirmedBookingIDs() ([]string, error) {
 	return GetUnsentConfirmedBookingIDs(q.pool)

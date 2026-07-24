@@ -4,11 +4,23 @@
 // Tier 2: full identity  → paid + public events (ID photo + VerifyNow / admin)
 import { api } from './api';
 
+/** Organiser-facing view of the KYC record (models.KYCProfile on the server). */
+export interface KycProfile {
+  status: string;
+  method?: string | null;
+  legal_first_name?: string | null;
+  legal_last_name?: string | null;
+  id_last_4?: string | null;
+  submitted_at?: string | null;
+  verified_at?: string | null;
+  rejection_reason?: string | null;
+  has_id_document: boolean;
+  has_proof_of_address: boolean;
+}
+
 export interface KycStatus {
   kyc_level: number;
-  // Raw profile block from the backend — shape owned by the API; we read the
-  // status defensively since it nests differently across states.
-  kyc?: Record<string, unknown> | null;
+  kyc?: KycProfile | null;
 }
 
 /** GET /organiser/kyc — 404 means "no organizer profile yet" = tier 0. */
@@ -28,7 +40,7 @@ export async function getKycStatus(): Promise<KycStatus> {
 
 /** Pull a displayable KYC status string out of the profile block. */
 export function readKycState(s: KycStatus): string {
-  const k = s.kyc as Record<string, unknown> | null;
+  const k = s.kyc as (KycProfile & { kyc_status?: string }) | null;
   if (!k) return 'none';
   return String(k.kyc_status ?? k.status ?? 'none');
 }
@@ -44,7 +56,9 @@ export function submitBasicKyc(dto: BasicKycDTO) {
   return api.post('/organiser/kyc/basic', dto);
 }
 
-/** POST /organiser/kyc — tier 2: multipart with the ID document. */
+/** POST /organiser/kyc — tier 2: multipart with the ID document.
+ *  sa_id_number is omitted when the organiser already has one on file; the
+ *  server reuses the stored (encrypted) value rather than asking again. */
 export function submitFullKyc(form: FormData) {
   return api.post('/organiser/kyc', form, {
     headers: { 'Content-Type': 'multipart/form-data' },

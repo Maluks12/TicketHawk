@@ -112,6 +112,13 @@ func CreateBookingHandler(
 
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking, paymentChannel(c))
 		if err != nil {
+			// Seats were counted against capacity when the booking committed.
+			// Release them now instead of leaving them locked for 15 minutes
+			// until the expiry worker runs.
+			if relErr := bookings.ReleaseFailedBooking(booking.ID); relErr != nil {
+				log.Error().Err(relErr).Str("booking_id", booking.ID).
+					Msg("checkout: could not release seats after payment init failure")
+			}
 			utils.InternalError(c, err, "checkout: failed to initialize payment")
 			return
 		}
@@ -230,15 +237,39 @@ func RequestRefundHandler(
 			return
 		}
 
-		cancelledAssignees, err := bookings.RequestRefundWithCascade(bookingID, userID.(string), input.Reason)
+		// Price the refund BEFORE touching the booking. The sliding scale keys
+		// off how far the event still is right now, not off when the ticket was
+		// bought, and the buyer service fee is never returned on a
+		// buyer-initiated refund. An ineligible quote (inside 7 days, or the
+		// event already started) is a 400 with the reason, not a silent no-op.
+		quote := models.QuoteBuyerRefund(booking.Subtotal, booking.PlatformFee, event.StartTime, time.Now())
+		if !quote.Eligible {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": quote.Reason,
+				"quote": quote,
+			})
+			return
+		}
+
+		cancelledAssignees, err := bookings.RequestRefundWithCascade(
+			bookingID, userID.(string), input.Reason, quote.RefundAmount, quote.Rate)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		if err := paymentService.ProcessRefund(bookingID); err != nil {
+		if err := paymentService.ProcessRefund(bookingID, quote.RefundAmount); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process payment refund"})
 			return
+		}
+
+		// Put the seats back on sale. Nothing decremented tickets_sold on a
+		// refund before this, so every refunded ticket permanently consumed
+		// capacity and events drifted towards a false sold-out. Idempotent, so
+		// a retried refund cannot release the same seats twice and oversell.
+		if relErr := bookings.ReleaseRefundedSeats(bookingID); relErr != nil {
+			log.Error().Err(relErr).Str("booking_id", bookingID).
+				Msg("refund: seats not returned to the pool — event capacity understated")
 		}
 
 		// FIX 4: send synchronously — no goroutine. The count is bounded by
@@ -265,6 +296,10 @@ func RequestRefundHandler(
 		c.JSON(http.StatusOK, gin.H{
 			"message":            "Refund processed successfully",
 			"refund_status":      "processing",
+			"refund_amount":      quote.RefundAmount,
+			"refund_rate":        quote.Rate,
+			"service_fee_kept":   quote.ServiceFeeKept,
+			"days_until_event":   quote.DaysUntilEvent,
 			"assignees_notified": len(cancelledAssignees) - emailsFailed,
 		})
 	}
@@ -347,6 +382,45 @@ func VerifyQRCodeHandler(
 			"attendee_name":   attendeeName,
 			"ticket_quantity": booking.TicketQuantity,
 			"event_title":     event.Title,
+		})
+	}
+}
+// RefundQuoteHandler previews a refund for a logged-in buyer without executing
+// it, so the app can show "you will get R200 of your R420 back" before they
+// commit. Read-only and safe to poll.
+//
+//	GET /v1/bookings/:id/refund-quote
+func RefundQuoteHandler(bookings repository.BookingQuerier, events repository.EventQuerier) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, _ := c.Get("user_id")
+		bookingID := c.Param("id")
+
+		booking, err := bookings.GetBookingByID(bookingID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
+			return
+		}
+		if booking.UserID == nil || *booking.UserID != userID.(string) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You do not have permission to view this booking"})
+			return
+		}
+
+		eventID := ""
+		if booking.EventID != nil {
+			eventID = *booking.EventID
+		}
+		event, err := events.GetEventByID(eventID, nil)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+
+		quote := models.QuoteBuyerRefund(booking.Subtotal, booking.PlatformFee, event.StartTime, time.Now())
+		c.JSON(http.StatusOK, gin.H{
+			"booking_number": booking.BookingNumber,
+			"total_paid":     booking.TotalAmount,
+			"quote":          quote,
+			"schedule":       models.RefundSchedule,
 		})
 	}
 }

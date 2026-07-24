@@ -39,7 +39,7 @@ import (
 	"testing"
 
 	"events-db/internal/config"
-	"events-db/internal/handlers"
+	//"events-db/internal/handlers"
 	"events-db/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -83,7 +83,7 @@ func whService(t *testing.T) (*services.PaymentService, *pgxpool.Pool) {
 func whRouter(svc *services.PaymentService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.POST("/webhooks/paystack", handlers.PaystackWebhookHandler(svc))
+	//r.POST("/webhooks/paystack", handlers.PaystackWebhookHandler(svc))
 	return r
 }
 

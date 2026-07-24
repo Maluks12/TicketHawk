@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"math"
 	"errors"
 	"fmt"
 	"time"
@@ -191,45 +192,87 @@ func SetOrganizerTier(pool *pgxpool.Pool, ctx context.Context, organizerID strin
 func CreatePayoutsForCompletedEvents(pool *pgxpool.Pool, ctx context.Context, delay time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-delay)
 
+	// Refunded bookings are now INCLUDED rather than filtered out, because a
+	// partial refund still leaves the organiser owed the unrefunded remainder.
+	// The organiser commission is charged on gross sold, so it is subtracted in
+	// full regardless of how much came back.
+	//
+	// The CASE is a safety net for rows that predate migration 000058: a
+	// 'refunded' booking with a NULL refund_amount is treated as fully refunded,
+	// so a legacy row can never be settled as if it were still confirmed.
+	// GREATEST(...,0) stops a fully-refunded booking contributing a negative
+	// amount that would silently reduce what other bookings earned.
+	const settlementAmount = `
+		GREATEST(
+		    b.subtotal
+		    - CASE WHEN b.booking_status = 'refunded'
+		           THEN COALESCE(b.refund_amount, b.subtotal)
+		           ELSE COALESCE(b.refund_amount, 0) END
+		    - b.organizer_fee,
+		    0)`
+
 	settled, err := pool.Exec(ctx, `
 		INSERT INTO organizer_payouts (organizer_id, event_id, kind, amount, currency)
 		SELECT o.id, ev.id, 'event_settlement',
-		       SUM(b.subtotal - b.organizer_fee), MAX(b.currency)
+		       SUM(`+settlementAmount+`), MAX(b.currency)
 		FROM events ev
 		JOIN organizers o ON o.user_id = ev.organizer_id
 		JOIN bookings b   ON b.event_id = ev.id
 		WHERE ev.status = 'completed'
 		  AND ev.end_time <= $1
-		  AND b.booking_status = 'confirmed'
+		  AND b.booking_status IN ('confirmed', 'refunded')
 		  AND b.subtotal > 0
 		  AND NOT EXISTS (
 		      SELECT 1 FROM payments p
 		      WHERE p.booking_id = b.id AND p.subaccount_code IS NOT NULL
 		  )
 		GROUP BY o.id, ev.id
-		HAVING SUM(b.subtotal - b.organizer_fee) > 0
+		HAVING SUM(`+settlementAmount+`) > 0
 		ON CONFLICT (event_id, kind) DO NOTHING
 	`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("CreatePayoutsForCompletedEvents settlements: %w", err)
 	}
 
+	// The reserve is what FUNDS a refund on an instant-tier booking: Paystack
+	// already settled the organiser's share at sale time, so the withheld
+	// portion is the only money the platform still controls. Whatever the
+	// refund did not consume belongs to the organiser and is released here.
+	//
+	// Because the reserve rate is sized to the refund rate applicable on the
+	// day of sale (models.ReserveRateForSale), and the refund rate only falls
+	// as the event nears, this subtraction can never go negative on a booking
+	// priced under the current schedule — GREATEST is belt-and-braces for rows
+	// created before migration 000058, where a flat 10% reserve may be smaller
+	// than the refund that was issued against it.
+	//
+	// Refunded bookings must be INCLUDED (previously they were filtered out by
+	// booking_status = 'confirmed'), otherwise a partial refund would strand
+	// the unconsumed remainder of the reserve on the platform permanently.
+	const releasableReserve = `
+		GREATEST(
+		    p.reserve_amount
+		    - CASE WHEN b.booking_status = 'refunded'
+		           THEN COALESCE(b.refund_amount, p.reserve_amount)
+		           ELSE COALESCE(b.refund_amount, 0) END,
+		    0)`
+
 	reserves, err := pool.Exec(ctx, `
 		INSERT INTO organizer_payouts (organizer_id, event_id, kind, amount, currency)
 		SELECT o.id, ev.id, 'reserve_release',
-		       SUM(p.reserve_amount), MAX(p.currency)
+		       SUM(`+releasableReserve+`), MAX(p.currency)
 		FROM events ev
 		JOIN organizers o ON o.user_id = ev.organizer_id
 		JOIN bookings b   ON b.event_id = ev.id
 		JOIN payments p   ON p.booking_id = b.id
 		WHERE ev.status = 'completed'
 		  AND ev.end_time <= $1
-		  AND b.booking_status = 'confirmed'
-		  AND p.status = 'completed'
+		  AND b.booking_status IN ('confirmed', 'refunded')
+		  AND p.status IN ('completed', 'refunded')
 		  AND p.subaccount_code IS NOT NULL
 		  AND p.reserve_amount > 0
 		GROUP BY o.id, ev.id
-		HAVING SUM(p.reserve_amount) > 0
+		HAVING SUM(`+releasableReserve+`) > 0
 		ON CONFLICT (event_id, kind) DO NOTHING
 	`, cutoff)
 	if err != nil {
@@ -364,6 +407,9 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 		FROM organizer_payouts op
 		JOIN organizers o ON o.id = op.organizer_id
 		WHERE op.status IN ('pending', 'processing')
+		  -- refund_clawback rows are debt owed TO the platform, never a
+		  -- transfer. They live in this table for the audit trail only.
+		  AND op.kind <> 'refund_clawback'
 		ORDER BY op.created_at ASC
 		LIMIT $1
 	`, limit)
@@ -383,4 +429,93 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+// ApplyPayoutDebt deducts any outstanding organiser debt from a pending payout
+// before it is transferred.
+//
+// Returns settled=true when the debt consumed the payout entirely — the row is
+// closed out as paid with a zero transfer and the caller must not proceed to
+// the gateway. Returns settled=false when there is either no debt or a positive
+// remainder to send, with organizer_payouts.amount already reduced.
+//
+// The whole thing runs in one transaction with SELECT ... FOR UPDATE on the
+// organiser, because two payout rows for the same organiser processing
+// concurrently would otherwise both see the full debt and each deduct it.
+// payable is the amount that must ACTUALLY be transferred after debt is
+// deducted. Callers must use this return value rather than the amount they
+// passed in: the in-memory PendingPayoutRow still holds the pre-deduction
+// figure, and transferring that while the ledger records the reduced one sends
+// the organiser too much money with every internal record looking correct.
+func ApplyPayoutDebt(
+	pool *pgxpool.Pool,
+	ctx context.Context,
+	organizerID string,
+	payoutID string,
+	amount float64,
+) (payable float64, settled bool, err error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, false, fmt.Errorf("begin debt tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var debt float64
+	if err := tx.QueryRow(ctx, `
+		SELECT payout_debt FROM organizers WHERE id = $1 FOR UPDATE
+	`, organizerID).Scan(&debt); err != nil {
+		return 0, false, fmt.Errorf("locking organizer for debt check: %w", err)
+	}
+	if debt <= 0 {
+		return amount, false, tx.Commit(ctx)
+	}
+
+	applied := debt
+	if applied > amount {
+		applied = amount
+	}
+	remaining := roundZAR(amount - applied)
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE organizers
+		SET payout_debt = payout_debt - $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`, applied, organizerID); err != nil {
+		return 0, false, fmt.Errorf("reducing organizer debt: %w", err)
+	}
+
+	if remaining <= 0 {
+		// Nothing left to send. Mark paid so the worker stops re-queuing it,
+		// and record why the organiser saw no money arrive.
+		if _, err := tx.Exec(ctx, `
+			UPDATE organizer_payouts
+			SET amount         = 0,
+			    status         = 'paid',
+			    paid_at        = CURRENT_TIMESTAMP,
+			    failure_reason = $1,
+			    updated_at     = CURRENT_TIMESTAMP
+			WHERE id = $2
+		`, fmt.Sprintf("Fully offset against outstanding balance of R%.2f", applied), payoutID); err != nil {
+			return 0, false, fmt.Errorf("closing fully-offset payout: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return 0, false, fmt.Errorf("commit full offset: %w", err)
+		}
+		return 0, true, nil
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE organizer_payouts
+		SET amount = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2
+	`, remaining, payoutID); err != nil {
+		return 0, false, fmt.Errorf("reducing payout by debt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, false, fmt.Errorf("commit partial offset: %w", err)
+	}
+	return remaining, false, nil
+}
+
+func roundZAR(v float64) float64 {
+	return math.Round(v*100) / 100
 }
