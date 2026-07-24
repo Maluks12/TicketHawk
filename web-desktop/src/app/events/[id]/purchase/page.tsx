@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check, AlertCircle, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
-import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
+import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, shouldRedirectInsteadOfPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -141,7 +141,11 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
     }
     setAdding(true);
     setError('');
-    preopenGatewayPopup();
+    // Skip the pre-opened popup for redirect-first browsers (Chrome/Firefox/
+    // Edge on iOS, in-app webviews) — the payment page redirects in-tab there.
+    if (!shouldRedirectInsteadOfPopup()) {
+      preopenGatewayPopup();
+    }
     try {
       const nameParts  = [guestName.trim(), guestSurname.trim()];
       const firstName  = user ? String((user as any).first_name ?? '') : (nameParts[0] ?? '');

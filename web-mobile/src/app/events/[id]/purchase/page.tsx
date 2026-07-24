@@ -6,7 +6,7 @@ import { enabledPaymentMethods, defaultPaymentMethod, type PaymentMethodId } fro
 import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
-import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
+import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, shouldRedirectInsteadOfPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
@@ -152,7 +152,14 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       // Pre-open the gateway popup within the tap gesture so mobile browsers
       // don't block it; the payment page falls back to a full redirect if the
       // popup was blocked anyway.
-      preopenGatewayPopup();
+      //
+      // Skip it entirely for redirect-first browsers (Chrome/Firefox/Edge on
+      // iOS, in-app webviews): there the placeholder popup either fails to open
+      // or leaves an orphan blank tab, and the payment page redirects in-tab
+      // anyway. Not pre-opening keeps those browsers clean.
+      if (!shouldRedirectInsteadOfPopup()) {
+        preopenGatewayPopup();
+      }
 
       // channel=web makes the booking's pre-initialised card checkout use the
       // web return page. Without it the gateway redirected back to the

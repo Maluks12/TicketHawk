@@ -127,7 +127,7 @@ func webReturnHTML(webBaseURL, reference, paypalToken string) string {
 (function () {
   try {
     if (window.opener && !window.opener.closed) {
-      window.opener.postMessage({ source: 'tickethawk', type: 'payment_return', reference: '%s', token: '%s' }, '*');
+      window.opener.postMessage({ source: 'tickethawk', type: 'payment-return', reference: '%s', token: '%s' }, '*');
     }
   } catch (e) {}
   // Close this popup/tab; the opener's watcher takes it from here.

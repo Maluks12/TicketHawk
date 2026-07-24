@@ -35,6 +35,7 @@ import {
   openGatewayCheckout,
   preopenGatewayPopup,
   discardPendingPopup,
+  shouldRedirectInsteadOfPopup,
   retryBookingPayment,
   retryGuestPayment,
   pollPayment,
@@ -274,6 +275,20 @@ export default function PaymentPage({
           });
         }
       })();
+
+      // Redirect-first browsers (Chrome/Firefox/Edge on iOS, in-app webviews):
+      // the pre-opened popup is unreliable there, so don't even try it — drive
+      // checkout as a full-page redirect in this same tab. The gateway returns
+      // to /payments/return, which sends the buyer back here; the server-side
+      // status watcher above and the on-return status check confirm the result.
+      // Doing this deliberately (rather than after a silently-failed popup) is
+      // the fix for the redirect never appearing in Chrome on iOS.
+      if (shouldRedirectInsteadOfPopup()) {
+        discardPendingPopup(); // close the blank placeholder if one was pre-opened
+        setMessage('Redirecting to secure checkout…');
+        window.location.href = checkoutUrl;
+        return;
+      }
 
       const outcome = await openGatewayCheckout(checkoutUrl, (popup) => {
         popupRef.current = popup;

@@ -59,6 +59,43 @@ export type CheckoutOutcome =
   | { type: 'blocked' };   // browser blocked the popup — caller should redirect instead
 
 /**
+ * shouldRedirectInsteadOfPopup — true for browsers where the pre-opened-popup
+ * trick is unreliable, so the caller should skip the popup and drive checkout
+ * as a full-page (same-tab) redirect instead.
+ *
+ * Why: the popup approach depends on the window handle opened synchronously on
+ * tap surviving a couple of `await`s and a route change, then being navigated
+ * to the real gateway URL. Safari's "sticky activation" survives that gap;
+ * several WebKit-wrapper browsers on iOS do NOT — window.open() returns null or
+ * a dead handle, the popup never appears, and the buyer lands on the failure
+ * screen. Chrome (CriOS), Firefox (FxiOS) and Edge (EdgiOS) on iOS are all in
+ * this bucket, as are most in-app webviews (Instagram, Facebook, etc.). For
+ * these we redirect in the same tab, which always works: the buyer pays, the
+ * gateway returns to /payments/return, and that page bounces them back here.
+ *
+ * Desktop and iOS Safari keep the popup (nicer UX — the buyer stays on our
+ * page), so this returns false for them.
+ */
+export function shouldRedirectInsteadOfPopup(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+
+  // iOS WebKit-wrapper browsers where the pre-opened popup is unreliable.
+  // (Plain Safari has none of these tokens and keeps the popup.)
+  if (/\b(CriOS|FxiOS|EdgiOS|OPiOS|mercury)\b/i.test(ua)) return true;
+
+  // In-app webviews: Instagram/Facebook/Line/etc. embed a webview that either
+  // blocks popups outright or opens them in a detached view the opener can't
+  // reach. Same-tab redirect is the only thing that works there.
+  if (/\b(Instagram|FBAN|FBAV|FB_IAB|Line|Snapchat|Pinterest)\b/i.test(ua)) return true;
+
+  // Android WebView (wv token) — embedded browser, popups unreliable.
+  if (/;\s*wv\)/i.test(ua)) return true;
+
+  return false;
+}
+
+/**
  * openGatewayCheckout opens the gateway's hosted-checkout URL in a centred
  * popup window and resolves once the popup closes.
  *
