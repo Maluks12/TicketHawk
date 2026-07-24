@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, use } from 'react';
+
+import { enabledPaymentMethods, defaultPaymentMethod, type PaymentMethodId } from '@/lib/paymentMethods';
 import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
@@ -46,7 +48,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [quantity,       setQuantity]       = useState(1);
   const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
   const [adding,         setAdding]         = useState(false);
-  const [paymentMethod,  setPaymentMethod]  = useState<'card' | 'paypal' | 'instant_eft'>('card');
+  const [paymentMethod,  setPaymentMethod]  = useState<PaymentMethodId>(defaultPaymentMethod());
   const [paySheetOpen,   setPaySheetOpen]   = useState(false);
   const [contactOpen,    setContactOpen]    = useState(false);
   const [guestName,      setGuestName]      = useState('');
@@ -160,7 +162,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       // • Card (default): the booking creation already initialised a Paystack
       //   card checkout and returned its URL in client_token. Reuse it to skip
       //   a round-trip (same optimisation as the mobile app).
-      // • PayPal / Instant EFT: call startBookingPayment to get a
+      // • Instant EFT: call startBookingPayment to get a
       //   method-specific hosted-checkout URL.
       // • Guests: no method-aware start route — always use the card URL from
       //   booking creation.
@@ -171,8 +173,8 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         // Card: reuse the checkout URL already returned by booking creation.
         authorizationUrl = (booking as any).client_token;
         usedMethod = 'card';
-      } else if (paymentMethod === 'paypal' || paymentMethod === 'instant_eft') {
-        // PayPal / Instant EFT: initialise a method-specific checkout.
+      } else if (paymentMethod === 'instant_eft') {
+        // Instant EFT: initialise a method-specific checkout.
         if (user) {
           const started = await startBookingPayment(bookingId, paymentMethod);
           authorizationUrl = started.authorization_url;
@@ -416,7 +418,7 @@ return (
               >
                 <p style={{ margin: 0, fontSize: 13, color: colors.subText, width: 100 }}>Payment</p>
                 <p style={{ margin: 0, flex: 1, fontSize: 13, color: colors.text, fontWeight: 600 }}>
-                  {paymentMethod === 'instant_eft' ? 'Instant EFT' : paymentMethod === 'paypal' ? 'PayPal' : 'Credit / Debit Card'} ›
+                  {paymentMethod === 'instant_eft' ? 'Instant EFT' : 'Credit / Debit Card'} ›
                 </p>
               </div>
             </div>
@@ -549,10 +551,10 @@ return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setPaySheetOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
             <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payment Method</h3>
-            {([
+            {(enabledPaymentMethods([
               { id: 'card',        Icon: CreditCard, label: 'Credit / Debit Card' },
               { id: 'instant_eft', Icon: Landmark,   label: 'Instant EFT' },
-            ] as const).map(({ id, Icon, label }) => (
+            ] as const)).map(({ id, Icon, label }) => (
               <div
                 key={id}
                 onClick={() => { setPaymentMethod(id); setPaySheetOpen(false); }}

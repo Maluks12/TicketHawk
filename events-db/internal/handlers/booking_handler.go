@@ -112,6 +112,13 @@ func CreateBookingHandler(
 
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntent(booking, paymentChannel(c))
 		if err != nil {
+			// Seats were counted against capacity when the booking committed.
+			// Release them now instead of leaving them locked for 15 minutes
+			// until the expiry worker runs.
+			if relErr := bookings.ReleaseFailedBooking(booking.ID); relErr != nil {
+				log.Error().Err(relErr).Str("booking_id", booking.ID).
+					Msg("checkout: could not release seats after payment init failure")
+			}
 			utils.InternalError(c, err, "checkout: failed to initialize payment")
 			return
 		}

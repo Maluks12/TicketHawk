@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
 func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.PaymentService) gin.HandlerFunc {
@@ -98,6 +99,14 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 		}
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
 		if err != nil {
+			// The booking committed before this call, so its seats already count
+			// against capacity. Hand them straight back rather than waiting 15
+			// minutes for the expiry worker — a buyer retrying a failed method
+			// would otherwise burn the event's inventory one attempt at a time.
+			if relErr := repository.ReleaseFailedBooking(pool, c.Request.Context(), booking.ID); relErr != nil {
+				log.Error().Err(relErr).Str("booking_id", booking.ID).
+					Msg("guest checkout: could not release seats after payment init failure")
+			}
 			utils.InternalError(c, err, "guest checkout: failed to initialize payment")
 			return
 		}
@@ -273,6 +282,14 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 		}
 		clientToken, paymentRequestID, err := paymentService.CreatePaymentIntentWithMethod(booking, retryMethod, paymentChannel(c))
 		if err != nil {
+			// The booking committed before this call, so its seats already count
+			// against capacity. Hand them straight back rather than waiting 15
+			// minutes for the expiry worker — a buyer retrying a failed method
+			// would otherwise burn the event's inventory one attempt at a time.
+			if relErr := repository.ReleaseFailedBooking(pool, c.Request.Context(), booking.ID); relErr != nil {
+				log.Error().Err(relErr).Str("booking_id", booking.ID).
+					Msg("guest retry payment: could not release seats after payment init failure")
+			}
 			utils.InternalError(c, err, "guest retry payment: failed to initialize payment")
 			return
 		}
