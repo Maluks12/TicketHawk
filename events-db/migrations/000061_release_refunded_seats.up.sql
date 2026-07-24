@@ -44,15 +44,24 @@ CREATE INDEX IF NOT EXISTS idx_bookings_seats_not_released
 -- rather than guess, we mark them all released and then recompute tickets_sold
 -- from scratch below. That makes the counters correct and guarantees no
 -- historical row can be released a second time by the new code.
+-- NOTE: booking_status is an ENUM of ('pending','confirmed','cancelled',
+-- 'refunded') — there is no 'expired' label. Naming one aborts the migration
+-- with "invalid input value for enum booking_status", which is exactly how this
+-- statement failed on its first run.
 UPDATE bookings
 SET seats_released_at = COALESCE(refunded_at, updated_at, created_at)
 WHERE seats_released_at IS NULL
-  AND booking_status IN ('cancelled', 'refunded', 'expired');
+  AND booking_status IN ('cancelled', 'refunded');
 
 -- ── One-time correction ──────────────────────────────────────────────────────
 --
--- Recompute every event's counter from the bookings that actually hold seats.
--- This clears the drift accumulated by every refund since launch.
+-- Recompute counters ONLY for events that have at least one booking.
+--
+-- Seeded demo events carry a tickets_sold figure with no bookings behind it —
+-- that is deliberate, it makes the catalogue look populated. Recomputing those
+-- would zero every one of them and leave the app looking like nothing has ever
+-- sold. Restricting to events with real bookings fixes the drift that refunds
+-- actually caused and leaves the seed data intact.
 UPDATE events e
 SET tickets_sold = COALESCE((
         SELECT SUM(b.ticket_quantity)
@@ -61,14 +70,15 @@ SET tickets_sold = COALESCE((
           AND b.booking_status IN ('confirmed', 'pending')
     ), 0),
     updated_at = CURRENT_TIMESTAMP
-WHERE e.tickets_sold IS DISTINCT FROM COALESCE((
+WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.event_id = e.id)
+  AND e.tickets_sold IS DISTINCT FROM COALESCE((
         SELECT SUM(b.ticket_quantity)
         FROM bookings b
         WHERE b.event_id = e.id
           AND b.booking_status IN ('confirmed', 'pending')
     ), 0);
 
--- Same for ticket tiers, which carry their own counter.
+-- Same for ticket tiers, restricted the same way.
 UPDATE ticket_types t
 SET tickets_sold = COALESCE((
         SELECT SUM(b.ticket_quantity)
@@ -77,7 +87,8 @@ SET tickets_sold = COALESCE((
           AND b.booking_status IN ('confirmed', 'pending')
     ), 0),
     updated_at = CURRENT_TIMESTAMP
-WHERE t.tickets_sold IS DISTINCT FROM COALESCE((
+WHERE EXISTS (SELECT 1 FROM bookings b WHERE b.ticket_type_id = t.id)
+  AND t.tickets_sold IS DISTINCT FROM COALESCE((
         SELECT SUM(b.ticket_quantity)
         FROM bookings b
         WHERE b.ticket_type_id = t.id
