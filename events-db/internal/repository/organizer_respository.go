@@ -67,6 +67,23 @@ func PromoteOrganizerAfterKYC(pool *pgxpool.Pool, ctx context.Context, organizer
 	}
 	defer tx.Rollback(ctx)
 
+	// Read the pre-promotion state under a row lock. This is what makes the
+	// approval notification fire EXACTLY ONCE: the function itself is
+	// idempotent and gets called from three paths (inline registry match,
+	// admin approval, admin registry re-run), any of which may run more than
+	// once for the same organiser. Without the lock+flag, a re-run would post
+	// a duplicate "you're approved" banner every time.
+	var userID string
+	var alreadyFull bool
+	if err = tx.QueryRow(ctx, `
+		SELECT user_id, (COALESCE(verified, FALSE) AND kyc_level >= 2)
+		FROM organizers
+		WHERE id = $1
+		FOR UPDATE
+	`, organizerID).Scan(&userID, &alreadyFull); err != nil {
+		return fmt.Errorf("PromoteOrganizerAfterKYC: load: %w", err)
+	}
+
 	if _, err = tx.Exec(ctx, `
 		UPDATE users u
 		SET role = $1, updated_at = NOW()
@@ -84,6 +101,28 @@ func PromoteOrganizerAfterKYC(pool *pgxpool.Pool, ctx context.Context, organizer
 		WHERE id = $2
 	`, models.OrganizerApproved, organizerID); err != nil {
 		return fmt.Errorf("PromoteOrganizerAfterKYC: organizer: %w", err)
+	}
+
+	// First promotion only — tell the organiser their verification passed.
+	// In-transaction on purpose: if the promotion rolls back, the organiser is
+	// never told they were approved when they weren't.
+	if !alreadyFull {
+		if _, err = tx.Exec(ctx, `
+			INSERT INTO notifications (user_id, type, title, body, data)
+			VALUES ($1, $2, $3, $4, $5)
+		`,
+			userID,
+			// Explicit string cast: NotificationType is a named string type,
+			// and pgx resolving those via its reflection fallback is exactly
+			// the shape that has bitten this codebase before. Costs nothing
+			// to remove the ambiguity.
+			string(models.NotifKYCApproved),
+			"Identity verified",
+			"Your full verification has been approved. You can now create paid events and public listings. Add your payout bank details to start selling tickets.",
+			[]byte(`{"kyc_level":2}`),
+		); err != nil {
+			return fmt.Errorf("PromoteOrganizerAfterKYC: notification: %w", err)
+		}
 	}
 
 	return tx.Commit(ctx)

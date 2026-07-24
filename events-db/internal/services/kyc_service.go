@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"time"
 
 	"events-db/internal/models"
@@ -152,6 +153,23 @@ func (s *KYCService) SubmitBasic(ctx context.Context, organizerID, firstName, la
 }
 
 func (s *KYCService) Submit(ctx context.Context, sub KYCSubmission) (models.KYCStatus, error) {
+	// No ID number in the payload = the organiser already gave it at tier-1
+	// onboarding and the tier-2 form deliberately doesn't ask again. Recover
+	// the stored one, decrypt it, and carry on as if it had been typed. It
+	// still goes through the full validation below, so a legacy row holding
+	// something malformed can't sneak past.
+	if strings.TrimSpace(sub.SAIDNumber) == "" {
+		rec, rErr := repository.GetKYCIdentity(s.pool, ctx, sub.OrganizerID)
+		if rErr != nil {
+			return "", fmt.Errorf("we don't have an ID number on file for you — please enter your 13-digit SA ID number")
+		}
+		idNumber, dErr := s.Decrypt(rec.IDEncrypted)
+		if dErr != nil {
+			return "", fmt.Errorf("could not read the ID number on file — please enter your 13-digit SA ID number")
+		}
+		sub.SAIDNumber = idNumber
+	}
+
 	dob, err := models.ValidateSAIDNumber(sub.SAIDNumber, time.Now())
 	if err != nil {
 		return "", fmt.Errorf("invalid ID number: %w", err)

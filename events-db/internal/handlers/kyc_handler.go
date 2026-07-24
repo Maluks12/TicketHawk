@@ -67,7 +67,7 @@ func SubmitKYCHandler(pool *pgxpool.Pool, kycService *services.KYCService) gin.H
 
 		var dto models.SubmitKYCDTO
 		if err := c.ShouldBind(&dto); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide your legal first name, legal last name, and 13-digit SA ID number"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Please provide your legal first name and legal last name as they appear on your ID (and, if you have no ID number on file, your 13-digit SA ID number)"})
 			return
 		}
 

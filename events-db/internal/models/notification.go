@@ -23,6 +23,14 @@ const (
 	NotifTicketsSellingFast NotificationType = "tickets_selling_fast"
 	// Sent to all followers when an event becomes fully sold out.
 	NotifEventSoldOut NotificationType = "event_sold_out"
+
+	// ── Organiser KYC ─────────────────────────────────────────────────────────
+	// Emitted exactly once, the moment full (tier-2) verification passes —
+	// whichever path got them there: an inline VerifyNow full match, an admin
+	// approval, or an admin registry re-run. The organiser dashboard renders
+	// this as a banner on the Overview screen so approval is visible without
+	// the organiser having to go looking for it.
+	NotifKYCApproved NotificationType = "kyc_approved"
 )
 
 type Notification struct {
