@@ -7,6 +7,7 @@ import {
   Linking,
   Platform,
   Animated,
+  Dimensions,
   InteractionManager,
   Alert,
 } from 'react-native';
@@ -22,11 +23,35 @@ import { useAppTheme } from '../../theme/colors';
 import { getBaseUrl } from '../../components/FilterModal';
 import { toggleFollow, getFollowStatus } from '../../lib/api';
 
-// ─── Hero display mode ────────────────────────────────────────────────────────
-// 'contain' → the whole image is shown, never zoomed or cropped (letterboxed
-//             over a blurred backdrop when the aspect ratio doesn't match).
-// 'cover'   → edge-to-edge fill, crops/upscales to fit the hero frame.
-const HERO_FIT: 'contain' | 'cover' = 'contain';
+// ─── Hero frame ───────────────────────────────────────────────────────────────
+// The hero no longer forces every image into one tall portrait box. The frame
+// TRACKS THE ARTWORK's own aspect ratio, clamped between the two bounds below,
+// which is what lets the wide banner render here the way it does on web.
+//
+// Why this matters: the old frame was a fixed 58vh portrait box, so a 16:9
+// banner had only bad options — 'contain' letterboxed it into a thin strip
+// with ~270px of blur bars, and 'cover' cropped ~55% of its width. That's why
+// the screen used to quietly prefer the (portrait) cover image instead, which
+// contradicted the organiser dashboard's own promise that the banner is the
+// "wide hero image at the top of the event page".
+//
+// Once the frame matches the image, 'cover' becomes the right fit rather than a
+// destructive one: inside the clamp range it crops NOTHING (frame aspect ==
+// image aspect) while still filling edge-to-edge, and only at the clamp limits
+// does it trim a little. Hence HERO_FIT is now 'cover'.
+const HERO_FIT: 'contain' | 'cover' = 'cover';
+
+const { width: SCREEN_W, height: SCREEN_H_LOCAL } = Dimensions.get('window');
+
+// Upper bound: the original 58vh portrait frame — unchanged, so portrait cover
+// artwork looks exactly as it does today.
+const HERO_MAX_H = HERO_H;
+// Lower bound: how short the frame may get for very wide artwork. Keeps enough
+// vertical room for the title block (absolutely positioned at bottom: 36) and
+// stops an ultra-wide banner collapsing the hero into a letterbox slot.
+const HERO_MIN_H = Math.round(SCREEN_H_LOCAL * 0.34);
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -88,6 +113,12 @@ export default function EventDetail() {
   const { colors, isDark } = useAppTheme();
   const [expanded, setExpanded] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
+
+  // Natural aspect ratio (w/h) of the hero artwork, learned from the image
+  // itself via onLoad. Null until the first layer reports back — until then we
+  // render at the max (portrait) height, which is the safe default and matches
+  // the pre-change look for the one frame before load completes.
+  const [heroAspect, setHeroAspect] = useState<number | null>(null);
 
   // ── View tracking + fresh data fetch ──────────────────────────────────────
   // Fires once when the user opens this screen (after the nav animation).
@@ -190,11 +221,13 @@ export default function EventDetail() {
   }
 
   const ev           = event as any;
-  // Prefer the COVER for the app hero: covers are card/portrait-shaped and
-  // fill the tall hero frame, while banners are wide web-hero artwork — using
-  // a banner here guarantees the letterboxed look (blur bars above/below).
-  // The banner remains the web desktop hero; falls back for cover-less events.
-  const heroImage    = event.cover_image_url ?? event.banner_image_url;
+  // Banner first — matching web-desktop, web-mobile, the app's own home hero
+  // and its purchase screen, all of which resolve `banner_image_url ?? cover`.
+  // This screen was the single outlier in the codebase, so an organiser who
+  // uploaded a banner saw it everywhere EXCEPT here, and the image changed
+  // under them when they tapped through to Get Tickets. The frame below adapts
+  // to the artwork, so preferring the wide banner no longer costs anything.
+  const heroImage    = event.banner_image_url ?? event.cover_image_url;
   const maxCap       = ev.max_capacity ?? 0;
   const isSoldOut    = event.is_sold_out ?? false;
   const isASport     = event.category?.toLowerCase() === 'sports';
@@ -230,16 +263,40 @@ export default function EventDetail() {
   const hasMore     = longDesc.length > 200;
   const displayDesc = expanded ? longDesc : (shortDesc + (hasMore ? '…' : ''));
 
+  // Frame height that would display the artwork edge-to-edge with no crop,
+  // then clamped to [HERO_MIN_H, HERO_MAX_H]. A tall/portrait cover lands at
+  // the max (unchanged from before); a 16:9 banner lands around 0.56·screen-W,
+  // i.e. a proper wide hero instead of a letterboxed strip. Falls back to the
+  // max height until the image has reported its dimensions.
+  // Plain const, NOT useMemo: this sits below the `if (!event)` early return,
+  // so a hook here would violate the rules of hooks. The maths is trivial.
+  const heroHeight = (!heroAspect || heroAspect <= 0)
+    ? HERO_MAX_H
+    : Math.round(clamp(SCREEN_W / heroAspect, HERO_MIN_H, HERO_MAX_H));
+
   // Gentle parallax on the sharp foreground only. The image is no longer
   // oversized (the old `bottom: -35%` overscan forced `cover` to upscale the
   // source ~35% beyond full-screen). As it drifts, the blurred backdrop shows
-  // through — no zoom, no crop, no resolution loss.
-  const PARALLAX_SHIFT  = Math.round(HERO_H * 0.12);
+  // through — no zoom, no crop, no resolution loss. Driven by the ACTUAL frame
+  // height so the drift stays proportional whatever aspect the artwork is.
+  const PARALLAX_SHIFT  = Math.round(heroHeight * 0.12);
   const imageTranslateY = scrollY.interpolate({
-    inputRange:  [-HERO_H, 0, HERO_H],
+    inputRange:  [-heroHeight, 0, heroHeight],
     outputRange: [-PARALLAX_SHIFT / 2, 0, PARALLAX_SHIFT],
     extrapolate: 'clamp',
   });
+
+  // expo-image reports the decoded source size on load; derive w/h aspect from
+  // whichever layer resolves first. Guarded so a re-report of the same ratio
+  // doesn't thrash state. Plain function (not useCallback) for the same
+  // rules-of-hooks reason as heroHeight above.
+  const onHeroLoad = (e: { source?: { width?: number; height?: number } }) => {
+    const w = e?.source?.width;
+    const h = e?.source?.height;
+    if (!w || !h) return;
+    const ratio = w / h;
+    setHeroAspect((prev) => (prev && Math.abs(prev - ratio) < 0.001 ? prev : ratio));
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -265,7 +322,9 @@ export default function EventDetail() {
         )}
       >
         {/* ── Hero ─────────────────────────────────────────────────── */}
-        <View style={sheet.heroContainer}>
+        {/* Height tracks the artwork's aspect (clamped): portrait covers stay
+            at the tall max, wide banners get a proportionate shorter frame. */}
+        <View style={[sheet.heroContainer, { height: heroHeight }]}>
           {heroImage ? (
             <>
               {/* Blurred backdrop fills the frame edge-to-edge, so the sharp
@@ -278,10 +337,11 @@ export default function EventDetail() {
                 cachePolicy="memory-disk"
                 transition={150}
               />
-              {/* Sharp foreground: HERO_FIT='contain' shows the entire image at
-                  its native aspect ratio — zero upscaling beyond fitting the
-                  screen width. Flip to 'cover' for edge-to-edge crop once all
-                  events have high-res portrait artwork. */}
+              {/* Sharp foreground. HERO_FIT='cover' now fills edge-to-edge, and
+                  because the frame above matches the artwork's aspect ratio it
+                  crops nothing within the clamp range — only at the min/max
+                  bounds does it trim slightly. onLoad reports the natural size
+                  that drives that frame height. */}
               <Animated.View
                 style={[sheet.heroImage, { transform: [{ translateY: imageTranslateY }] }]}
                 pointerEvents="none"
@@ -290,6 +350,7 @@ export default function EventDetail() {
                   source={{ uri: heroImage }}
                   style={{ flex: 1 }}
                   contentFit={HERO_FIT}
+                  onLoad={onHeroLoad}
                   cachePolicy="memory-disk"
                   priority="high"
                   transition={150}
