@@ -441,16 +441,21 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 // The whole thing runs in one transaction with SELECT ... FOR UPDATE on the
 // organiser, because two payout rows for the same organiser processing
 // concurrently would otherwise both see the full debt and each deduct it.
+// payable is the amount that must ACTUALLY be transferred after debt is
+// deducted. Callers must use this return value rather than the amount they
+// passed in: the in-memory PendingPayoutRow still holds the pre-deduction
+// figure, and transferring that while the ledger records the reduced one sends
+// the organiser too much money with every internal record looking correct.
 func ApplyPayoutDebt(
 	pool *pgxpool.Pool,
 	ctx context.Context,
 	organizerID string,
 	payoutID string,
 	amount float64,
-) (settled bool, err error) {
+) (payable float64, settled bool, err error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("begin debt tx: %w", err)
+		return 0, false, fmt.Errorf("begin debt tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -458,10 +463,10 @@ func ApplyPayoutDebt(
 	if err := tx.QueryRow(ctx, `
 		SELECT payout_debt FROM organizers WHERE id = $1 FOR UPDATE
 	`, organizerID).Scan(&debt); err != nil {
-		return false, fmt.Errorf("locking organizer for debt check: %w", err)
+		return 0, false, fmt.Errorf("locking organizer for debt check: %w", err)
 	}
 	if debt <= 0 {
-		return false, tx.Commit(ctx)
+		return amount, false, tx.Commit(ctx)
 	}
 
 	applied := debt
@@ -475,7 +480,7 @@ func ApplyPayoutDebt(
 		SET payout_debt = payout_debt - $1, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2
 	`, applied, organizerID); err != nil {
-		return false, fmt.Errorf("reducing organizer debt: %w", err)
+		return 0, false, fmt.Errorf("reducing organizer debt: %w", err)
 	}
 
 	if remaining <= 0 {
@@ -490,12 +495,12 @@ func ApplyPayoutDebt(
 			    updated_at     = CURRENT_TIMESTAMP
 			WHERE id = $2
 		`, fmt.Sprintf("Fully offset against outstanding balance of R%.2f", applied), payoutID); err != nil {
-			return false, fmt.Errorf("closing fully-offset payout: %w", err)
+			return 0, false, fmt.Errorf("closing fully-offset payout: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return false, fmt.Errorf("commit full offset: %w", err)
+			return 0, false, fmt.Errorf("commit full offset: %w", err)
 		}
-		return true, nil
+		return 0, true, nil
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -503,12 +508,12 @@ func ApplyPayoutDebt(
 		SET amount = $1, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2
 	`, remaining, payoutID); err != nil {
-		return false, fmt.Errorf("reducing payout by debt: %w", err)
+		return 0, false, fmt.Errorf("reducing payout by debt: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("commit partial offset: %w", err)
+		return 0, false, fmt.Errorf("commit partial offset: %w", err)
 	}
-	return false, nil
+	return remaining, false, nil
 }
 
 func roundZAR(v float64) float64 {

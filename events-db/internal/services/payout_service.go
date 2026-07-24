@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"math"
 	"fmt"
 	"strings"
 
@@ -189,17 +190,24 @@ func (s *PayoutService) payRow(ctx context.Context, row repository.PendingPayout
 	// Debt accrues when a cancellation refund exceeded the reserve held against
 	// it — see RefundService.accrueClawback. Paying out in full while a balance
 	// is outstanding would mean the platform never recovers it.
-	if settled, err := repository.ApplyPayoutDebt(s.pool, ctx, row.OrganizerID, row.PayoutID, row.Amount); err != nil {
+	payable, settled, err := repository.ApplyPayoutDebt(s.pool, ctx, row.OrganizerID, row.PayoutID, row.Amount)
+	if err != nil {
 		log.Error().Err(err).Str("payout_id", row.PayoutID).
 			Msg("payouts: could not apply outstanding debt — skipping row this tick")
 		return
-	} else if settled {
+	}
+	if settled {
 		// The debt swallowed the entire payout. The row is closed out as paid
 		// with a zero transfer; nothing leaves the platform balance.
 		log.Info().Str("payout_id", row.PayoutID).Str("organizer", row.BusinessName).
 			Msg("payouts: fully absorbed by outstanding debt, no transfer needed")
 		return
 	}
+
+	// Overwrite the in-memory amount with what the ledger now says. Skipping
+	// this transfers the pre-debt figure while the database records the reduced
+	// one — the organiser is overpaid and every internal number still reconciles.
+	row.Amount = payable
 
 	ref := "po_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	claimed, reference, err := repository.ClaimPayoutForProcessing(s.pool, ctx, row.PayoutID, ref)
@@ -212,7 +220,7 @@ func (s *PayoutService) payRow(ctx context.Context, row repository.PendingPayout
 	}
 
 	transfer, err := s.paystack.InitiateTransfer(ctx,
-		int64(row.Amount*100), *row.RecipientCode, reference,
+		int64(math.Round(row.Amount*100)), *row.RecipientCode, reference,
 		fmt.Sprintf("TicketHawk payout — %s", row.BusinessName))
 	if err != nil {
 		// "Duplicate reference" means a previous attempt actually went
