@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, use } from 'react';
-import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check } from 'lucide-react';
+import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check, AlertCircle, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
 import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, type PaymentMethod } from '@/lib/payments';
@@ -46,7 +46,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [quantity,       setQuantity]       = useState(1);
   const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
   const [adding,         setAdding]         = useState(false);
-  const [paymentMethod,  setPaymentMethod]  = useState<PaymentMethodId>(defaultPaymentMethod());
+  const [paymentMethod,  setPaymentMethod]  = useState<PaymentMethod>('card');
   const [paySheetOpen,   setPaySheetOpen]   = useState(false);
   const [contactOpen,    setContactOpen]    = useState(false);
   const [guestName,      setGuestName]      = useState('');
@@ -590,10 +590,10 @@ return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setPaySheetOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
             <h3 style={{ margin: '0 0 4px', color: colors.text }}>Payment Method</h3>
-            {(enabledPaymentMethods([
+            {([
               { id: 'card',        Icon: CreditCard, label: 'Credit / Debit Card' },
               { id: 'instant_eft', Icon: Landmark,   label: 'Instant EFT' },
-            ] as const)).map(({ id, Icon, label }) => (
+            ] as const).map(({ id, Icon, label }) => (
               <div
                 key={id}
                 onClick={() => { setPaymentMethod(id); setPaySheetOpen(false); }}
