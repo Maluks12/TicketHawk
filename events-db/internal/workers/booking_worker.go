@@ -15,7 +15,7 @@ import (
 )
 
 // isPermanentEmailErr reports whether an email send failure is a non-retryable
-// auth/config problem (invalid SENDGRID_API_KEY or unverified sender). Retrying
+// auth/config problem (unverified SES sender or suspended/paused account). Retrying
 // such a failure is pointless — it only churns the queue and the logs.
 func isPermanentEmailErr(err error) bool {
 	var apiErr *services.EmailAPIError
@@ -43,7 +43,7 @@ func backoffFor(attempts int) time.Duration {
 
 // StartBookingWorker drains the jobs channel and, for each confirmed booking:
 //  1. Generates + uploads the QR code to R2.
-//  2. Sends the booking confirmation email via SendGrid.
+//  2. Sends the booking confirmation email via Amazon SES.
 //
 // FIX 4: On email failure the worker now persists a row to
 // booking_email_retries instead of spawning a fire-and-forget goroutine that
@@ -181,12 +181,12 @@ func processBookingJob(
 	}
 
 	if err := emailSvc.SendBookingConfirmation(booking, event, user); err != nil {
-		// A permanent auth/config failure (bad SENDGRID_API_KEY / unverified
-		// sender) won't fix itself on retry. Tickets are already issued, so
+		// A permanent SES rejection (unverified sender, suspended/paused
+		// account, or malformed message) won't fix itself on retry. Tickets are already issued, so
 		// just log it once and skip the retry queue to avoid endless churn.
 		if isPermanentEmailErr(err) {
 			log.Error().Err(err).Str("booking_id", bookingID).
-				Msg("booking worker: email rejected (auth/config) — NOT queuing retry; set a valid SENDGRID_API_KEY. Tickets were still issued.")
+				Msg("booking worker: email rejected by SES (permanent) — NOT queuing retry; verify the sender identity / check SES account status. Tickets were still issued.")
 			return
 		}
 

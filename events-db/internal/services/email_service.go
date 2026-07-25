@@ -1,17 +1,29 @@
 package services
 
 import (
+	"bytes"
+	"context"
 	"embed"
 	"encoding/base64"
+	"errors"
 	"events-db/internal/config"
 	"events-db/internal/models"
 	"fmt"
 	"html/template"
+	"io"
+	"mime"
+	"mime/multipart"
+	"net/mail"
+	"net/textproto"
 	"net/url"
+	"sync"
 	"time"
 
-	"github.com/sendgrid/sendgrid-go"
-	"github.com/sendgrid/sendgrid-go/helpers/mail"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	sestypes "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 )
 
 // brandLogoFS is the TicketHawk mark, embedded directly into the compiled
@@ -29,31 +41,69 @@ var brandLogoFS embed.FS
 // image references it via "cid:<brandLogoCID>".
 const brandLogoCID = "brand-logo"
 
-// EmailAPIError is returned when the email provider (SendGrid) responds with a
-// non-2xx status. A 401/403 means the API key is invalid or the sender isn't
-// verified — a permanent misconfiguration that retrying cannot fix.
+// EmailAPIError is returned when the email provider (Amazon SES) rejects a
+// message for a reason that retrying cannot fix. sendHTML maps such failures
+// to StatusCode 403 (see isPermanentSESError) so the booking worker can skip
+// queueing pointless retries. The numeric StatusCode is retained purely for
+// backwards compatibility with the worker's IsPermanent() check — SES itself
+// does not return HTTP-style status codes to callers.
 type EmailAPIError struct{ StatusCode int }
 
 func (e *EmailAPIError) Error() string { return fmt.Sprintf("email API error: %d", e.StatusCode) }
 
-// IsPermanent reports whether the failure is a non-retryable auth/config
-// problem — 401/403 mean the SendGrid API key is invalid or the sender
-// identity isn't verified, which no amount of retrying can fix. The booking
-// worker uses this to skip queueing retries for such failures.
+// IsPermanent reports whether the failure is a non-retryable problem — a 403
+// here means SES rejected the message for a permanent reason (unverified
+// sender identity, suspended/paused account, malformed message), which no
+// amount of retrying can fix. The booking worker uses this to skip queueing
+// retries for such failures.
 func (e *EmailAPIError) IsPermanent() bool {
 	return e.StatusCode == 401 || e.StatusCode == 403
 }
 
 type EmailService struct {
-	client *sendgrid.Client
-	cfg    *config.Config
+	cfg *config.Config
+
+	// The SES client is built lazily on first send and cached. Building it
+	// requires a context (LoadDefaultConfig) and can fail, but the existing
+	// NewEmailService signature returns no error — so we defer construction
+	// to getClient() rather than change every caller. Guarded by clientMu.
+	clientMu sync.Mutex
+	client   *sesv2.Client
 }
 
 func NewEmailService(cfg *config.Config) *EmailService {
-	return &EmailService{
-		client: sendgrid.NewSendClient(cfg.SendGridAPIKey),
-		cfg:    cfg,
+	return &EmailService{cfg: cfg}
+}
+
+// getClient lazily builds and caches the SES v2 client. Credentials come from
+// explicit SES_* keys when set (config.SESAccessKeyID / SESSecretAccessKey);
+// otherwise the AWS default chain is used — on EC2 this is the instance role,
+// which is the recommended way to grant SES access in production (no static
+// secrets on disk). Region is config.AWSRegion (default af-south-1).
+func (s *EmailService) getClient(ctx context.Context) (*sesv2.Client, error) {
+	s.clientMu.Lock()
+	defer s.clientMu.Unlock()
+	if s.client != nil {
+		return s.client, nil
 	}
+
+	opts := []func(*awsconfig.LoadOptions) error{
+		awsconfig.WithRegion(s.cfg.AWSRegion),
+	}
+	if s.cfg.SESAccessKeyID != "" && s.cfg.SESSecretAccessKey != "" {
+		opts = append(opts, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(
+				s.cfg.SESAccessKeyID, s.cfg.SESSecretAccessKey, "",
+			),
+		))
+	}
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config for SES: %w", err)
+	}
+	s.client = sesv2.NewFromConfig(awsCfg)
+	return s.client, nil
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -202,30 +252,154 @@ func muted(text string) string {
 	return fmt.Sprintf(`<p style="margin:14px 0 0; font-size:13px; color:%s;">%s</p>`, textMuted, esc(text))
 }
 
-// sendHTML dispatches the email and returns the provider status code. Every
-// email gets the TicketHawk logo attached inline (see brandLogoFS) so the
-// header image renders regardless of the recipient's mail client or network
+// sendHTML dispatches the email through Amazon SES and returns a synthetic
+// status code kept for backwards compatibility with callers that check
+// `status >= 400` and build EmailAPIError{StatusCode: status}:
+//
+//	200 → sent successfully
+//	403 → permanent SES rejection (unverified sender, suspended/paused
+//	      account, malformed message) — see classifySESError. Callers wrap
+//	      this as EmailAPIError{403}, whose IsPermanent() is true, so the
+//	      booking worker skips a pointless retry.
+//	(0, err) → transient failure (throttling, network, quota) — the caller
+//	      returns the raw error, which is NOT an EmailAPIError, so the worker
+//	      treats it as retryable.
+//
+// Every email gets the TicketHawk logo attached inline (see brandLogoFS) via a
+// multipart/related MIME message referencing it by Content-ID, so the header
+// image renders regardless of the recipient's mail client or network
 // conditions — it never depends on fetching an external URL.
 func (s *EmailService) sendHTML(toName, toEmail, subject, htmlContent string) (int, error) {
-	from := mail.NewEmail(s.cfg.EmailFromName, s.cfg.EmailFromAddress)
-	to := mail.NewEmail(toName, toEmail)
-	message := mail.NewSingleEmail(from, subject, to, "", htmlContent)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	if logoBytes, err := brandLogoFS.ReadFile("assets/brand-logo.png"); err == nil {
-		logoAttachment := mail.NewAttachment()
-		logoAttachment.SetContent(base64.StdEncoding.EncodeToString(logoBytes))
-		logoAttachment.SetType("image/png")
-		logoAttachment.SetFilename("brand-logo.png")
-		logoAttachment.SetDisposition("inline")
-		logoAttachment.SetContentID(brandLogoCID)
-		message.AddAttachment(logoAttachment)
-	}
-
-	resp, err := s.client.Send(message)
+	client, err := s.getClient(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return resp.StatusCode, nil
+
+	raw, err := buildRawMIME(s.cfg.EmailFromName, s.cfg.EmailFromAddress, toName, toEmail, subject, htmlContent)
+	if err != nil {
+		return 0, fmt.Errorf("failed to build email message: %w", err)
+	}
+
+	fromAddr := (&mail.Address{Name: s.cfg.EmailFromName, Address: s.cfg.EmailFromAddress}).String()
+
+	input := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(fromAddr),
+		Destination:      &sestypes.Destination{ToAddresses: []string{toEmail}},
+		Content: &sestypes.EmailContent{
+			Raw: &sestypes.RawMessage{Data: raw},
+		},
+	}
+	// A configuration set enables SES event publishing (bounces, complaints,
+	// deliveries) and dedicated-IP / reputation controls. Optional.
+	if s.cfg.SESConfigurationSet != "" {
+		input.ConfigurationSetName = aws.String(s.cfg.SESConfigurationSet)
+	}
+
+	if _, err := client.SendEmail(ctx, input); err != nil {
+		if isPermanentSESError(err) {
+			return 403, nil
+		}
+		return 0, err
+	}
+	return 200, nil
+}
+
+// isPermanentSESError reports whether an SES SendEmail failure is one that
+// retrying cannot fix. These map to a 403 status so EmailAPIError.IsPermanent()
+// returns true. Everything else (throttling, quota, transient network) is left
+// as-is so the booking worker retries.
+func isPermanentSESError(err error) bool {
+	var (
+		rejected  *sestypes.MessageRejected
+		suspended *sestypes.AccountSuspendedException
+		paused    *sestypes.SendingPausedException
+		mailFrom  *sestypes.MailFromDomainNotVerifiedException
+		badReq    *sestypes.BadRequestException
+		notFound  *sestypes.NotFoundException
+	)
+	return errors.As(err, &rejected) ||
+		errors.As(err, &suspended) ||
+		errors.As(err, &paused) ||
+		errors.As(err, &mailFrom) ||
+		errors.As(err, &badReq) ||
+		errors.As(err, &notFound)
+}
+
+// buildRawMIME assembles a multipart/related message: the HTML body plus the
+// TicketHawk logo attached inline and referenced by Content-ID (cid:brand-logo).
+// Bodies are base64-encoded with 76-char line wrapping so no MIME line exceeds
+// the 998-octet limit (the branded HTML contains some very long lines). The
+// subject is RFC 2047-encoded so event titles with any Unicode survive intact.
+func buildRawMIME(fromName, fromAddr, toName, toAddr, subject, htmlContent string) ([]byte, error) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+
+	// HTML part.
+	htmlHeader := textproto.MIMEHeader{}
+	htmlHeader.Set("Content-Type", "text/html; charset=UTF-8")
+	htmlHeader.Set("Content-Transfer-Encoding", "base64")
+	hp, err := mw.CreatePart(htmlHeader)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeWrappedBase64(hp, []byte(htmlContent)); err != nil {
+		return nil, err
+	}
+
+	// Inline logo part (best-effort: if the embedded asset can't be read we
+	// still send the email — the header text renders without the mark).
+	if logoBytes, err := brandLogoFS.ReadFile("assets/brand-logo.png"); err == nil {
+		imgHeader := textproto.MIMEHeader{}
+		imgHeader.Set("Content-Type", "image/png")
+		imgHeader.Set("Content-Transfer-Encoding", "base64")
+		imgHeader.Set("Content-ID", "<"+brandLogoCID+">")
+		imgHeader.Set("Content-Disposition", `inline; filename="brand-logo.png"`)
+		ip, err := mw.CreatePart(imgHeader)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeWrappedBase64(ip, logoBytes); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+
+	to := (&mail.Address{Name: toName, Address: toAddr}).String()
+	from := (&mail.Address{Name: fromName, Address: fromAddr}).String()
+
+	var msg bytes.Buffer
+	fmt.Fprintf(&msg, "From: %s\r\n", from)
+	fmt.Fprintf(&msg, "To: %s\r\n", to)
+	fmt.Fprintf(&msg, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", subject))
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&msg, "Content-Type: multipart/related; boundary=%q\r\n", mw.Boundary())
+	msg.WriteString("\r\n")
+	msg.Write(body.Bytes())
+
+	return msg.Bytes(), nil
+}
+
+// writeWrappedBase64 writes data as base64 with CRLF every 76 characters, as
+// required for MIME transfer encoding.
+func writeWrappedBase64(w io.Writer, data []byte) error {
+	enc := base64.StdEncoding.EncodeToString(data)
+	const lineLen = 76
+	for i := 0; i < len(enc); i += lineLen {
+		end := i + lineLen
+		if end > len(enc) {
+			end = len(enc)
+		}
+		if _, err := io.WriteString(w, enc[i:end]+"\r\n"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

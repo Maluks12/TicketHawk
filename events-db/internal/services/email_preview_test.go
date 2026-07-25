@@ -6,8 +6,8 @@ package services
 //
 // Sends ONE of every email type the platform produces to a real inbox, so the
 // branded templates can be eyeballed in actual email clients (Gmail, Outlook,
-// phone). These deliver REAL mail via SendGrid — they are previews, not unit
-// tests — and skip automatically when SENDGRID_API_KEY is absent.
+// phone). These deliver REAL mail via Amazon SES — they are previews, not unit
+// tests — and skip automatically when EMAIL_FROM_ADDRESS is absent.
 //
 // Recipient:   EMAIL_TEST_RECIPIENT env var (default below).
 // Links/logo:  EMAIL_TEST_FRONTEND_URL env var (default https://ticket-hawk.com).
@@ -81,11 +81,8 @@ func previewConfig(t *testing.T) *config.Config {
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-	if cfg.SendGridAPIKey == "" {
-		t.Skip("SENDGRID_API_KEY not set — skipping live email previews")
-	}
 	if cfg.EmailFromAddress == "" {
-		t.Skip("EMAIL_FROM_ADDRESS not set — skipping live email previews")
+		t.Skip("EMAIL_FROM_ADDRESS not set — skipping live email previews (SES)")
 	}
 	if cfg.EmailFromName == "" {
 		cfg.EmailFromName = "TicketHawk"

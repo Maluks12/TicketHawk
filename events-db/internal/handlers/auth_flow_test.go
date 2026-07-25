@@ -85,7 +85,7 @@ func authTestConfig() *config.Config {
 	return &config.Config{
 		JWTSecret:        "test-secret-that-is-at-least-32-chars!!",
 		FrontendURLs:     []string{"http://localhost:3000"},
-		SendGridAPIKey:   "SG.test",
+		AWSRegion:        "af-south-1",
 		EmailFromAddress: "noreply@test.com",
 		EmailFromName:    "Test",
 

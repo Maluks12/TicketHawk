@@ -41,7 +41,7 @@ type transferEventRequest struct {
 
 // handoverEventToOrganizer performs the full handover for an already-loaded
 // event: ensure the account, transfer ownership, mint a 7-day set-password
-// token, and send the handover email (best-effort — a SendGrid failure never
+// token, and send the handover email (best-effort — an SES failure never
 // fails the transfer; ownership is already correct in the DB and the
 // organiser can use "forgot password" on the dashboard as a fallback).
 func handoverEventToOrganizer(

@@ -16,9 +16,19 @@ type Config struct {
 	JWTSecret   string
 	RedisAddr   string
 
-	SendGridAPIKey   string
-	EmailFromAddress string
-	EmailFromName    string
+	// ── Email (Amazon SES) ────────────────────────────────────────────────────
+	// EmailFromAddress must be a verified SES identity (or belong to a verified
+	// domain). EmailFromName is the display name. AWSRegion is the SES region
+	// (af-south-1 for TicketHawk). SESAccessKeyID/SESSecretAccessKey are
+	// optional — when empty, the AWS default credential chain is used (the EC2
+	// instance role in production). SESConfigurationSet is optional and enables
+	// SES event tracking (bounces/complaints/deliveries).
+	EmailFromAddress    string
+	EmailFromName       string
+	AWSRegion           string
+	SESAccessKeyID      string
+	SESSecretAccessKey  string
+	SESConfigurationSet string
 
 	QREncryptionKey string // AES-GCM key for static QR codes (email/offline)
 	KYCEncryptionKey string // AES-GCM key for stored SA ID numbers (falls back to QR key)
@@ -94,9 +104,12 @@ func Load() (*Config, error) {
 		JWTSecret:   os.Getenv("JWT_SECRET"),
 		RedisAddr:   os.Getenv("REDIS_ADDR"),
 
-		SendGridAPIKey:   os.Getenv("SENDGRID_API_KEY"),
-		EmailFromAddress: os.Getenv("EMAIL_FROM_ADDRESS"),
-		EmailFromName:    os.Getenv("EMAIL_FROM_NAME"),
+		EmailFromAddress:    os.Getenv("EMAIL_FROM_ADDRESS"),
+		EmailFromName:       os.Getenv("EMAIL_FROM_NAME"),
+		AWSRegion:           firstNonEmpty(os.Getenv("AWS_REGION"), "af-south-1"),
+		SESAccessKeyID:      os.Getenv("AWS_SES_ACCESS_KEY_ID"),
+		SESSecretAccessKey:  os.Getenv("AWS_SES_SECRET_ACCESS_KEY"),
+		SESConfigurationSet: os.Getenv("SES_CONFIGURATION_SET"),
 
 		QREncryptionKey: os.Getenv("QR_ENCRYPTION_KEY"),
 		KYCEncryptionKey: firstNonEmpty(os.Getenv("KYC_ENCRYPTION_KEY"), os.Getenv("QR_ENCRYPTION_KEY")),
@@ -211,8 +224,11 @@ func (c *Config) validate() error {
 	if len(c.FrontendURLs) == 0 || c.FrontendURLs[0] == "" {
 		missing = append(missing, "FRONTEND_URLS")
 	}
-	if c.SendGridAPIKey == "" {
-		missing = append(missing, "SENDGRID_API_KEY")
+	// SES sends from a verified identity; the From address is what must be set
+	// (credentials come from the instance role or optional AWS_SES_* keys, and
+	// the region defaults to af-south-1).
+	if c.EmailFromAddress == "" {
+		missing = append(missing, "EMAIL_FROM_ADDRESS")
 	}
 	if len(c.QRHMACSecret) < 32 {
 		missing = append(missing, "QR_HMAC_SECRET (must be at least 32 chars — generate with: openssl rand -hex 32)")
