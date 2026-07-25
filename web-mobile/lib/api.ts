@@ -131,6 +131,12 @@ export interface Event {
   venue_name: string;
   city: string;
   address?: string;
+  // Populated from the organiser's Google Places selection. Clients link
+  // with place_id (or lat/lng) to open the EXACT venue rather than a fuzzy
+  // text search. Optional: events created before this feature have none.
+  latitude?: number | null;
+  longitude?: number | null;
+  place_id?: string | null;
   cover_image_url?: string;
   banner_image_url?: string;
   is_featured: boolean;

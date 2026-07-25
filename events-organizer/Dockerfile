@@ -23,6 +23,20 @@ COPY . .
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
+# Public URL of THIS dashboard, used by the landing page for canonical /
+# Open Graph / robots.txt / sitemap.xml. Also inlined at build time, so it MUST
+# be passed as a build arg - a runtime-only env var arrives too late and the
+# canonical URL silently falls back to the default.
+ARG NEXT_PUBLIC_ORGANISER_URL
+ENV NEXT_PUBLIC_ORGANISER_URL=${NEXT_PUBLIC_ORGANISER_URL}
+
+# Google Maps browser key for the venue autocomplete on the create-event form.
+# Inlined at build time like the vars above. This key is PUBLIC by design (it
+# ships in the client bundle) - it's protected by HTTP-referrer + API
+# restrictions in the Google Cloud console, not by secrecy.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_KEY}
+
 RUN npm run build
 
 # ── runtime ───────────────────────────────────────────────────────────────────

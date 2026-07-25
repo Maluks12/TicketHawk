@@ -60,6 +60,14 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: "https://api.ticket-hawk.com/v1"
+        # Public URL of this dashboard, for the landing page's canonical /
+        # Open Graph / robots.txt / sitemap.xml. Build arg (not runtime env):
+        # NEXT_PUBLIC_* is inlined by Next at build time, and .env* is excluded
+        # by .dockerignore so the .env file never reaches this build.
+        NEXT_PUBLIC_ORGANISER_URL: "https://organiser.ticket-hawk.com"
+        # Google Maps browser key for the venue autocomplete. Public by design
+        # (ships in the client bundle); protected by referrer + API restrictions.
+        NEXT_PUBLIC_GOOGLE_MAPS_KEY: "AIzaSyCz_LX4j7NGVTeRqKNb9zgeSyWS2pQXmJc"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3000"   # host 3002 → container 3000

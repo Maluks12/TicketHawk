@@ -247,9 +247,27 @@ export default function EventDetail() {
   };
 
   const handleDirections = async () => {
-    const query     = encodeURIComponent(`${event.venue_name}, ${event.city}`);
-    const nativeUrl = Platform.OS === 'ios' ? `maps://?q=${query}` : `geo:0,0?q=${query}`;
-    const webUrl    = `https://www.google.com/maps/search/?api=1&query=${query}`;
+    // Prefer EXACT coordinates / place_id over a text search. The old version
+    // searched for "<venue>, <city>" and let Google guess, which is why buyers
+    // were sent to a completely different place — a mismatched pair like
+    // "FNB Stadium, Sandton" (FNB is in Nasrec) can resolve anywhere. It also
+    // dropped the street address entirely.
+    const ev        = event as any;
+    const label     = [event.venue_name, ev.address, event.city].filter(Boolean).join(', ');
+    const query     = encodeURIComponent(label);
+    const hasCoords = typeof ev.latitude === 'number' && typeof ev.longitude === 'number';
+    const coords    = hasCoords ? `${ev.latitude},${ev.longitude}` : '';
+
+    // Native apps take coordinates directly, which removes all ambiguity.
+    const nativeUrl = hasCoords
+      ? (Platform.OS === 'ios' ? `maps://?ll=${coords}&q=${query}` : `geo:${coords}?q=${coords}(${query})`)
+      : (Platform.OS === 'ios' ? `maps://?q=${query}` : `geo:0,0?q=${query}`);
+
+    const webUrl = ev.place_id
+      ? `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${encodeURIComponent(ev.place_id)}`
+      : hasCoords
+        ? `https://www.google.com/maps/search/?api=1&query=${coords}`
+        : `https://www.google.com/maps/search/?api=1&query=${query}`;
     try {
       const ok = await Linking.canOpenURL(nativeUrl);
       await Linking.openURL(ok ? nativeUrl : webUrl);

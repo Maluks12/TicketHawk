@@ -50,6 +50,10 @@ type Event struct {
 	City           string      `json:"city" db:"city"`
 	Latitude       *float64    `json:"latitude,omitempty" db:"latitude"`
 	Longitude      *float64    `json:"longitude,omitempty" db:"longitude"`
+	// Google Places id captured by the organiser's address autocomplete.
+	// Clients use it to build EXACT map links (&query_place_id=...) instead of
+	// a fuzzy text search that lands on the wrong venue.
+	PlaceID        *string     `json:"place_id,omitempty" db:"place_id"`
 	CategoryID     int         `json:"category_id" db:"category_id"`
 	Category       string      `json:"category" db:"category"`
 	// Price reflects the cheapest visible ticket type (kept in sync by a DB
@@ -159,6 +163,7 @@ type CreateEventDTO struct {
 	City               string     `json:"city" binding:"required"`
 	Latitude           *float64   `json:"latitude"`
 	Longitude          *float64   `json:"longitude"`
+	PlaceID            *string    `json:"place_id"`
 	CategoryID         int        `json:"category_id" binding:"required"`
 	Price              float64    `json:"price" binding:"min=0"`
 	Currency           string     `json:"currency" binding:"required"`
@@ -208,6 +213,7 @@ type UpdateEventDTO struct {
 	City               *string    `json:"city"`
 	Latitude           *float64   `json:"latitude"`
 	Longitude          *float64   `json:"longitude"`
+	PlaceID            *string    `json:"place_id"`
 	Price              *float64   `json:"price" binding:"omitempty,min=0"`
 	MaxCapacity        *int       `json:"max_capicity" binding:"omitempty,min=1"`
 	AllowWaitlist       *bool      `json:"allow_waitlist"`

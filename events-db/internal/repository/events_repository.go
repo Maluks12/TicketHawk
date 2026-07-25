@@ -84,7 +84,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             id, slug,
             title, description, cover_image_url, banner_image_url, gallery_images,
             start_time, end_time, expires_at, timezone,
-            venue_name, address, city, latitude, longitude,
+            venue_name, address, city, latitude, longitude, place_id,
             category_id, price, currency, max_capacity, allow_waitlist,
             max_tickets_per_user, venue_type,
             refund_policy, terms_and_conditions, tags, performers, teams,
@@ -92,7 +92,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
             visibility, rights_declared_at, rights_declaration_version,
             scan_open_offset_min, scan_close_offset_min
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38)
         RETURNING id, slug, title, description, cover_image_url, start_time, end_time,
                   price, currency, max_capacity, tickets_sold, status, organizer_id, created_at, updated_at
     `
@@ -102,7 +102,7 @@ func CreateEvent(pool *pgxpool.Pool, dto *models.CreateEventDTO, organizerID str
 		id, slug,
 		dto.Title, dto.Description, dto.CoverImageURL, dto.BannerImageURL, dto.GalleryImages,
 		dto.StartTime, dto.EndTime, dto.ExpiresAt, dto.Timezone,
-		dto.VenueName, dto.Address, dto.City, dto.Latitude, dto.Longitude,
+		dto.VenueName, dto.Address, dto.City, dto.Latitude, dto.Longitude, dto.PlaceID,
 		dto.CategoryID, dto.Price, dto.Currency, dto.MaxCapacity, dto.AllowWaitlist,
 		dto.MaxTicketsPerUser, dto.VenueType,
 		dto.RefundPolicy, dto.TermsAndConditions, dto.Tags, dto.Performers, dto.Teams,
@@ -720,6 +720,11 @@ func UpdateEvents(pool *pgxpool.Pool, eventID string, dto *models.UpdateEventDTO
 		args = append(args, *dto.City)
 		argIndex++
 	}
+	if dto.PlaceID != nil {
+		updates = append(updates, fmt.Sprintf("place_id = $%d", argIndex))
+		args = append(args, *dto.PlaceID)
+		argIndex++
+	}
 	if dto.Latitude != nil {
 		updates = append(updates, fmt.Sprintf("latitude = $%d", argIndex))
 		args = append(args, *dto.Latitude)
@@ -994,7 +999,7 @@ func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
         SELECT
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.expires_at, e.timezone,
-            e.venue_name, e.address, e.city, e.latitude, e.longitude,
+            e.venue_name, e.address, e.city, e.latitude, e.longitude, e.place_id,
             e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
             e.allow_waitlist, e.max_tickets_per_user, e.venue_type,
             e.is_featured, e.featured_until, e.status,
@@ -1008,7 +1013,7 @@ func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
     `, id).Scan(
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
-		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
+		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude, &event.PlaceID,
 		&event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
 		&event.AllowWaitlist, &event.MaxTicketsPerUser, &event.VenueType,
 		&event.IsFeatured, &event.FeaturedUntil, &event.Status,
@@ -1045,7 +1050,7 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
         SELECT
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.expires_at, e.timezone,
-            e.venue_name, e.address, e.city, e.latitude, e.longitude,
+            e.venue_name, e.address, e.city, e.latitude, e.longitude, e.place_id,
             e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
             e.allow_waitlist, e.max_tickets_per_user, e.venue_type,
             e.is_featured, e.featured_until, e.status,
@@ -1075,7 +1080,7 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
     err := pool.QueryRow(ctx, query, args...).Scan(
         &event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
         &event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
-        &event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
+        &event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude, &event.PlaceID,
         &event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
         &event.AllowWaitlist, &event.MaxTicketsPerUser, &event.VenueType,
 		&event.IsFeatured, &event.FeaturedUntil, &event.Status,
@@ -1116,7 +1121,7 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.banner_video_url,
             e.start_time, e.end_time, e.expires_at, e.timezone,
-            e.venue_name, e.address, e.city, e.latitude, e.longitude,
+            e.venue_name, e.address, e.city, e.latitude, e.longitude, e.place_id,
             e.category_id, e.price, e.currency, e.max_capacity, e.tickets_sold,
             e.allow_waitlist, e.max_tickets_per_user, e.venue_type,
             e.is_featured, e.featured_until, e.status,
@@ -1132,7 +1137,7 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 		&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 		&event.BannerVideoURL,
 		&event.StartTime, &event.EndTime, &event.ExpiresAt, &event.Timezone,
-		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude,
+		&event.VenueName, &event.Address, &event.City, &event.Latitude, &event.Longitude, &event.PlaceID,
 		&event.CategoryID, &event.Price, &event.Currency, &event.MaxCapacity, &event.TicketsSold,
 		&event.AllowWaitlist, &event.MaxTicketsPerUser, &event.VenueType,
 		&event.IsFeatured, &event.FeaturedUntil, &event.Status,
