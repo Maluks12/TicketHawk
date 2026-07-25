@@ -123,23 +123,30 @@ function useScrollArrows() {
   return { scrollRef, canScrollLeft, canScrollRight, scrollLeft, scrollRight };
 }
 
-// ── CHANGE C: Arrow button component ─────────────────────────────────────────
+// ── CHANGE C: Arrow button component — Netflix-style edge hover reveal ───────
+// Hidden by default; fades in only when the mouse is over the row (the
+// parent carries `group`), and sits flush against the edge it belongs to.
 function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick: () => void; colors: any }) {
+  const isLeft = dir === 'left';
   return (
     <button
       onClick={onClick}
-      className="absolute top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition-opacity duration-200 hover:opacity-90"
-      style={{
-        [dir === 'left' ? 'left' : 'right']: '8px',
-        backgroundColor: 'rgba(0,0,0,0.75)',
-        border: `1px solid rgba(255,255,255,0.15)`,
-      }}
-      aria-label={dir === 'left' ? 'Scroll left' : 'Scroll right'}
+      className={[
+        'absolute top-0 bottom-4 z-20 w-14 md:w-16 flex items-center justify-center',
+        isLeft ? 'left-0 bg-gradient-to-r' : 'right-0 bg-gradient-to-l',
+        'from-black/70 via-black/35 to-transparent',
+        'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+        'transition-opacity duration-300 ease-out',
+        'cursor-pointer',
+      ].join(' ')}
+      aria-label={isLeft ? 'Scroll left' : 'Scroll right'}
     >
-      {dir === 'left'
-        ? <ChevronLeft size={20} color="#ffffff" />
-        : <ChevronRight size={20} color="#ffffff" />
-      }
+      <span className="flex items-center justify-center w-10 h-10 rounded-full transition-transform duration-200 hover:scale-110">
+        {isLeft
+          ? <ChevronLeft size={34} strokeWidth={2.5} color="#ffffff" />
+          : <ChevronRight size={34} strokeWidth={2.5} color="#ffffff" />
+        }
+      </span>
     </button>
   );
 }
@@ -332,7 +339,7 @@ const EditorialSection = memo(function EditorialSection({ title, events, filterK
         <h2 className="text-[17px] font-black tracking-[0.8px] uppercase" style={{ color: colors.text }}>{title}</h2>
         <button onClick={() => onViewAll(filterKey, title)} className="text-[10px] font-extrabold text-[#FF2D55] tracking-[1.5px]">VIEW ALL</button>
       </div>
-      <div className="relative">
+      <div className="relative group">
         {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
         {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
         <div ref={scrollRef} className="flex overflow-x-auto gap-7 px-5 pb-4 scrollbar-hide">
@@ -394,7 +401,7 @@ const SectionRow = memo(({
         </button>
       </div>
       {/* Scroll track + arrows */}
-      <div className="relative">
+      <div className="relative group">
         {canScrollLeft  && <ScrollArrow dir="left"  onClick={scrollLeft}  colors={colors} />}
         {canScrollRight && <ScrollArrow dir="right" onClick={scrollRight} colors={colors} />}
         <div ref={scrollRef} className="flex overflow-x-auto gap-5 md:gap-7 px-5 md:px-8 pb-4 scrollbar-hide">
