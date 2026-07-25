@@ -47,9 +47,21 @@ const brandLogoCID = "brand-logo"
 // queueing pointless retries. The numeric StatusCode is retained purely for
 // backwards compatibility with the worker's IsPermanent() check — SES itself
 // does not return HTTP-style status codes to callers.
-type EmailAPIError struct{ StatusCode int }
+type EmailAPIError struct {
+	StatusCode int
+	// Detail carries the provider's own explanation (e.g. "Email address is
+	// not verified. The following identities failed the check in region
+	// AF-SOUTH-1: noreply@example.com"). Without this the caller only sees a
+	// bare status code, which is nearly useless for diagnosing a rejection.
+	Detail string
+}
 
-func (e *EmailAPIError) Error() string { return fmt.Sprintf("email API error: %d", e.StatusCode) }
+func (e *EmailAPIError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("email API error: %d: %s", e.StatusCode, e.Detail)
+	}
+	return fmt.Sprintf("email API error: %d", e.StatusCode)
+}
 
 // IsPermanent reports whether the failure is a non-retryable problem — a 403
 // here means SES rejected the message for a permanent reason (unverified
@@ -299,8 +311,13 @@ func (s *EmailService) sendHTML(toName, toEmail, subject, htmlContent string) (i
 	}
 
 	if _, err := client.SendEmail(ctx, input); err != nil {
+		// Permanent rejections come back as a typed *EmailAPIError carrying
+		// SES's own explanation. Every caller wraps this with %w, so the
+		// booking worker's errors.As(&EmailAPIError) check still matches and
+		// IsPermanent() still suppresses the retry — while the operator now
+		// sees WHY it was rejected instead of a bare status code.
 		if isPermanentSESError(err) {
-			return 403, nil
+			return 0, &EmailAPIError{StatusCode: 403, Detail: err.Error()}
 		}
 		return 0, err
 	}
