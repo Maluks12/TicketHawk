@@ -4,3 +4,15 @@ android/
 ios/
 dist/
 .git/
+
+# Build/test artifacts and caches
+.turbo/
+.metro-cache/
+coverage/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS/editor cruft
+.DS_Store
+.vscode/

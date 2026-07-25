@@ -3,6 +3,10 @@ events-admin/
 events-db/
 events-organizer/
 EventsWeb/
+EventsStudio/
+loadtest/
+web-desktop/
+web-mobile/
 
 # Heavy / regenerated folders anywhere in the tree
 **/node_modules/
@@ -12,6 +16,9 @@ EventsWeb/
 **/ios/
 **/dist/
 **/build/
+**/.turbo/
+**/.metro-cache/
+**/coverage/
 
 # Misc
 **/.DS_Store
