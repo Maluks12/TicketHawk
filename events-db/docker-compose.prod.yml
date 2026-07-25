@@ -67,7 +67,7 @@ services:
         NEXT_PUBLIC_ORGANISER_URL: "https://organiser.ticket-hawk.com"
         # Google Maps browser key for the venue autocomplete. Public by design
         # (ships in the client bundle); protected by referrer + API restrictions.
-        NEXT_PUBLIC_GOOGLE_MAPS_KEY: "AIzaSyDsm3OYKkLuHXTypmXByqa81HSFIbjiIaI"
+        NEXT_PUBLIC_GOOGLE_MAPS_KEY: "AIzaSyCz_LX4j7NGVTeRqKNb9zgeSyWS2pQXmJc"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3000"   # host 3002 → container 3000
