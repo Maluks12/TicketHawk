@@ -30,6 +30,13 @@ ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ARG NEXT_PUBLIC_ORGANISER_URL
 ENV NEXT_PUBLIC_ORGANISER_URL=${NEXT_PUBLIC_ORGANISER_URL}
 
+# Google Maps browser key for the venue autocomplete on the create-event form.
+# Inlined at build time like the vars above. This key is PUBLIC by design (it
+# ships in the client bundle) - it's protected by HTTP-referrer + API
+# restrictions in the Google Cloud console, not by secrecy.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_KEY}
+
 RUN npm run build
 
 # ── runtime ───────────────────────────────────────────────────────────────────

@@ -79,6 +79,30 @@ const IconHeart = ({ filled }: { filled?: boolean }) => (
 );
 
 /* ─── Component ─────────────────────────────────────────────────────────── */
+/**
+ * Build a map URL that opens the EXACT venue.
+ *
+ * Order matters:
+ *  1. place_id  — Google's own id for the place the organiser picked. Exact.
+ *  2. lat/lng   — exact coordinates, captured with the place.
+ *  3. text      — last resort. This is what used to run for EVERY event, and
+ *                 it's why buyers landed somewhere else: a fuzzy search for
+ *                 "<venue>, <city>" lets Google guess, and a mismatched pair
+ *                 like "FNB Stadium, Sandton" can resolve anywhere. The text
+ *                 fallback now includes the street address, which it wrongly
+ *                 omitted before.
+ */
+function buildMapsUrl(ev: { venue_name?: string; address?: string; city?: string; latitude?: number | null; longitude?: number | null; place_id?: string | null; }): string {
+  const label = [ev.venue_name, ev.address, ev.city].filter(Boolean).join(', ');
+  if (ev.place_id) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label || 'venue')}&query_place_id=${encodeURIComponent(ev.place_id)}`;
+  }
+  if (typeof ev.latitude === 'number' && typeof ev.longitude === 'number') {
+    return `https://www.google.com/maps/search/?api=1&query=${ev.latitude},${ev.longitude}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`;
+}
+
 export default function EventDetailPage() {
   const router = useRouter();
   const { id: eventId } = useParams<{ id: string }>();
@@ -179,12 +203,12 @@ export default function EventDetailPage() {
   };
 
   const venueStr  = `${event.venue_name ?? ''}${event.city ? `, ${event.city}` : ''}`;
-  const mapsBase  = 'https://www.google.com/maps/search/?api=1&query=';
+  const mapsUrl   = buildMapsUrl(event);
   const infoItems = [
     { icon: <IconCalendar />, label: 'Date',    value: fmtDate(event.start_time), mapsUrl: null },
     { icon: <IconClock />,    label: 'Time',    value: fmtTime(event.start_time), mapsUrl: null },
-    { icon: <IconPin />,      label: 'Venue',   value: venueStr,                  mapsUrl: mapsBase + encodeURIComponent(venueStr) },
-    ...(event.address ? [{ icon: <IconMap />, label: 'Address', value: event.address, mapsUrl: mapsBase + encodeURIComponent(event.address) }] : []),
+    { icon: <IconPin />,      label: 'Venue',   value: venueStr,                  mapsUrl },
+    ...(event.address ? [{ icon: <IconMap />, label: 'Address', value: event.address, mapsUrl }] : []),
   ];
 
   return (

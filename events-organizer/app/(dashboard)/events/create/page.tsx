@@ -5,6 +5,7 @@ import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import { validateRequired, validateMinLength, firstError } from '../../../../lib/validation';
 import { getKycStatus } from '../../../../lib/kyc';
+import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
 
 // ── Draft ─────────────────────────────────────────────────────────────────────
 export const DRAFT_KEY = 'org_event_draft';
@@ -21,6 +22,11 @@ interface EventDraft {
   isFree: boolean; price: string; currency: string;
   maxCapacity: string; maxTicketsPerUser: string; allowWaitlist: boolean;
   venueName: string; address: string; city: string;
+  // Google Places selection saved with the draft, so restoring a draft keeps
+  // the venue pinned rather than silently falling back to a text search.
+  // Optional: drafts saved before this feature existed won't have them.
+  placeId?: string; placeLabel?: string;
+  latitude?: number | null; longitude?: number | null;
   venueType: 'auto' | 'stadium' | 'auditorium' | 'none';
   tags: string[]; performers: string[]; teams: string[];
   ticketTypes: TicketTypeRow[];
@@ -220,6 +226,12 @@ export default function CreateEventPage() {
   const [venueName,           setVenueName]           = useState('');
   const [address,             setAddress]             = useState('');
   const [city,                setCity]                = useState('');
+  // Captured by the Places autocomplete alongside the three text fields, so the
+  // clients can build an EXACT map link instead of a fuzzy text search.
+  const [placeId,             setPlaceId]             = useState('');
+  const [latitude,            setLatitude]            = useState<number | null>(null);
+  const [longitude,           setLongitude]           = useState<number | null>(null);
+  const [placeLabel,          setPlaceLabel]          = useState('');
   const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('auto');
   const [tags,                setTags]                = useState<string[]>([]);
   const [performers,          setPerformers]          = useState<string[]>([]);
@@ -260,7 +272,7 @@ export default function CreateEventPage() {
         savedAt: new Date().toISOString(),
         title, description, categoryId, timezone, startTime, endTime, expiresAt,
         isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
-        venueName, address, city, venueType, tags, performers, teams, ticketTypes,
+        venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
         refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
       };
       try {
@@ -272,7 +284,7 @@ export default function CreateEventPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
       isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
-      venueName, address, city, venueType, tags, performers, teams, ticketTypes,
+      venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
       refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl, submitting]);
 
   // ── Restore draft ─────────────────────────────────────────────────────────
@@ -293,6 +305,10 @@ export default function CreateEventPage() {
     setVenueName(d.venueName ?? '');
     setAddress(d.address ?? '');
     setCity(d.city ?? '');
+    setPlaceId(d.placeId ?? '');
+    setLatitude(typeof d.latitude === 'number' ? d.latitude : null);
+    setLongitude(typeof d.longitude === 'number' ? d.longitude : null);
+    setPlaceLabel(d.placeLabel ?? '');
     setVenueType(d.venueType ?? 'auto');
     setTags(d.tags ?? []);
     setPerformers(d.performers ?? []);
@@ -385,6 +401,12 @@ export default function CreateEventPage() {
         venue_name:   venueName.trim(),
         address:      address.trim(),
         city:         city.trim(),
+        // Only sent when the organiser actually picked a suggestion — a
+        // hand-typed address stays text-only rather than shipping a stale
+        // place_id from a previous selection.
+        ...(placeId   ? { place_id: placeId } : {}),
+        ...(latitude  !== null ? { latitude }  : {}),
+        ...(longitude !== null ? { longitude } : {}),
         timezone,
         start_time:   new Date(startTime).toISOString(),
         end_time:     new Date(endTime).toISOString(),
@@ -578,6 +600,39 @@ export default function CreateEventPage() {
 
               {/* Location */}
               <FormCard title="Location" icon="📍">
+                {/* Search first — picking a suggestion fills the three fields
+                    below AND captures place_id + lat/lng, which is what lets the
+                    app and website open the exact venue on a map instead of a
+                    fuzzy text search. Manual entry still works if the venue
+                    isn't listed. */}
+                <PlacesAutocomplete
+                  style={inp}
+                  initialValue={placeLabel}
+                  onSelect={(p: PlaceResult) => {
+                    if (p.venueName) setVenueName(p.venueName);
+                    if (p.address)   setAddress(p.address);
+                    if (p.city)      setCity(p.city);
+                    setPlaceId(p.placeId);
+                    setLatitude(p.latitude);
+                    setLongitude(p.longitude);
+                    setPlaceLabel(p.formatted);
+                  }}
+                />
+                {placeId && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, margin: '-4px 0 14px',
+                    fontSize: 12.5, color: 'var(--ok, #1e7e34)',
+                  }}>
+                    <span>✓</span>
+                    <span style={{ flex: 1 }}>Pinned to <strong>{placeLabel || 'the selected place'}</strong></span>
+                    <button type="button" onClick={() => {
+                      setPlaceId(''); setLatitude(null); setLongitude(null); setPlaceLabel('');
+                    }} style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--text-3)', fontSize: 12, textDecoration: 'underline',
+                    }}>Clear</button>
+                  </div>
+                )}
                 <div className="field">
                   <label>Venue name <Required /></label>
                   <input value={venueName} onChange={e => setVenueName(e.target.value)}
