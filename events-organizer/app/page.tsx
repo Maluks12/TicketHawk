@@ -2,8 +2,11 @@
 // PUBLIC + server-rendered (no 'use client') so Google can index it — a bare
 // login page gives search engines nothing to rank, so the organiser product
 // never surfaced in search. This page carries real headings, metadata and
-// JSON-LD; every CTA leads to /auth/login (which itself sends already-signed-in
-// organisers straight to /dashboard).
+// JSON-LD; every CTA leads to /login (which itself sends already-signed-in
+// organisers straight to /dashboard). NOTE: the login page lives at
+// app/(auth)/login/page.tsx, but "(auth)" is a Next.js ROUTE GROUP — parenthesised
+// folders organise files without adding a URL segment, so the real path is
+// /login, NOT /auth/login. Linking to the latter 404s.
 //
 // Visual language is intentionally NOT the light Meta-style dashboard theme —
 // it's a dark marketing splash in TicketHawk's own palette (brand pink #FF2D55 +
@@ -271,8 +274,8 @@ export default function OrganiserLanding() {
             <a href="#audiences">Events</a>
           </div>
           <div className="thl-navcta">
-            <Link href="/auth/login" className="thl-btn thl-btn-ghost thl-hidephone">Log in</Link>
-            <Link href="/auth/login" className="thl-btn thl-btn-pink">Start selling</Link>
+            <Link href="/login" className="thl-btn thl-btn-ghost thl-hidephone">Log in</Link>
+            <Link href="/login?mode=register" className="thl-btn thl-btn-pink">Start selling</Link>
           </div>
         </div>
       </nav>
@@ -288,8 +291,8 @@ export default function OrganiserLanding() {
                 the door, and get paid — all from one dashboard, on the web or your phone.
               </p>
               <div className="thl-hero-cta">
-                <Link href="/auth/login" className="thl-btn thl-btn-pink thl-btn-lg">Start selling</Link>
-                <Link href="/auth/login" className="thl-btn thl-btn-ghost thl-btn-lg">Log in</Link>
+                <Link href="/login?mode=register" className="thl-btn thl-btn-pink thl-btn-lg">Start selling</Link>
+                <Link href="/login" className="thl-btn thl-btn-ghost thl-btn-lg">Log in</Link>
               </div>
               <p className="thl-hero-note">No setup fees. No monthly cost. You only pay a small fee per ticket sold.</p>
             </div>
@@ -385,8 +388,8 @@ export default function OrganiserLanding() {
               <h2>Your next event starts here</h2>
               <p>Create your organiser account and list your first event in minutes. It&rsquo;s free to get started.</p>
               <div className="thl-cta-row">
-                <Link href="/auth/login" className="thl-btn thl-btn-pink thl-btn-lg">Start selling</Link>
-                <Link href="/auth/login" className="thl-btn thl-btn-ghost thl-btn-lg">Log in</Link>
+                <Link href="/login?mode=register" className="thl-btn thl-btn-pink thl-btn-lg">Start selling</Link>
+                <Link href="/login" className="thl-btn thl-btn-ghost thl-btn-lg">Log in</Link>
               </div>
             </div>
           </div>
@@ -402,8 +405,8 @@ export default function OrganiserLanding() {
           <div className="thl-foot-links">
             <a href="#features">Features</a>
             <a href="#how">How it works</a>
-            <Link href="/auth/login">Log in</Link>
-            <Link href="/auth/login">Start selling</Link>
+            <Link href="/login">Log in</Link>
+            <Link href="/login?mode=register">Start selling</Link>
           </div>
           <div className="thl-foot-copy">© {new Date().getFullYear()} TicketHawk</div>
         </div>

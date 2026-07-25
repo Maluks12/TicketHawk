@@ -38,6 +38,18 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => { hydrate(); }, [hydrate]);
+
+  // The landing page's "Start selling" CTAs link to /login?mode=register so the
+  // signup tab is already open on arrival — sending a would-be signup to a login
+  // form is a pointless extra click. Read from window.location rather than
+  // useSearchParams(): the latter forces this client component to need a
+  // Suspense boundary at build time, and this runs client-side only anyway.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('mode') === 'register') {
+      setMode('register');
+    }
+  }, []);
   useEffect(() => {
     if (isLoading || !user) return;
     if (user.role === 'organizer' || user.role === 'admin') {
