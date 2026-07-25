@@ -48,6 +48,8 @@ import { useAppTheme } from '@/themes/colors';
 
 type Phase =
   | 'opening'     // spinner — resolving URL / starting
+  | 'redirecting' // full-page redirect to the gateway (mobile) — page about to unload
+  | 'returned'    // came back from the gateway (back button) without completing ↩️
   | 'in_popup'    // popup is open, waiting for user
   | 'confirming'  // popup closed, polling for status
   | 'done'        // payment completed ✅
@@ -99,6 +101,11 @@ export default function PaymentPage({
   const startedRef   = useRef(false);
   const popupRef     = useRef<Window | null>(null);
   const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True once we've sent a mobile buyer to the gateway via full-page redirect.
+  // Survives bfcache freeze, so the pageshow handler below knows the buyer is
+  // returning (e.g. pressed Back) and must re-check status rather than sit on
+  // the "Redirecting…" screen forever.
+  const redirectedRef = useRef(false);
 
   // ── Navigation helpers ───────────────────────────────────────────────────
   const goToTickets = useCallback(() => {
@@ -201,11 +208,66 @@ export default function PaymentPage({
   // ── Core checkout runner ─────────────────────────────────────────────────
   const pollAbortRef = useRef<AbortController | null>(null);
 
+  // Redirect bookkeeping key — one per booking, so returning to this page for a
+  // different booking never collides.
+  const redirectKey = `th_pay_redirect_${bookingId}`;
+
+  // Called when a mobile buyer comes BACK from the gateway (Back button, or a
+  // reload after the redirect). Verifies what actually happened instead of
+  // leaving the page stuck on "Redirecting…": completed → success, pending EFT
+  // → pending, anything else (including "they just pressed back") → a clear
+  // "not completed, try again" state.
+  const verifyAfterReturn = useCallback(async () => {
+    setPhase('confirming');
+    setMessage('Checking your payment…');
+    try {
+      const s = await fetchPaymentStatus(bookingId, guest);
+      if (s.payment_status === 'completed') { finishFromStatus(s, false); return; }
+      if (s.payment_status === 'pending') {
+        setPhase('pending');
+        setMessage('Your payment is processing. We\u2019ll confirm it on your Tickets tab shortly.');
+        return;
+      }
+    } catch {
+      // fall through to the not-completed state
+    }
+    setPhase('returned');
+    setMessage('You came back without completing payment. Nothing was charged — you can try again.');
+  }, [bookingId, guest, finishFromStatus]);
+
   const run = useCallback(
     async (checkoutUrl: string, isRetry = false) => {
       if (!checkoutUrl) {
         setPhase('failed');
         setMessage('Missing checkout link. Please go back and try again.');
+        return;
+      }
+
+      // ── Redirect-first browsers (all mobile + in-app webviews) ──────────────
+      // Handled BEFORE the popup phase/watcher so the redirect path never shows
+      // popup copy ("A secure payment window has opened") and never starts a
+      // watcher that would freeze into bfcache. Two arrivals reach here:
+      //   1. First time  → mark, then full-page redirect to the gateway.
+      //   2. Coming back via a full reload (browsers that don't bfcache) →
+      //      don't bounce them to the gateway again; verify what happened.
+      // (The bfcache Back-button case is handled by the pageshow listener,
+      // which doesn't re-run this code.)
+      if (shouldRedirectInsteadOfPopup()) {
+        pollAbortRef.current?.abort();
+        discardPendingPopup();
+
+        if (typeof window !== 'undefined' && sessionStorage.getItem(redirectKey) === '1') {
+          sessionStorage.removeItem(redirectKey);
+          redirectedRef.current = false;
+          await verifyAfterReturn();
+          return;
+        }
+
+        try { sessionStorage.setItem(redirectKey, '1'); } catch {}
+        redirectedRef.current = true;
+        setPhase('redirecting');
+        setMessage('Redirecting to secure checkout…');
+        window.location.href = checkoutUrl;
         return;
       }
 
@@ -276,20 +338,6 @@ export default function PaymentPage({
         }
       })();
 
-      // Redirect-first browsers (Chrome/Firefox/Edge on iOS, in-app webviews):
-      // the pre-opened popup is unreliable there, so don't even try it — drive
-      // checkout as a full-page redirect in this same tab. The gateway returns
-      // to /payments/return, which sends the buyer back here; the server-side
-      // status watcher above and the on-return status check confirm the result.
-      // Doing this deliberately (rather than after a silently-failed popup) is
-      // the fix for the redirect never appearing in Chrome on iOS.
-      if (shouldRedirectInsteadOfPopup()) {
-        discardPendingPopup(); // close the blank placeholder if one was pre-opened
-        setMessage('Redirecting to secure checkout…');
-        window.location.href = checkoutUrl;
-        return;
-      }
-
       const outcome = await openGatewayCheckout(checkoutUrl, (popup) => {
         popupRef.current = popup;
       });
@@ -325,8 +373,25 @@ export default function PaymentPage({
         }
       }
     },
-    [bookingId, finishFromStatus, guest],
+    [bookingId, finishFromStatus, guest, verifyAfterReturn, redirectKey],
   );
+
+  // Back-button return from the gateway on browsers that bfcache this page:
+  // the redirect froze it on "Redirecting…", and run() does NOT re-execute on a
+  // bfcache restore — only pageshow fires. Detect that restore and verify the
+  // payment instead of leaving the buyer stuck forever (the reported bug: press
+  // Back without paying → frozen screen). persisted === true means the page was
+  // served from bfcache; redirectedRef confirms we're the ones who sent them.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted || !redirectedRef.current) return;
+      redirectedRef.current = false;
+      try { sessionStorage.removeItem(redirectKey); } catch {}
+      verifyAfterReturn();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [verifyAfterReturn, redirectKey]);
 
   // Mount once
   useEffect(() => {
@@ -337,7 +402,12 @@ export default function PaymentPage({
 
   // ── Retry ────────────────────────────────────────────────────────────────
   const retry = useCallback(async () => {
-    preopenGatewayPopup();
+    // Don't pre-open a popup on redirect-first browsers (all mobile) — retry
+    // there re-runs the full-page redirect, and a pre-opened blank tab would
+    // just orphan.
+    if (!shouldRedirectInsteadOfPopup()) {
+      preopenGatewayPopup();
+    }
     if (doneTimerRef.current) { clearTimeout(doneTimerRef.current); doneTimerRef.current = null; }
     setPhase('opening');
     setMessage('Restarting secure checkout…');
@@ -364,9 +434,9 @@ export default function PaymentPage({
 
   const methodLabel = METHOD_LABEL[method] ?? 'Card';
   const methodIcon  = METHOD_ICON[method]  ?? '💳';
-  const spinning    = phase === 'opening' || phase === 'confirming';
+  const spinning    = phase === 'opening' || phase === 'confirming' || phase === 'redirecting';
   const inPopup     = phase === 'in_popup';
-  const canRetry    = phase === 'failed' || phase === 'cancelled';
+  const canRetry    = phase === 'failed' || phase === 'cancelled' || phase === 'returned';
 
   const bg     = isDark ? '#0a0a0a' : '#f5f5f7';
   const cardBg = isDark ? '#111'    : '#fff';
@@ -420,6 +490,7 @@ export default function PaymentPage({
           {phase === 'done'      && <span style={{ fontSize: 56 }}>✅</span>}
           {phase === 'failed'    && <span style={{ fontSize: 56 }}>⚠️</span>}
           {phase === 'cancelled' && <span style={{ fontSize: 56 }}>↩️</span>}
+          {phase === 'returned'  && <span style={{ fontSize: 56 }}>↩️</span>}
           {phase === 'pending'   && <span style={{ fontSize: 56 }}>⏳</span>}
 
           {/* ── Message ── */}
