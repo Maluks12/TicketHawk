@@ -59,37 +59,44 @@ export type CheckoutOutcome =
   | { type: 'blocked' };   // browser blocked the popup — caller should redirect instead
 
 /**
- * shouldRedirectInsteadOfPopup — true for browsers where the pre-opened-popup
- * trick is unreliable, so the caller should skip the popup and drive checkout
- * as a full-page (same-tab) redirect instead.
+ * shouldRedirectInsteadOfPopup — true on mobile/tablet and in-app webviews, so
+ * the caller drives checkout as a full-page (same-tab) redirect instead of a
+ * popup. Desktop keeps the popup.
  *
- * Why: the popup approach depends on the window handle opened synchronously on
- * tap surviving a couple of `await`s and a route change, then being navigated
- * to the real gateway URL. Safari's "sticky activation" survives that gap;
- * several WebKit-wrapper browsers on iOS do NOT — window.open() returns null or
- * a dead handle, the popup never appears, and the buyer lands on the failure
- * screen. Chrome (CriOS), Firefox (FxiOS) and Edge (EdgiOS) on iOS are all in
- * this bucket, as are most in-app webviews (Instagram, Facebook, etc.). For
- * these we redirect in the same tab, which always works: the buyer pays, the
- * gateway returns to /payments/return, and that page bounces them back here.
+ * Why redirect on ALL mobile, not just Chrome-iOS:
+ * The popup approach pre-opens a blank window synchronously on the "Pay" tap,
+ * holds the handle across a booking POST and a client-side route change, then
+ * navigates that same handle to the real gateway URL on the payment page. That
+ * split is what breaks: on Chrome-iOS (and other WebKit-wrapper and in-app
+ * browsers) the reused handle is dead by the time we navigate it, so nothing
+ * appears — yet a full page RELOAD "fixes" it, because the reload wipes the
+ * stale handle and the code then does a fresh window.open() instead. That
+ * reload-only behaviour is the tell: the pre-open/reuse is the fragile part.
  *
- * Desktop and iOS Safari keep the popup (nicer UX — the buyer stays on our
- * page), so this returns false for them.
+ * On a phone a "popup" is just another tab — there's no windowing benefit like
+ * on desktop — so redirecting the current tab is both more reliable AND cleaner
+ * UX. The gateway returns to /payments/return, which sends the buyer back. So
+ * every mobile browser (Safari included) takes the redirect; only desktop, where
+ * the popup genuinely works and a separate window is nicer, keeps it.
  */
 export function shouldRedirectInsteadOfPopup(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
 
-  // iOS WebKit-wrapper browsers where the pre-opened popup is unreliable.
-  // (Plain Safari has none of these tokens and keeps the popup.)
-  if (/\b(CriOS|FxiOS|EdgiOS|OPiOS|mercury)\b/i.test(ua)) return true;
+  // Chromium user-agent client hints expose this directly when available.
+  const uaData = (navigator as unknown as { userAgentData?: { mobile?: boolean } }).userAgentData;
+  if (uaData && uaData.mobile === true) return true;
 
-  // In-app webviews: Instagram/Facebook/Line/etc. embed a webview that either
-  // blocks popups outright or opens them in a detached view the opener can't
-  // reach. Same-tab redirect is the only thing that works there.
-  if (/\b(Instagram|FBAN|FBAV|FB_IAB|Line|Snapchat|Pinterest)\b/i.test(ua)) return true;
+  // Phones and tablets across every browser/engine (covers CriOS/FxiOS/EdgiOS
+  // implicitly via iPhone/iPad, plus Android, plus generic "Mobi").
+  if (/Android|iPhone|iPad|iPod|Mobi|CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua)) return true;
 
-  // Android WebView (wv token) — embedded browser, popups unreliable.
+  // iPadOS 13+ reports a desktop "Macintosh" UA but is a touch device — the
+  // popup is just as unreliable there, so treat touch-capable "Macs" as mobile.
+  if (/Macintosh/.test(ua) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) return true;
+
+  // In-app webviews (Instagram/Facebook/Line/etc.) and raw Android WebView.
+  if (/Instagram|FBAN|FBAV|FB_IAB|Line|Snapchat|Pinterest/i.test(ua)) return true;
   if (/;\s*wv\)/i.test(ua)) return true;
 
   return false;
@@ -217,10 +224,29 @@ export function openGatewayCheckout(
       // rAF never fires in background tabs. The popup then sat on
       // "Loading secure checkout…" forever. A plain assignment works in
       // every browser, foreground or background.
+      //
+      // Robustness: on some browsers (notably Chrome on iOS) the reused handle
+      // is DEAD by now — the pre-opened blank window was discarded or severed
+      // across the route change, so navigating it silently does nothing and the
+      // page hangs on "Complete your payment…". (Tellingly, a full reload made
+      // it work, because that path skips reuse and does a fresh window.open.)
+      // Detect the dead handle and resolve 'blocked' so the caller redirects in
+      // the same tab instead of waiting on a popup that will never appear.
+      let navigated = false;
       try {
-        gwPopup.location.href = authorizationUrl;
-        gwPopup.focus();
-      } catch {}
+        if (!gwPopup.closed) {
+          gwPopup.location.href = authorizationUrl;
+          gwPopup.focus();
+          navigated = true;
+        }
+      } catch {
+        navigated = false;
+      }
+      if (!navigated || gwPopup.closed) {
+        try { gwPopup.close(); } catch {}
+        resolve({ type: 'blocked' });
+        return;
+      }
       openedAt = Date.now();
     }
 
