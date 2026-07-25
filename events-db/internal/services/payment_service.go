@@ -700,6 +700,16 @@ func (s *PaymentService) syncAllCartBookings(ctx context.Context, cartID, primar
 		}
 		additionalIDs = append(additionalIDs, id)
 	}
+	// Same seat-release rule as the single-booking path: a cart whose payment
+	// failed is cancelled, so each sibling booking's seats must go back on sale.
+	if bookingStatus == models.BookingCancelled {
+		for _, id := range additionalIDs {
+			if err := repository.ReleaseRefundedSeats(s.pool, ctx, id); err != nil {
+				log.Error().Err(err).Str("booking_id", id).
+					Msg("payment: failed to release seats for cancelled cart booking")
+			}
+		}
+	}
 	return additionalIDs, nil
 }
 
@@ -722,14 +732,30 @@ func (s *PaymentService) syncBookingStatus(ctx context.Context, bookingID string
 		return nil
 	}
 
-	_, err := s.pool.Exec(ctx, `
+	if _, err := s.pool.Exec(ctx, `
 		UPDATE bookings
 		SET booking_status = $1::booking_status,
 		    confirmed_at   = CASE WHEN $1::text = 'confirmed' THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
 		    updated_at     = CURRENT_TIMESTAMP
 		WHERE id = $2
-	`, string(bookingStatus), bookingID)
-	return err
+	`, string(bookingStatus), bookingID); err != nil {
+		return err
+	}
+
+	// A failed payment cancels the booking — put its seats BACK ON SALE.
+	// createBookingTx incremented events.tickets_sold (and the tier counter)
+	// the moment the booking was created, and nothing here used to undo it, so
+	// every abandoned/declined payment permanently consumed a seat and pushed
+	// the event towards a false sold-out. ReleaseRefundedSeats is idempotent
+	// (gated on bookings.seats_released_at), so a later refund or the expiry
+	// worker cannot double-release the same booking.
+	if bookingStatus == models.BookingCancelled {
+		if err := repository.ReleaseRefundedSeats(s.pool, ctx, bookingID); err != nil {
+			log.Error().Err(err).Str("booking_id", bookingID).
+				Msg("payment: failed to release seats for cancelled booking")
+		}
+	}
+	return nil
 }
 
 // ── Reads ─────────────────────────────────────────────────────────────────────
