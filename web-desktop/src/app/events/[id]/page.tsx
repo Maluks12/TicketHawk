@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { api, type Event } from '@/lib/api';
+import { api, toggleFollow, getFollowStatus, type Event } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
+import { useAuthStore } from '@/store/authStore';
 
 function fmtPrice(p: number) {
   if (p === 0) return 'Free';
@@ -71,6 +72,11 @@ const IconExternalLink = () => (
     <path d="M7 1h3v3M10 1L5.5 5.5"/>
   </svg>
 );
+const IconHeart = ({ filled }: { filled?: boolean }) => (
+  <svg width="15" height="15" viewBox="0 0 15 15" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7.5 13S1.5 9.5 1.5 5.25C1.5 3.18 3.18 1.5 5.25 1.5c1.02 0 1.94.4 2.25 1.09.31-.69 1.23-1.09 2.25-1.09 2.07 0 3.75 1.68 3.75 3.75C13.5 9.5 7.5 13 7.5 13z"/>
+  </svg>
+);
 
 /* ─── Component ─────────────────────────────────────────────────────────── */
 export default function EventDetailPage() {
@@ -78,10 +84,18 @@ export default function EventDetailPage() {
   const { id: eventId } = useParams<{ id: string }>();
   const { colors, isDark } = useAppTheme();
 
+  const { user } = useAuthStore();
+
   const [event,    setEvent]   = useState<Event | null>(null);
   const [loading,  setLoading] = useState(true);
   const [imgErr,   setImgErr]  = useState(false);
   const [expanded, setExpanded] = useState(false);
+
+  // ── Follow state ──────────────────────────────────────────────────────────
+  const [isFollowing,   setIsFollowing]   = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  const [showSignIn,    setShowSignIn]    = useState(false);
+  const [followErr,     setFollowErr]     = useState('');
 
   useEffect(() => {
     if (!eventId) return;
@@ -91,6 +105,18 @@ export default function EventDetailPage() {
       .finally(() => setLoading(false));
     api.post(`/v1/events/${eventId}/view`).catch(() => {});
   }, [eventId]);
+
+  // ── Fetch current follow status once the event and a logged-in user are
+  // both available, so the button always reflects reality (e.g. the person
+  // followed this event on another device/app). Mirrors EventsApp exactly.
+  useEffect(() => {
+    if (!event?.id || !user) return;
+    let cancelled = false;
+    getFollowStatus(event.id)
+      .then((res) => { if (!cancelled) setIsFollowing(res.following); })
+      .catch(() => { /* default to not-following — no disruption to the UI */ });
+    return () => { cancelled = true; };
+  }, [event?.id, user]);
 
   /* Design tokens */
   const bg      = isDark ? '#0a0a0a' : '#f4f4f7';
@@ -128,6 +154,28 @@ export default function EventDetailPage() {
   const handleGetTickets = () => {
     sessionStorage.setItem(`event_detail_visited_${eventId}`, '1');
     router.push(`/events/${eventId}/purchase`);
+  };
+
+  // ── Toggle follow ─────────────────────────────────────────────────────────
+  // Same flow as EventsApp: optimistic flip so the button snaps immediately,
+  // reconcile with the server response, roll back + surface an error on
+  // failure. Signed-out users are prompted to log in instead of firing the
+  // request.
+  const handleFollow = async () => {
+    if (!user) { setShowSignIn(true); return; }
+    if (!event?.id || followLoading) return;
+
+    setIsFollowing((prev) => !prev);
+    setFollowLoading(true);
+    try {
+      const res = await toggleFollow(event.id);
+      setIsFollowing(res.following);
+    } catch {
+      setIsFollowing((prev) => !prev);
+      setFollowErr('Could not update follow status. Please try again.');
+    } finally {
+      setFollowLoading(false);
+    }
   };
 
   const venueStr  = `${event.venue_name ?? ''}${event.city ? `, ${event.city}` : ''}`;
@@ -263,6 +311,38 @@ export default function EventDetailPage() {
           width: 100%; background: ${subtle}; color: ${colors.subText};
           border: 1px solid ${border}; border-radius: 12px; padding: 14px;
           font-size: 14px; font-weight: 700; cursor: not-allowed;
+        }
+
+        /* ── Follow (desktop: full-width button under Get Tickets,
+             matching EventsApp's outline FOLLOW button 1:1 in behaviour) ── */
+        .follow-btn {
+          width: 100%; margin-top: 8px;
+          display: flex; align-items: center; justify-content: center; gap: 7px;
+          background: ${subtle}; color: ${colors.text};
+          border: 1px solid ${border}; border-radius: 12px; padding: 12px;
+          font-size: 13px; font-weight: 700; letter-spacing: 0.2px; cursor: pointer;
+          transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .follow-btn:hover  { background: ${border}; }
+        .follow-btn:disabled { cursor: default; opacity: 0.75; }
+        .follow-btn.is-following {
+          background: ${isDark ? 'rgba(181,123,238,0.12)' : 'rgba(181,123,238,0.08)'};
+          border-color: #b57bee; color: #b57bee;
+        }
+
+        /* ── Follow (mobile: icon-only circular button — adapted for the
+             fixed bottom bar, which has no room for the full text label
+             once price + Get Tickets are in it) ── */
+        .follow-btn-mobile {
+          width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+          display: flex; align-items: center; justify-content: center;
+          background: ${subtle}; border: 1px solid ${border}; color: ${colors.text};
+          cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .follow-btn-mobile:disabled { cursor: default; opacity: 0.75; }
+        .follow-btn-mobile.is-following {
+          background: ${isDark ? 'rgba(181,123,238,0.14)' : 'rgba(181,123,238,0.08)'};
+          border-color: #b57bee; color: #b57bee;
         }
 
         /* ── Trust items ── */
@@ -471,6 +551,14 @@ export default function EventDetailPage() {
                 ? <button disabled className="sold-out-btn">Sold Out</button>
                 : <button className="get-tickets-btn" onClick={handleGetTickets}>Get Tickets</button>
               }
+              <button
+                className={`follow-btn${isFollowing ? ' is-following' : ''}`}
+                onClick={handleFollow}
+                disabled={followLoading}
+              >
+                <IconHeart filled={isFollowing} />
+                {followLoading ? 'Updating…' : isFollowing ? 'Following' : 'Follow'}
+              </button>
             </div>
 
             {/* Payment methods */}
@@ -521,11 +609,82 @@ export default function EventDetailPage() {
           <p style={{ margin: 0, fontSize: 10, color: colors.subText, textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600 }}>From</p>
           <p style={{ margin: 0, fontSize: 19, fontWeight: 800, color: colors.text, letterSpacing: -0.5 }}>{fmtPrice(event.price)}</p>
         </div>
+        {/* Icon-only on mobile — same follow logic as the desktop button,
+            just adapted to fit the fixed bar alongside price + Get Tickets. */}
+        <button
+          className={`follow-btn-mobile${isFollowing ? ' is-following' : ''}`}
+          onClick={handleFollow}
+          disabled={followLoading}
+          aria-label={isFollowing ? 'Following this event' : 'Follow this event'}
+        >
+          <IconHeart filled={isFollowing} />
+        </button>
         {isSoldOut
           ? <button disabled className="sold-out-btn" style={{ flex: 1 }}>Sold Out</button>
           : <button className="get-tickets-btn" style={{ flex: 1 }} onClick={handleGetTickets}>Get Tickets</button>
         }
       </div>
+
+      {/* ── Sign-in prompt (unauthenticated Follow tap) ───────────────────────
+           Same trigger as EventsApp's Alert.alert('Sign in required', …) —
+           adapted to a dismissible web toast with a direct Log in action
+           instead of a native alert dialog. */}
+      {showSignIn && (
+        <div
+          style={{
+            position: 'fixed', top: 16, left: 16, right: 16, zIndex: 200,
+            maxWidth: 520, margin: '0 auto',
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: cardBg, border: `1px solid ${border}`,
+            borderRadius: 12, padding: '12px 14px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          }}
+          role="alert"
+        >
+          <div style={{ color: accent, flexShrink: 0 }}><IconHeart /></div>
+          <p style={{ flex: 1, margin: 0, fontSize: 13, fontWeight: 600, color: colors.text, lineHeight: 1.4 }}>
+            Log in or sign up to follow events and get reminders.
+          </p>
+          <button
+            onClick={() => router.push('/auth/login')}
+            style={{ background: accent, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}
+          >
+            Log in
+          </button>
+          <button
+            onClick={() => setShowSignIn(false)}
+            aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', flexShrink: 0, color: colors.subText, fontSize: 14 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* ── Follow error toast — same visual pattern as the purchase page's
+           error toast, reused here so failures don't rely on a native alert. */}
+      {followErr && (
+        <div
+          style={{
+            position: 'fixed', top: 16, left: 16, right: 16, zIndex: 200,
+            maxWidth: 520, margin: '0 auto',
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: '#2a0e14', border: '1px solid #ff3c6e',
+            borderRadius: 12, padding: '12px 14px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          }}
+          role="alert"
+        >
+          <p style={{ flex: 1, margin: 0, fontSize: 13, fontWeight: 600, color: '#fff', lineHeight: 1.4 }}>{followErr}</p>
+          <button
+            onClick={() => setFollowErr('')}
+            aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', flexShrink: 0 }}
+          >
+            <span style={{ color: '#ffb3c2' }}>✕</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
