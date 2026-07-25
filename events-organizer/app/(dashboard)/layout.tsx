@@ -159,7 +159,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </aside>
 
-          <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* overflow:auto, NOT hidden. The shell is height:100vh, so anything
+              taller than the viewport was previously clipped with no scrollbar —
+              the KYC/payout form was unreachable below the fold. Pages that run
+              their own scroller (e.g. /events uses flex:1 + overflow:auto) are
+              unaffected: main is a definite-height flex column, so those children
+              still resolve to a bounded height and scroll internally as before;
+              this only adds a fallback scrollbar for pages that don't. */}
+          <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             {children}
           </main>
         </div>

@@ -274,10 +274,19 @@ func initialOf(tok string, super []string) bool {
 
 // SubmitKYCDTO — non-file fields of the multipart KYC submission.
 // (id_document / proof_of_address arrive as multipart files.)
+//
+// SAIDNumber is deliberately `omitempty`, NOT `required`: when the organiser
+// already has an ID number on file (Level 1 basic KYC stores one), the client
+// omits the field entirely and KYCService.Submit decrypts the stored value and
+// reuses it. Marking this `required` made that fallback unreachable — the bind
+// failed with a 400 before the service ever ran, so "use the ID on my profile"
+// always failed while re-typing the identical number worked. `len=13` still
+// applies whenever a value IS supplied, so a malformed number can't slip past;
+// full checksum/DOB/age validation happens in ValidateSAIDNumber either way.
 type SubmitKYCDTO struct {
 	LegalFirstName string `form:"legal_first_name" binding:"required,min=2,max=100"`
 	LegalLastName  string `form:"legal_last_name" binding:"required,min=2,max=100"`
-	SAIDNumber     string `form:"sa_id_number" binding:"required,len=13"`
+	SAIDNumber     string `form:"sa_id_number" binding:"omitempty,len=13"`
 }
 
 // KYCProfile — organizer-facing view of their KYC state.
