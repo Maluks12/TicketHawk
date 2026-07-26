@@ -65,11 +65,28 @@ func (s *PayoutService) SetPayoutDetails(ctx context.Context, organizerID string
 	var subCode string
 	if profile.HasSubaccount && profile.SubaccountCode != nil {
 		sub, uErr := s.paystack.UpdateSubaccount(ctx, *profile.SubaccountCode, profile.BusinessName, dto.BankCode, dto.AccountNumber)
-		if uErr != nil {
+		switch {
+		case uErr == nil:
+			subCode = sub.SubaccountCode
+		case isSubaccountNotFoundErr(uErr):
+			// The stored code doesn't resolve against the CURRENT API keys —
+			// it was created in the other Paystack mode (test vs live), or
+			// deleted from the dashboard. Hard-failing here left the organiser
+			// permanently stuck: the update path is the only one reachable
+			// while a code is stored, so every retry hit the same 404 and
+			// payout details could never be re-saved. Fall through to creating
+			// a fresh subaccount instead, which is exactly what's needed.
+			log.Warn().
+				Str("organizer_id", organizerID).
+				Str("stale_subaccount", *profile.SubaccountCode).
+				Msg("payouts: stored subaccount not found on this integration — creating a new one")
+			subCode = ""
+		default:
 			return nil, fmt.Errorf("updating subaccount: %w", uErr)
 		}
-		subCode = sub.SubaccountCode
-	} else {
+	}
+
+	if subCode == "" {
 		var email string
 		_ = s.pool.QueryRow(ctx, `SELECT business_email FROM organizers WHERE id = $1`, organizerID).Scan(&email)
 		sub, cErr := s.paystack.CreateSubaccount(ctx, profile.BusinessName, dto.BankCode, dto.AccountNumber, dto.AccountName, email)
@@ -88,6 +105,18 @@ func (s *PayoutService) SetPayoutDetails(ctx context.Context, organizerID string
 
 	if err := repository.SavePayoutDetails(s.pool, ctx, organizerID, subCode, recipientCode, dto); err != nil {
 		return nil, err
+	}
+
+	// A fresh, working subaccount clears any earlier "Paystack rejected this
+	// code" flag. Without this, splitForBooking's `subaccount_invalid_at IS
+	// NULL` filter would keep splits disabled forever even after successful
+	// re-onboarding.
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE organizers SET subaccount_invalid_at = NULL
+		WHERE id = $1 AND subaccount_invalid_at IS NOT NULL
+	`, organizerID); err != nil {
+		log.Warn().Err(err).Str("organizer_id", organizerID).
+			Msg("payouts: could not clear subaccount_invalid_at after re-onboarding")
 	}
 
 	// Bank-account ownership check — this is the only point we hold the full
@@ -410,4 +439,17 @@ func (s *PayoutService) ApplyTransferWebhook(ctx context.Context, reference, sta
 		}
 		return nil
 	}
+}
+// isSubaccountNotFoundErr reports whether Paystack rejected a subaccount code
+// because it doesn't exist on the integration the current API keys belong to.
+// Paystack phrases this as a 404 with "Subaccount not found"; the same shape
+// occurs when a code created under test keys is used with live keys (and vice
+// versa), which is the common case during a launch key-swap.
+func isSubaccountNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "subaccount not found") ||
+		(strings.Contains(msg, "subaccount") && strings.Contains(msg, "404"))
 }
