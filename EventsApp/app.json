@@ -8,7 +8,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tickethawk.app",
+      "associatedDomains": [
+        "applinks:ticket-hawk.com",
+        "applinks:www.ticket-hawk.com"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -22,6 +27,17 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "ticket-hawk.com", "pathPrefix": "/events" },
+            { "scheme": "https", "host": "www.ticket-hawk.com", "pathPrefix": "/events" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {

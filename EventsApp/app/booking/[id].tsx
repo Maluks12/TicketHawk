@@ -20,11 +20,30 @@ import {
 } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { syncBookingOffline, cacheBookingDetail, getCachedBookingDetail } from '../../lib/offline';
-import { s, sheet, setBookingTheme } from '../../styles/booking';
+import { s, sheet, t, setBookingTheme } from '../../styles/booking';
 import { useAppTheme } from '../../theme/colors';
 import { RotatingQR } from '../../components/RotatingQR';
+import {
+  getRefundQuote,
+  submitRefund,
+  fmtRand,
+  fmtRate,
+  refundWindowLabel,
+  daysLeftInBand,
+  type RefundQuote,
+  type RefundQuoteResponse,
+} from '../../lib/refunds';
 
 const { width: SW } = Dimensions.get('window');
+
+// Lets the hero scrim stay light. A shadow tight to the glyphs guarantees
+// contrast against whatever pixel happens to sit behind a given letter, which a
+// blanket overlay can only do by darkening the entire image.
+const HERO_TEXT_SHADOW = {
+  textShadowColor:  'rgba(0,0,0,0.55)',
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 6,
+} as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -87,38 +106,119 @@ const PriceLine = ({ label, value, bold, accent }: { label: string; value: strin
 );
 
 // ─── Refund Modal ─────────────────────────────────────────────────────────────
+// Shows the buyer what they will actually be paid BEFORE they commit, then
+// submits. The amount is never computed here — see lib/refunds.ts for why.
 
-const RefundModal = ({ visible, bookingId, onClose, onSuccess }: {
-  visible: boolean; bookingId: string; onClose: () => void; onSuccess: () => void;
+const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onSuccess }: {
+  visible: boolean;
+  bookingId: string;
+  guest?: { bookingNumber: string; email: string };
+  quote: RefundQuote | null;
+  totalPaid: number;
+  onClose: () => void;
+  onSuccess: (amount: number) => void;
 }) => {
   const [reason, setReason]   = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
 
+  // Clear the form each time the sheet opens, so a cancelled attempt doesn't
+  // leave a stale reason (or a stale error) sitting there next time.
+  useEffect(() => {
+    if (visible) { setReason(''); setError(''); }
+  }, [visible]);
+
   const submit = async () => {
+    if (!quote?.eligible) { setError('This booking is no longer refundable.'); return; }
     if (reason.trim().length < 10) { setError('Please provide at least 10 characters.'); return; }
     setLoading(true); setError('');
     try {
-      await api.post(`/v1/bookings/${bookingId}/refund`, { reason: reason.trim() });
-      onSuccess(); onClose();
+      await submitRefund(bookingId, reason.trim(), guest);
+      onSuccess(quote.refund_amount);
+      onClose();
     } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Failed to submit. Please try again.');
+      // A 400 here means the server re-priced the refund and it no longer
+      // qualifies — almost always because the buyer sat on the sheet across a
+      // band boundary. Surface the server's reason verbatim rather than the
+      // now-stale figure this sheet was showing.
+      setError(
+        e?.response?.data?.error ??
+        e?.response?.data?.quote?.reason ??
+        'Failed to submit. Please try again.',
+      );
     } finally { setLoading(false); }
   };
 
+  const bandDays  = quote ? daysLeftInBand(quote.days_until_event) : null;
+  const nextRate  = quote && quote.rate >= 1 ? '75%'
+                  : quote && quote.rate >= 0.75 ? '50%'
+                  : quote && quote.rate >= 0.5  ? '25%'
+                  : '0%';
+
   return (
-    <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
-      <View className={s.modalOverlay}>
+    <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={sheet.modalSheet}>
           <View className={s.modalHandle} />
           <Text className={s.modalTitle}>Request a refund</Text>
-          <Text className={s.modalSub}>Tell us why you'd like a refund. Processed within 3–5 business days.</Text>
+
+          {/* ── What you get back ────────────────────────────────────────── */}
+          {quote ? (
+            <View style={sheet.quoteCard}>
+              <View style={sheet.quoteHeadRow}>
+                <Text style={sheet.quoteHeadLabel}>You&apos;ll get back</Text>
+                <Text style={sheet.quoteHeadValue}>{fmtRand(quote.refund_amount)}</Text>
+              </View>
+              <View style={sheet.quoteDivider} />
+
+              <View style={sheet.quoteRow}>
+                <Text style={sheet.quoteLabel}>Total paid</Text>
+                <Text style={sheet.quoteValue}>{fmtRand(totalPaid)}</Text>
+              </View>
+              <View style={sheet.quoteRow}>
+                <Text style={sheet.quoteLabel}>
+                  Refunded at {fmtRate(quote.rate)} of the ticket price
+                </Text>
+                <Text style={sheet.quoteValue}>{fmtRand(quote.refund_amount)}</Text>
+              </View>
+              {quote.forfeited > 0 && (
+                <View style={sheet.quoteRow}>
+                  <Text style={sheet.quoteLabel}>Not refunded</Text>
+                  <Text style={sheet.quoteValue}>−{fmtRand(quote.forfeited)}</Text>
+                </View>
+              )}
+              {quote.service_fee_kept > 0 && (
+                <View style={sheet.quoteRow}>
+                  <Text style={sheet.quoteLabel}>Service fee (non-refundable)</Text>
+                  <Text style={sheet.quoteValue}>−{fmtRand(quote.service_fee_kept)}</Text>
+                </View>
+              )}
+
+              <Text style={sheet.quoteFoot}>
+                Based on {refundWindowLabel(quote.days_until_event).toLowerCase()}.
+                {bandDays != null
+                  ? ` Refunds drop to ${nextRate} in ${bandDays} day${bandDays === 1 ? '' : 's'}.`
+                  : ''}
+                {' '}Refunds are not available within 7 days of the event.
+              </Text>
+            </View>
+          ) : (
+            <View style={sheet.quoteLoading}>
+              <ActivityIndicator color={t.spinner} />
+            </View>
+          )}
+
+          <Text className={s.modalSub}>
+            Tell us why you&apos;d like a refund. Once approved, the money is returned to your
+            original payment method within 3–5 business days.
+          </Text>
           <Text className={s.modalFieldLabel}>REASON FOR REFUND</Text>
           <TextInput
             style={[sheet.modalInput, error ? sheet.modalInputError : undefined]}
             value={reason} onChangeText={v => { setReason(v); setError(''); }}
             placeholder="e.g. I can no longer attend this event due to..."
-            placeholderTextColor="rgba(255,255,255,0.25)"
+            placeholderTextColor={t.placeholder}
             multiline numberOfLines={4} maxLength={500} textAlignVertical="top"
           />
           <Text className={s.charCount}>{reason.length}/500</Text>
@@ -128,14 +228,23 @@ const RefundModal = ({ visible, bookingId, onClose, onSuccess }: {
               <Text style={sheet.modalErrorText}>{error}</Text>
             </View>
           ) : null}
-          <TouchableOpacity style={[sheet.modalBtn, loading && { opacity: 0.6 }]} onPress={submit} disabled={loading} activeOpacity={0.85}>
-            {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text className={s.modalBtnText}>Submit refund request</Text>}
+          <TouchableOpacity
+            style={[sheet.modalBtn, (loading || !quote?.eligible) && { opacity: 0.6 }]}
+            onPress={submit}
+            disabled={loading || !quote?.eligible}
+            activeOpacity={0.85}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>
+                  {quote ? `Refund ${fmtRand(quote.refund_amount)}` : 'Submit refund request'}
+                </Text>}
           </TouchableOpacity>
           <TouchableOpacity className={s.modalCancel} onPress={onClose}>
             <Text className={s.modalCancelText}>Cancel</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
@@ -286,7 +395,6 @@ interface AssignSheetProps {
 }
 
 const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, onSuccess }: AssignSheetProps) => {
-  const { isDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const [name, setName]       = useState('');
   const [email, setEmail]     = useState('');
@@ -350,7 +458,7 @@ const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, on
             value={name}
             onChangeText={v => { setName(v); setError(''); }}
             placeholder="e.g. Jane Smith"
-            placeholderTextColor="rgba(255,255,255,0.2)"
+            placeholderTextColor={t.placeholder}
             autoCapitalize="words"
             autoCorrect={false}
             returnKeyType="next"
@@ -363,7 +471,7 @@ const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, on
             value={email}
             onChangeText={v => { setEmail(v); setError(''); }}
             placeholder="jane@example.com"
-            placeholderTextColor="rgba(255,255,255,0.2)"
+            placeholderTextColor={t.placeholder}
             autoCapitalize="none"
             keyboardType="email-address"
             autoCorrect={false}
@@ -387,10 +495,10 @@ const AssignSheet = ({ visible, bookingId, assignment, totalTickets, onClose, on
             activeOpacity={0.85}
           >
             {loading
-              ? <ActivityIndicator color={isDark ? '#0a0a0a' : '#ffffff'} size="small" />
+              ? <ActivityIndicator color={t.onAccent} size="small" />
               : (
                 <>
-                  <Feather name="send" size={15} color={isDark ? '#0a0a0a' : '#ffffff'} />
+                  <Feather name="send" size={15} color={t.onAccent} />
                   <Text style={sheet.sendBtnText}>Send claim link</Text>
                 </>
               )
@@ -424,6 +532,9 @@ export default function BookingDetailScreen() {
   const [loading, setLoading]               = useState(true);
   const [refundOpen, setRefundOpen]         = useState(false);
   const [refunded, setRefunded]             = useState(false);
+  const [refundedAmount, setRefundedAmount] = useState<number | null>(null);
+  const [refundQuote, setRefundQuote]       = useState<RefundQuoteResponse | null>(null);
+  const [quoteLoading, setQuoteLoading]     = useState(false);
   const [assignTarget, setAssignTarget]     = useState<TicketAssignment | null>(null);
   const [revoking, setRevoking]             = useState<string | null>(null); // assignmentId being revoked
   const [poolRemaining, setPoolRemaining]   = useState<number | null>(null); // live remaining from the pool QR
@@ -523,12 +634,51 @@ export default function BookingDetailScreen() {
     load();
   }, [id, bookingNumber, email]);
 
+  // ── Refund quote ──────────────────────────────────────────────────────────
+  // Fetched separately from the booking, and deliberately AFTER it: the quote is
+  // additive (it decides whether a refund button exists), so it must never be
+  // able to delay or fail the ticket itself. Only asked for when a refund could
+  // conceivably apply — a confirmed booking for an event that hasn't started.
+  // Mock bookings are skipped since there is no server row behind them.
+  const eventStarted = booking?.event?.start_time
+    ? new Date(booking.event.start_time).getTime() <= Date.now()
+    : false;
+  const refundPossible =
+    !!booking &&
+    !refunded &&
+    booking.booking_status === 'confirmed' &&
+    !eventStarted &&
+    !String(booking.id ?? '').startsWith('mock-');
+
+  useEffect(() => {
+    if (!refundPossible || !booking) { setRefundQuote(null); return; }
+    let cancelled = false;
+    setQuoteLoading(true);
+    getRefundQuote(booking.id ?? (id as string), guest)
+      .then(q => { if (!cancelled) setRefundQuote(q); })
+      .finally(() => { if (!cancelled) setQuoteLoading(false); });
+    return () => { cancelled = true; };
+  }, [refundPossible, booking?.id, bookingNumber, email]);
+
   const heroOpacity = scrollY.interpolate({ inputRange: [0, 180], outputRange: [1, 0.4], extrapolate: 'clamp' });
-  const headerBg    = scrollY.interpolate({ inputRange: [140, 200], outputRange: ['rgba(10,10,10,0)', 'rgba(10,10,10,1)'], extrapolate: 'clamp' });
+  // Themed: this was pinned to rgba(10,10,10,…), so scrolling in light mode slid
+  // a black bar down over a white page. Built from the theme's page colour, and
+  // the title/glyph fade from white (over the hero art) to the theme's text
+  // colour (over the solid header) so they stay legible through the transition.
+  const headerBg = scrollY.interpolate({
+    inputRange:  [140, 200],
+    outputRange: [`${t.headerScrim}0)`, `${t.headerScrim}1)`],
+    extrapolate: 'clamp',
+  });
+  const headerFg = scrollY.interpolate({
+    inputRange:  [140, 200],
+    outputRange: ['#ffffff', isDark ? '#ffffff' : '#0a0a0a'],
+    extrapolate: 'clamp',
+  });
 
   if (loading) return (
     <View className={s.root} style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator color="rgba(255,255,255,0.5)" />
+      <ActivityIndicator color={t.spinner} />
     </View>
   );
 
@@ -569,7 +719,16 @@ export default function BookingDetailScreen() {
         <TouchableOpacity className={s.headerBack} onPress={() => router.back()}>
           <Feather name="arrow-left" size={20} color="#fff" />
         </TouchableOpacity>
-        <Text className={s.headerTitle} numberOfLines={1}>{booking.event?.title ?? 'Ticket'}</Text>
+        {/* Animated.Text so the title can cross-fade from white (over the hero
+            artwork) to the theme's text colour (over the solid header). The
+            className supplies size/weight; only the colour is animated. */}
+        <Animated.Text
+          className={s.headerTitle}
+          style={{ color: headerFg }}
+          numberOfLines={1}
+        >
+          {booking.event?.title ?? 'Ticket'}
+        </Animated.Text>
         <View style={{ width: 36 }} />
       </Animated.View>
 
@@ -585,15 +744,39 @@ export default function BookingDetailScreen() {
             ? <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} />
             : <View className={s.heroBg} />
           }
-          <LinearGradient colors={['transparent', 'rgba(10,10,10,0.85)', '#0a0a0a']} style={StyleSheet.absoluteFillObject} />
+          {/* The scrim exists to keep the status badge, title and date legible —
+              nothing more. The old three-stop ramp
+              ['transparent','rgba(10,10,10,0.85)','#0a0a0a'] reached 85% black by
+              the MIDPOINT of a 320px hero and solid black at the bottom, so it
+              was covering the top half of the artwork on its way to covering the
+              rest. On a photo-led screen that is most of the reason to have a
+              hero at all.
+              Now: a whisper at the very top (so the back button reads against a
+              bright sky), untouched through the middle where the image actually
+              lives, and the weight pushed down into the last third where the text
+              sits. Same legibility, roughly half the coverage — and the text
+              carries its own shadow (heroTitle/heroDate below) so the ramp no
+              longer has to do that job on its own. */}
+          <LinearGradient
+            colors={[
+              'rgba(0,0,0,0.28)',
+              'transparent',
+              'rgba(0,0,0,0.30)',
+              'rgba(0,0,0,0.78)',
+            ]}
+            locations={[0, 0.30, 0.66, 1]}
+            style={StyleSheet.absoluteFillObject}
+          />
           <View className={s.heroContent} style={{ paddingTop: insets.top + 56 }}>
             <View className={s.statusBadge} style={{ borderColor: `${statusCol}44`, backgroundColor: `${statusCol}18` }}>
               <View className={s.statusDot} style={{ backgroundColor: statusCol }} />
               <Text className={s.statusText} style={{ color: statusCol }}>{status.toUpperCase()}</Text>
             </View>
-            <Text className={s.heroTitle}>{booking.event?.title}</Text>
+            <Text className={s.heroTitle} style={HERO_TEXT_SHADOW}>{booking.event?.title}</Text>
             {booking.event?.start_time && (
-              <Text className={s.heroDate}>{fmt(booking.event.start_time)} · {fmtTime(booking.event.start_time)}</Text>
+              <Text className={s.heroDate} style={HERO_TEXT_SHADOW}>
+                {fmt(booking.event.start_time)} · {fmtTime(booking.event.start_time)}
+              </Text>
             )}
           </View>
         </Animated.View>
@@ -608,7 +791,7 @@ export default function BookingDetailScreen() {
 
           {status === 'refunded' ? (
             <View style={[sheet.qrCard, { opacity: 0.4 }]}>
-              <Ionicons name="close-circle-outline" size={64} color="rgba(255,255,255,0.3)" />
+              <Ionicons name="close-circle-outline" size={64} color={t.chevron} />
               <Text className={s.qrNumber}>#{booking.booking_number}</Text>
               <Text className={s.qrHint}>This ticket has been refunded</Text>
             </View>
@@ -643,7 +826,7 @@ export default function BookingDetailScreen() {
               {poolCount === 0 && assignedSlots.length > 0 && showQRs && (
                 <View style={[sheet.qrCard, { marginBottom: 12 }]}>
                   <View style={sheet.pendingQR}>
-                    <Ionicons name="people-outline" size={48} color="rgba(255,255,255,0.2)" />
+                    <Ionicons name="people-outline" size={48} color={t.iconFaint} />
                     <Text style={sheet.pendingText}>You&apos;ve assigned all your tickets</Text>
                   </View>
                   <Text className={s.qrHint}>Everyone below has their own pass</Text>
@@ -653,16 +836,16 @@ export default function BookingDetailScreen() {
               {/* Assigned tickets list */}
               {assignedSlots.length > 0 && (
                 <>
-                  <Text style={poolStyles.assignedHeader}>ASSIGNED ({assignedSlots.length})</Text>
+                  <Text style={sheet.assignedHeader}>ASSIGNED ({assignedSlots.length})</Text>
                   {assignedSlots.map((slot) => {
                     const isClaimed  = slot.status === 'claimed';
                     const isPending  = slot.status === 'pending';
                     const isRevoking = revoking === slot.id;
                     return (
-                      <View key={slot.id} style={poolStyles.assignedRow}>
+                      <View key={slot.id} style={sheet.assignedRow}>
                         <View
                           style={[
-                            poolStyles.assignedIcon,
+                            sheet.assignedIcon,
                             { backgroundColor: isClaimed ? 'rgba(0,229,160,0.12)' : 'rgba(255,184,48,0.14)' },
                           ]}
                         >
@@ -673,11 +856,11 @@ export default function BookingDetailScreen() {
                           />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={poolStyles.assignedName} numberOfLines={1}>
+                          <Text style={sheet.assignedName} numberOfLines={1}>
                             {slot.assignee_name ?? 'Guest'}
                           </Text>
                           <Text
-                            style={[poolStyles.assignedStatus, { color: isClaimed ? '#00e5a0' : '#c79249' }]}
+                            style={[sheet.assignedStatus, { color: isClaimed ? '#00e5a0' : '#c79249' }]}
                             numberOfLines={1}
                           >
                             {isClaimed
@@ -689,7 +872,7 @@ export default function BookingDetailScreen() {
                           <TouchableOpacity onPress={() => handleRevoke(slot.id)} disabled={isRevoking} hitSlop={8}>
                             {isRevoking
                               ? <ActivityIndicator size="small" color="#ff6b6b" />
-                              : <Feather name="x" size={18} color="rgba(255,255,255,0.4)" />}
+                              : <Feather name="x" size={18} color={t.icon} />}
                           </TouchableOpacity>
                         )}
                       </View>
@@ -701,18 +884,18 @@ export default function BookingDetailScreen() {
               {/* Assign a ticket — peel one off the pool (authed buyer only) */}
               {poolCount > 0 && status === 'confirmed' && !guest && firstUnassigned && (
                 <TouchableOpacity
-                  style={poolStyles.assignRow}
+                  style={sheet.assignRow}
                   onPress={() => setAssignTarget(firstUnassigned)}
                   activeOpacity={0.8}
                 >
-                  <View style={poolStyles.assignRowIcon}>
-                    <Feather name="send" size={15} color="rgba(255,255,255,0.8)" />
+                  <View style={sheet.assignRowIcon}>
+                    <Feather name="send" size={15} color={t.iconStrong} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={poolStyles.assignRowTitle}>Assign a ticket</Text>
-                    <Text style={poolStyles.assignRowSub}>Send one to someone arriving separately</Text>
+                    <Text style={sheet.assignRowTitle}>Assign a ticket</Text>
+                    <Text style={sheet.assignRowSub}>Send one to someone arriving separately</Text>
                   </View>
-                  <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.3)" />
+                  <Feather name="chevron-right" size={18} color={t.chevron} />
                 </TouchableOpacity>
               )}
             </>
@@ -723,7 +906,7 @@ export default function BookingDetailScreen() {
                 <Image source={{ uri: booking.qr_code_url }} style={sheet.qrImage} resizeMode="contain" />
               ) : (
                 <View style={sheet.pendingQR}>
-                  <Ionicons name="time-outline" size={48} color="rgba(255,255,255,0.2)" />
+                  <Ionicons name="time-outline" size={48} color={t.iconFaint} />
                   <Text style={sheet.pendingText}>
                     {status === 'confirmed' ? 'QR code is being generated…' : 'Ticket not yet confirmed'}
                   </Text>
@@ -743,15 +926,15 @@ export default function BookingDetailScreen() {
         <View style={sheet.card}>
           <Text className={s.sectionLabel}>EVENT DETAILS</Text>
           {booking.event?.start_time && (
-            <InfoRow icon={<Ionicons name="calendar-outline" size={15} color="rgba(255,255,255,0.45)" />}
+            <InfoRow icon={<Ionicons name="calendar-outline" size={15} color={t.icon} />}
               label="Date & time" value={`${fmt(booking.event.start_time)} at ${fmtTime(booking.event.start_time)}`} />
           )}
           {booking.event && (
-            <InfoRow icon={<Ionicons name="location-outline" size={15} color="rgba(255,255,255,0.45)" />}
+            <InfoRow icon={<Ionicons name="location-outline" size={15} color={t.icon} />}
               label="Venue" value={`${booking.event.venue_name}, ${booking.event.city}`} />
           )}
           {booking.event?.address && (
-            <InfoRow icon={<Feather name="map-pin" size={15} color="rgba(255,255,255,0.45)" />}
+            <InfoRow icon={<Feather name="map-pin" size={15} color={t.icon} />}
               label="Address" value={booking.event.address} />
           )}
         </View>
@@ -759,16 +942,16 @@ export default function BookingDetailScreen() {
         {/* Ticket Info */}
         <View style={sheet.card}>
           <Text className={s.sectionLabel}>TICKET INFO</Text>
-          <InfoRow icon={<Ionicons name="ticket-outline" size={15} color="rgba(255,255,255,0.45)" />}
+          <InfoRow icon={<Ionicons name="ticket-outline" size={15} color={t.icon} />}
             label="Type" value={booking.ticket_type_name ?? 'General Admission'} />
-          <InfoRow icon={<Feather name="users" size={15} color="rgba(255,255,255,0.45)" />}
+          <InfoRow icon={<Feather name="users" size={15} color={t.icon} />}
             label="Quantity" value={`${booking.ticket_quantity} ticket${booking.ticket_quantity > 1 ? 's' : ''}`} />
-          <InfoRow icon={<Feather name="check-circle" size={15} color="rgba(255,255,255,0.45)" />}
+          <InfoRow icon={<Feather name="check-circle" size={15} color={t.icon} />}
             label="Status" value={status.charAt(0).toUpperCase() + status.slice(1)} valueColor={statusCol} />
-          <InfoRow icon={<Feather name="clock" size={15} color="rgba(255,255,255,0.45)" />}
+          <InfoRow icon={<Feather name="clock" size={15} color={t.icon} />}
             label="Booked on" value={fmtDT(booking.created_at)} />
           {booking.confirmed_at && (
-            <InfoRow icon={<Feather name="check" size={15} color="rgba(255,255,255,0.45)" />}
+            <InfoRow icon={<Feather name="check" size={15} color={t.icon} />}
               label="Confirmed" value={fmtDT(booking.confirmed_at)} />
           )}
         </View>
@@ -778,11 +961,11 @@ export default function BookingDetailScreen() {
           <View style={sheet.card}>
             <Text className={s.sectionLabel}>ATTENDEE</Text>
             {(booking.attendee_first_name || booking.attendee_last_name) && (
-              <InfoRow icon={<Feather name="user" size={15} color="rgba(255,255,255,0.45)" />}
+              <InfoRow icon={<Feather name="user" size={15} color={t.icon} />}
                 label="Name" value={[booking.attendee_first_name, booking.attendee_last_name].filter(Boolean).join(' ')} />
             )}
             {booking.attendee_email && (
-              <InfoRow icon={<Feather name="mail" size={15} color="rgba(255,255,255,0.45)" />}
+              <InfoRow icon={<Feather name="mail" size={15} color={t.icon} />}
                 label="Email" value={booking.attendee_email} />
             )}
           </View>
@@ -808,8 +991,13 @@ export default function BookingDetailScreen() {
               <View className={s.refundedBanner}>
                 <Ionicons name="checkmark-circle" size={15} color="#00e5a0" />
                 <Text className={s.refundedText}>
-                  {booking.refunded_amount != null
-                    ? `Refund of ${fmtMoney(booking.refunded_amount)} is being processed`
+                  {/* refundedAmount is what THIS session's request was quoted at;
+                      booking.refunded_amount is what the server recorded on an
+                      earlier one. Prefer the fresh figure so the buyer sees the
+                      exact amount they just agreed to, not a stale field that the
+                      cached booking may not carry at all. */}
+                  {(refundedAmount ?? booking.refunded_amount) != null
+                    ? `Refund of ${fmtMoney((refundedAmount ?? booking.refunded_amount) as number)} is being processed — 3–5 business days`
                     : 'Refund request submitted — processing in 3–5 business days'}
                 </Text>
               </View>
@@ -818,11 +1006,81 @@ export default function BookingDetailScreen() {
           )}
         </View>
 
-        {/* Refund action removed per product decision. */}
+        {/* ── Refund ────────────────────────────────────────────────────────
+            Restored, and now driven entirely by the server's quote rather than
+            being unconditionally present.
+
+            The rule the button follows (events-db/internal/models/refund_policy.go):
+              30+ days  → 100% of the ticket price
+              21–29     →  75%
+              14–20     →  50%
+               7–13     →  25%
+              under 7   →   0%  — NO BUTTON AT ALL
+
+            Inside 7 days the action is not disabled or greyed out, it is gone,
+            replaced by a line explaining why. A visible-but-dead refund button is
+            worse than no button: buyers tap it, get a 400 back, and open a support
+            ticket. The eligibility decision comes from quote.eligible, so the app
+            can never disagree with what the refund endpoint will actually do.
+
+            The amount is on the button face on purpose. "Request a refund" alone
+            invites the buyer to assume they get everything back, which after day 30
+            is never true — putting the real figure up front is the difference
+            between an informed cancellation and a chargeback. */}
+        {refundPossible && (
+          <View style={sheet.refundWrap}>
+            {quoteLoading && !refundQuote ? (
+              <View style={sheet.quoteLoading}>
+                <ActivityIndicator color={t.spinner} size="small" />
+              </View>
+            ) : refundQuote?.quote?.eligible ? (
+              <>
+                <TouchableOpacity
+                  className={s.refundBtn}
+                  onPress={() => setRefundOpen(true)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="arrow-undo-outline" size={16} color="#ff4d4d" />
+                  <Text className={s.refundBtnText}>
+                    Request a refund · {fmtRand(refundQuote.quote!.refund_amount)} back
+                  </Text>
+                </TouchableOpacity>
+                <Text className={s.refundBtnSub}>
+                  {refundWindowLabel(refundQuote.quote!.days_until_event)} ·{' '}
+                  {fmtRate(refundQuote.quote!.rate)} of your ticket price
+                  {(() => {
+                    const left = daysLeftInBand(refundQuote.quote!.days_until_event);
+                    return left != null
+                      ? ` · rate drops in ${left} day${left === 1 ? '' : 's'}`
+                      : '';
+                  })()}
+                </Text>
+              </>
+            ) : refundQuote?.quote ? (
+              <View style={sheet.refundNote}>
+                <Ionicons name="information-circle-outline" size={17} color={t.icon} />
+                <View style={{ flex: 1 }}>
+                  <Text className={s.refundNoteTitle}>Refunds are closed for this booking</Text>
+                  <Text className={s.refundNoteBody}>
+                    {refundQuote.quote!.reason ??
+                      'Refunds are not available within 7 days of the event.'}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+          </View>
+        )}
       </Animated.ScrollView>
 
-      <RefundModal visible={refundOpen} bookingId={booking.id}
-        onClose={() => setRefundOpen(false)} onSuccess={() => setRefunded(true)} />
+      <RefundModal
+        visible={refundOpen}
+        bookingId={booking.id}
+        guest={guest}
+        quote={refundQuote?.quote ?? null}
+        totalPaid={refundQuote?.total_paid ?? booking.total_amount}
+        onClose={() => setRefundOpen(false)}
+        onSuccess={(amount) => { setRefunded(true); setRefundedAmount(amount); }}
+      />
 
       <AssignSheet
         visible={!!assignTarget}
@@ -836,58 +1094,7 @@ export default function BookingDetailScreen() {
   );
 }
 // ─── Pool model styles ────────────────────────────────────────────────────────
-
-const poolStyles = StyleSheet.create({
-  assignedHeader: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    marginTop: 4,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-  assignedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    backgroundColor: '#141414',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    paddingVertical: 11,
-    paddingHorizontal: 13,
-    marginBottom: 8,
-  },
-  assignedIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  assignedName: { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
-  assignedStatus: { fontSize: 11.5, marginTop: 2 },
-  assignRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    backgroundColor: '#141414',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 13,
-    marginTop: 4,
-  },
-  assignRowIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  assignRowTitle: { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
-  assignRowSub: { color: 'rgba(255,255,255,0.4)', fontSize: 11.5, marginTop: 2 },
-});
+// Moved to styles/booking.ts (sheet.assignRow, sheet.assignedRow, …) so they
+// follow the theme. They were hardcoded #141414 panels with white text here,
+// which is why the "Assign a ticket" row and the assigned-ticket list stayed
+// dark on a light screen.

@@ -3,6 +3,7 @@ import {
   Text,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
   Share,
   Linking,
   Platform,
@@ -22,6 +23,7 @@ import { s, sheet, HERO_H } from '../../styles/eventDetail';
 import { useAppTheme } from '../../theme/colors';
 import { getBaseUrl } from '../../components/FilterModal';
 import { toggleFollow, getFollowStatus } from '../../lib/api';
+import { buildEventShare } from '../../lib/shareLinks';
 
 // ─── Hero frame ───────────────────────────────────────────────────────────────
 // The hero no longer forces every image into one tall portrait box. The frame
@@ -201,6 +203,32 @@ export default function EventDetail() {
     }
   }, [authUser, event?.id, followLoading, router]);
 
+  // ── Cold-start / deep-link guard ──────────────────────────────────────────
+  // Reaching this screen from inside the app always pre-seeds selectedEvent, so
+  // `event` is already there. Reaching it from a SHARED LINK does not: the
+  // process starts on this route with nothing in the store, and the fetch in the
+  // effect above is what fills it in.
+  //
+  // Two things that then go wrong without this guard:
+  //   1. an empty store rendered "EVENT NOT FOUND" for the length of the fetch,
+  //      which is the worst possible first impression of a shared ticket link;
+  //   2. a store still holding the LAST event viewed rendered that event's
+  //      artwork, price and Get Tickets button under the new event's URL.
+  // Both are fixed by treating "store doesn't match the route yet" as loading.
+  const routeKey     = id ? String(id) : null;
+  const storeMatches = !routeKey || !event
+    ? !!event
+    : (event.id === routeKey || (event as any).slug === routeKey);
+  const resolving    = !!routeKey && !storeMatches;
+
+  if (resolving) {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
+        <ActivityIndicator color={colors.subText} />
+      </View>
+    );
+  }
+
   if (!event) {
     return (
       <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
@@ -238,12 +266,36 @@ export default function EventDetail() {
   // Routing unchanged — matches index.tsx push to /event/${event.id}
   const handleGetTickets = () => router.push('/event/purchase');
 
+  // ── Share ─────────────────────────────────────────────────────────────────
+  // Shares the canonical WEB url for the event, not a bare sentence and not the
+  // eventsapp:// scheme. A recipient without the app gets a page that opens; a
+  // recipient with the app gets handed straight to this screen by the OS via
+  // Universal Links / App Links (see app.json + lib/shareLinks.ts).
+  //
+  // iOS and Android disagree about where the URL belongs — iOS renders `url` as
+  // a rich link preview and would double-post it if it were also in `message`,
+  // while Android drops `url` entirely and only sends `message`. buildEventShare
+  // resolves that per platform rather than us shipping a URL that silently
+  // vanishes on one of them.
   const handleShare = async () => {
     try {
-      await Share.share({
-        message: `Check out ${event.title} at ${event.venue_name} on ${formatDate(event.start_time)}`,
+      const payload = buildEventShare(ev, Platform.OS === 'ios', id);
+      const result  = await Share.share(payload, {
+        dialogTitle:  'Share this event',
+        subject:      payload.title,          // iOS: pre-fills the email subject
+        // Nothing useful can be posted to the clipboard-only targets, and the
+        // print/assign-to-contact actions make no sense for a link.
+        excludedActivityTypes: [
+          'com.apple.UIKit.activity.Print',
+          'com.apple.UIKit.activity.AssignToContact',
+        ],
       });
-    } catch (_) {}
+      // Not an error path — just nothing to do. Kept explicit so a future
+      // analytics call has an obvious home.
+      if (result.action === Share.dismissedAction) return;
+    } catch (_) {
+      // The sheet failing to open is not worth an alert; the buyer can retry.
+    }
   };
 
   const handleDirections = async () => {

@@ -19,6 +19,10 @@ const LIGHT = {
   vipBg: '#fef3c7', vipText: '#92400e',
   okBg: '#f0fdf4', okText: '#15803d',
   soldBg: '#fff1f2', soldText: '#be123c',
+  // Trust badges. A single green that reads as "verified" on either surface —
+  // #2ecc71 (what web-mobile uses) is legible on white but glares on #0e0e12,
+  // so the dark value is lifted for contrast rather than reused verbatim.
+  trustIcon: '#16a34a', trustSurface: '#fafafa', trustBorder: '#e5e7eb',
 };
 
 const DARK: typeof LIGHT = {
@@ -31,6 +35,7 @@ const DARK: typeof LIGHT = {
   vipBg: '#3a2d0d', vipText: '#fbbf24',
   okBg: '#10261a', okText: '#4ade80',
   soldBg: '#2c1317', soldText: '#f87171',
+  trustIcon: '#34d399', trustSurface: '#17171c', trustBorder: '#2e2e35',
 };
 
 export type PurchaseTokens = typeof LIGHT;
@@ -219,12 +224,29 @@ export const makePurchaseSheet = (dark: boolean) => {
   chevron:        { fontSize: 18, color: T.border3, fontWeight: '300', lineHeight: 20 },
 
   // ── Trust badges ───────────────────────────────────────────────────────────
-  trustSection: { paddingHorizontal: 20, marginBottom: 24, gap: 14 },
-  trustRow:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  trustIcon:    { fontSize: 18, width: 24, textAlign: 'center' },
+  // Card, not a bare list: on web these two lines sit inside their own bordered
+  // panel between the ticket summary and the price breakdown, and the app looked
+  // thinner at exactly the moment the buyer is deciding whether to hand over card
+  // details. Matching the web layout keeps the reassurance in the same place on
+  // both surfaces.
+  trustCard: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 16,
+    gap: 12,
+    backgroundColor: T.trustSurface,
+    borderWidth: 1,
+    borderColor: T.trustBorder,
+    borderRadius: 14,
+  },
+  trustRow:     { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   trustText:    { flex: 1 },
   trustTitle:   { fontSize: 13, fontWeight: '700', color: T.text },
-  trustBody:    { fontSize: 12, color: T.faint, marginTop: 1 },
+  trustBody:    { fontSize: 12, color: T.sub, marginTop: 1, lineHeight: 16 },
+
+  // Legacy keys, kept so any older reference still compiles.
+  trustSection: { paddingHorizontal: 20, marginBottom: 24, gap: 14 },
+  trustIcon:    { fontSize: 18, width: 24, textAlign: 'center' },
   trustHelp:    { fontSize: 16, color: T.border3 },
 
   // ── Price breakdown ────────────────────────────────────────────────────────
@@ -341,6 +363,45 @@ export const makePurchaseSheet = (dark: boolean) => {
     fontSize: 13, color: T.sub, lineHeight: 19,
     marginHorizontal: 16, marginTop: 16, fontWeight: '400',
   },
+
+  // ── Payment method sheet ───────────────────────────────────────────────────
+  // These were inline styles in purchase.tsx with a hardcoded '#fff' sheet and
+  // '#f0f0f0' row dividers, while the LABELS inside used T.text. In dark mode
+  // that is white text on a white sheet: the "Add credit card" row was rendering
+  // the whole time, it just could not be seen. Hoisted here so the sheet is
+  // themed from the same tokens as everything else on the screen.
+  paySheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  paySheet: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: T.sheet,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingBottom: 40,
+    // A dark sheet on a dark page needs a hairline to separate it from the
+    // backdrop; a shadow alone does nothing there.
+    borderTopWidth: 1, borderColor: T.border2,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.18, shadowRadius: 16, elevation: 20,
+  },
+  paySheetHandleWrap: { alignItems: 'center', paddingTop: 12, paddingBottom: 8 },
+  paySheetHandle:     { width: 36, height: 4, borderRadius: 2, backgroundColor: T.border3 },
+  paySheetTitle:      { fontSize: 17, fontWeight: '700', color: T.text, paddingHorizontal: 20, paddingBottom: 8 },
+  payRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderTopWidth: 1, borderTopColor: T.border2,
+  },
+  payRowIcon: {
+    width: 52, height: 34, borderRadius: 8,
+    borderWidth: 1.5, borderColor: T.border3,
+    alignItems: 'center', justifyContent: 'center', marginRight: 14,
+  },
+  payRowIconFilled: {
+    width: 52, height: 34, borderRadius: 8,
+    alignItems: 'center', justifyContent: 'center', marginRight: 14,
+  },
+  payRowLabel:    { flex: 1, fontSize: 16, fontWeight: '500', color: T.text },
+  payRowLabelTop: { fontSize: 16, fontWeight: '500', color: T.text },
+  payRowSub:      { fontSize: 12, color: T.faint, marginTop: 1 },
 
   // ── Guest / input (legacy, kept for compatibility) ─────────────────────────
   guestSection: {

@@ -230,7 +230,9 @@ const GuestLookup = () => {
         <Text className={s.sectionLabel}>YOUR TICKET</Text>
         <TicketStack bookings={[result]} />
         <TouchableOpacity style={sheet.lookupAgainBtn} onPress={() => setResult(null)}>
-          <Ionicons name="search-outline" size={15} color="rgba(255,255,255,0.6)" />
+          {/* Themed: a white glyph on the light sheet's rgba(0,0,0,0.06) pill was
+              invisible, so the button looked like a text-only row. */}
+          <Ionicons name="search-outline" size={15} color={isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.55)'} />
           <Text className={s.lookupAgainText}>Look up another ticket</Text>
         </TouchableOpacity>
       </ScrollView>

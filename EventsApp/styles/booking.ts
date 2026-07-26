@@ -11,6 +11,39 @@ export const setBookingTheme = (d: boolean) => { dark = d; };
 const pick = <T extends object>(D: T, L: T): T =>
   new Proxy({} as T, { get: (_, k) => (dark ? D : L)[k as keyof T] }) as T;
 
+// ─── Colour tokens ────────────────────────────────────────────────────────────
+// Not every colour on this screen can live in a className or a StyleSheet: the
+// Ionicons/Feather icons take a `color` prop, and so do ActivityIndicator and
+// TextInput's placeholderTextColor. Those were all hardcoded to
+// rgba(255,255,255,…) — correct on the dark theme, invisible on the light one,
+// which is why the info-row icons and every sheet placeholder disappeared in
+// light mode. Import `t` alongside `s`/`sheet` and use it for prop-based colours.
+const tDark = {
+  icon:        'rgba(255,255,255,0.45)',
+  iconFaint:   'rgba(255,255,255,0.20)',
+  iconStrong:  'rgba(255,255,255,0.80)',
+  chevron:     'rgba(255,255,255,0.30)',
+  placeholder: 'rgba(255,255,255,0.25)',
+  spinner:     'rgba(255,255,255,0.50)',
+  onAccent:    '#0a0a0a',   // text/glyph colour on a filled (white) button
+  headerScrim: 'rgba(10,10,10,',
+  pageBg:      '#0a0a0a',
+};
+
+const tLight: typeof tDark = {
+  icon:        'rgba(0,0,0,0.45)',
+  iconFaint:   'rgba(0,0,0,0.20)',
+  iconStrong:  'rgba(0,0,0,0.72)',
+  chevron:     'rgba(0,0,0,0.30)',
+  placeholder: 'rgba(0,0,0,0.32)',
+  spinner:     'rgba(0,0,0,0.45)',
+  onAccent:    '#ffffff',
+  headerScrim: 'rgba(255,255,255,',
+  pageBg:      '#ffffff',
+};
+
+export const t = pick(tDark, tLight);
+
 const sDark = {
 
   // ── Shell ────────────────────────────────────────────────────────────────
@@ -63,6 +96,9 @@ const sDark = {
   actions:          'mx-4 mt-5 gap-3',
   refundBtn:        'flex-row items-center justify-center gap-2 bg-status-cancelled/[0.08] rounded-[14px] border border-status-cancelled/20 py-[15px]',
   refundBtnText:    'text-status-cancelled text-[14px] font-bold',
+  refundBtnSub:     'text-[11px] text-white/40 text-center mt-1.5',
+  refundNoteTitle:  'text-[13px] font-bold text-white/70',
+  refundNoteBody:   'text-[12px] text-white/40 leading-[17px] mt-0.5',
 
   // ── Error / empty ─────────────────────────────────────────────────────────
   errTitle:         'text-[18px] font-bold text-white',
@@ -88,7 +124,12 @@ const sLight = {
 
   // ── Floating header ──────────────────────────────────────────────────────
   floatingHeader:   'absolute top-0 left-0 right-0 z-50 flex-row items-center px-4 pb-3',
-  headerBack:       'w-9 h-9 rounded-[10px] bg-black/[0.12] items-center justify-center',
+  // The chip has to work in BOTH of the header's states: floating over the hero
+  // artwork (dark) and sitting on the solid header once scrolled (white in this
+  // theme). A translucent dark chip with a white glyph is the one value that
+  // reads in both — bg-black/[0.12] read as nothing over the artwork, and a
+  // white chip would vanish against the scrolled header.
+  headerBack:       'w-9 h-9 rounded-[10px] bg-black/40 items-center justify-center',
   headerTitle:      'flex-1 text-center text-[15px] font-bold text-white mx-2',
 
   // ── Hero ─────────────────────────────────────────────────────────────────
@@ -133,6 +174,9 @@ const sLight = {
   actions:          'mx-4 mt-5 gap-3',
   refundBtn:        'flex-row items-center justify-center gap-2 bg-status-cancelled/[0.08] rounded-[14px] border border-status-cancelled/20 py-[15px]',
   refundBtnText:    'text-status-cancelled text-[14px] font-bold',
+  refundBtnSub:     'text-[11px] text-black/45 text-center mt-1.5',
+  refundNoteTitle:  'text-[13px] font-bold text-black/70',
+  refundNoteBody:   'text-[12px] text-black/45 leading-[17px] mt-0.5',
 
   // ── Error / empty ─────────────────────────────────────────────────────────
   errTitle:         'text-[18px] font-bold text-[#0a0a0a]',
@@ -347,6 +391,105 @@ const sheetDark = StyleSheet.create({
     fontSize: 14,
   },
 
+  // ── Pool model rows (assigned list + "Assign a ticket") ───────────────────
+  // These lived in a local `poolStyles` StyleSheet inside app/booking/[id].tsx
+  // with hardcoded #141414 panels and white text, so the whole block stayed dark
+  // no matter the theme — the "Assign a ticket" row was a black card sitting in
+  // the middle of a white screen. Moved here so both themes are defined in one
+  // place and the screen can't drift again.
+  assignedHeader: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 4,
+    marginBottom: 8,
+    marginLeft: 4,
+    alignSelf: 'flex-start',
+  },
+  assignedRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: '#141414',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+    marginBottom: 8,
+  },
+  assignedIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignedName:   { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
+  assignedStatus: { fontSize: 11.5, marginTop: 2 },
+  assignRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: '#141414',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    marginTop: 4,
+  },
+  assignRowIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignRowTitle: { color: '#e8e8e8', fontSize: 14, fontWeight: '600' },
+  assignRowSub:   { color: 'rgba(255,255,255,0.4)', fontSize: 11.5, marginTop: 2 },
+
+  // ── Refund action + quote ─────────────────────────────────────────────────
+  refundWrap: { marginHorizontal: 16, marginTop: 20 },
+  refundNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 14,
+  },
+  // The quote card inside the refund sheet. Deliberately the loudest thing in
+  // the sheet: the buyer's only real question is "how much do I get back", and
+  // the sliding scale means the answer is not the amount they paid.
+  quoteCard: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 16,
+    gap: 9,
+  },
+  quoteHeadRow:   { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  quoteHeadLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 13, fontWeight: '600' },
+  quoteHeadValue: { color: '#ffffff', fontSize: 26, fontWeight: '800', letterSpacing: -0.6 },
+  quoteDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: 2,
+  },
+  quoteRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  quoteLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 12.5, flex: 1 },
+  quoteValue: { color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontWeight: '600' },
+  quoteFoot:  { color: 'rgba(255,255,255,0.4)', fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  quoteLoading: { paddingVertical: 26, alignItems: 'center' },
+
   // ── Info card ─────────────────────────────────────────────────────────────
   card: {
     marginHorizontal: 16,
@@ -513,14 +656,25 @@ const sheetLight = StyleSheet.create({
   },
 
   // ── Assign bottom sheet ───────────────────────────────────────────────────
+  // WAS '#0a0a0a'. The light sheet was being given the DARK sheet's background
+  // while every label inside it used the light theme's near-black text — so
+  // "Send ticket to someone", both field labels, the recipient inputs and the
+  // Cancel row were all #0a0a0a-on-#0a0a0a. The sheet was rendering perfectly;
+  // it was simply black text on a black panel, which is why only the white
+  // "Send claim link" button and the placeholder text were visible.
   assignSheet: {
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
     paddingTop: 12,
     borderTopWidth: 1,
     borderColor: 'rgba(0,0,0,0.08)',
+    shadowColor: '#0a0a0a',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 24,
   },
   sheetHandle: {
     width: 36,
@@ -603,6 +757,105 @@ const sheetLight = StyleSheet.create({
     fontSize: 14,
   },
 
+  // ── Pool model rows (assigned list + "Assign a ticket") ───────────────────
+  // These lived in a local `poolStyles` StyleSheet inside app/booking/[id].tsx
+  // with hardcoded #141414 panels and white text, so the whole block stayed dark
+  // no matter the theme — the "Assign a ticket" row was a black card sitting in
+  // the middle of a white screen. Moved here so both themes are defined in one
+  // place and the screen can't drift again.
+  assignedHeader: {
+    color: 'rgba(0,0,0,0.45)',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 4,
+    marginBottom: 8,
+    marginLeft: 4,
+    alignSelf: 'flex-start',
+  },
+  assignedRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: '#ffffff',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.10)',
+    borderRadius: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+    marginBottom: 8,
+  },
+  assignedIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignedName:   { color: '#111111', fontSize: 14, fontWeight: '600' },
+  assignedStatus: { fontSize: 11.5, marginTop: 2 },
+  assignRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    backgroundColor: '#ffffff',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.10)',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    marginTop: 4,
+  },
+  assignRowIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assignRowTitle: { color: '#111111', fontSize: 14, fontWeight: '600' },
+  assignRowSub:   { color: 'rgba(0,0,0,0.45)', fontSize: 11.5, marginTop: 2 },
+
+  // ── Refund action + quote ─────────────────────────────────────────────────
+  refundWrap: { marginHorizontal: 16, marginTop: 20 },
+  refundNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.10)',
+    padding: 14,
+  },
+  // The quote card inside the refund sheet. Deliberately the loudest thing in
+  // the sheet: the buyer's only real question is "how much do I get back", and
+  // the sliding scale means the answer is not the amount they paid.
+  quoteCard: {
+    backgroundColor: '#fafafa',
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.10)',
+    padding: 16,
+    gap: 9,
+  },
+  quoteHeadRow:   { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  quoteHeadLabel: { color: 'rgba(0,0,0,0.55)', fontSize: 13, fontWeight: '600' },
+  quoteHeadValue: { color: '#111111', fontSize: 26, fontWeight: '800', letterSpacing: -0.6 },
+  quoteDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(0,0,0,0.10)',
+    marginVertical: 2,
+  },
+  quoteRow:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  quoteLabel: { color: 'rgba(0,0,0,0.55)', fontSize: 12.5, flex: 1 },
+  quoteValue: { color: 'rgba(0,0,0,0.85)', fontSize: 12.5, fontWeight: '600' },
+  quoteFoot:  { color: 'rgba(0,0,0,0.45)', fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  quoteLoading: { paddingVertical: 26, alignItems: 'center' },
+
   // ── Info card ─────────────────────────────────────────────────────────────
   card: {
     marginHorizontal: 16,
@@ -622,13 +875,19 @@ const sheetLight = StyleSheet.create({
   },
 
   // ── Refund modal sheet ────────────────────────────────────────────────────
+  // Same bug as assignSheet above — the light sheet had the dark background.
   modalSheet: {
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     paddingBottom: 40,
     gap: 14,
+    shadowColor: '#0a0a0a',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 24,
   },
   modalInput: {
     backgroundColor: 'rgba(0,0,0,0.06)',

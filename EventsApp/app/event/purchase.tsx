@@ -34,6 +34,7 @@ import { isPaymentMethodEnabled } from '../../lib/paymentMethods';
 import {
   CaretLeft, CaretDown, ArrowsDownUp, Star, CrownSimple, Check,
   CreditCard, AppleLogo, PaypalLogo, Bank,
+  SealCheck, ShieldCheck,
   Ticket, X,
 } from 'phosphor-react-native';
 
@@ -665,6 +666,30 @@ export default function TicketPurchaseScreen() {
                   </View>
                 </View>
 
+                {/* Trust badges — restored.
+                    These two lines exist on the web checkout and were the one
+                    piece of reassurance the app checkout was missing: the buyer
+                    is one tap from a card form, and nothing on screen said the
+                    tickets are legitimate or the payment is protected. Copy is
+                    kept verbatim from web-mobile's purchase page so support
+                    isn't answering questions about two different promises. */}
+                <View style={ss.trustCard}>
+                  <View style={ss.trustRow}>
+                    <SealCheck size={18} color={T.trustIcon} weight="fill" />
+                    <View style={ss.trustText}>
+                      <Text style={ss.trustTitle}>Official Ticket Marketplace</Text>
+                      <Text style={ss.trustBody}>Tickets are reviewed and verified by the venue.</Text>
+                    </View>
+                  </View>
+                  <View style={ss.trustRow}>
+                    <ShieldCheck size={18} color={T.trustIcon} weight="fill" />
+                    <View style={ss.trustText}>
+                      <Text style={ss.trustTitle}>Every ticket protected</Text>
+                      <Text style={ss.trustBody}>Secure payment processing.</Text>
+                    </View>
+                  </View>
+                </View>
+
                 {/* Price breakdown — collapsed by default; "View details"
                     expands the per-line items (SeatGeek-style). */}
                 <View style={ss.priceBreakdown}>
@@ -792,7 +817,7 @@ export default function TicketPurchaseScreen() {
               <TextInput
                 style={ss.modalInput}
                 placeholder="First name"
-                placeholderTextColor="#aab0be"
+                placeholderTextColor={T.faint}
                 value={guestName}
                 onChangeText={setGuestName}
                 autoCapitalize="words"
@@ -806,7 +831,7 @@ export default function TicketPurchaseScreen() {
                 ref={surnameRef}
                 style={ss.modalInput}
                 placeholder="Surname"
-                placeholderTextColor="#aab0be"
+                placeholderTextColor={T.faint}
                 value={guestSurname}
                 onChangeText={setGuestSurname}
                 autoCapitalize="words"
@@ -822,7 +847,7 @@ export default function TicketPurchaseScreen() {
                 ref={emailRef}
                 style={ss.modalInput}
                 placeholder="Email address"
-                placeholderTextColor="#aab0be"
+                placeholderTextColor={T.faint}
                 value={guestEmail}
                 onChangeText={setGuestEmail}
                 keyboardType="email-address"
@@ -852,20 +877,20 @@ export default function TicketPurchaseScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-    {/* ── Payment Method Sheet ───────────────────────────────── */}
+    {/* ── Payment Method Sheet ─────────────────────────────────
+        Fully themed. The sheet used to be a hardcoded '#fff' panel with
+        '#f0f0f0' dividers while its labels and check marks used T.text — so in
+        dark mode "Add credit card" was white-on-white and the only payment
+        method available looked like an empty sheet. Styles now come from
+        styles/purchase.ts like the rest of the screen, which also means adding a
+        method later can't reintroduce the same bug. */}
     <Modal visible={paymentSheetOpen} transparent animationType="none" onRequestClose={closePaymentSheet}>
-      <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={closePaymentSheet} />
-      <Animated.View style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0,
-        backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-        paddingBottom: 40, transform: [{ translateY: paymentSlide }],
-      }}>
-        <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 8 }}>
-          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#e0e0e0' }} />
+      <TouchableOpacity style={ss.paySheetBackdrop} activeOpacity={1} onPress={closePaymentSheet} />
+      <Animated.View style={[ss.paySheet, { transform: [{ translateY: paymentSlide }] }]}>
+        <View style={ss.paySheetHandleWrap}>
+          <View style={ss.paySheetHandle} />
         </View>
-        <Text style={{ fontSize: 17, fontWeight: '700', color: T.text, paddingHorizontal: 20, paddingBottom: 8 }}>
-          Payments
-        </Text>
+        <Text style={ss.paySheetTitle}>Payment method</Text>
 
         {/* Instant EFT (Paystack/Ozow) — signed-in users only for now;
             guest checkout is card-only until a method-aware guest route exists.
@@ -877,27 +902,28 @@ export default function TicketPurchaseScreen() {
             holds the buyer's seats until the booking expires, so an
             unavailable method must not be shown at all. */}
         {user && isPaymentMethodEnabled('instant_eft') && (
-          <TouchableOpacity onPress={() => selectPaymentMethod('instant_eft')} activeOpacity={0.7}
-            style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-            <View style={{ width: 52, height: 34, borderRadius: 8, backgroundColor: '#1a7f5a', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+          <TouchableOpacity onPress={() => selectPaymentMethod('instant_eft')} activeOpacity={0.7} style={ss.payRow}>
+            <View style={[ss.payRowIconFilled, { backgroundColor: '#1a7f5a' }]}>
               <Bank size={19} color="#ffffff" weight="fill" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '500', color: T.text }}>Instant EFT</Text>
-              <Text style={{ fontSize: 12, color: T.faint, marginTop: 1 }}>Pay from your bank · instant confirmation</Text>
+              <Text style={ss.payRowLabelTop}>Instant EFT</Text>
+              <Text style={ss.payRowSub}>Pay from your bank · instant confirmation</Text>
             </View>
-            {paymentMethod === 'instant_eft' && <Check size={18} color={T.text} weight="bold" />}
+            {paymentMethod === 'instant_eft' && <Check size={18} color={PRIMARY} weight="bold" />}
           </TouchableOpacity>
         )}
 
-        {/* Credit Card */}
-        <TouchableOpacity onPress={() => selectPaymentMethod('card')} activeOpacity={0.7}
-          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-          <View style={{ width: 52, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: T.border3, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+        {/* Credit / debit card */}
+        <TouchableOpacity onPress={() => selectPaymentMethod('card')} activeOpacity={0.7} style={ss.payRow}>
+          <View style={ss.payRowIcon}>
             <CreditCard size={20} color={T.subStrong} weight="regular" />
           </View>
-          <Text style={{ flex: 1, fontSize: 16, fontWeight: '500', color: T.text }}>Add credit card</Text>
-          {paymentMethod === 'card' && <Check size={18} color={T.text} weight="bold" />}
+          <View style={{ flex: 1 }}>
+            <Text style={ss.payRowLabelTop}>Credit / Debit Card</Text>
+            <Text style={ss.payRowSub}>Visa, Mastercard · 3D Secure</Text>
+          </View>
+          {paymentMethod === 'card' && <Check size={18} color={PRIMARY} weight="bold" />}
         </TouchableOpacity>
       </Animated.View>
     </Modal>

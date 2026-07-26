@@ -21,10 +21,10 @@ const sDark = {
   metaRow:            'flex-row items-center gap-[5px]',
   metaText:           'text-[11px] text-white/50 font-medium flex-1',
   cardBottom:         'flex-row items-center gap-2',
-  bottomLabel:        'text-[8px] font-bold tracking-[1.5px] text-white/40 mb-0.5',
+  bottomLabel:        'text-[8px] font-bold tracking-[1.5px] text-white/55 mb-0.5',
   bottomValue:        'text-[13px] font-extrabold',
   bottomCenter:       'flex-1 items-center',
-  bookingNum:         'text-[10px] text-white/25 font-semibold tracking-[0.5px]',
+  bookingNum:         'text-[10px] text-white/35 font-semibold tracking-[0.5px]',
   bottomRight:        'items-end',
   centred:            'flex-1 items-center justify-center gap-3 px-10',
   emptyTitle:         'text-[19px] font-extrabold text-white',
@@ -41,24 +41,41 @@ const sDark = {
   tabLabelInactive:   'text-[14px] font-semibold text-white/35 tracking-[0.2px]',
 };
 
+// ── Light theme ─────────────────────────────────────────────────
+//
+// IMPORTANT: only the SCREEN CHROME flips with the theme here — the header, tab
+// labels, section labels, empty states and the guest-lookup form. The ticket
+// CARD interior does not.
+//
+// The card is a saturated dark gradient (see PALETTES in tickets.tsx) in both
+// themes, and switching the app to light mode does not lighten it. Theming the
+// card's own text alongside the chrome is what put near-black type on a
+// near-black card: the event title, the venue/date meta and the "GENERAL" label
+// all rendered at 40–100% black over #0d2137, which is why they read as blank
+// space in light mode. Card text is therefore pinned to the light values below
+// and shares them with sDark on purpose.
+//
+// If a light card variant is ever introduced, that is the point at which these
+// four keys become theme-dependent — and PALETTES has to move with them.
 const sLight = {
   root:               'flex-1 bg-white',
   scroll:             'px-5 pt-1',
   header:             'flex-row items-center gap-2.5 px-6 pb-[18px]',
   headerTitle:        'text-[28px] font-extrabold text-[#0a0a0a] tracking-[-0.5px]',
-  sectionLabel:       'text-[10px] font-extrabold tracking-[2.5px] text-black/30 mb-3.5 ml-0.5',
+  sectionLabel:       'text-[10px] font-extrabold tracking-[2.5px] text-black/40 mb-3.5 ml-0.5',
   cardTopRow:         'flex-row items-center justify-between',
   statusPill:         'flex-row items-center gap-[5px] px-[9px] py-1 rounded-full border',
   statusDot:          'w-[5px] h-[5px] rounded-full',
   statusText:         'text-[9px] font-extrabold tracking-[1.5px]',
- eventTitle:          'text-[21px] font-extrabold text-[#0a0a0a] tracking-[-0.2px] leading-[22px]',
+  // ↓ on-card text — intentionally identical to sDark, see note above
+ eventTitle:          'text-[21px] font-extrabold text-white tracking-[-0.2px] leading-[22px]',
   metaRow:            'flex-row items-center gap-[5px]',
-  metaText:           'text-[11px] text-black/50 font-medium flex-1',
+  metaText:           'text-[11px] text-white/60 font-medium flex-1',
   cardBottom:         'flex-row items-center gap-2',
-  bottomLabel:        'text-[8px] font-bold tracking-[1.5px] text-black/40 mb-0.5',
+  bottomLabel:        'text-[8px] font-bold tracking-[1.5px] text-white/55 mb-0.5',
   bottomValue:        'text-[13px] font-extrabold',
   bottomCenter:       'flex-1 items-center',
-  bookingNum:         'text-[10px] text-black/25 font-semibold tracking-[0.5px]',
+  bookingNum:         'text-[10px] text-white/35 font-semibold tracking-[0.5px]',
   bottomRight:        'items-end',
   centred:            'flex-1 items-center justify-center gap-3 px-10',
   emptyTitle:         'text-[19px] font-extrabold text-[#0a0a0a]',
@@ -244,13 +261,21 @@ const sheetDark = StyleSheet.create({
   },
 });
 const sheetLight = StyleSheet.create({
+  // The dark sheet's shadow (0.6 opacity, 22px blur, 14px drop) exists to make a
+  // dark card read as raised against a black background — it needs that much
+  // weight to be seen at all. On white it is not depth, it is a grey halo wrapped
+  // around every card, and because the cards overlap in a stack those halos
+  // compound into the dark band that ran between them.
+  //
+  // Light mode gets a shadow tuned for a light surface instead: tight, close and
+  // low-opacity. Same lift, no smudge.
   cardTouchable: {
     borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 14 },
-    shadowOpacity: 0.6,
-    shadowRadius: 22,
-    elevation: 16,
+    shadowColor: '#0a0a0a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    elevation: 5,
   },
   card: {
     width: '100%' as const,
@@ -266,11 +291,14 @@ const sheetLight = StyleSheet.create({
     marginHorizontal: -18,
     position: 'relative' as const,
   },
+  // The perforation circles are punch-outs — they must be the colour of the PAGE
+  // behind the card, or they read as black dots rather than a tear line. #0a0a0a
+  // is right on the dark sheet and wrong here.
   perfCircle: {
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#ffffff',
     position: 'absolute' as const,
     zIndex: 2,
   },
