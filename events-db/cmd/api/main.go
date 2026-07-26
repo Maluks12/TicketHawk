@@ -229,6 +229,20 @@ func main() {
 	}
 
 	// ==========================================
+	// Service identity (intentionally not versioned — this IS the root)
+	// ==========================================
+	// Without a handler here, GET / returned Gin's bare 404. URL-categorisation
+	// crawlers fetch exactly that path to decide what a host is, and with nothing
+	// to read, Symantec's WebPulse rated api.ticket-hawk.com as "Placeholders" —
+	// its parked-domain bucket, filed under the Security category group. Networks
+	// block that aggressively, and a blocked API fails invisibly in the mobile
+	// apps: cached bookings still render while every live call quietly fails.
+	// See internal/handlers/root_handler.go for the full reasoning.
+	router.GET("/", handlers.ServiceIdentityHandler())
+	router.HEAD("/", handlers.ServiceIdentityHandler())
+	router.GET("/robots.txt", handlers.RobotsHandler())
+
+	// ==========================================
 	// Health Check (intentionally not versioned — infra tools call this)
 	// ==========================================
 	router.GET("/health", func(c *gin.Context) {
