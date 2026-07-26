@@ -94,9 +94,18 @@ func (s *QRService) GenerateQRCode(bookingID string) error {
 		return fmt.Errorf("failed to upload QR code: %w", err)
 	}
 
+	// NOTE: this deliberately does NOT set tickets_sent. That flag means
+	// "confirmation email delivered", and only the booking worker sets it,
+	// after a successful send. Setting it here (QR generation happens BEFORE
+	// the email is attempted) made it true for every ticket booking, which
+	// broke two things: retryEmailSend short-circuits on booking.TicketsSent
+	// and would mark queued retries 'sent' without ever sending them, and the
+	// startup re-enqueue sweep (confirmed + tickets_sent = FALSE) could never
+	// find a booking whose email had failed. Net effect: a transient email
+	// failure meant the buyer silently never received their ticket.
 	updateQuery := `
 		UPDATE bookings
-		SET qr_code_data = $1, qr_code_url = $2, tickets_sent = TRUE
+		SET qr_code_data = $1, qr_code_url = $2
 		WHERE id = $3
 	`
 	_, err = s.pool.Exec(ctx, updateQuery, encryptedData, qrURL, bookingID)
