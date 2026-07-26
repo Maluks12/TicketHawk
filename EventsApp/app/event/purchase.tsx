@@ -31,6 +31,7 @@ import SeatingMap, { detectVenueType, MapLegend } from '../../components/seating
 import { makePurchaseSheet, purchaseTokens, PRIMARY } from '../../styles/purchase';
 import { useAppTheme } from '../../theme/colors';
 import { isPaymentMethodEnabled } from '../../lib/paymentMethods';
+import { openLegal } from '../../lib/legalLinks';
 import {
   CaretLeft, CaretDown, ArrowsDownUp, Star, CrownSimple, Check,
   CreditCard, AppleLogo, PaypalLogo, Bank,
@@ -728,11 +729,11 @@ export default function TicketPurchaseScreen() {
                 <Text style={ss.termsText}>
                   By tapping Pay Now to complete your purchase, you agree to
                   TicketHawk's{' '}
-                  <Text style={ss.termsLink} onPress={() => Linking.openURL('https://ticket-hawk.com/terms')}>
+                  <Text style={ss.termsLink} onPress={() => openLegal('terms')}>
                     Terms of Use
                   </Text>
                   {' '}and confirm that you have read our{' '}
-                  <Text style={ss.termsLink} onPress={() => Linking.openURL('https://ticket-hawk.com/privacy')}>
+                  <Text style={ss.termsLink} onPress={() => openLegal('privacy')}>
                     Privacy Policy
                   </Text>
                   .

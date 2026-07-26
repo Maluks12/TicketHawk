@@ -7,6 +7,7 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { openStudioApp } from '../../lib/studioLink';
+import { openLegal } from '../../lib/legalLinks';
 import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 import { useAppTheme } from '../../theme/colors';
@@ -273,21 +274,21 @@ export default function ProfileScreen() {
           <Row
             icon={<Feather name="help-circle" size={16} color={colors.iconColor} />}
             label="Help & support"
-            onPress={() => Linking.openURL('mailto:support@example.com')}
+            onPress={() => Linking.openURL('mailto:support@ticket-hawk.com')}
             colors={colors}
           />
           <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
           <Row
             icon={<Feather name="file-text" size={16} color={colors.iconColor} />}
             label="Terms of use"
-            onPress={() => {}}
+            onPress={() => openLegal('terms')}
             colors={colors}
           />
           <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
           <Row
             icon={<Feather name="shield" size={16} color={colors.iconColor} />}
             label="Privacy policy"
-            onPress={() => {}}
+            onPress={() => openLegal('privacy')}
             colors={colors}
           />
         </Section>

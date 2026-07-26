@@ -11,6 +11,7 @@ import { useAuthStore } from '../../store/authStore';
 import { s, sheet, fieldSheet } from '../../styles/auth';
 import { useAppTheme } from '../../theme/colors';
 import BrandLogo from '../../components/BrandLogo';        // ADD
+import { openLegal } from '../../lib/legalLinks';
 
 type Mode = 'login' | 'register';
 
@@ -348,8 +349,27 @@ export default function AuthScreen() {
                   {agreed && <Ionicons name="checkmark" size={13} color={isDark ? '#000' : '#fff'} />}
                 </View>
                 <Text className={s.termsText} style={{ color: colors.subText }}>
-                  By checking this box, you agree to our <Text className={s.termsLink} style={{ color: colors.text }}>Terms of Use</Text>
-                  {' '}and acknowledge having read our <Text className={s.termsLink} style={{ color: colors.text }}>Privacy Policy</Text>.
+                  {/* The two document names were styled as links but had no
+                      handler, so tapping them only toggled the checkbox. A user
+                      is being asked to agree to terms they had no way to read. */}
+                  By checking this box, you agree to our{' '}
+                  <Text
+                    className={s.termsLink}
+                    style={{ color: colors.text }}
+                    onPress={(e) => { e.stopPropagation(); openLegal('terms'); }}
+                    suppressHighlighting
+                  >
+                    Terms of Use
+                  </Text>
+                  {' '}and acknowledge having read our{' '}
+                  <Text
+                    className={s.termsLink}
+                    style={{ color: colors.text }}
+                    onPress={(e) => { e.stopPropagation(); openLegal('privacy'); }}
+                    suppressHighlighting
+                  >
+                    Privacy Policy
+                  </Text>.
                 </Text>
               </TouchableOpacity>
               {errors.agreed ? <Text className={s.termsErr}>{errors.agreed}</Text> : null}
