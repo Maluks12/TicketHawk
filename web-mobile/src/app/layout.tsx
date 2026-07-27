@@ -5,6 +5,7 @@ import NavBar from '@/components/navBar';
 import Footer from '@/components/footer';
 import ThemedMain from '@/components/themedMain';
 import ThemeSync from '@/components/themesync';
+import ReturnPathTracker from '@/components/returnPathTracker';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://ticket-hawk.com'),
@@ -75,6 +76,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             OS rather than the theme picked in the app — so a light theme on a
             dark phone left black showing through wherever <main> did not reach. */}
         <ThemeSync />
+
+        {/* Records the last non-auth page visited, so logging in returns the
+            user there instead of router.back() landing them on whatever
+            happened to precede the login page. */}
+        <ReturnPathTracker />
 
         <NavBar />
 

@@ -5,6 +5,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
+import { resolveReturnPath, clearReturnPath } from '@/lib/returnPath';
 
 type Mode = 'login' | 'register';
 
@@ -79,6 +80,28 @@ export default function AuthPage() {
     return isNaN(d.getTime()) ? null : d.toISOString();
   };
 
+  // Post-auth destination.
+  //
+  // Was router.back(). That returned the user to the previous history entry
+  // whatever it was — which after a password reset is /reset-password, so
+  // finishing a reset and signing in dumped them back on "Set your password"
+  // holding a spent token. It also did nothing at all when the login page was
+  // the first entry in the tab, e.g. arriving from a link in an email.
+  //
+  // replace(), not push(): the login page should not sit in history behind the
+  // page the user just reached, or Back walks them into a login form they have
+  // already completed.
+  const goAfterAuth = useCallback(() => {
+    // window.location rather than useSearchParams(): that hook opts the whole
+    // route into dynamic rendering and requires a <Suspense> boundary in the
+    // App Router. This callback only ever runs after a click, so window is
+    // guaranteed to exist and the plain API is the simpler correct tool.
+    const next = new URLSearchParams(window.location.search).get('next');
+    const dest = resolveReturnPath(next);
+    clearReturnPath();
+    router.replace(dest);
+  }, [router]);
+
   const handleLogin = useCallback(async () => {
     const errs: Record<string, string> = {};
     if (!loginEmail.trim()) errs.loginEmail = 'Please enter your email';
@@ -87,12 +110,12 @@ export default function AuthPage() {
     setLoading(true); setGlobalErr(null);
     try {
       await login(loginEmail.trim().toLowerCase(), loginPassword);
-      router.back();
+      goAfterAuth();
     } catch (e: any) {
       const msg = e?.response?.data?.error ?? '';
       setGlobalErr(msg.includes('credentials') ? 'Incorrect email or password.' : msg || 'Something went wrong.');
     } finally { setLoading(false); }
-  }, [loginEmail, loginPassword, login, router]);
+  }, [loginEmail, loginPassword, login, goAfterAuth]);
 
   const handleRegister = useCallback(async () => {
     const errs: Record<string, string> = {};
@@ -116,7 +139,7 @@ export default function AuthPage() {
         first_name: firstName.trim(), last_name: lastName.trim(),
         phone_number: phone.trim(), date_of_birth: parseDobToISO(dob)!,
       });
-      router.back();
+      goAfterAuth();
     } catch (e: any) {
       const msg = e?.response?.data?.error ?? '';
       setGlobalErr(msg.toLowerCase().includes('email') ? 'An account with this email already exists.' : msg || 'Something went wrong.');
