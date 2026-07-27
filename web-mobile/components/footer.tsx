@@ -10,7 +10,7 @@ import { COMPANY } from '@/lib/legal';
 // ones listed below.
 //
 // ── Why some routes hide it ──────────────────────────────────────────────────
-// Checkout and cart screens end in a `position: fixed` CTA bar pinned to the
+// Event, cart and checkout screens end in a `position: fixed` CTA bar pinned to the
 // bottom of the viewport. A footer in normal document flow scrolls up behind
 // that bar, so the copyright line ends up rendering *through* the Pay Now
 // button and the legal links sit in a dead strip just above it. It reads as a
@@ -20,22 +20,26 @@ import { COMPANY } from '@/lib/legal';
 // Those routes carry their own links to the legal documents (the s49
 // acknowledgement links to clause 7, and the notice above the button links to
 // the Terms and Privacy Policy), so hiding the footer costs no reachability.
-const HIDE_FOOTER_ON = [
-  '/purchase',       // /events/[id]/purchase
-  '/cart',           // /cart and /cart/checkout
-  '/payment',        // /payment/[id] — hosted gateway return
+// Matched as anchored patterns, not substrings. The first attempt used
+// endsWith/startsWith on path fragments, which both missed /events/[id] (its
+// CTA is declared inside a template-literal <style> block, so it does not look
+// like the others) and would have matched any future route that merely
+// contained one of those words.
+const HIDE_FOOTER_PATTERNS: RegExp[] = [
+  /^\/events\/[^/]+$/,            // event detail — "Get Tickets" bar
+  /^\/events\/[^/]+\/purchase$/,  // ticket selection → summary → pay
+  /^\/cart$/,                     // cart — "Checkout" bar
+  /^\/cart\/checkout$/,           // reserve → pay
+  /^\/payment\/[^/]+$/,           // hosted gateway return — transient
 ];
 
 export default function Footer() {
   const { colors } = useAppTheme();
   const pathname = usePathname() || '';
 
-  // endsWith for /purchase so it matches the nested route without also
-  // matching a future /purchases listing page.
-  const hidden = HIDE_FOOTER_ON.some(
-    (seg) => pathname.endsWith(seg) || pathname.startsWith(seg + '/') || pathname === seg,
-  );
-  if (hidden) return null;
+  // Normalise a trailing slash so /cart/ and /cart both match.
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  if (HIDE_FOOTER_PATTERNS.some((re) => re.test(path))) return null;
 
   const LEGAL_LINKS = [
     { href: '/terms',   label: 'Terms of Use' },
