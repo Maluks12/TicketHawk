@@ -10,6 +10,7 @@ import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPen
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
+import RiskAcknowledgement from '@/components/risk-acknowledgement';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtPrice(p: number) {
@@ -48,6 +49,12 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [quantity,       setQuantity]       = useState(1);
   const [step,              setStep]        = useState<'select' | 'map' | 'summary'>('select');
   const [adding,         setAdding]         = useState(false);
+
+  // CPA s49 acknowledgement. Deliberately NOT persisted anywhere: each
+  // purchase needs its own affirmative act, so a buyer who ticked this last
+  // week has not thereby consented this week.
+  const [riskAccepted,   setRiskAccepted]   = useState(false);
+  const [riskNudge,      setRiskNudge]      = useState(false);
   const [paymentMethod,  setPaymentMethod]  = useState<PaymentMethodId>(defaultPaymentMethod());
   const [paySheetOpen,   setPaySheetOpen]   = useState(false);
   const [contactOpen,    setContactOpen]    = useState(false);
@@ -486,7 +493,19 @@ return (
         )}
       </div>
 
-       {/* CTA bar */}
+       {/* CPA s49 acknowledgement — summary step only, immediately above the
+          Pay button so it is the last thing read before paying. */}
+      {step === 'summary' && selectedType && !isSoldOut(selectedType) && (
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px', width: '100%' }}>
+          <RiskAcknowledgement
+            checked={riskAccepted}
+            onChange={(v) => { setRiskAccepted(v); if (v) setRiskNudge(false); }}
+            highlight={riskNudge}
+          />
+        </div>
+      )}
+
+      {/* CTA bar */}
     {selectedType && !isSoldOut(selectedType) && (
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: bg, borderTop: `1px solid ${border}`, padding: '14px 16px 28px', display: 'flex', alignItems: 'center', gap: 14, maxWidth: 640, margin: '0 auto' }}>
         <div>
@@ -503,11 +522,13 @@ return (
             } else if (step === 'map') {
               setStep('summary');
             } else {
+              // Gate: no payment without the s49 acknowledgement.
+              if (!riskAccepted) { setRiskNudge(true); return; }
               handleBuyNow();
             }
           }}
-          disabled={adding}
-          style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer', opacity: adding ? 0.6 : 1 }}
+          disabled={adding || (step === 'summary' && !riskAccepted)}
+          style={{ flex: 1, background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 15, fontWeight: 800, cursor: (adding || (step === 'summary' && !riskAccepted)) ? 'not-allowed' : 'pointer', opacity: (adding || (step === 'summary' && !riskAccepted)) ? 0.55 : 1 }}
         >
           {adding ? 'Processing…' : step === 'select' ? (venueType !== 'none' ? 'Choose Seats' : 'Review Order') : step === 'map' ? 'Review Order' : 'Pay Now'}
         </button>

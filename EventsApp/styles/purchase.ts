@@ -364,6 +364,54 @@ export const makePurchaseSheet = (dark: boolean) => {
     marginHorizontal: 16, marginTop: 16, fontWeight: '400',
   },
 
+  // ── CPA s49 risk acknowledgement ───────────────────────────────────────────
+  // Styled to be conspicuous rather than to blend in: s49(1) requires the
+  // consumer's attention to be DRAWN to terms of this kind. A control that looks
+  // like the rest of the form is doing the opposite of what the section asks.
+  //
+  // Rules for anyone editing this: never default the checkbox to checked, and
+  // never let the Pay button through while it is false. Pre-ticked consent is
+  // not assent, and an ungated button makes the whole control decorative.
+  riskBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: T.border2,
+    backgroundColor: T.trustSurface,
+  },
+  riskBoxChecked: { borderColor: T.trustIcon },
+  riskBoxError:   { borderColor: PRIMARY },
+  riskCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1.6,
+    borderColor: T.border3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  riskCheckOn: { backgroundColor: PRIMARY, borderColor: PRIMARY },
+  riskLabel: {
+    flex: 1,
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: T.text,
+  },
+  riskError: {
+    marginHorizontal: 20,
+    marginTop: -6,
+    marginBottom: 12,
+    fontSize: 12,
+    fontWeight: '600',
+    color: PRIMARY,
+  },
+
   // ── Payment method sheet ───────────────────────────────────────────────────
   // These were inline styles in purchase.tsx with a hardcoded '#fff' sheet and
   // '#f0f0f0' row dividers, while the LABELS inside used T.text. In dark mode

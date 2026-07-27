@@ -89,6 +89,12 @@ export default function TicketPurchaseScreen() {
   const [step, setStep]               = useState<'select' | 'map' | 'summary'>('select');
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [adding, setAdding]           = useState(false);
+
+  // CPA s49 acknowledgement. Not persisted: each purchase needs its own
+  // affirmative act, so a buyer who ticked this last week has not thereby
+  // consented this week. See the note in styles/purchase.ts (riskBox).
+  const [riskAccepted, setRiskAccepted] = useState(false);
+  const [riskNudge, setRiskNudge] = useState(false);
   const [guestName, setGuestName]         = useState('');
   const [guestSurname, setGuestSurname]   = useState('');
   const [guestEmail, setGuestEmail]       = useState('');
@@ -725,10 +731,55 @@ export default function TicketPurchaseScreen() {
                   )}
                 </View>
 
-                {/* Terms agreement */}
+                {/* ── CPA s49 acknowledgement ─────────────────────────────
+                    Section 49 governs HOW agreement is obtained, not what the
+                    terms say. For terms that limit our liability or ask the
+                    buyer to assume risk, their attention must be drawn to the
+                    term conspicuously, and s49(5) requires assent by an act
+                    "consistent with acknowledgement of the notice" where the
+                    activity could cause serious injury or death.
+
+                    A Pay button alone cannot be that act: it means "I want this
+                    ticket" and "I accept the refund policy" at the same time, so
+                    it is not referable to the risk notice specifically. One
+                    checkbox, one clause, risks named. */}
+                <TouchableOpacity
+                  style={[
+                    ss.riskBox,
+                    riskAccepted && ss.riskBoxChecked,
+                    riskNudge && !riskAccepted && ss.riskBoxError,
+                  ]}
+                  onPress={() => { setRiskAccepted(v => !v); setRiskNudge(false); }}
+                  activeOpacity={0.75}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: riskAccepted }}
+                  accessibilityLabel="Accept the risks of attending a live event"
+                >
+                  <View style={[ss.riskCheck, riskAccepted && ss.riskCheckOn]}>
+                    {riskAccepted && <Check size={13} color="#fff" weight="bold" />}
+                  </View>
+                  <Text style={ss.riskLabel}>
+                    I accept that attending a live event carries risks including personal
+                    injury, that the organiser and venue reserve the right of admission,
+                    and that age restrictions may apply — as set out in{' '}
+                    <Text
+                      style={ss.termsLink}
+                      onPress={() => openLegal('terms')}
+                      suppressHighlighting
+                    >
+                      clause 7 of the Terms of Use
+                    </Text>
+                    .
+                  </Text>
+                </TouchableOpacity>
+                {riskNudge && !riskAccepted && (
+                  <Text style={ss.riskError}>Please confirm this before continuing.</Text>
+                )}
+
+                {/* General terms notice. Adequate for ordinary purchase terms —
+                    it is only the s49(1) categories above that need the tick. */}
                 <Text style={ss.termsText}>
-                  By tapping Pay Now to complete your purchase, you agree to
-                  TicketHawk's{' '}
+                  By tapping Pay Now you also agree to TicketHawk's{' '}
                   <Text style={ss.termsLink} onPress={() => openLegal('terms')}>
                     Terms of Use
                   </Text>
@@ -766,8 +817,12 @@ export default function TicketPurchaseScreen() {
           )}
           {step === 'summary' && (
             <TouchableOpacity
-              style={[ss.payBtn, adding && ss.payBtnDisabled]}
-              onPress={handleAddToCart}
+              style={[ss.payBtn, (adding || !riskAccepted) && ss.payBtnDisabled]}
+              onPress={() => {
+                // Gate: no payment without the s49 acknowledgement.
+                if (!riskAccepted) { setRiskNudge(true); return; }
+                handleAddToCart();
+              }}
               disabled={adding}
               activeOpacity={0.88}
             >

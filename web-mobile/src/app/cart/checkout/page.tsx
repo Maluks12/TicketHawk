@@ -10,6 +10,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import { ShieldCheck, Lock, Smartphone } from 'lucide-react';
+import RiskAcknowledgement from '@/components/risk-acknowledgement';
 
 type Phase = 'review' | 'reserving' | 'reserved' | 'confirming';
 
@@ -30,6 +31,10 @@ export default function CartCheckoutPage() {
   const [cart, setCart] = useState<CartSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [phase, setPhase] = useState<Phase>('review');
+
+  // CPA s49 acknowledgement — see components/risk-acknowledgement.tsx.
+  const [riskAccepted, setRiskAccepted] = useState(false);
+  const [riskNudge,    setRiskNudge]    = useState(false);
   const [reservations, setReservations] = useState<any[]>([]);
   const [initialSecs, setInitialSecs] = useState(600);
   const [payMethod, setPayMethod] = useState<'card' | 'eft'>('card');
@@ -252,6 +257,21 @@ export default function CartCheckoutPage() {
         </div>
       </div>
 
+      {/* CPA s49 acknowledgement — shown once seats are held, immediately
+          above the Pay button. Sits outside the sticky bar because that bar is
+          a horizontal flex row sized for the total and one button. */}
+      {phase === 'reserved' && (
+        <div style={{ position: 'fixed', bottom: 88, left: 0, right: 0, padding: '0 24px', zIndex: 51 }}>
+          <div style={{ maxWidth: 640, margin: '0 auto' }}>
+            <RiskAcknowledgement
+              checked={riskAccepted}
+              onChange={(v) => { setRiskAccepted(v); if (v) setRiskNudge(false); }}
+              highlight={riskNudge}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Sticky CTA */}
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: isDark ? '#0a0a0a' : '#fff', borderTop: `1px solid ${border}`, padding: '14px 24px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 50 }}>
         <div>
@@ -265,7 +285,7 @@ export default function CartCheckoutPage() {
         )}
         {phase === 'reserving' && <div style={{ background: '#ff2d55', color: '#fff', borderRadius: 14, padding: '14px 22px', fontSize: 15, fontWeight: 800, opacity: 0.5 }}>Reserving seats…</div>}
         {phase === 'reserved' && (
-          <button onClick={handleConfirm} disabled={secondsLeft === 0} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px 22px', fontSize: 15, fontWeight: 800, cursor: secondsLeft === 0 ? 'not-allowed' : 'pointer', opacity: secondsLeft === 0 ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => { if (!riskAccepted) { setRiskNudge(true); return; } handleConfirm(); }} disabled={secondsLeft === 0 || !riskAccepted} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 14, padding: '14px 22px', fontSize: 15, fontWeight: 800, cursor: (secondsLeft === 0 || !riskAccepted) ? 'not-allowed' : 'pointer', opacity: (secondsLeft === 0 || !riskAccepted) ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 8 }}>
             💳 Pay Now
           </button>
         )}
