@@ -488,22 +488,22 @@ return (
               </div>
             </div>
 
+            {/* CPA s49 acknowledgement. Lives INSIDE the summary content so it
+                flows directly under the price breakdown — the wrapper above
+                already reserves 100px at the bottom for the fixed CTA bar, and
+                rendering this outside that wrapper put all 100px of it between
+                the total and the checkbox. */}
+            <RiskAcknowledgement
+              checked={riskAccepted}
+              onChange={(v) => { setRiskAccepted(v); if (v) setRiskNudge(false); }}
+              highlight={riskNudge}
+            />
+
             {error && <p style={{ color: '#ff3c6e', fontSize: 13, margin: 0 }}>{error}</p>}
           </div>
         )}
       </div>
 
-       {/* CPA s49 acknowledgement — summary step only, immediately above the
-          Pay button so it is the last thing read before paying. */}
-      {step === 'summary' && selectedType && !isSoldOut(selectedType) && (
-        <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px', width: '100%' }}>
-          <RiskAcknowledgement
-            checked={riskAccepted}
-            onChange={(v) => { setRiskAccepted(v); if (v) setRiskNudge(false); }}
-            highlight={riskNudge}
-          />
-        </div>
-      )}
 
       {/* CTA bar */}
     {selectedType && !isSoldOut(selectedType) && (

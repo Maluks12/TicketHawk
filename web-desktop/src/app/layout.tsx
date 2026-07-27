@@ -4,6 +4,7 @@ import './styles/global.css';
 import NavBar from '@/components/navBar';
 import Footer from '@/components/footer';
 import ThemedMain from '@/components/themedMain';
+import ThemeSync from '@/components/themesync';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://ticket-hawk.com'),
@@ -69,6 +70,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
       </head>
       <body>
+        {/* Paints <html>/<body> and the browser chrome from the ACTIVE theme.
+            global.css only has a prefers-color-scheme fallback, which tracks the
+            OS rather than the theme picked in the app — so a light theme on a
+            dark phone left black showing through wherever <main> did not reach. */}
+        <ThemeSync />
+
         <NavBar />
 
         <ThemedMain>{children}</ThemedMain>

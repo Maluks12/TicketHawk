@@ -775,21 +775,6 @@ export default function TicketPurchaseScreen() {
                 {riskNudge && !riskAccepted && (
                   <Text style={ss.riskError}>Please confirm this before continuing.</Text>
                 )}
-
-                {/* General terms notice. Adequate for ordinary purchase terms —
-                    it is only the s49(1) categories above that need the tick. */}
-                <Text style={ss.termsText}>
-                  By tapping Pay Now you also agree to TicketHawk's{' '}
-                  <Text style={ss.termsLink} onPress={() => openLegal('terms')}>
-                    Terms of Use
-                  </Text>
-                  {' '}and confirm that you have read our{' '}
-                  <Text style={ss.termsLink} onPress={() => openLegal('privacy')}>
-                    Privacy Policy
-                  </Text>
-                  .
-                </Text>
-
               </View>
             )}
 

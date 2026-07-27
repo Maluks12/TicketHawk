@@ -1,29 +1,47 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAppTheme } from '@/themes/colors';
 import { COMPANY } from '@/lib/legal';
 
 // ── Footer ───────────────────────────────────────────────────────────────────
-// Rendered once in the root layout so it appears on every page site-wide.
+// Rendered once in the root layout, so it appears on every page — except the
+// ones listed below.
 //
-// The legal links are here rather than in the header for the ordinary reason
-// that footers are where people look for them, but also because the app's
-// checkout screen links to /terms and /privacy directly: those routes have to
-// exist and be reachable, and a buyer who taps through from the payment screen
-// should be able to find their way back to the rest.
+// ── Why some routes hide it ──────────────────────────────────────────────────
+// Checkout and cart screens end in a `position: fixed` CTA bar pinned to the
+// bottom of the viewport. A footer in normal document flow scrolls up behind
+// that bar, so the copyright line ends up rendering *through* the Pay Now
+// button and the legal links sit in a dead strip just above it. It reads as a
+// layout bug, and on a phone it actively competes with the primary action at
+// the exact moment the buyer is deciding to pay.
 //
-// next/link, not <a>: these are internal routes, and client-side navigation
-// avoids a full document reload from a page the user may be mid-checkout on.
-
-const LEGAL_LINKS = [
-  { href: '/terms',   label: 'Terms of Use' },
-  { href: '/privacy', label: 'Privacy Policy' },
-  { href: '/legal',   label: 'Legal' },
+// Those routes carry their own links to the legal documents (the s49
+// acknowledgement links to clause 7, and the notice above the button links to
+// the Terms and Privacy Policy), so hiding the footer costs no reachability.
+const HIDE_FOOTER_ON = [
+  '/purchase',       // /events/[id]/purchase
+  '/cart',           // /cart and /cart/checkout
+  '/payment',        // /payment/[id] — hosted gateway return
 ];
 
 export default function Footer() {
   const { colors } = useAppTheme();
+  const pathname = usePathname() || '';
+
+  // endsWith for /purchase so it matches the nested route without also
+  // matching a future /purchases listing page.
+  const hidden = HIDE_FOOTER_ON.some(
+    (seg) => pathname.endsWith(seg) || pathname.startsWith(seg + '/') || pathname === seg,
+  );
+  if (hidden) return null;
+
+  const LEGAL_LINKS = [
+    { href: '/terms',   label: 'Terms of Use' },
+    { href: '/privacy', label: 'Privacy Policy' },
+    { href: '/legal',   label: 'Legal' },
+  ];
 
   return (
     <footer
