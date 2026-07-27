@@ -174,7 +174,7 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
     </div>
     <div className="pt-2.5 px-0.5">
       <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2 h-[36px]" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
@@ -197,7 +197,7 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
     </div>
     <div className="pt-2.5 px-0.5">
       <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
-      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2 h-[36px]" style={{ color: colors.text }}>{item.title}</p>
+      <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>

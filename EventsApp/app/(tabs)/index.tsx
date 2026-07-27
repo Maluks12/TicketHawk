@@ -259,7 +259,11 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       </View>
     </View>
     <View className={s.hCardBody}>
-      <Text className={s.hCardCat} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
+      {/* colors.subText is required, not optional: hCardCat carries no colour
+          of its own, so without it the date falls back to RN's default black
+          and vanishes on the dark theme. EventCard has always had this; the
+          Top 10 variant was the one that missed it. */}
+      <Text className={s.hCardCat} style={{ color: colors.subText }} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
       <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
       <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
