@@ -160,8 +160,22 @@ function ScrollArrow({ dir, onClick, colors }: { dir: 'left' | 'right'; onClick:
 const eventCardEqual = (a: any, b: any) =>
   a.item === b.item && a.colors === b.colors && a.rank === b.rank;
 
+// `self-start` on the card button is load-bearing, not cosmetic.
+//
+// The carousel row is `flex` with no align-items, so items default to
+// `stretch` and every card button is stretched to the tallest card in the
+// row. A <button> then vertically CENTRES its own content — that is the UA
+// default, not something we set — so a card whose title runs to one line
+// instead of two has shorter content, gets centred inside the stretched
+// button, and its image and date visibly sag below its neighbours.
+//
+// This was invisible while the title carried a fixed h-[36px], because every
+// card then had identical content height and centring was a no-op. Removing
+// that fixed height (so short titles no longer leave a gap above the venue)
+// exposed it. `self-start` opts the button out of stretching, so it sizes to
+// its content and there is nothing to centre.
 const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
-  <button onClick={onPress} className="shrink-0 text-left" style={{ width: CARD_W }}>
+  <button onClick={onPress} className="shrink-0 self-start text-left" style={{ width: CARD_W }}>
     <div className="relative w-full aspect-[16/10] rounded-[16px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
@@ -188,7 +202,7 @@ EventCard.displayName = 'EventCard';
 
 // ── CHANGE E: Top10Card — larger dimensions ───────────────────────────────────
 const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
-  <button onClick={onPress} className="shrink-0 text-left" style={{ width: CARD_W }}>
+  <button onClick={onPress} className="shrink-0 self-start text-left" style={{ width: CARD_W }}>
     <div className="relative w-full aspect-[16/10] rounded-[16px] overflow-hidden">
       {item.cover_image_url && (
         <CoverImage uri={item.cover_image_url} alt={item.title} className="absolute inset-0 w-full h-full object-cover" />
