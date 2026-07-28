@@ -140,7 +140,14 @@ export default function StudioScan() {
   const doPoolAdmit = async () => {
     if (!eventId || !outcome || outcome.kind !== 'pool_prompt') return;
     await confirmPoolAdmit(eventId, outcome.bookingId, headcount);
-    showResult({ kind: 'admitted', name: `${outcome.buyer} +${headcount}`, tier: 'Group', slot: 0 });
+    // Was hardcoded 'Group', which told the door nothing about what the group
+    // had actually bought. outcome.tier comes from the manifest.
+    showResult({
+      kind: 'admitted',
+      name: `${outcome.buyer} +${headcount}`,
+      tier: `${outcome.tier} · ${headcount} admitted`,
+      slot: 0,
+    });
   };
 
   const doProvisional = async () => {

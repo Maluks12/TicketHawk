@@ -300,6 +300,7 @@ export const makePurchaseSheet = (dark: boolean) => {
   // ── Empty state ────────────────────────────────────────────────────────────
   emptyState:   { padding: 48, alignItems: 'center', gap: 8 },
   emptyIcon:    { fontSize: 36 },
+  emptyTitle:   { fontSize: 16, fontWeight: '800', color: T.text },
   emptyText:    { fontSize: 13, color: T.faint, fontWeight: '600' },
 
   // ── Contact modal ──────────────────────────────────────────────────────────

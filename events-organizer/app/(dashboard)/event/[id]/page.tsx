@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
+import TicketTiersPanel from '../../../../components/TicketTiersPanel';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
 type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
@@ -12,9 +13,19 @@ type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
 const MERCH_ENABLED = false;
 
+// Mirrors what /organiser/dashboard/events/:id/stats returns for a tier.
+//
+// reserved_count, available_tickets and is_sold_out were all absent here even
+// though the API has always sent them, which is why the read-only table could
+// not show held tickets or a sold-out state. TicketTiersPanel needs them, and
+// `description` is widened from optional to nullable-required so the shapes
+// line up exactly rather than merely overlapping.
 interface TicketTypeRow {
-  id: string; name: string; description?: string | null;
+  id: string; name: string; description: string | null;
   price: number; capacity: number | null; tickets_sold: number;
+  reserved_count: number;
+  available_tickets?: number;
+  is_sold_out?: boolean;
   sort_order: number; is_visible: boolean;
   sale_starts_at?: string | null; sale_ends_at?: string | null;
 }
@@ -470,40 +481,15 @@ export default function EventDetailPage() {
               <Row label="Max per attendee"  value={ev.max_tickets_per_user ? String(ev.max_tickets_per_user) : 'No limit'} />
               <Row label="Waitlist"          value={ev.allow_waitlist ? 'Enabled' : 'Disabled'} />
 
-              {ev.ticket_types && ev.ticket_types.length > 0 ? (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>
-                    Ticket tiers
-                  </div>
-                  <table className="meta-table" style={{ width: '100%' }}>
-                    <thead>
-                      <tr>
-                        <th>Tier</th><th>Price</th><th>Sold</th><th>Capacity</th><th>Visible</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...ev.ticket_types].sort((a, b) => a.sort_order - b.sort_order).map(t => (
-                        <tr key={t.id}>
-                          <td>
-                            <div style={{ fontWeight: 600 }}>{t.name}</div>
-                            {t.description && (
-                              <div style={{ fontSize: 12, color: '#8a8d91' }}>{t.description}</div>
-                            )}
-                          </td>
-                          <td>{t.price > 0 ? fmtMoney(t.price, ev.currency) : 'Free'}</td>
-                          <td>{t.tickets_sold}</td>
-                          <td>{t.capacity ?? '∞'}</td>
-                          <td>{t.is_visible ? 'Yes' : 'Hidden'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div style={{ fontSize: 12.5, color: '#8a8d91', marginTop: 10 }}>
-                  Flat pricing — no separate tiers.
-                </div>
-              )}
+              {/* Was a read-only table. The backend has always exposed full tier
+                  CRUD; the dashboard just never called it, so a typo’d price or a
+                  tier that needed pulling off sale meant a support request. */}
+              <TicketTiersPanel
+                eventId={id}
+                tiers={ev.ticket_types ?? []}
+                currency={ev.currency}
+                onChanged={fetchStats}
+              />
             </Panel>
 
             {/* ── Classification ─────────────────────────────────────────── */}

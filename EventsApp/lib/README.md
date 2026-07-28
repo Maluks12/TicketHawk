@@ -360,7 +360,8 @@ export interface TicketType {
   capacity?: number | null;
   tickets_sold: number;
   reserved_count: number;
-  available?: number | null;
+  available_tickets?: number;
+  is_sold_out?: boolean;
   sort_order: number;
   is_visible: boolean;
   sale_starts_at?: string | null;

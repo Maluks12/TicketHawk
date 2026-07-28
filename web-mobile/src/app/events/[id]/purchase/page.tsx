@@ -23,16 +23,52 @@ function fmtDate(iso: string) {
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
+// ─── Availability ─────────────────────────────────────────────────
+//
+// The server already decides this. models.TicketType.ComputeAvailable() sets
+// `available_tickets` and `is_sold_out` on every tier it returns, and those are
+// the same numbers the booking transaction enforces under its row lock. So the
+// job here is to READ that answer, not to recompute it.
+//
+// It used to recompute it, from a field that does not exist:
+//
+//     tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - ... : null)
+//
+// The API sends `available_tickets`, never `available`, so the left side was
+// always undefined and the fallback always ran. That fallback disagreed with the
+// server in two cases:
+//
+//   capacity 0   -> `tt.capacity ?` is falsy, so 0 was read as "unlimited" and a
+//                   tier with no allocation showed as Available.
+//   oversold     -> available of -2 is not `=== 0`, so an over-allocated tier
+//                   showed "-2 left" instead of Sold Out.
+//
+// Reading the server field fixes both and removes the duplicate rule. The local
+// computation is kept only as a fallback for older payloads, now with `!= null`
+// instead of a truthiness test and `<= 0` instead of `=== 0`.
+function availableOf(tt: TicketType): number | null {
+  if (typeof tt.available_tickets === 'number') {
+    // -1 is the UnlimitedTickets sentinel from the Go model.
+    return tt.available_tickets < 0 ? null : tt.available_tickets;
+  }
+  if (tt.capacity != null) {
+    return Math.max(0, tt.capacity - (tt.tickets_sold ?? 0) - (tt.reserved_count ?? 0));
+  }
+  return null; // no cap = unlimited
+}
+
+function isSoldOut(tt: TicketType): boolean {
+  if (typeof tt.is_sold_out === 'boolean') return tt.is_sold_out;
+  const av = availableOf(tt);
+  return av !== null && av <= 0;
+}
+
 function availLabel(tt: TicketType): string {
-  const av = tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - tt.reserved_count : null);
+  if (isSoldOut(tt)) return 'Sold out';
+  const av = availableOf(tt);
   if (av === null) return 'Available';
-  if (av === 0) return 'Sold out';
   if (av < 10) return `${av} left`;
   return `${av.toLocaleString()} available`;
-}
-function isSoldOut(tt: TicketType): boolean {
-  const av = tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - tt.reserved_count : null);
-  return av !== null && av === 0;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -53,6 +89,10 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   // CPA s49 acknowledgement. Deliberately NOT persisted anywhere: each
   // purchase needs its own affirmative act, so a buyer who ticked this last
   // week has not thereby consented this week.
+  // Every on-sale tier gone. Not the same as "no tiers on sale yet" — an
+  // Early Bird that opens next week has sold nothing and is not sold out.
+  const allTiersSoldOut = ticketTypes.length > 0 && ticketTypes.every(isSoldOut);
+
   const [riskAccepted,   setRiskAccepted]   = useState(false);
   const [riskNudge,      setRiskNudge]      = useState(false);
   const [paymentMethod,  setPaymentMethod]  = useState<PaymentMethodId>(defaultPaymentMethod());
@@ -298,6 +338,21 @@ return (
                 <p style={{ fontSize: 40, margin: '0 0 8px' }}>🎫</p>
                 <p style={{ margin: 0 }}>No tickets currently on sale</p>
               </div>
+            ) : allTiersSoldOut ? (
+              /* Every on-sale tier is gone. Without this the page rendered a list
+                 of greyed-out tiers and no CTA — nothing visibly broken, but the
+                 buyer had no idea why they could not continue. Distinct from the
+                 branch above, which is "not on sale yet" and is not sold out. */
+              <div style={{ textAlign: 'center', padding: '40px 0', color: colors.subText }}>
+                <p style={{ fontSize: 40, margin: '0 0 8px' }}>⚠️</p>
+                <p style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 800, color: colors.text }}>
+                  Sold out
+                </p>
+                <p style={{ margin: 0, fontSize: 13, maxWidth: 320, marginLeft: 'auto', marginRight: 'auto' }}>
+                  Every ticket type for this event has sold out. Follow the event to be
+                  notified if more tickets are released.
+                </p>
+              </div>
             ) : (
               ticketTypes.map((tt, idx) => {
                 const sold      = isSoldOut(tt);
@@ -326,7 +381,14 @@ return (
                         {isPremium && !sold && <span style={{ fontSize: 10, fontWeight: 800, color: '#ff9500', background: 'rgba(255,149,0,0.12)', padding: '2px 7px', borderRadius: 4 }}>⭐ VIP</span>}
                       </div>
                       <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>
-                        {sold ? 'Sold out' : (tt.description ?? availLabel(tt))}
+                        {/* Description AND availability, not one or the other. This was
+                            `tt.description ?? availLabel(tt)`, so any tier carrying a
+                            description — all of them in practice — never showed
+                            "3 left" or "47 available". The scarcity signal existed in
+                            code and never reached a buyer. */}
+                        {sold
+                          ? 'Sold out'
+                          : [tt.description, availLabel(tt)].filter(Boolean).join(' · ')}
                       </p>
                     </div>
 

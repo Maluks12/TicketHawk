@@ -1029,12 +1029,16 @@ func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
 		return nil, fmt.Errorf("AdminGetEventByID: %w", err)
 	}
 
-	event.ComputeAvailableTickets()
-
 	ticketTypes, err := GetTicketTypesByEventID(pool, event.ID)
 	if err == nil && len(ticketTypes) > 0 {
 		event.TicketTypes = ticketTypes
 	}
+
+	// AFTER the tiers are attached, not before. ComputeAvailableTickets now
+	// derives is_sold_out from the tiers when they are present, so calling it
+	// first would always take the flat-price branch and report an event with
+	// every tier sold out as still available.
+	event.ComputeAvailableTickets()
 
 	return &event, nil
 }
@@ -1098,13 +1102,17 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
         return nil, fmt.Errorf("failed to get event: %w", err)
     }
 
-    event.ComputeAvailableTickets()
-
     // Load ticket types — nil slice means the event uses flat pricing
     ticketTypes, err := GetTicketTypesByEventID(pool, event.ID)
     if err == nil && len(ticketTypes) > 0 {
         event.TicketTypes = ticketTypes
     }
+
+    // AFTER the tiers are attached, not before. ComputeAvailableTickets now
+    // derives is_sold_out from the tiers when present, so calling it first
+    // would always take the flat-price branch and report an event whose
+    // every tier is sold out as still available.
+    event.ComputeAvailableTickets()
 
     return &event, nil
 }
@@ -1153,13 +1161,17 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 		return nil, fmt.Errorf("GetEventBySlug: %w", err)
 	}
  
-	event.ComputeAvailableTickets()
-
 	// Load ticket types — nil slice means the event uses flat pricing
 	ticketTypes, err := GetTicketTypesByEventID(pool, event.ID)
 	if err == nil && len(ticketTypes) > 0 {
 		event.TicketTypes = ticketTypes
 	}
+
+	// AFTER the tiers are attached, not before. ComputeAvailableTickets now
+	// derives is_sold_out from the tiers when present, so calling it first
+	// would always take the flat-price branch and report an event whose
+	// every tier is sold out as still available.
+	event.ComputeAvailableTickets()
 
 	return &event, nil
 }

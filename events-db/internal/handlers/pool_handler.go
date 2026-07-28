@@ -87,17 +87,23 @@ func scanIndividual(
 		endTime         time.Time
 		organizerUserID string
 		isStaff         bool
+		// Tier the holder bought. Read from bookings.ticket_type_name, which is
+		// denormalised at booking time on purpose — the door needs the name the
+		// buyer actually paid for, and it must survive the organiser later
+		// renaming or deleting the tier.
+		ticketTypeName  *string
 	)
 	err := pool.QueryRow(ctx, `
 		SELECT ta.status, b.booking_status, e.start_time, e.end_time, e.organizer_id,
-		       (es.user_id IS NOT NULL) AS is_staff
+		       (es.user_id IS NOT NULL) AS is_staff,
+		       b.ticket_type_name
 		FROM ticket_assignments ta
 		JOIN bookings b ON ta.booking_id = b.id
 		JOIN events   e ON b.event_id    = e.id
 		LEFT JOIN event_staff es
 		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE ta.id = $1
-	`, payload.AssignmentID, scannerUserID).Scan(&assignStatus, &bookingStatus, &startTime, &endTime, &organizerUserID, &isStaff)
+	`, payload.AssignmentID, scannerUserID).Scan(&assignStatus, &bookingStatus, &startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
 		return
@@ -138,13 +144,22 @@ func scanIndividual(
 		return
 	}
 
+	// "General Admission" rather than an empty string when the event is flat-
+	// priced: the door staff need to read something definite off the screen, and
+	// a blank field looks like a failed lookup.
+	tier := "General Admission"
+	if ticketTypeName != nil && *ticketTypeName != "" {
+		tier = *ticketTypeName
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"type":          "individual",
-		"message":       "Admitted",
-		"admitted":      1,
-		"assignment_id": payload.AssignmentID,
-		"slot_number":   payload.SlotNumber,
-		"booking_id":    payload.BookingID,
+		"type":             "individual",
+		"message":          "Admitted",
+		"admitted":         1,
+		"assignment_id":    payload.AssignmentID,
+		"slot_number":      payload.SlotNumber,
+		"booking_id":       payload.BookingID,
+		"ticket_type_name": tier,
 	})
 
 	// Best-effort audit (fire-and-forget; response already sent).
@@ -178,16 +193,19 @@ func scanPool(
 		endTime         time.Time
 		organizerUserID string
 		isStaff         bool
+		// A pool covers one booking, so every head under it shares one tier.
+		ticketTypeName  *string
 	)
 	err := pool.QueryRow(ctx, `
 		SELECT b.booking_status, b.booking_number, e.title, e.start_time, e.end_time, e.organizer_id,
-		       (es.user_id IS NOT NULL) AS is_staff
+		       (es.user_id IS NOT NULL) AS is_staff,
+		       b.ticket_type_name
 		FROM bookings b
 		JOIN events  e ON b.event_id = e.id
 		LEFT JOIN event_staff es
 		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE b.id = $1
-	`, payload.BookingID, scannerUserID).Scan(&bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID, &isStaff)
+	`, payload.BookingID, scannerUserID).Scan(&bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 		return
@@ -195,6 +213,11 @@ func scanPool(
 	if organizerUserID != scannerUserID && !isStaff && c.GetString("role") != string(models.RoleAdmin) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "You don't have scanning access for this event"})
 		return
+	}
+	// Same fallback as the individual path — door staff need a definite label.
+	poolTier := "General Admission"
+	if ticketTypeName != nil && *ticketTypeName != "" {
+		poolTier = *ticketTypeName
 	}
 	if bookingStatus != string(models.BookingConfirmed) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Booking is no longer valid", "booking_status": bookingStatus})
@@ -234,9 +257,10 @@ func scanPool(
 			"message":        "Admitted",
 			"admitted":       prevAdmitted,
 			"remaining":      remaining,
-			"idempotent":     true,
-			"booking_number": bookingNumber,
-			"event_title":    eventTitle,
+			"idempotent":       true,
+			"booking_number":   bookingNumber,
+			"event_title":      eventTitle,
+			"ticket_type_name": poolTier,
 		})
 		return
 	}
@@ -267,9 +291,10 @@ func scanPool(
 		"message":        "Admitted",
 		"admitted":       admitted,
 		"remaining":      remaining - admitted,
-		"slot_numbers":   slots,
-		"booking_number": bookingNumber,
-		"event_title":    eventTitle,
+		"slot_numbers":     slots,
+		"booking_number":   bookingNumber,
+		"event_title":      eventTitle,
+		"ticket_type_name": poolTier,
 	})
 }
 

@@ -25,6 +25,10 @@ export interface LocalPool {
   booking_id: string;
   booking_number: string;
   buyer: string;
+  // Tier the whole booking was bought under. Individual assignments have always
+  // carried this; pools did not, so a group pass showed "Group" at the door and
+  // staff could not tell a VIP table from a GA block.
+  tier: string;
   pool_total: number;
   pool_admitted: number;
   booking_ok: number;
@@ -69,6 +73,7 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
           booking_id TEXT PRIMARY KEY,
           booking_number TEXT NOT NULL,
           buyer TEXT NOT NULL DEFAULT '',
+          tier TEXT NOT NULL DEFAULT 'General Admission',
           pool_total INTEGER NOT NULL,
           pool_admitted INTEGER NOT NULL,
           booking_ok INTEGER NOT NULL DEFAULT 1
@@ -86,6 +91,23 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
         );
         CREATE INDEX IF NOT EXISTS idx_scanlog_unsynced ON scan_log (event_id, synced);
       `);
+
+      // ── Migrations ───────────────────────────────────────────────────────
+      //
+      // CREATE TABLE IF NOT EXISTS does nothing to a device that already has
+      // the table, so a new column has to be added explicitly. Scanner
+      // databases live on the device across app updates — without this, an
+      // existing install would keep its old `pools` table and every manifest
+      // sync would fail with "no such column: tier", at the gate, offline.
+      //
+      // ALTER TABLE ADD COLUMN throws if the column is already there and
+      // SQLite has no IF NOT EXISTS for it, so the error is swallowed. That is
+      // the intended control flow here, not a silenced bug.
+      try {
+        await db.execAsync(`ALTER TABLE pools ADD COLUMN tier TEXT NOT NULL DEFAULT 'General Admission'`);
+      } catch {
+        // already present
+      }
       return db;
     })();
   }
@@ -140,6 +162,9 @@ export async function upsertAssignments(rows: Array<{
 
 export async function upsertPools(rows: Array<{
   booking_id: string; booking_number: string; buyer_name: string;
+  // Optional so a manifest from an older backend still type-checks; the insert
+  // below falls back to General Admission when it is absent.
+  tier?: string;
   pool_total: number; pool_admitted: number; booking_ok: boolean;
 }>): Promise<void> {
   if (!rows.length) return;
@@ -147,15 +172,17 @@ export async function upsertPools(rows: Array<{
   await db.withExclusiveTransactionAsync(async (txn) => {
     for (const r of rows) {
       await txn.runAsync(
-        `INSERT INTO pools (booking_id, booking_number, buyer, pool_total, pool_admitted, booking_ok)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO pools (booking_id, booking_number, buyer, tier, pool_total, pool_admitted, booking_ok)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(booking_id) DO UPDATE SET
            booking_number = excluded.booking_number, buyer = excluded.buyer,
+           tier = excluded.tier,
            pool_total = excluded.pool_total,
            -- admitted ratchets upward for the same reason as scanned above
            pool_admitted = MAX(pools.pool_admitted, excluded.pool_admitted),
            booking_ok = excluded.booking_ok`,
-        r.booking_id, r.booking_number, r.buyer_name, r.pool_total, r.pool_admitted,
+        r.booking_id, r.booking_number, r.buyer_name, r.tier || 'General Admission',
+        r.pool_total, r.pool_admitted,
         r.booking_ok ? 1 : 0,
       );
     }

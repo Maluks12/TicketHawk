@@ -71,6 +71,9 @@ type ManifestPool struct {
 	BookingID     string `json:"booking_id"`
 	BookingNumber string `json:"booking_number"`
 	BuyerName     string `json:"buyer_name"`
+	// Tier for the whole pool. Offline scanning must show the same label as an
+	// online scan, or door staff get different answers depending on signal.
+	Tier          string `json:"tier"`
 	PoolTotal     int    `json:"pool_total"`    // unassigned slots on the booking
 	PoolAdmitted  int    `json:"pool_admitted"` // of those, already admitted
 	BookingOK     bool   `json:"booking_ok"`
@@ -117,7 +120,7 @@ func BuildManifest(
 	rows, err := pool.Query(ctx, `
 		SELECT ta.id, ta.booking_id, ta.slot_number,
 		       COALESCE(ta.assignee_name, ''),
-		       COALESCE(tt.name, 'General'),
+		       COALESCE(tt.name, 'General Admission'),
 		       ta.status::text,
 		       b.booking_status = 'confirmed',
 		       ta.qr_scanned_at
@@ -153,13 +156,15 @@ func BuildManifest(
 		                'Guest'),
 		       COUNT(*) FILTER (WHERE ta.status = 'unassigned'),
 		       COUNT(*) FILTER (WHERE ta.status = 'unassigned' AND ta.qr_scanned_at IS NOT NULL),
-		       b.booking_status = 'confirmed'
+		       b.booking_status = 'confirmed',
+		       COALESCE(NULLIF(b.ticket_type_name, ''), 'General Admission')
 		FROM bookings b
 		JOIN ticket_assignments ta ON ta.booking_id = b.id
 		LEFT JOIN users u ON u.id = b.user_id
 		WHERE b.event_id = $1
 		  AND ($2::timestamptz IS NULL OR ta.updated_at > $2 OR b.updated_at > $2)
-		GROUP BY b.id, b.booking_number, u.first_name, u.last_name, b.attendee_email, b.booking_status
+		GROUP BY b.id, b.booking_number, u.first_name, u.last_name, b.attendee_email, b.booking_status,
+		         b.ticket_type_name
 		HAVING COUNT(*) FILTER (WHERE ta.status = 'unassigned') > 0
 	`, eventID, nullableTime(since))
 	if err != nil {
@@ -169,7 +174,7 @@ func BuildManifest(
 	for prows.Next() {
 		var p ManifestPool
 		if err := prows.Scan(&p.BookingID, &p.BookingNumber, &p.BuyerName,
-			&p.PoolTotal, &p.PoolAdmitted, &p.BookingOK); err != nil {
+			&p.PoolTotal, &p.PoolAdmitted, &p.BookingOK, &p.Tier); err != nil {
 			return nil, err
 		}
 		m.Pools = append(m.Pools, p)

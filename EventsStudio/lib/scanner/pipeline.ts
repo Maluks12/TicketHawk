@@ -33,7 +33,9 @@ export type ScanOutcome =
   | { kind: 'admitted'; name: string; tier: string; slot: number }
   | { kind: 'duplicate'; name: string; firstScanAt: string | null }
   | { kind: 'invalid'; reason: string }
-  | { kind: 'pool_prompt'; bookingId: string; buyer: string; bookingNumber: string; remaining: number }
+  // `tier` so the door can see GA vs VIP BEFORE admitting a group, not only
+  // after. Comes from the manifest, so it is available offline too.
+  | { kind: 'pool_prompt'; bookingId: string; buyer: string; bookingNumber: string; remaining: number; tier: string }
   | { kind: 'unknown_prompt'; assignmentId: string | null; bookingId: string | null; isPool: boolean };
 
 export function decodeToken(raw: string): TokenPayload | null {
@@ -88,6 +90,7 @@ export async function processScan(eventId: string, raw: string): Promise<ScanOut
       kind: 'pool_prompt',
       bookingId: pool.booking_id,
       buyer: pool.buyer,
+      tier: pool.tier || 'General Admission',
       bookingNumber: pool.booking_number,
       remaining,
     };

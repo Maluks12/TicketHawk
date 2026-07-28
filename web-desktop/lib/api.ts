@@ -222,7 +222,16 @@ export interface TicketType {
   is_visible: boolean;
   sale_starts_at: string | null;
   sale_ends_at: string | null;
-  available?: number | null;
+  /**
+   * Server-computed, from models.TicketType.ComputeAvailable().
+   * -1 is the UnlimitedTickets sentinel (no capacity set).
+   *
+   * `available` (without the suffix) was declared here previously and is NOT a
+   * field the API has ever sent, so every read of it was undefined. Do not
+   * reintroduce it — use these two.
+   */
+  available_tickets?: number;
+  is_sold_out?: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -58,17 +58,52 @@ function fmtTime(iso: string) {
   return d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
 
-function availLabel(tt: TicketType): string {
-  const av = tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - tt.reserved_count : null);
-  if (av === null) return 'Available';
-  if (av === 0) return 'Sold out';
-  if (av < 10) return `${av} left`;
-  return `${av.toLocaleString()} available`;
+// ─── Availability ────────────────────────────────────────────────────────────
+//
+// The server already decides this. models.TicketType.ComputeAvailable() sets
+// `available_tickets` and `is_sold_out` on every tier it returns, and those are
+// the same numbers the booking transaction enforces under its row lock. So the
+// job here is to READ that answer, not to recompute it.
+//
+// It used to recompute it, from a field that does not exist:
+//
+//     tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - ... : null)
+//
+// The API sends `available_tickets`, never `available`, so the left side was
+// always undefined and the fallback always ran. That fallback disagreed with the
+// server in two cases:
+//
+//   capacity 0   -> `tt.capacity ?` is falsy, so 0 was read as "unlimited" and a
+//                   tier with no allocation showed as Available.
+//   oversold     -> available of -2 is not `=== 0`, so an over-allocated tier
+//                   showed "-2 left" instead of Sold Out.
+//
+// Reading the server field fixes both and removes the duplicate rule. The local
+// computation is kept only as a fallback for older payloads, now with `!= null`
+// instead of a truthiness test and `<= 0` instead of `=== 0`.
+function availableOf(tt: TicketType): number | null {
+  if (typeof tt.available_tickets === 'number') {
+    // -1 is the UnlimitedTickets sentinel from the Go model.
+    return tt.available_tickets < 0 ? null : tt.available_tickets;
+  }
+  if (tt.capacity != null) {
+    return Math.max(0, tt.capacity - (tt.tickets_sold ?? 0) - (tt.reserved_count ?? 0));
+  }
+  return null; // no cap = unlimited
 }
 
 function isSoldOut(tt: TicketType): boolean {
-  const av = tt.available ?? (tt.capacity ? tt.capacity - tt.tickets_sold - tt.reserved_count : null);
-  return av !== null && av === 0;
+  if (typeof tt.is_sold_out === 'boolean') return tt.is_sold_out;
+  const av = availableOf(tt);
+  return av !== null && av <= 0;
+}
+
+function availLabel(tt: TicketType): string {
+  if (isSoldOut(tt)) return 'Sold out';
+  const av = availableOf(tt);
+  if (av === null) return 'Available';
+  if (av < 10) return `${av} left`;
+  return `${av.toLocaleString()} available`;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -93,6 +128,10 @@ export default function TicketPurchaseScreen() {
   // CPA s49 acknowledgement. Not persisted: each purchase needs its own
   // affirmative act, so a buyer who ticked this last week has not thereby
   // consented this week. See the note in styles/purchase.ts (riskBox).
+  // Every on-sale tier gone. Distinct from "no tiers on sale yet" (an Early
+  // Bird that opens next week), which is not sold out and must not say so.
+  const allTiersSoldOut = ticketTypes.length > 0 && ticketTypes.every(isSoldOut);
+
   const [riskAccepted, setRiskAccepted] = useState(false);
   const [riskNudge, setRiskNudge] = useState(false);
   const [guestName, setGuestName]         = useState('');
@@ -492,6 +531,17 @@ export default function TicketPurchaseScreen() {
                     <Ticket size={34} color={T.border3} weight="duotone" />
                     <Text style={ss.emptyText}>No tickets currently on sale</Text>
                   </View>
+                ) : allTiersSoldOut ? (
+                  /* Without this the screen simply rendered a list of greyed-out
+                     tiers and no CTA — nothing was broken on screen, but the buyer
+                     had no idea why they could not continue. */
+                  <View style={ss.emptyState}>
+                    <Text style={ss.emptyTitle}>Sold out</Text>
+                    <Text style={ss.emptyText}>
+                      Every ticket type for this event has sold out. Follow the event to
+                      be notified if more tickets are released.
+                    </Text>
+                  </View>
                 ) : (
                   ticketTypes.map((tt, idx) => {
                     const sold      = isSoldOut(tt);
@@ -517,8 +567,16 @@ export default function TicketPurchaseScreen() {
                               </View>
                             )}
                           </View>
-                          <Text style={ss.ticketAvail} numberOfLines={1}>
-                            {tt.description ?? availLabel(tt)}
+                          {/* Description AND availability, not one or the other.
+                              This was `tt.description ?? availLabel(tt)`, so any tier
+                              with a description — which is all of them in practice —
+                              never displayed "3 left" or "47 available". The scarcity
+                              signal existed in code and never reached a buyer. */}
+                          {!!tt.description && (
+                            <Text style={ss.ticketAvail} numberOfLines={1}>{tt.description}</Text>
+                          )}
+                          <Text style={[ss.ticketAvail, sold && ss.ticketNameSoldOut]} numberOfLines={1}>
+                            {availLabel(tt)}
                           </Text>
                           {sold ? (
                             <View style={ss.soldBadge}>
@@ -775,6 +833,21 @@ export default function TicketPurchaseScreen() {
                 {riskNudge && !riskAccepted && (
                   <Text style={ss.riskError}>Please confirm this before continuing.</Text>
                 )}
+
+                {/* General terms notice. Adequate for ordinary purchase terms —
+                    it is only the s49(1) categories above that need the tick. */}
+                <Text style={ss.termsText}>
+                  By tapping Pay Now you also agree to TicketHawk's{' '}
+                  <Text style={ss.termsLink} onPress={() => openLegal('terms')}>
+                    Terms of Use
+                  </Text>
+                  {' '}and confirm that you have read our{' '}
+                  <Text style={ss.termsLink} onPress={() => openLegal('privacy')}>
+                    Privacy Policy
+                  </Text>
+                  .
+                </Text>
+
               </View>
             )}
 

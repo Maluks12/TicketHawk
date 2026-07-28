@@ -134,17 +134,104 @@ func (a ImageArray) Value() (driver.Value, error) {
 
 const UnlimitedTickets = -1
 
+// ComputeAvailableTickets fills AvailableTickets and IsSoldOut.
+//
+// ── Why this consults the tiers ──────────────────────────────────────────────
+//
+// This used to compare MaxCapacity against TicketsSold and nothing else, which
+// is only the whole story for a flat-priced event. Once an event has tiers, the
+// real supply is the sum of what the tiers still have, and the two numbers come
+// apart in the ordinary case:
+//
+//   event max_capacity 1000, tickets_sold 120
+//   tiers: GA  100/100 sold, VIP 20/20 sold   -> nothing left to buy
+//
+// The old computation reported is_sold_out=false (120 < 1000), so the event
+// card and the detail screen offered a live "Get Tickets" button that led to a
+// purchase screen where every tier was greyed out and no CTA rendered. The
+// buyer got a dead end with no explanation.
+//
+// Tiers are only attached on the endpoints that load them (GetEventByID and the
+// organiser dashboard); elsewhere TicketTypes is empty and the flat-price path
+// below applies exactly as before, so this is additive.
+//
+// ── "Sold out" is not the same as "not on sale yet" ─────────────────────────
+//
+// A tier outside its sale window, or hidden, is deliberately NOT counted as
+// sold out — an event whose Early Bird opens tomorrow has sold nothing and is
+// not sold out. When no tier is currently on sale we report zero availability
+// but leave IsSoldOut false, so the UI can say "not on sale" rather than
+// telling the buyer they missed it.
 func (e *Event) ComputeAvailableTickets() {
+	// Event-level cap, computed first: it binds regardless of tiers.
+	capRemaining := UnlimitedTickets
 	if e.MaxCapacity != nil {
-		e.AvailableTickets = *e.MaxCapacity - e.TicketsSold
-		if e.AvailableTickets < 0 {
-			e.AvailableTickets = 0
+		capRemaining = *e.MaxCapacity - e.TicketsSold
+		if capRemaining < 0 {
+			capRemaining = 0
 		}
-		e.IsSoldOut = e.AvailableTickets == 0
-	} else {
-		e.AvailableTickets = UnlimitedTickets
-		e.IsSoldOut = false
 	}
+
+	if len(e.TicketTypes) > 0 {
+		var (
+			onSale       int
+			soldOut      int
+			sumAvailable int
+			hasUnlimited bool
+		)
+		for _, tt := range e.TicketTypes {
+			if tt == nil || !tt.IsOnSale() {
+				continue
+			}
+			onSale++
+			tt.ComputeAvailable()
+			switch {
+			case tt.IsSoldOut:
+				soldOut++
+			case tt.AvailableTickets == UnlimitedTickets:
+				hasUnlimited = true
+			default:
+				sumAvailable += tt.AvailableTickets
+			}
+		}
+
+		switch {
+		case onSale == 0:
+			// Nothing on sale right now. Not sold out — see the note above.
+			e.AvailableTickets = 0
+			e.IsSoldOut = false
+		case soldOut == onSale:
+			e.AvailableTickets = 0
+			e.IsSoldOut = true
+		case hasUnlimited:
+			e.AvailableTickets = UnlimitedTickets
+			e.IsSoldOut = false
+		default:
+			e.AvailableTickets = sumAvailable
+			e.IsSoldOut = sumAvailable == 0
+		}
+
+		// The event cap still overrides: an organiser can cap the venue below the
+		// sum of the tiers, and the smaller number is the one that binds.
+		if capRemaining != UnlimitedTickets {
+			if e.AvailableTickets == UnlimitedTickets || capRemaining < e.AvailableTickets {
+				e.AvailableTickets = capRemaining
+			}
+			if capRemaining == 0 {
+				e.IsSoldOut = true
+			}
+		}
+		return
+	}
+
+	// Flat-priced event, or an endpoint that does not load tiers.
+	if capRemaining != UnlimitedTickets {
+		e.AvailableTickets = capRemaining
+		e.IsSoldOut = capRemaining == 0
+		return
+	}
+	e.AvailableTickets = UnlimitedTickets
+	e.IsSoldOut = false
 }
 
 type CreateEventDTO struct {
