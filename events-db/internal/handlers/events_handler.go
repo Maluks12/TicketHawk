@@ -48,6 +48,19 @@ func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache, emailService *
 			return
 		}
 
+		// Same omission as the organiser path: dto.TicketTypes was accepted and
+		// never written, so an admin creating a tiered event got a flat-priced one.
+		// Not fatal — the event is valid without tiers — so this logs and continues.
+		if len(dto.TicketTypes) > 0 {
+			if _, ttErr := repository.CreateTicketTypes(pool, event.ID, dto.TicketTypes, userID.(string)); ttErr != nil {
+				log.Error().Err(ttErr).Str("event_id", event.ID).
+					Msg("admin create: event created but ticket types failed to persist")
+			} else if tts, loadErr := repository.GetTicketTypesByEventID(pool, event.ID); loadErr == nil {
+				event.TicketTypes = tts
+				event.ComputeAvailableTickets()
+			}
+		}
+
 		// Path 4: created on behalf of an organiser — hand it over right now.
 		// The event exists and is published either way; a handover failure is
 		// reported but doesn't roll back creation (the admin can retransfer
@@ -900,10 +913,45 @@ func OrgCreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			utils.InternalError(c, err, "failed to create event")
 			return
 		}
- 
-		c.JSON(http.StatusCreated, gin.H{
+
+		// Persist the pricing tiers submitted with the event.
+		//
+		// CreateEventDTO has carried a TicketTypes field for a long time and the
+		// creation wizard has been sending it (body.ticket_types) — but nothing here
+		// ever read it, so every tier an organiser defined was silently dropped. The
+		// event came out flat-priced, the buyer got a single synthesised "General
+		// Admission" row, and the organiser had no way to tell anything was wrong
+		// because the request returned 201.
+		//
+		// Failure here does NOT roll back the event. The event is valid without
+		// tiers (that is just flat pricing), and destroying a successfully created
+		// event because one tier had a bad capacity would be worse than reporting
+		// the problem. The response carries ticket_types_error so the client can
+		// surface it, and the organiser can add the tiers from the event page.
+		var ticketTypeErr string
+		if len(dto.TicketTypes) > 0 {
+			if _, ttErr := repository.CreateTicketTypes(pool, event.ID, dto.TicketTypes, userID.(string)); ttErr != nil {
+				ticketTypeErr = ttErr.Error()
+				log.Error().Err(ttErr).
+					Str("event_id", event.ID).
+					Int("tier_count", len(dto.TicketTypes)).
+					Msg("event created but ticket types failed to persist")
+			} else {
+				// Reload so the response carries the tiers with their generated ids.
+				if tts, loadErr := repository.GetTicketTypesByEventID(pool, event.ID); loadErr == nil {
+					event.TicketTypes = tts
+					event.ComputeAvailableTickets()
+				}
+			}
+		}
+
+		resp := gin.H{
 			"message": "Event created as draft — pending admin approval before it can be published.",
 			"event":   event,
-		})
+		}
+		if ticketTypeErr != "" {
+			resp["ticket_types_error"] = ticketTypeErr
+		}
+		c.JSON(http.StatusCreated, resp)
 	}
 }

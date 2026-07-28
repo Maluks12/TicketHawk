@@ -1252,7 +1252,6 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 	args := []interface{}{models.EventPublished, true, time.Now()}
 	where := `
 	WHERE e.status = $1
-	AND (e.price > 0 OR e.listing_fee_paid = TRUE)
 	AND e.is_featured = $2
 	AND e.featured_until > $3
 	`

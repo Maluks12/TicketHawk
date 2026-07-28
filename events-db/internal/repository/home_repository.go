@@ -40,6 +40,26 @@ type HomeSectionsResult struct {
 // Each section receives up to 2 sponsored cards at positions 3 and 7
 // (1-indexed). Sponsored ranking weights daily_budget × category affinity,
 // so ads relevant to the user rank higher regardless of raw budget alone.
+// ── Paid placement removed ───────────────────────────────────────────
+//
+// Every section below used to carry:
+//
+//     AND (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE)
+//
+// which meant a FREE event was invisible in the feed until its organiser paid a
+// listing fee or an admin promoted it. That was part of the paid-placement /
+// ads model, and it was retired with the rest of that system — so the gate was
+// left silently suppressing free events that their organisers had explicitly
+// marked public.
+//
+// Visibility is now decided by status and the event's own visibility setting
+// alone. Ticking "public" makes an event public whatever it costs.
+//
+// The listing_fee_paid and admin_promoted COLUMNS are deliberately kept: they
+// still record what was paid historically and are still written by the listing
+// fee and transfer flows. They just no longer filter reads. Do not reintroduce
+// them into a WHERE clause without also reinstating the payment flow that sets
+// them, or free public events disappear again with no error anywhere.
 func GetHomeSections(pool *pgxpool.Pool, userID *string, city *string) (*HomeSectionsResult, error) {
 	// Composed of the shared (cacheable) sections plus the personalised ones.
 	// Retained for any direct callers; the home handler caches the shared part
@@ -239,7 +259,6 @@ func ForYou(pool *pgxpool.Pool, userID string, limit int) ([]models.Event, error
 		JOIN   categories c   ON c.id  = ev.category_id
 		LEFT JOIN user_cats uc ON uc.category_id = ev.category_id
 		WHERE  ev.status          = 'published'
-		  AND  (ev.price > 0 OR ev.listing_fee_paid = TRUE OR ev.admin_promoted = TRUE)
 		  AND  ev.start_time > NOW()
 		  AND NOT EXISTS (
 			  SELECT 1 FROM bookings b2
@@ -304,7 +323,6 @@ func NearYou(pool *pgxpool.Pool, city string, limit int) ([]models.Event, error)
 		FROM events ev
 		JOIN categories c ON c.id = ev.category_id
 		WHERE ev.status          = 'published'
-		  AND (ev.price > 0 OR ev.listing_fee_paid = TRUE OR ev.admin_promoted = TRUE)
 		  AND ev.start_time > NOW()
 		  AND LOWER(ev.city) = ANY($1)
 		ORDER BY ev.start_time ASC, ev.views DESC
@@ -381,7 +399,6 @@ func TrendingNow(pool *pgxpool.Pool, limit int) ([]models.Event, *utils.Cursor, 
 		FROM   events     e
 		JOIN   categories c ON c.id = e.category_id
 		WHERE  e.status          = 'published'
-		  AND  (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE)
 		  AND  e.start_time > NOW()
 		ORDER BY (
 			e.views::float
@@ -424,7 +441,7 @@ func RecentlyAdded(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	defer cancel()
 
 	args := []interface{}{models.EventPublished}
-	where := "WHERE e.status = $1 AND (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE)"
+	where := "WHERE e.status = $1"
 
 	if cursor != nil {
 		where += ` AND (e.created_at < $2 OR (e.created_at = $2 AND e.id < $3))`
@@ -491,7 +508,7 @@ func HappeningSoon(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]model
 	defer cancel()
 
 	args := []interface{}{models.EventPublished, time.Now()}
-	where := `WHERE e.status = $1 AND (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE) AND e.start_time > $2`
+	where := `WHERE e.status = $1 AND e.start_time > $2`
 
 	if cursor != nil {
 		where += ` AND (e.start_time > $3 OR (e.start_time = $3 AND e.id > $4))`
@@ -581,7 +598,6 @@ func ThisWeekend(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.
 	args := []interface{}{models.EventPublished, weekendStart, weekendEnd}
 	where := `
 		WHERE e.status          = $1
-		  AND (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE)
 		  AND e.start_time >= $2
 		  AND e.start_time <  $3
 	`
