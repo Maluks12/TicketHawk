@@ -12,8 +12,13 @@
       "bundleIdentifier": "com.tickethawk.app",
       "associatedDomains": [
         "applinks:ticket-hawk.com",
+        "applinks:www.ticket-hawk.com",
+        "applinks:ticket-hawk.com",
         "applinks:www.ticket-hawk.com"
-      ]
+      ],
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -33,10 +38,21 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "ticket-hawk.com", "pathPrefix": "/events" },
-            { "scheme": "https", "host": "www.ticket-hawk.com", "pathPrefix": "/events" }
+            {
+              "scheme": "https",
+              "host": "ticket-hawk.com",
+              "pathPrefix": "/events"
+            },
+            {
+              "scheme": "https",
+              "host": "www.ticket-hawk.com",
+              "pathPrefix": "/events"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },

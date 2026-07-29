@@ -207,6 +207,12 @@ func (s *PayoutService) ProcessPendingPayouts(ctx context.Context) {
 
 // payRow claims a pending row and initiates the transfer.
 func (s *PayoutService) payRow(ctx context.Context, row repository.PendingPayoutRow) {
+	if row.Attempts > 0 {
+		log.Info().Str("payout_id", row.PayoutID).Str("organizer", row.BusinessName).
+			Int("attempt", row.Attempts+1).Int("max", repository.MaxPayoutAttempts).
+			Msg("payouts: retrying previously failed transfer")
+	}
+
 	if row.RecipientCode == nil || *row.RecipientCode == "" {
 		// Organizer has never submitted bank details. Leave the row pending —
 		// it becomes payable the moment they onboard. Surfaced in admin.
@@ -259,8 +265,17 @@ func (s *PayoutService) payRow(ctx context.Context, row repository.PendingPayout
 			s.reconcileByReference(ctx, row.PayoutID, reference)
 			return
 		}
-		log.Error().Err(err).Str("payout_id", row.PayoutID).Msg("payouts: transfer failed")
 		_ = repository.MarkPayoutFailed(s.pool, ctx, row.PayoutID, err.Error())
+		if row.Attempts+1 >= repository.MaxPayoutAttempts {
+			log.Error().Err(err).Str("payout_id", row.PayoutID).
+				Str("organizer", row.BusinessName).Float64("amount", row.Amount).
+				Int("attempts", row.Attempts+1).
+				Msg("payouts: RETRY BUDGET EXHAUSTED — organiser is owed money and will not be paid without intervention")
+		} else {
+			log.Warn().Err(err).Str("payout_id", row.PayoutID).
+				Str("organizer", row.BusinessName).Int("attempt", row.Attempts+1).
+				Msg("payouts: transfer failed, scheduled for retry")
+		}
 		return
 	}
 

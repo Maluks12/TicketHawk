@@ -360,21 +360,54 @@ func MarkPayoutPaid(pool *pgxpool.Pool, ctx context.Context, payoutID, transferC
 	_, err := pool.Exec(ctx, `
 		UPDATE organizer_payouts
 		SET status = 'paid', paystack_transfer_code = $1,
-		    failure_reason = NULL, paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		    failure_reason = NULL, next_attempt_at = NULL,
+		    paid_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $2
 	`, transferCode, payoutID)
 	return err
 }
 
+// MaxPayoutAttempts caps the retry budget for one payout row. Once a row has
+// failed this many times it stays 'failed' with next_attempt_at NULL and the
+// worker stops picking it up — the failure is no longer plausibly transient
+// and needs a human.
+//
+// The schedule below spans roughly 3.5 days in total (15m, 1h, 4h, 12h, then
+// daily). That is deliberately longer than any realistic balance top-up or
+// Paystack incident, so a solvable problem resolves itself, while a dead
+// recipient code stops generating traffic within the week.
+const MaxPayoutAttempts = 8
+
+// MarkPayoutFailed records a failed transfer attempt and schedules the next
+// one with exponential backoff.
+//
+// Every failure path funnels through here — gateway errors, a transfer that
+// vanished at Paystack, a row claimed but never sent — so backoff applies
+// uniformly without each call site having to think about it.
 func MarkPayoutFailed(pool *pgxpool.Pool, ctx context.Context, payoutID, reason string) error {
 	if len(reason) > 500 {
 		reason = reason[:500]
 	}
+	// $3 is cast explicitly. An uncast parameter compared against `attempts + 1`
+	// has bitten this codebase before: Postgres deduces inconsistent types for
+	// a reused parameter and fails with SQLSTATE 42P08.
 	_, err := pool.Exec(ctx, `
 		UPDATE organizer_payouts
-		SET status = 'failed', failure_reason = $1, updated_at = CURRENT_TIMESTAMP
+		SET status          = 'failed',
+		    failure_reason  = $1,
+		    attempts        = attempts + 1,
+		    last_attempt_at = CURRENT_TIMESTAMP,
+		    next_attempt_at = CASE
+		        WHEN attempts + 1 >= $3::int THEN NULL
+		        WHEN attempts + 1 = 1 THEN CURRENT_TIMESTAMP + INTERVAL '15 minutes'
+		        WHEN attempts + 1 = 2 THEN CURRENT_TIMESTAMP + INTERVAL '1 hour'
+		        WHEN attempts + 1 = 3 THEN CURRENT_TIMESTAMP + INTERVAL '4 hours'
+		        WHEN attempts + 1 = 4 THEN CURRENT_TIMESTAMP + INTERVAL '12 hours'
+		        ELSE CURRENT_TIMESTAMP + INTERVAL '24 hours'
+		    END,
+		    updated_at      = CURRENT_TIMESTAMP
 		WHERE id = $2
-	`, reason, payoutID)
+	`, reason, payoutID, MaxPayoutAttempts)
 	return err
 }
 
@@ -386,6 +419,7 @@ type PendingPayoutRow struct {
 	Currency      string
 	Status        string
 	TransferRef   *string
+	Attempts      int
 	RecipientCode *string
 	BusinessName  string
 	BankCode      *string
@@ -402,11 +436,20 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 	}
 	rows, err := pool.Query(ctx, `
 		SELECT op.id, op.organizer_id, op.amount, op.currency, op.status, op.transfer_reference,
+		       op.attempts,
 		       o.paystack_recipient_code, o.business_name,
 		       o.settlement_bank_code, o.bank_account_last_4, o.bank_account_name
 		FROM organizer_payouts op
 		JOIN organizers o ON o.id = op.organizer_id
-		WHERE op.status IN ('pending', 'processing')
+		WHERE (
+		        op.status IN ('pending', 'processing')
+		        -- Failed rows come back once their backoff has elapsed. A NULL
+		        -- next_attempt_at on a failed row means the retry budget is
+		        -- spent: leave it alone, it needs a human.
+		        OR (op.status = 'failed'
+		            AND op.next_attempt_at IS NOT NULL
+		            AND op.next_attempt_at <= CURRENT_TIMESTAMP)
+		      )
 		  -- refund_clawback rows are debt owed TO the platform, never a
 		  -- transfer. They live in this table for the audit trail only.
 		  AND op.kind <> 'refund_clawback'
@@ -422,7 +465,7 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 	for rows.Next() {
 		var r PendingPayoutRow
 		if err := rows.Scan(&r.PayoutID, &r.OrganizerID, &r.Amount, &r.Currency, &r.Status,
-			&r.TransferRef, &r.RecipientCode, &r.BusinessName,
+			&r.TransferRef, &r.Attempts, &r.RecipientCode, &r.BusinessName,
 			&r.BankCode, &r.AccountLast4, &r.AccountName); err != nil {
 			return nil, fmt.Errorf("FetchPayableRows scan: %w", err)
 		}
