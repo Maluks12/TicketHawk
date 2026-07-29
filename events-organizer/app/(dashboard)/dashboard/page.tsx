@@ -5,12 +5,24 @@ import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
 import { fmtMoney, fmtDate } from '../../../lib/utils';
 import { getNotifications, markRead, NOTIF_KYC_APPROVED, Notification } from '../../../lib/notifications';
+import { StatCard, StatusPill } from '@/components/ui';
 
+// Mirrors repository.OrganizerStats as serialised by
+// GET /organiser/dashboard/stats. The names matter: this endpoint returns the
+// struct directly, so a mismatched key doesn't error — it silently reads as
+// undefined and renders as zero. `total_revenue` was exactly that bug; the
+// field is called total_net_earnings here. (A different handler does expose
+// `total_revenue`, which is presumably where the wrong name came from.)
 interface DashStats {
   total_events: number;
   published_events: number;
   total_bookings: number;
-  total_revenue: number;
+  total_tickets_sold: number;
+  total_net_earnings: number;
+  gross_ticket_revenue: number;
+  platform_fees_paid: number;
+  bookings_today: number;
+  revenue_today: number;
 }
 
 interface RecentEvent {
@@ -143,9 +155,9 @@ export default function DashboardPage() {
             }
           />
           <StatCard
-            label="Total revenue"
-            value={fmtMoney(stats?.total_revenue ?? 0)}
-            sub="from ticket sales"
+            label="Net earnings"
+            value={fmtMoney(stats?.total_net_earnings ?? 0)}
+            sub={`${fmtMoney(stats?.gross_ticket_revenue ?? 0)} gross · ${fmtMoney(stats?.platform_fees_paid ?? 0)} fees`}
             accent="green"
             icon={
               <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
@@ -155,9 +167,9 @@ export default function DashboardPage() {
             }
           />
           <StatCard
-            label="Total bookings"
-            value={(stats?.total_bookings ?? 0).toLocaleString()}
-            sub="confirmed tickets"
+            label="Tickets sold"
+            value={(stats?.total_tickets_sold ?? 0).toLocaleString()}
+            sub={`across ${(stats?.total_bookings ?? 0).toLocaleString()} confirmed bookings`}
             accent="orange"
             icon={
               <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
@@ -166,13 +178,13 @@ export default function DashboardPage() {
             }
           />
           <StatCard
-            label="Total events"
-            value={stats?.total_events ?? 0}
-            sub="across all statuses"
-            accent="blue"
+            label="Today"
+            value={fmtMoney(stats?.revenue_today ?? 0)}
+            sub={`${(stats?.bookings_today ?? 0).toLocaleString()} bookings since midnight`}
+            accent="grey"
             icon={
               <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
-                <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.5 2.5a1 1 0 001.414-1.414L11 9.586V6z" clipRule="evenodd"/>
               </svg>
             }
           />
@@ -219,9 +231,7 @@ export default function DashboardPage() {
                         {fmtDate(ev.start_time)} · {ev.tickets_sold} tickets sold
                       </div>
                     </div>
-                    <span className={`badge badge-${ev.status}`} style={{ flexShrink: 0 }}>
-                      {ev.status}
-                    </span>
+                    <StatusPill status={ev.status} style={{ flexShrink: 0 }} />
                   </div>
                 ))}
               </div>
@@ -237,6 +247,7 @@ export default function DashboardPage() {
               {[
                 { href: '/events/create', title: 'Create an event', desc: 'Publish free or paid events — they appear in the TicketHawk feed organically.' },
                 { href: '/events', title: 'Manage events', desc: 'Edit details, track sales, and manage door staff per event.' },
+                { href: '/kyc', title: 'Verification & payouts', desc: 'Confirm your identity and bank details so ticket money can reach you.' },
               ].map((a) => (
                 <Link key={a.href} href={a.href} style={{
                   display: 'block', padding: '12px 10px', borderRadius: 6,
@@ -251,40 +262,6 @@ export default function DashboardPage() {
         </div>
 
       </div>
-    </div>
-  );
-}
-
-// ── Stat Card ─────────────────────────────────────────────────────────────────
-function StatCard({
-  label, value, sub, accent, icon,
-}: {
-  label: string;
-  value: string | number;
-  sub: string;
-  accent: 'blue' | 'green' | 'orange' | 'red';
-  icon: React.ReactNode;
-}) {
-  const colors = { blue: '#1877f2', green: '#1a7f37', orange: '#e65c00', red: '#c41c1c' };
-  const bgs    = { blue: '#e7f3ff', green: '#f0fff4', orange: '#fff8f0', red: '#fff5f5' };
-  const color  = colors[accent];
-  const bg     = bgs[accent];
-
-  return (
-    <div style={{
-      background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
-      padding: '16px', borderTop: `3px solid ${color}`,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#606770', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-          {label}
-        </div>
-        <div style={{ width: 32, height: 32, borderRadius: 6, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
-          {icon}
-        </div>
-      </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: '#1c1e21', lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: '#8a8d91', marginTop: 4 }}>{sub}</div>
     </div>
   );
 }

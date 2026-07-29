@@ -6,6 +6,7 @@ import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../lib/utils';
+import { StatusPill } from '@/components/ui';
 
 const DRAFT_KEY = 'org_event_draft';
 
@@ -336,22 +337,32 @@ export default function EventsPage() {
                         onClick={() => router.push(`/event/${e.id}`)}>
                         {e.title}
                       </div>
-                      <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 1 }}>
-                        {fmtDateTime(e.created_at)}
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                        Created {fmtDateTime(e.created_at)}
                       </div>
                     </td>
                     <td>
-                      <span className={`badge badge-${e.status}`}>
-                        {e.status.charAt(0).toUpperCase() + e.status.slice(1)}
-                      </span>
+                      <StatusPill status={e.status} />
                     </td>
-                    <td style={{ color: '#606770' }}>
-                      <div>{fmtDate(e.start_time)}</div>
-                      <div style={{ fontSize: 11, color: '#8a8d91' }}>{fmtDate(e.end_time)}</div>
+                    <td style={{ color: 'var(--text-2)' }}>
+                      <div>{fmtDateTime(e.start_time)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                        ends {fmtDateTime(e.end_time)}
+                      </div>
                     </td>
-                    <td style={{ color: '#606770' }}>
-                      <div>{e.venue_name || '—'}</div>
-                      <div style={{ fontSize: 11, color: '#8a8d91' }}>{e.city}</div>
+                    <td style={{ color: 'var(--text-2)' }}>
+                      {e.venue_name || e.city ? (
+                        <>
+                          <div>{e.venue_name || '—'}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{e.city}</div>
+                        </>
+                      ) : (
+                        <Link href={`/event/${e.id}`} style={{
+                          fontSize: 12, color: 'var(--warning)', fontWeight: 600,
+                        }}>
+                          Not set — add
+                        </Link>
+                      )}
                     </td>
                     <td>
                       <div style={{ fontWeight: 600 }}>

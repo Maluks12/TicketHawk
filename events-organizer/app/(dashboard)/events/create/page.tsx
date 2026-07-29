@@ -6,6 +6,7 @@ import { useToast } from '../../../../lib/toast';
 import { validateRequired, validateMinLength, firstError } from '../../../../lib/validation';
 import { getKycStatus } from '../../../../lib/kyc';
 import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
+import DateTimePicker from '@/components/dateTimePicker';
 
 // ── Draft ─────────────────────────────────────────────────────────────────────
 export const DRAFT_KEY = 'org_event_draft';
@@ -549,19 +550,21 @@ export default function CreateEventPage() {
                 <div className="field-row">
                   <div className="field">
                     <label>Start time <Required /></label>
-                    <input type="datetime-local" value={startTime}
-                      onChange={e => setStartTime(e.target.value)} style={inp} />
+                    <DateTimePicker value={startTime} onChange={setStartTime}
+                      placeholder="When doors open" style={inp} />
                   </div>
                   <div className="field">
                     <label>End time <Required /></label>
-                    <input type="datetime-local" value={endTime}
-                      onChange={e => setEndTime(e.target.value)} style={inp} />
+                    {/* min={startTime} stops the "end before start" error being
+                        reachable at all, rather than catching it on submit. */}
+                    <DateTimePicker value={endTime} onChange={setEndTime}
+                      min={startTime} placeholder="When it wraps up" style={inp} />
                   </div>
                 </div>
                 <div className="field" style={{ marginBottom: 0 }}>
                   <label>Booking deadline <Required /></label>
-                  <input type="datetime-local" value={expiresAt}
-                    onChange={e => setExpiresAt(e.target.value)} style={inp} />
+                  <DateTimePicker value={expiresAt} onChange={setExpiresAt}
+                    placeholder="Last moment to buy" style={inp} />
                   <div className="field-hint">Tickets stop selling after this date</div>
                 </div>
 
