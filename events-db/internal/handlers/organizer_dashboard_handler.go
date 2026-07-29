@@ -227,11 +227,14 @@ func GetOrganizerEventStatsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // ── GET /organiser/dashboard/events/:id/bookings ──────────────────────────────
 //
 // Returns a cursor-paginated attendee/booking list for one of the organiser's
-// events. Each row includes the attendee name, email, ticket quantity, and net
-// earning to the organiser from that booking.
+// events. Each row includes the attendee name, ticket quantity, and net
+// earning to the organiser from that booking. Attendee email is deliberately
+// omitted — that's PII organisers shouldn't have access to. Cancelled
+// bookings are excluded unless a status filter explicitly asks for them.
 //
 // Query params:
-//   status  — filter: pending | confirmed | cancelled | refunded
+//   status  — filter: pending | confirmed | cancelled | refunded | all
+//             (default: everything except cancelled)
 //   limit   — default 50, max 200
 //   cursor  — opaque pagination token
 //
@@ -246,7 +249,6 @@ func GetOrganizerEventStatsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //     "currency": "ZAR",
 //     "booking_status": "confirmed",
 //     "attendee_name": "John Doe",
-//     "attendee_email": "john@example.com",
 //     "confirmed_at": "2025-04-01T14:22:00Z"
 //   }
 func GetOrganizerEventBookingsHandler(pool *pgxpool.Pool) gin.HandlerFunc {

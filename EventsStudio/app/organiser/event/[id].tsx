@@ -14,11 +14,9 @@ import { StatCard, Card, Chip, ProgressBar, Loader, Empty } from '../../../compo
 import {
   getOrgEventStats,
   getOrgEventBookings,
-  getOrgEventMerch,
   getOrgCampaigns,
   OrgEventStats,
   OrgBooking,
-  OrgMerchSale,
   OrgCampaign,
   fmtMoney,
   fmtNum,
@@ -28,7 +26,7 @@ import {
   capacityPct,
 } from '../../../lib/organiser';
 
-type Tab = 'overview' | 'attendees' | 'merch';
+type Tab = 'overview' | 'attendees';
 
 const capColor = (pct: number) =>
   pct >= 90 ? STUDIO.red : pct >= 70 ? STUDIO.amber : STUDIO.accent;
@@ -42,7 +40,6 @@ export default function StudioEventDetail() {
   const [stats, setStats] = useState<OrgEventStats | null>(null);
   const [campaign, setCampaign] = useState<OrgCampaign | null>(null);
   const [bookings, setBookings] = useState<OrgBooking[]>([]);
-  const [merch, setMerch] = useState<OrgMerchSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTab, setLoadingTab] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -84,24 +81,21 @@ export default function StudioEventDetail() {
           setLoadingTab(false);
         }
       }
-      if (t === 'merch' && merch.length === 0) {
-        setLoadingTab(true);
-        try {
-          setMerch(await getOrgEventMerch(id));
-        } catch {
-          /* leave empty */
-        } finally {
-          setLoadingTab(false);
-        }
-      }
     },
-    [id, bookings.length, merch.length],
+    [id, bookings.length],
   );
 
   const switchTab = (t: Tab) => {
     setTab(t);
     loadTab(t);
   };
+
+  // Organisers only need to see who's actually coming — cancelled bookings
+  // aren't attendees and shouldn't clutter (or be countable in) this list.
+  const confirmedBookings = useMemo(
+    () => bookings.filter((b) => b.booking_status === 'confirmed'),
+    [bookings],
+  );
 
   const ev = stats?.event;
   const pct = useMemo(
@@ -152,7 +146,7 @@ export default function StudioEventDetail() {
 
             {/* Tab switch */}
             <View style={styles.segment}>
-              {(['overview', 'attendees', 'merch'] as Tab[]).map((t) => (
+              {(['overview', 'attendees'] as Tab[]).map((t) => (
                 <TouchableOpacity
                   key={t}
                   style={[styles.segItem, tab === t && styles.segItemActive]}
@@ -160,7 +154,7 @@ export default function StudioEventDetail() {
                   activeOpacity={0.8}
                 >
                   <Text style={[styles.segTxt, tab === t && styles.segTxtActive]}>
-                    {t === 'overview' ? 'Overview' : t === 'attendees' ? 'Attendees' : 'Merch'}
+                    {t === 'overview' ? 'Overview' : 'Attendees'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -240,7 +234,7 @@ export default function StudioEventDetail() {
               {tab === 'attendees' &&
                 (loadingTab ? (
                   <Loader />
-                ) : bookings.length === 0 ? (
+                ) : confirmedBookings.length === 0 ? (
                   <Card noPad>
                     <Empty
                       icon={<Feather name="users" size={24} color={STUDIO.muted} />}
@@ -250,12 +244,12 @@ export default function StudioEventDetail() {
                   </Card>
                 ) : (
                   <Card noPad>
-                    {bookings.map((b, i) => (
+                    {confirmedBookings.map((b, i) => (
                       <View
                         key={b.id}
                         style={[
                           styles.bookingRow,
-                          i < bookings.length - 1 && styles.rowDivider,
+                          i < confirmedBookings.length - 1 && styles.rowDivider,
                         ]}
                       >
                         <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
@@ -263,7 +257,7 @@ export default function StudioEventDetail() {
                             {b.attendee_name || 'Guest'}
                           </Text>
                           <Text style={styles.bookMeta} numberOfLines={1}>
-                            {b.attendee_email || b.booking_number}
+                            {b.booking_number}
                           </Text>
                           <Text style={styles.bookMeta}>
                             {fmtNum(b.ticket_quantity)} ticket
@@ -276,51 +270,6 @@ export default function StudioEventDetail() {
                             {fmtMoney(b.net_earning, b.currency)}
                           </Text>
                           <Chip status={b.booking_status} />
-                        </View>
-                      </View>
-                    ))}
-                  </Card>
-                ))}
-
-              {tab === 'merch' &&
-                (loadingTab ? (
-                  <Loader />
-                ) : merch.length === 0 ? (
-                  <Card noPad>
-                    <Empty
-                      icon={<Feather name="shopping-bag" size={24} color={STUDIO.muted} />}
-                      title="No merch sales"
-                      desc="Merch sold for this event will appear here."
-                    />
-                  </Card>
-                ) : (
-                  <Card noPad>
-                    {merch.map((m, i) => (
-                      <View
-                        key={`${m.merchandise_id}-${m.variant_id ?? i}`}
-                        style={[
-                          styles.bookingRow,
-                          i < merch.length - 1 && styles.rowDivider,
-                        ]}
-                      >
-                        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-                          <Text style={styles.bookName} numberOfLines={1}>
-                            {m.merch_name}
-                          </Text>
-                          {m.variant_sku ? (
-                            <Text style={styles.bookMeta} numberOfLines={1}>
-                              {m.variant_sku}
-                            </Text>
-                          ) : null}
-                          <Text style={styles.bookMeta}>
-                            {fmtNum(m.units_sold)} sold · {fmtMoney(m.unit_price)} each
-                          </Text>
-                        </View>
-                        <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                          <Text style={styles.bookAmt}>{fmtMoney(m.gross_revenue)}</Text>
-                          {m.oversold_quantity > 0 && (
-                            <Chip status="oversold" label={`${m.oversold_quantity} oversold`} />
-                          )}
                         </View>
                       </View>
                     ))}

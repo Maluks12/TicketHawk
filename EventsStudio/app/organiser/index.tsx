@@ -641,9 +641,9 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: STUDIO.border,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    marginTop: 2,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginTop: 20,
   },
   staffJoinIcon: {
     width: 36,

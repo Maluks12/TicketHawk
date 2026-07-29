@@ -458,9 +458,10 @@ type OrganizerBookingRow struct {
 	PaymentStatus models.PaymentStatus `json:"payment_status"`
 	IsGuest       bool                `json:"is_guest"`
 
-	// Attendee info — first/last name or email depending on what's available
+	// Attendee info. Email is intentionally not exposed to organisers —
+	// it's attendee PII, not something organisers should have access to.
 	AttendeeName  string `json:"attendee_name"`
-	AttendeeEmail string `json:"attendee_email"`
+	AttendeeEmail string `json:"-"`
 
 	ConfirmedAt *time.Time `json:"confirmed_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
@@ -494,6 +495,11 @@ func GetOrganizerEventBookings(
 		where += fmt.Sprintf(" AND b.booking_status = $%d", argN)
 		args = append(args, statusFilter)
 		argN++
+	} else {
+		// Cancelled bookings aren't attendees — organisers shouldn't see them
+		// in the attendee list by default. Explicit status filters (e.g.
+		// ?status=cancelled) still work for any future admin/refund tooling.
+		where += " AND b.booking_status != 'cancelled'"
 	}
 	if cursor != nil {
 		where += fmt.Sprintf(

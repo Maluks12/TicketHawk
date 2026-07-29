@@ -119,7 +119,6 @@ export interface OrgBooking {
   currency: string;
   booking_status: string;
   attendee_name: string;
-  attendee_email: string;
   confirmed_at: string | null;
 }
 
