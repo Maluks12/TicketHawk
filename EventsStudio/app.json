@@ -22,7 +22,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.tickethawk.studio",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -46,7 +47,10 @@
       ]
     ],
     "extra": {
-      "router": {}
+      "router": {},
+      "eas": {
+        "projectId": "a156487c-a808-4812-ba00-d32427177555"
+      }
     }
   }
 }

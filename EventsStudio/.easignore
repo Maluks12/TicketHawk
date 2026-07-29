@@ -1,0 +1,19 @@
+# Heavy / regenerated folders anywhere in the tree — safe to exclude
+# regardless of which app in this monorepo is being built.
+**/node_modules/
+**/.git/
+**/.expo/
+**/android/
+**/ios/
+**/dist/
+**/build/
+**/.turbo/
+**/.metro-cache/
+**/coverage/
+
+# Misc
+**/.DS_Store
+**/*.log
+**/npm-debug.log*
+**/yarn-error.log*
+**/.vscode/
