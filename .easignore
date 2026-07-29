@@ -1,9 +1,10 @@
-# Sibling projects in the monorepo — not part of the mobile app build
+# Non-mobile projects in the monorepo — never needed by an EAS build.
+# NOTE: this file governs the archive for BOTH EventsApp and EventsStudio,
+# so neither mobile app may be listed here.
 events-admin/
 events-db/
 events-organizer/
 EventsWeb/
-EventsStudio/
 loadtest/
 web-desktop/
 web-mobile/
@@ -23,3 +24,6 @@ web-mobile/
 # Misc
 **/.DS_Store
 **/*.log
+**/npm-debug.log*
+**/yarn-error.log*
+**/.vscode/
