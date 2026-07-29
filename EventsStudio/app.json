@@ -10,7 +10,10 @@
     "backgroundColor": "#08080C",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tickethawk.studio"
+      "bundleIdentifier": "com.tickethawk.studio",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
