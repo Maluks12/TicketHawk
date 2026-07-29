@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView,
+  View, Text, TextInput, TouchableOpacity, Pressable, ScrollView,
   KeyboardAvoidingView, Platform, ActivityIndicator, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +14,22 @@ import BrandLogo from '../../components/BrandLogo';        // ADD
 import { openLegal } from '../../lib/legalLinks';
 
 type Mode = 'login' | 'register';
+
+// ─── DOB helpers (module scope so they never change identity) ────────────────
+
+const formatDob = (raw: string) => {
+  const d = raw.replace(/\D/g, '').slice(0, 8);
+  if (d.length > 4) return `${d.slice(0,2)}/${d.slice(2,4)}/${d.slice(4)}`;
+  if (d.length > 2) return `${d.slice(0,2)}/${d.slice(2)}`;
+  return d;
+};
+
+const parseDobToISO = (f: string) => {
+  const [dd, mm, yyyy] = f.split('/');
+  if (!dd || !mm || !yyyy || yyyy.length < 4) return null;
+  const d = new Date(`${yyyy}-${mm}-${dd}`);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 
@@ -31,22 +47,46 @@ interface FieldProps {
   isDark?: boolean;
 }
 
-const Field = ({ placeholder, value, onChange, secure, keyboardType = 'default',
+// RESPONSIVENESS: Field is memoised so that typing in one input no longer
+// re-renders the other six. Every prop it receives from the screen is a stable
+// reference (useCallback / useRef), otherwise memo would never hit.
+const Field = React.memo(({ placeholder, value, onChange, secure, keyboardType = 'default',
   autoCapitalize = 'none', error, returnKeyType = 'next', onSubmit, inputRef,
   isDark }: FieldProps) => {
   const [focused, setFocused] = useState(false);
   const [shown, setShown]     = useState(false);
+
+  // Fallback ref for fields the screen doesn't drive, so the box-tap handler
+  // below always has something to focus.
+  const localRef = useRef<TextInput>(null);
+  const ref = inputRef ?? localRef;
+
+  const focusInput = useCallback(() => {
+    const node = ref.current;
+    if (node && !node.isFocused()) node.focus();
+  }, [ref]);
+
+  const handleFocus   = useCallback(() => setFocused(true), []);
+  const handleBlur    = useCallback(() => setFocused(false), []);
+  const toggleShown   = useCallback(() => setShown(p => !p), []);
+
   return (
     <View style={fieldSheet.wrap}>
-      <View style={[
-        fieldSheet.box,
-        isDark && { backgroundColor: '#1c1c1c', borderColor: '#333' },
-        focused && (isDark ? { borderColor: '#666' } : fieldSheet.boxFocused),
-        !!error && fieldSheet.boxError,
-      ]}>
+      {/* The box itself is pressable: a tap on the border/padding focuses the
+          input instead of being swallowed, which is what made fields feel like
+          they needed two taps. */}
+      <Pressable
+        onPress={focusInput}
+        style={[
+          fieldSheet.box,
+          isDark && { backgroundColor: '#1c1c1c', borderColor: '#333' },
+          focused && (isDark ? { borderColor: '#666' } : fieldSheet.boxFocused),
+          !!error && fieldSheet.boxError,
+        ]}
+      >
         <TextInput
-          ref={inputRef}
-           style={[fieldSheet.input, isDark && { color: '#ffffff' }]}
+          ref={ref}
+          style={[fieldSheet.input, isDark && { color: '#ffffff' }]}
           value={value}
           onChangeText={onChange}
           placeholder={placeholder}
@@ -56,27 +96,35 @@ const Field = ({ placeholder, value, onChange, secure, keyboardType = 'default',
           autoCapitalize={autoCapitalize}
           autoCorrect={false}
           returnKeyType={returnKeyType}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           onSubmitEditing={onSubmit}
         />
         {secure && (
-          <TouchableOpacity onPress={() => setShown(p => !p)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-           <Feather name={shown ? 'eye-off' : 'eye'} size={19} color={isDark ? 'rgba(255,255,255,0.4)' : 'rgba(10,10,10,0.4)'} />
-          </TouchableOpacity>
+          <Pressable
+            onPress={toggleShown}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+            style={{ paddingLeft: 8 }}
+          >
+            <Feather name={shown ? 'eye-off' : 'eye'} size={19} color={isDark ? 'rgba(255,255,255,0.4)' : 'rgba(10,10,10,0.4)'} />
+          </Pressable>
         )}
-      </View>
+      </Pressable>
       {error ? <Text style={fieldSheet.err}>{error}</Text> : null}
     </View>
   );
-};
+});
+Field.displayName = 'Field';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { login, register } = useAuthStore();
+  // Selectors, not the whole store: destructuring useAuthStore() subscribed this
+  // screen to every auth state change and re-rendered the form each time.
+  const login    = useAuthStore((st) => st.login);
+  const register = useAuthStore((st) => st.register);
   const { isDark, colors } = useAppTheme();
 
   const [mode, setMode]           = useState<Mode>('login');
@@ -105,26 +153,46 @@ export default function AuthScreen() {
   const confirmRef   = useRef<TextInput>(null);
 
 
-  const clearErr = (key: string) => setErrors(p => ({ ...p, [key]: '' }));
+  // INPUT LAG: this used to build a brand-new errors object on every single
+  // keystroke, which forced a second full re-render of the screen per character
+  // even when there was no error to clear. Returning the same object when
+  // nothing changes makes the update a no-op.
+  const clearErr = useCallback((key: string) => {
+    setErrors(p => (p[key] ? { ...p, [key]: '' } : p));
+  }, []);
 
-  const switchMode = (m: Mode) => {
+  const switchMode = useCallback((m: Mode) => {
     setMode(m); setGlobalErr(null); setErrors({});
-    Animated.spring(tabAnim, { toValue: m === 'login' ? 0 : 1, useNativeDriver: false, tension: 140, friction: 11 }).start();
-  };
+    // Native driver: this animated `left` as a percentage before, which runs on
+    // the JS thread and re-lays-out the track every frame. For ~400ms after each
+    // tap the thread was too busy to register the next one.
+    Animated.spring(tabAnim, { toValue: m === 'login' ? 0 : 1, useNativeDriver: true, tension: 140, friction: 11 }).start();
+  }, [tabAnim]);
 
-  const formatDob = (raw: string) => {
-    const d = raw.replace(/\D/g, '').slice(0, 8);
-    if (d.length > 4) return `${d.slice(0,2)}/${d.slice(2,4)}/${d.slice(4)}`;
-    if (d.length > 2) return `${d.slice(0,2)}/${d.slice(2)}`;
-    return d;
-  };
+  const goLogin    = useCallback(() => switchMode('login'), [switchMode]);
+  const goRegister = useCallback(() => switchMode('register'), [switchMode]);
 
-  const parseDobToISO = (f: string) => {
-    const [dd, mm, yyyy] = f.split('/');
-    if (!dd || !mm || !yyyy || yyyy.length < 4) return null;
-    const d = new Date(`${yyyy}-${mm}-${dd}`);
-    return isNaN(d.getTime()) ? null : d.toISOString();
-  };
+  // ── Stable per-field handlers (required for React.memo on Field to bite) ──
+  const onLoginEmail    = useCallback((v: string) => { setLoginEmail(v);    clearErr('loginEmail'); },    [clearErr]);
+  const onLoginPassword = useCallback((v: string) => { setLoginPassword(v); clearErr('loginPassword'); }, [clearErr]);
+  const onFirstName     = useCallback((v: string) => { setFirstName(v);     clearErr('firstName'); },     [clearErr]);
+  const onLastName      = useCallback((v: string) => { setLastName(v);      clearErr('lastName'); },      [clearErr]);
+  const onRegEmail      = useCallback((v: string) => { setRegEmail(v);      clearErr('regEmail'); },      [clearErr]);
+  const onPhone         = useCallback((v: string) => { setPhone(v);         clearErr('phone'); },         [clearErr]);
+  const onRegPassword   = useCallback((v: string) => { setRegPassword(v);   clearErr('regPassword'); },   [clearErr]);
+  const onConfirmPass   = useCallback((v: string) => { setConfirmPass(v);   clearErr('confirmPass'); },   [clearErr]);
+
+  const focusLoginPass = useCallback(() => loginPassRef.current?.focus(), []);
+  const focusLastName  = useCallback(() => lastNameRef.current?.focus(),  []);
+  const focusEmail     = useCallback(() => emailRef.current?.focus(),     []);
+  const focusPhone     = useCallback(() => phoneRef.current?.focus(),     []);
+  const focusDob       = useCallback(() => dobRef.current?.focus(),       []);
+  const focusPass      = useCallback(() => passRef.current?.focus(),      []);
+  const focusConfirm   = useCallback(() => confirmRef.current?.focus(),   []);
+
+  const toggleAgreed = useCallback(() => { setAgreed(a => !a); clearErr('agreed'); }, [clearErr]);
+
+  const onDob = useCallback((v: string) => { setDob(formatDob(v)); clearErr('dob'); }, [clearErr]);
 
   // Live password requirements shown under the Password field.
   const passChecks = [
@@ -194,13 +262,27 @@ export default function AuthScreen() {
   }, [firstName, lastName, regEmail, phone, dob, regPassword, confirmPass, agreed, passAllOk, register, router]);
 
 
-  const indicatorLeft = tabAnim.interpolate({ inputRange: [0, 1], outputRange: ['2%', '51%'] });
+  // Tab indicator: measured once on layout, then moved with a native-driver
+  // translateX instead of an animated `left` percentage.
+  const [trackWidth, setTrackWidth] = useState(0);
+  const onTrackLayout = useCallback((e: any) => {
+    const w = e.nativeEvent.layout.width;
+    setTrackWidth(prev => (Math.abs(prev - w) > 0.5 ? w : prev));
+  }, []);
+  const thumbWidth = trackWidth > 0 ? (trackWidth - 8) / 2 : 0;
+  const indicatorX = tabAnim.interpolate({ inputRange: [0, 1], outputRange: [0, thumbWidth] });
 
   return (
    <View className={s.root} style={{ backgroundColor: isDark ? '#161618' : colors.background }}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        {/* keyboardShouldPersistTaps: "handled" let the ScrollView swallow the
+            first tap whenever the keyboard was up, so moving between fields or
+            hitting a button took two taps. "always" delivers every tap straight
+            to its target; keyboardDismissMode keeps the swipe-to-dismiss
+            behaviour that "handled" was there for. */}
         <ScrollView className={s.scroll} contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}
-          keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          keyboardShouldPersistTaps="always" keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}>
 
           {/* Close */}
           <TouchableOpacity className={s.closeBtn} style={{ marginTop: insets.top + 14, backgroundColor: isDark ? '#1c1c1c' : '#efefef' }}
@@ -218,12 +300,23 @@ export default function AuthScreen() {
           </View>
 
           {/* Tab toggle */}
-           <View className={s.tabTrack} style={{ backgroundColor: isDark ? '#1c1c1c' : '#ebebeb' }}>
-            <Animated.View style={[sheet.tabThumb, { left: indicatorLeft, backgroundColor: isDark ? '#2c2c2c' : '#fff' }]} />
-            <TouchableOpacity className={s.tab} onPress={() => switchMode('login')} activeOpacity={0.75}>
+           <View className={s.tabTrack} style={{ backgroundColor: isDark ? '#1c1c1c' : '#ebebeb' }} onLayout={onTrackLayout}>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                sheet.tabThumb,
+                {
+                  left: 4,
+                  width: thumbWidth,
+                  transform: [{ translateX: indicatorX }],
+                  backgroundColor: isDark ? '#2c2c2c' : '#fff',
+                },
+              ]}
+            />
+            <TouchableOpacity className={s.tab} onPress={goLogin} activeOpacity={0.75}>
               <Text className={s.tabLabel} style={{ color: mode === 'login' ? colors.text : colors.subText, fontWeight: mode === 'login' ? '700' : '600' }}>Log in</Text>
             </TouchableOpacity>
-            <TouchableOpacity className={s.tab} onPress={() => switchMode('register')} activeOpacity={0.75}>
+            <TouchableOpacity className={s.tab} onPress={goRegister} activeOpacity={0.75}>
               <Text className={s.tabLabel} style={{ color: mode === 'register' ? colors.text : colors.subText, fontWeight: mode === 'register' ? '700' : '600' }}>Sign up</Text>
             </TouchableOpacity>
           </View>
@@ -240,11 +333,11 @@ export default function AuthScreen() {
           {mode === 'login' && (
             <View className={s.form}>
               <Field placeholder="Email address" value={loginEmail}
-                onChange={v => { setLoginEmail(v); clearErr('loginEmail'); }}
+                onChange={onLoginEmail}
                 keyboardType="email-address" error={errors.loginEmail}
-                returnKeyType="next" onSubmit={() => loginPassRef.current?.focus()} isDark={isDark} />
+                returnKeyType="next" onSubmit={focusLoginPass} isDark={isDark} />
               <Field placeholder="Password" value={loginPassword}
-                onChange={v => { setLoginPassword(v); clearErr('loginPassword'); }}
+                onChange={onLoginPassword}
                 secure inputRef={loginPassRef} error={errors.loginPassword}
                 returnKeyType="done" onSubmit={handleLogin} isDark={isDark} />
 
@@ -265,7 +358,7 @@ export default function AuthScreen() {
               </TouchableOpacity>
 
 
-              <TouchableOpacity className={s.switchRow} onPress={() => switchMode('register')}>
+              <TouchableOpacity className={s.switchRow} onPress={goRegister}>
                 <Text className={s.switchText} style={{ color: colors.subText }}>Don't have an account?{'  '}<Text className={s.switchLink}>Sign up</Text></Text>
               </TouchableOpacity>
             </View>
@@ -278,22 +371,22 @@ export default function AuthScreen() {
               <View className={s.nameRow}>
                 <View style={{ flex: 1 }}>
                   <Field placeholder="First name" value={firstName}
-                  onChange={v => { setFirstName(v); clearErr('firstName'); }}
+                  onChange={onFirstName}
                   autoCapitalize="words" error={errors.firstName}
-                  returnKeyType="next" onSubmit={() => lastNameRef.current?.focus()} isDark={isDark} />
+                  returnKeyType="next" onSubmit={focusLastName} isDark={isDark} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Field placeholder="Last name" value={lastName}
-                  onChange={v => { setLastName(v); clearErr('lastName'); }}
+                  onChange={onLastName}
                   autoCapitalize="words" inputRef={lastNameRef} error={errors.lastName}
-                  returnKeyType="next" onSubmit={() => emailRef.current?.focus()} isDark={isDark} />
+                  returnKeyType="next" onSubmit={focusEmail} isDark={isDark} />
                 </View>
               </View>
 
               <Field placeholder="Email address" value={regEmail}
-              onChange={v => { setRegEmail(v); clearErr('regEmail'); }}
+              onChange={onRegEmail}
               keyboardType="email-address" inputRef={emailRef} error={errors.regEmail}
-              returnKeyType="next" onSubmit={() => phoneRef.current?.focus()} isDark={isDark} />
+              returnKeyType="next" onSubmit={focusPhone} isDark={isDark} />
 
               <View className={s.phoneRow}>
                 <View style={[sheet.dialCode, isDark && { backgroundColor: '#1c1c21', borderColor: '#2e2e35' }]}>
@@ -302,22 +395,22 @@ export default function AuthScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Field placeholder="Phone number" value={phone}
-                  onChange={v => { setPhone(v); clearErr('phone'); }}
+                  onChange={onPhone}
                   keyboardType="phone-pad" inputRef={phoneRef} error={errors.phone}
-                  returnKeyType="next" onSubmit={() => dobRef.current?.focus()} isDark={isDark} />
+                  returnKeyType="next" onSubmit={focusDob} isDark={isDark} />
 
                 </View>
               </View>
 
               <Field placeholder="Date of birth (DD/MM/YYYY)" value={dob}
-                onChange={v => { setDob(formatDob(v)); clearErr('dob'); }}
+                onChange={onDob}
                 keyboardType="numeric" inputRef={dobRef} error={errors.dob}
-                returnKeyType="next" onSubmit={() => passRef.current?.focus()} isDark={isDark} />
+                returnKeyType="next" onSubmit={focusPass} isDark={isDark} />
 
               <Field placeholder="Password" value={regPassword}
-              onChange={v => { setRegPassword(v); clearErr('regPassword'); }}
+              onChange={onRegPassword}
               secure inputRef={passRef} error={errors.regPassword}
-              returnKeyType="next" onSubmit={() => confirmRef.current?.focus()} isDark={isDark} />
+              returnKeyType="next" onSubmit={focusConfirm} isDark={isDark} />
 
               {/* Live password requirements */}
               <View style={{ marginTop: -2, marginBottom: 12, gap: 6, paddingHorizontal: 4 }}>
@@ -334,13 +427,13 @@ export default function AuthScreen() {
               </View>
 
               <Field placeholder="Confirm password" value={confirmPass}
-                onChange={v => { setConfirmPass(v); clearErr('confirmPass'); }}
+                onChange={onConfirmPass}
                 secure inputRef={confirmRef} error={errors.confirmPass}
                 returnKeyType="done" onSubmit={handleRegister} isDark={isDark} />
 
               {/* Terms */}
               <TouchableOpacity className={s.termsRow}
-                onPress={() => { setAgreed(a => !a); clearErr('agreed'); }} activeOpacity={0.75}>
+                onPress={toggleAgreed} activeOpacity={0.75}>
                 <View style={[
                   sheet.checkbox,
                   { borderColor: isDark ? '#4a4a52' : '#ccc' },
@@ -387,7 +480,7 @@ export default function AuthScreen() {
               </TouchableOpacity>
 
 
-              <TouchableOpacity className={s.switchRow} onPress={() => switchMode('login')}>
+              <TouchableOpacity className={s.switchRow} onPress={goLogin}>
                 <Text className={s.switchText} style={{ color: colors.subText }}>Already have an account?{'  '}<Text className={s.switchLink}>Log in</Text></Text>
               </TouchableOpacity>
             </View>

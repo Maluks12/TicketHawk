@@ -92,6 +92,12 @@ export const sheet = StyleSheet.create({
 
 export const fieldSheet = StyleSheet.create({
   wrap: { gap: 5 },
+  // TOUCH TARGET: the vertical padding used to live here, on the wrapper View.
+  // A TextInput only receives touches inside its OWN bounds, so 16px of padding
+  // above and below the text line was dead space -- tapping near the top or
+  // bottom edge of the box did nothing and the user had to tap again, lower
+  // down. The padding now lives on the input itself (below), which makes the
+  // full height of the box a live target.
   box: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -100,10 +106,19 @@ export const fieldSheet = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#e8e8e8',
     paddingHorizontal: 18,
-    paddingVertical: Platform.OS === 'ios' ? 16 : 4,
+    paddingVertical: 0,
   },
   boxFocused: { borderColor: '#0a0a0a' },
   boxError:   { borderColor: '#ff3c6e' },
-  input:      { flex: 1, fontSize: 15.5, color: '#0a0a0a', fontWeight: '400' as const },
+  input: {
+    flex: 1,
+    alignSelf: 'stretch' as const,
+    fontSize: 15.5,
+    color: '#0a0a0a',
+    fontWeight: '400' as const,
+    paddingVertical: Platform.OS === 'ios' ? 16 : 12,
+    minHeight: 52,
+    textAlignVertical: 'center' as const,   // Android: keep text centred in the taller box
+  },
   err:        { fontSize: 12, color: '#ff3c6e', fontWeight: '500' as const, marginLeft: 4 },
 });

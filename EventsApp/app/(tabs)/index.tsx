@@ -14,10 +14,10 @@ import {
   type AppStateStatus,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { prefetchImages } from '../../lib/img';
+import { prefetchImages, prefetchFullImages } from '../../lib/img';
 import { CoverImage } from '../../components/CoverImage';
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
-import { useRouter } from 'expo-router';
+import { useState, useEffect, useCallback, useRef, useMemo, memo, forwardRef, useImperativeHandle } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -123,6 +123,21 @@ const SPOTLIGHT_CONFIGS = [
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Which events feed the hero carousel. Lifted out of the component so
+// fetchSections() can warm exactly the artwork the hero is about to request --
+// if these two ever computed a different pool, the prefetch would be warming
+// the wrong images.
+function pickCarouselEvents(sections: HomeSection[]): Event[] {
+  const rawFeatured  = sections.find((sec) => sec.id === 'featured')?.events ?? [];
+  const trendingPool = sections.find((sec) => sec.id === 'trending')?.events ?? [];
+  return rawFeatured.length >= 2
+    ? rawFeatured.slice(0, 6)
+    : [
+        ...rawFeatured,
+        ...trendingPool.filter((e) => !rawFeatured.some((f) => f.id === e.id)),
+      ].slice(0, 5);
+}
 
 function formatPrice(price: number, currency: string) {
   if (price === 0) return 'Free';
@@ -361,6 +376,37 @@ const SectionRow = memo(({
   );
 });
 
+// ─── Hero dot indicators ──────────────────────────────────────────────────────
+// The active-dot index used to be state on the screen itself. The carousel
+// advances every 5 seconds, so every 5 seconds the entire home feed -- hero,
+// every section row, every editorial list -- re-rendered just to recolour five
+// 6px dots. That render is long enough to swallow a tap on the tab bar or a
+// card. The index now lives here, and the screen pushes it in imperatively.
+type HeroDotsHandle = { setIndex: (i: number) => void };
+
+const HeroDots = memo(forwardRef<HeroDotsHandle, { count: number; onPress: (i: number) => void }>(
+  ({ count, onPress }, ref) => {
+    const [index, setIndex] = useState(0);
+    useImperativeHandle(ref, () => ({ setIndex }), []);
+    if (count <= 1) return null;
+    return (
+      <View style={{ position: 'absolute', bottom: 14, right: 16, flexDirection: 'row', gap: 5, zIndex: 10 }}>
+        {Array.from({ length: count }).map((_, idx) => (
+          <TouchableOpacity key={idx} onPress={() => onPress(idx)} hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}>
+            <View style={{
+              width: idx === index ? 18 : 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: idx === index ? '#FF2D55' : 'rgba(255,255,255,0.4)',
+            }} />
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  },
+));
+HeroDots.displayName = 'HeroDots';
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function Index() {
@@ -388,6 +434,9 @@ export default function Index() {
   const headerHeight     = useRef(120);
   const featuredIndexRef = useRef(0);
   const heroBannerRef    = useRef<FlatList<Event>>(null);
+  const heroDotsRef      = useRef<HeroDotsHandle>(null);
+  // Carousel only ticks while this tab is actually on screen.
+  const screenFocused    = useRef(true);
 
   const [spotlightConfig, setSpotlightConfig] = useState(
     () => SPOTLIGHT_CONFIGS[Math.floor(Math.random() * SPOTLIGHT_CONFIGS.length)]
@@ -402,7 +451,6 @@ export default function Index() {
   const [loading,        setLoading]        = useState(true);
   const [refreshing,     setRefreshing]     = useState(false);
   const [error,          setError]          = useState<string | null>(null);
-  const [featuredIndex,  setFeaturedIndex]  = useState(0);
 
   const isFiltered = !!(
     filterParams.city     ||
@@ -412,18 +460,7 @@ export default function Index() {
   );
 
   // PERF: memoize carousel pool — only recomputes when homeSections changes
-  const carouselEvents = useMemo<Event[]>(() => {
-    const rawFeatured = homeSections.find((sec) => sec.id === 'featured')?.events ?? [];
-    const trendingPool = homeSections.find((sec) => sec.id === 'trending')?.events ?? [];
-    return rawFeatured.length >= 2
-      ? rawFeatured.slice(0, 6)
-      : [
-          ...rawFeatured,
-          ...trendingPool.filter((e) => !rawFeatured.some((f) => f.id === e.id)),
-        ].slice(0, 5);
-  }, [homeSections]);
-
-  const featuredEvent: Event | null = carouselEvents[featuredIndex] ?? null;
+  const carouselEvents = useMemo<Event[]>(() => pickCarouselEvents(homeSections), [homeSections]);
 
   // PERF: useMemo + O(n) Set-based dedup — was O(n²) findIndex inline every render
   const allEvents = useMemo(() => {
@@ -490,7 +527,7 @@ export default function Index() {
   // ── Featured carousel (FlatList-based, no fade-race glitch) ──────────────
   const advanceTo = useCallback((nextIdx: number) => {
     featuredIndexRef.current = nextIdx;
-    setFeaturedIndex(nextIdx);
+    heroDotsRef.current?.setIndex(nextIdx);
     // Guard: scrollToIndex crashes if list is empty or index out of range
     try {
       heroBannerRef.current?.scrollToIndex({ index: nextIdx, animated: true });
@@ -502,13 +539,22 @@ export default function Index() {
     if (viewableItems[0] && viewableItems[0].index != null) {
       const idx = viewableItems[0].index;
       featuredIndexRef.current = idx;
-      setFeaturedIndex(idx);
+      heroDotsRef.current?.setIndex(idx);
     }
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      screenFocused.current = true;
+      return () => { screenFocused.current = false; };
+    }, []),
+  );
 
   useEffect(() => {
     if (carouselEvents.length <= 1) return;
     const timer = setInterval(() => {
+      // Don't animate (or scroll) a carousel nobody is looking at.
+      if (!screenFocused.current) return;
       const next = (featuredIndexRef.current + 1) % carouselEvents.length;
       advanceTo(next);
     }, 5000);
@@ -517,7 +563,7 @@ export default function Index() {
 
   useEffect(() => {
     featuredIndexRef.current = 0;
-    setFeaturedIndex(0);
+    heroDotsRef.current?.setIndex(0);
     // Only scroll if the list already has items — scrollToIndex throws when length is 0
     if ((heroBannerRef.current as any)?._listRef?._getItemCount?.() > 0) {
       heroBannerRef.current?.scrollToIndex({ index: 0, animated: false });
@@ -567,6 +613,16 @@ export default function Index() {
       // instantly as the user scrolls instead of downloading on first sight.
       prefetchImages(
         loaded.flatMap((sec) => (sec.events ?? []).slice(0, 6)).map((e) => e.cover_image_url),
+      );
+      // The line above warms the _thumb.jpg variant, which is right for cards
+      // but wrong for the hero: it renders banner_image_url at full size, so it
+      // never touches the thumbnail and starts its download cold. Warm the
+      // first two slides at full resolution instead. Only two -- the rest of
+      // the carousel is a long way behind a 5-second auto-advance, and full-size
+      // banners are not something to be pulling down six at a time on mobile
+      // data.
+      prefetchFullImages(
+        pickCarouselEvents(loaded).slice(0, 2).map((e) => e.banner_image_url ?? e.cover_image_url),
       );
       const cats = categoriesRes?.data?.categories ?? [];
       if (cats.length > 0) setDbCategories(cats);
@@ -678,12 +734,17 @@ export default function Index() {
   // PERF: stable reference so EventCard/SectionRow don't re-render unnecessarily
   const handleEventPress = useCallback((event: Event) => {
     setSelectedEvent(event);
+    // The detail screen renders the full-size banner, but only the thumbnail was
+    // warmed for this card -- so kick the real download off now and let it run
+    // under the push animation instead of starting it when the screen lands.
+    prefetchFullImages([event.banner_image_url ?? event.cover_image_url]);
     router.push(`/event/${event.id}`);
   }, [setSelectedEvent, router]);
 
   // GET TICKETS skips the details page and lands directly on ticket selection.
   const handleGetTickets = useCallback((event: Event) => {
     setSelectedEvent(event);
+    prefetchFullImages([event.banner_image_url ?? event.cover_image_url]);
     router.push('/event/purchase');
   }, [setSelectedEvent, router]);
 
@@ -751,6 +812,11 @@ export default function Index() {
         className={s.scroll}
         style={{ backgroundColor: colors.background }}
         showsVerticalScrollIndicator={false}
+        // A horizontal swipe across a row is never perfectly horizontal. Without
+        // a directional lock the page also scrolls by the few vertical pixels in
+        // the gesture, so everything under the row you're swiping drifts up and
+        // down with your thumb.
+        directionalLockEnabled
         scrollEventThrottle={16}
         onScroll={(e) => {
           const currentY = e.nativeEvent.contentOffset.y;
@@ -847,20 +913,7 @@ export default function Index() {
             )}
           />
           {/* Dot indicators — tap to jump, auto-updates on swipe */}
-          {carouselEvents.length > 1 && (
-            <View style={{ position: 'absolute', bottom: 14, right: 16, flexDirection: 'row', gap: 5, zIndex: 10 }}>
-              {carouselEvents.map((_, idx) => (
-                <TouchableOpacity key={idx} onPress={() => advanceTo(idx)} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
-                  <View style={{
-                    width: idx === featuredIndex ? 18 : 6,
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor: idx === featuredIndex ? '#FF2D55' : 'rgba(255,255,255,0.4)',
-                  }} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          <HeroDots ref={heroDotsRef} count={carouselEvents.length} onPress={advanceTo} />
         </View>
 
         {/* Category Filter */}

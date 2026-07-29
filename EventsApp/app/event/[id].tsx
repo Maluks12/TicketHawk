@@ -607,10 +607,12 @@ export default function EventDetail() {
                       style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
                       <Hash size={16} color={colors.text} weight="regular" />
                     </View>
+                    {/* No chevron here: unlike Teams/Performers these rows
+                        aren't tappable, so the arrow was promising a screen
+                        that doesn't exist. */}
                     <Text className={s.participantName} style={{ color: colors.text }}>
                       {tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1)}
                     </Text>
-                    <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
                   </View>
                 ))}
               </View>

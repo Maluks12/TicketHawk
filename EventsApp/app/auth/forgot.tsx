@@ -66,7 +66,8 @@ export default function ForgotPasswordScreen() {
         <ScrollView
           className={s.scroll}
           contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 24, flexGrow: 1 }}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="on-drag"
         >
           {/* Back */}
           <TouchableOpacity

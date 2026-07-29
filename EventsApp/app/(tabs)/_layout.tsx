@@ -10,7 +10,7 @@ const SZ = 30;
 
 // One component for every tab: Phosphor regular weight when idle,
 // fill weight + text color when focused (Instagram/Spotify pattern).
-function TabIcon({ icon: IconCmp, focused, colors }: { icon: PhosphorIcon; focused: boolean; colors: any }) {
+const TabIcon = React.memo(function TabIcon({ icon: IconCmp, focused, colors }: { icon: PhosphorIcon; focused: boolean; colors: any }) {
   return (
     <View style={styles.iconWrap}>
       <IconCmp
@@ -20,7 +20,7 @@ function TabIcon({ icon: IconCmp, focused, colors }: { icon: PhosphorIcon; focus
       />
     </View>
   );
-}
+});
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
@@ -35,15 +35,31 @@ export default function TabLayout() {
         tabBarShowLabel:         false,
         tabBarActiveTintColor:   colors.text,
         tabBarInactiveTintColor: colors.iconColor,
+        // RESPONSIVENESS: keep inactive tabs frozen so their render work never
+        // competes with the JS thread while you are tapping around. Without
+        // this, a background screen re-rendering (the home feed re-renders on a
+        // timer) can eat the frame your tap landed on.
+        lazy:          true,
+        freezeOnBlur:  true,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           ...styles.tabBar,
           backgroundColor: colors.headerBg,
           borderTopColor:  colors.dividerColor,
           height:        55 + insets.bottom,
-          paddingBottom: insets.bottom,
-          paddingTop:    10,
+          // TOUCH TARGET: the bottom inset used to be padding on the BAR, which
+          // made the whole home-indicator strip dead space -- a thumb landing
+          // low on the bar hit nothing and you had to tap again. Moving the
+          // inset onto the item keeps the icons in exactly the same place but
+          // extends each button's touchable area all the way down.
+          paddingBottom: 0,
+          paddingTop:    0,
         },
-        tabBarItemStyle: styles.tabItem,
+        tabBarItemStyle: {
+          ...styles.tabItem,
+          paddingTop:    10,
+          paddingBottom: insets.bottom,
+        },
       }}
     >
       <Tabs.Screen

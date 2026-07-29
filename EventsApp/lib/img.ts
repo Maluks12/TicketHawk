@@ -46,3 +46,15 @@ export function prefetchImages(urls: (string | null | undefined)[]): void {
   if (list.length === 0) return;
   Image.prefetch(list, 'memory-disk').catch(() => {});
 }
+
+/**
+ * Warm the disk cache for a FULL-resolution image (hero / banner artwork), as
+ * opposed to prefetchImages() above which deliberately warms the small card
+ * thumbnail. Use this when the screen you're heading to renders the full URL --
+ * prefetching the thumbnail would leave that render a cache miss.
+ */
+export function prefetchFullImages(urls: (string | null | undefined)[]): void {
+  const list = urls.filter((u): u is string => !!u && isRemote(u));
+  if (list.length === 0) return;
+  Image.prefetch(list, 'memory-disk').catch(() => {});
+}

@@ -9,7 +9,6 @@ import {
   Animated,
   Dimensions,
   StatusBar,
-  Image,
   TextInput,
   Modal,
   Platform,
@@ -17,6 +16,8 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image as ExpoImage } from 'expo-image';
+import { IMG_BLURHASH, prefetchFullImages } from '../../lib/img';
 import { useRouter } from 'expo-router';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -281,6 +282,14 @@ export default function TicketPurchaseScreen() {
   const venueType = SEATING_ENABLED ? rawVenueType : 'none';
   const bannerImage  = event?.banner_image_url ?? event?.cover_image_url ?? null;
 
+  // The banner only renders on the summary step, but the user is on the ticket
+  // picker for a few seconds first. Start warming the cache now so the image is
+  // already on disk by the time they tap through, instead of beginning the
+  // download at the moment the checkout screen appears.
+  useEffect(() => {
+    if (bannerImage) prefetchFullImages([bannerImage]);
+  }, [bannerImage]);
+
   const handleSelectType = useCallback((id: string) => setSelectedId(id), []);
 
   const handleNext = () => {
@@ -484,7 +493,24 @@ export default function TicketPurchaseScreen() {
             {step === 'summary' && (
               <View style={ss.bannerWrap}>
                 {bannerImage ? (
-                  <Image source={{ uri: bannerImage }} style={ss.bannerImage} resizeMode="cover" />
+                  // This was react-native's <Image>, which keeps its own cache.
+                  // Every other screen loads covers through expo-image, so the
+                  // full-size banner the event detail page had already
+                  // downloaded was invisible here and got fetched again from
+                  // scratch -- hence the long blank rectangle. Same cache, same
+                  // policy as the rest of the app now, with a blur-up
+                  // placeholder so the space is never empty.
+                  <ExpoImage
+                    source={{ uri: bannerImage }}
+                    style={ss.bannerImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    placeholder={IMG_BLURHASH}
+                    placeholderContentFit="cover"
+                    priority="high"
+                    transition={150}
+                    recyclingKey={event.id}
+                  />
                 ) : (
                   <View style={ss.bannerPlaceholder}>
                     <Ticket size={36} color={T.border3} weight="duotone" />

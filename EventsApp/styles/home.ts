@@ -72,7 +72,14 @@ export const s = {
   hCardPriceBadgeText:   'text-white text-[9px] font-bold',
   hCardBody:             'pt-2.5 px-0.5',
   hCardCat:              'text-[10px] font-semibold tracking-[0.5px] mb-0.5',
-  hCardTitle:            'text-sm font-bold text-black mb-1 leading-[18px]',
+  // FIXED HEIGHT, deliberately. The title is numberOfLines={2}, so a card with
+  // a short title used to be 18px shorter than one whose title wrapped. A
+  // horizontal FlatList is only as tall as its tallest MOUNTED row, and
+  // virtualisation mounts/unmounts rows as you swipe -- so the row's height
+  // flipped between the two values mid-scroll and every section below it
+  // (BEST FESTIVALS) jumped up and down. Two lines' worth of space is always
+  // reserved now, so every card is exactly the same height.
+  hCardTitle:            'text-sm font-bold text-black mb-1 leading-[18px] h-[36px]',
   hCardMeta:             'text-[11px] text-black/40',
 
   //  Rank badge (kept for compat) 
