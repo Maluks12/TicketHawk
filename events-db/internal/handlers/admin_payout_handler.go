@@ -202,6 +202,20 @@ func AdminRetryPayoutHandler(pool *pgxpool.Pool, payoutService *services.PayoutS
 			return
 		}
 
+		// Clear the backoff first. ProcessPendingPayouts only sees rows that
+		// FetchPayableRows returns, and a failed row is invisible to it while
+		// its next_attempt_at is in the future or NULL (budget exhausted).
+		// Without this the endpoint returns "Retry triggered" and does nothing
+		// — which is the state it was in before the retry schedule existed.
+		if status == "failed" {
+			if err := repository.ResetPayoutForManualRetry(pool, ctx, payoutID); err != nil {
+				log.Error().Err(err).Str("payout_id", payoutID).
+					Msg("admin: could not clear payout backoff for manual retry")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not reset payout for retry"})
+				return
+			}
+		}
+
 		// Run the whole pipeline; the targeted row is pending/failed/stuck and
 		// will be picked up, and any other payable rows ride along harmlessly.
 		payoutService.ProcessPendingPayouts(ctx)

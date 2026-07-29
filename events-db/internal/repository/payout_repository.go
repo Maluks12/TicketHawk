@@ -356,6 +356,33 @@ func ClaimPayoutForProcessing(pool *pgxpool.Pool, ctx context.Context, payoutID,
 	return true, reference, nil
 }
 
+// ResetPayoutForManualRetry clears the backoff state on a failed row so the
+// next ProcessPendingPayouts tick picks it up immediately.
+//
+// This exists because the automatic retry budget is deliberately finite: once
+// MaxPayoutAttempts is spent, next_attempt_at goes NULL and the worker stops
+// looking at the row. That is correct for unattended retries — a dead
+// recipient code should not generate traffic forever — but it must not trap
+// the money. An admin pressing "retry" has presumably fixed the underlying
+// cause, so the budget is reset to zero rather than merely nudged: they get a
+// full fresh schedule, not one last attempt.
+//
+// Scoped to 'failed' so it can never disturb a row that is pending, mid-flight
+// or already paid.
+func ResetPayoutForManualRetry(pool *pgxpool.Pool, ctx context.Context, payoutID string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE organizer_payouts
+		SET attempts        = 0,
+		    next_attempt_at = CURRENT_TIMESTAMP,
+		    updated_at      = CURRENT_TIMESTAMP
+		WHERE id = $1 AND status = 'failed'
+	`, payoutID)
+	if err != nil {
+		return fmt.Errorf("ResetPayoutForManualRetry: %w", err)
+	}
+	return nil
+}
+
 func MarkPayoutPaid(pool *pgxpool.Pool, ctx context.Context, payoutID, transferCode string) error {
 	_, err := pool.Exec(ctx, `
 		UPDATE organizer_payouts
