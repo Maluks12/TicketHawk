@@ -181,8 +181,12 @@ function Required() { return <span style={{ color: '#c41c1c', marginLeft: 2 }}>*
 
 function FormCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+    // No `overflow: hidden` here. It was clipping every popover raised from
+    // inside a card — the date calendar was sliced off mid-month, and the venue
+    // autocomplete dropdown had the same problem. The header rounds its own top
+    // corners instead, which is all the overflow rule was really achieving.
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: 'var(--r-lg) var(--r-lg) 0 0' }}>
         <span style={{ fontSize: 16 }}>{icon}</span>
         <span style={{ fontSize: 15, fontWeight: 700 }}>{title}</span>
       </div>

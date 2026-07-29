@@ -7,6 +7,13 @@
 // be styled to match the dashboard, and on Chrome puts the date grid and two
 // scrolling number columns side by side in a popup that's easy to mis-tap.
 //
+// It renders as TWO fields, not one. The first attempt put the calendar and the
+// time selectors together in a single popover, which failed twice over: the
+// popover was tall enough to be clipped by the enclosing card, and because the
+// time controls sat below the calendar grid they were the part that got cut —
+// so the time was literally unreachable. A date button beside a plain time
+// input keeps the popover short and keeps time always visible.
+//
 // The contract here is deliberately identical to the native input —
 //   value:    'YYYY-MM-DDTHH:mm'  (local wall-clock, no timezone suffix)
 //   onChange: (next: string) => void
@@ -51,9 +58,10 @@ function fromValue(v: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** Human label for the closed input, e.g. "Wed 29 Jul 2026, 19:30". */
+/** Label for the date button, e.g. "Wed 29 Jul 2026". No time — that has its
+ *  own field, and repeating it here just made the button overflow. */
 function toDisplay(d: Date): string {
-  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /** Midnight on the same day — used for date-only comparisons. */
@@ -208,22 +216,14 @@ export default function DateTimePicker({
     fontSize: 14, lineHeight: 1,
   };
 
-  const selectStyle: CSSProperties = {
-    flex: 1,
-    padding: '7px 8px',
-    border: '1px solid var(--border-2)',
-    borderRadius: 'var(--r)',
-    background: 'var(--surface)',
-    color: 'var(--text)',
-    fontSize: 14,
-    fontFamily: 'inherit',
-  };
 
-  const hours = selected ? selected.getHours() : 19;
-  const minutes = selected ? selected.getMinutes() : 0;
+
+  const timeValue = selected ? `${pad(selected.getHours())}:${pad(selected.getMinutes())}` : '';
 
   return (
-    <div ref={boxRef} style={{ position: 'relative' }}>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+      {/* Date — custom, because a month grid is the part worth styling */}
+      <div ref={boxRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -231,8 +231,12 @@ export default function DateTimePicker({
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        <span>{selected ? toDisplay(selected) : placeholder}</span>
-        <span aria-hidden style={{ color: 'var(--text-3)', fontSize: 15 }}>📅</span>
+        <span style={{
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {selected ? toDisplay(selected) : placeholder}
+        </span>
+        <span aria-hidden style={{ color: 'var(--text-3)', fontSize: 15, flexShrink: 0 }}>📅</span>
       </button>
 
       {open && (
@@ -296,41 +300,10 @@ export default function DateTimePicker({
             })}
           </div>
 
-          {/* Time */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)',
-          }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)' }}>Time</span>
-            <select
-              value={hours}
-              onChange={e => pickTime(Number(e.target.value), minutes)}
-              style={selectStyle}
-              aria-label="Hour"
-            >
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={h}>{pad(h)}</option>
-              ))}
-            </select>
-            <span style={{ color: 'var(--text-3)' }}>:</span>
-            <select
-              value={minutes}
-              onChange={e => pickTime(hours, Number(e.target.value))}
-              style={selectStyle}
-              aria-label="Minute"
-            >
-              {/* 5-minute granularity: fine enough for door times and booking
-                  deadlines, and short enough to scan without scrolling. */}
-              {Array.from({ length: 12 }, (_, i) => i * 5).map(m => (
-                <option key={m} value={m}>{pad(m)}</option>
-              ))}
-            </select>
-          </div>
-
           {/* Footer */}
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            marginTop: 10,
+            marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)',
           }}>
             <button
               type="button"
@@ -359,6 +332,30 @@ export default function DateTimePicker({
           </div>
         </div>
       )}
+      </div>
+
+      {/* Time — the native control. Small, precise to the minute, keyboard
+          friendly, and with no popover of its own it cannot be clipped. */}
+      <input
+        type="time"
+        value={timeValue}
+        onChange={e => {
+          const [h, m] = e.target.value.split(':');
+          if (h === undefined || m === undefined || e.target.value === '') return;
+          pickTime(Number(h), Number(m));
+        }}
+        aria-label="Time"
+        style={{
+          width: 116, flexShrink: 0,
+          padding: '9px 10px',
+          border: `1px solid ${invalid ? 'var(--danger)' : 'var(--border-2)'}`,
+          borderRadius: 'var(--r)',
+          background: 'var(--surface)',
+          color: selected ? 'var(--text)' : 'var(--text-3)',
+          fontSize: 14,
+          fontFamily: 'inherit',
+        }}
+      />
     </div>
   );
 }
