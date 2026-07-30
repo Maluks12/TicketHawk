@@ -9,6 +9,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
 import RiskAcknowledgement from '@/components/risk-acknowledgement';
+import ApplePayButton from '@/components/applePayButton';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtPrice(p: number) {
@@ -100,6 +101,28 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
   const [guestSurname,   setGuestSurname]   = useState('');
   const [guestEmail,     setGuestEmail]     = useState('');
   const [error,          setError]          = useState('');
+
+  // ── Payment intent, once the booking exists ──────────────────────────
+  //
+  // Apple Pay's button is mounted by Paystack against a transaction that
+  // already exists, because the sheet has to open inside a user gesture with
+  // no async gap in between. So the booking must be created BEFORE the button
+  // can render — which is why tapping Pay no longer navigates straight out.
+  //
+  // It still creates the booking at exactly the same moment it always did, so
+  // inventory behaviour is unchanged. booking_repository.go increments
+  // tickets_sold inside the booking transaction, so a booking created any
+  // earlier than this would hold seats for everyone merely browsing.
+  const [intent, setIntent] = useState<{
+    bookingId: string;
+    accessCode: string;
+    reference: string;
+    amount: number;
+    payParams: string;
+  } | null>(null);
+  // Guards the automatic fall-through to the card page so it can only fire
+  // once, even if Paystack reports unavailability more than once.
+  const fellBack = useRef(false);
 
   // Errors are surfaced as a floating toast (see below) so they're visible
   // no matter where the person is scrolled to, or whether a sheet is open.
@@ -232,9 +255,22 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       //   booking creation.
       let authorizationUrl: string;
       let usedMethod: PaymentMethod = 'card';
+      let accessCode = '';
+      let startedReference = '';
 
-      if (paymentMethod === 'card' && (booking as any).client_token) {
-        // Card: reuse the checkout URL already returned by booking creation.
+      // Card: booking creation already returned a checkout URL in
+      // client_token, but NOT an access code — and without the access code
+      // there is no Apple Pay. For signed-in buyers we spend one extra
+      // round-trip on startBookingPayment to get it. Guests keep the
+      // client_token shortcut, since the guest route has no access code to
+      // give and therefore no Apple Pay either.
+      if (paymentMethod === 'card' && user) {
+        const started = await startBookingPayment(bookingId, 'card');
+        authorizationUrl = started.authorization_url || (booking as any).client_token;
+        accessCode       = started.access_code;
+        startedReference = started.reference;
+        usedMethod = 'card';
+      } else if (paymentMethod === 'card' && (booking as any).client_token) {
         authorizationUrl = (booking as any).client_token;
         usedMethod = 'card';
       } else if (paymentMethod === 'instant_eft') {
@@ -242,6 +278,8 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         if (user) {
           const started = await startBookingPayment(bookingId, paymentMethod);
           authorizationUrl = started.authorization_url;
+          accessCode       = started.access_code;
+          startedReference = started.reference;
         } else {
           const bn = (booking as any).booking_number;
           const started = await startGuestPayment(bn, guestEmail.trim(), paymentMethod);
@@ -270,6 +308,21 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         params.set('bookingNumber', String((booking as any).booking_number ?? ''));
         params.set('email', email);
       }
+      // Logged-in Paystack payments come back with an access code, which is
+      // the only client-side path that preserves the organiser subaccount
+      // split. When we have one, stay on this page and let Apple Pay mount.
+      // Guests and PayPal have no access code and keep the redirect flow.
+      if (accessCode) {
+        setIntent({
+          bookingId,
+          accessCode,
+          reference: startedReference,
+          amount: Number((booking as any).total_amount ?? 0),
+          payParams: params.toString(),
+        });
+        return;
+      }
+
       router.push(`/payment/${bookingId}?${params.toString()}`);
     } catch (e: any) {
       discardPendingPopup();
@@ -629,6 +682,57 @@ return (
         </button>
       </div>
     )}
+
+      {/* ── Payment sheet: Apple Pay, with card as the fallback ─────────
+          Shown only once the booking exists and we hold an access code.
+          ApplePayButton renders nothing unless Paystack actually mounts an
+          Apple Pay element, so non-Apple browsers fall straight through to
+          the card page and never see this step at all. */}
+      {intent && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 110, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 36px', width: '100%', maxWidth: 520 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: colors.text }}>Complete payment</h3>
+              <button
+                onClick={() => { setIntent(null); discardPendingPopup(); }}
+                aria-label="Close"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.subText, padding: 4 }}
+              ><X size={20} /></button>
+            </div>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: colors.subText }}>
+              {`R${Math.round(intent.amount).toLocaleString('en-ZA')} · ${quantity} ${quantity === 1 ? 'ticket' : 'tickets'}`}
+            </p>
+
+            <ApplePayButton
+              accessCode={intent.accessCode}
+              amount={intent.amount}
+              reference={intent.reference}
+              onSuccess={() => {
+                // Paystack's callback is not proof of payment. The server is
+                // told by webhook; /tickets reads the authoritative status.
+                discardPendingPopup();
+                router.replace('/tickets');
+              }}
+              onCancel={() => { /* sheet stays open so they can pay by card */ }}
+              onUnavailable={() => {
+                // Not an Apple surface. Continue to the existing card page
+                // automatically, so nobody gains an extra tap over the old
+                // flow. Guarded: this may fire more than once.
+                if (fellBack.current) return;
+                fellBack.current = true;
+                router.push(`/payment/${intent.bookingId}?${intent.payParams}`);
+              }}
+            />
+
+            <button
+              onClick={() => router.push(`/payment/${intent.bookingId}?${intent.payParams}`)}
+              style={{ width: '100%', marginTop: 12, background: 'transparent', color: colors.text, border: `1px solid ${border}`, borderRadius: 12, padding: '13px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+            >
+              Pay by card instead
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Guest contact sheet ──────────────────────────────────────── */}
       {contactOpen && (
