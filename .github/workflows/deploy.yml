@@ -1,0 +1,120 @@
+name: Build and push images
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Moves image building off the EC2 box.
+#
+# Building on the production instance meant three heavy builds racing each other
+# on 2 vCPUs — a Go compile that should take 60s took 948s because two Next
+# builds were exhausting RAM and spilling into swap. The live API was degraded
+# for twenty minutes on every deploy.
+#
+# Here each image builds on its own runner, in parallel, with no contention, and
+# EC2 only downloads the result.
+#
+# Deploy is PULL-based on purpose. docker-compose.prod.yml binds every port to
+# 127.0.0.1 so the security group can block all inbound traffic — there is no
+# SSH for a CI job to use. So this workflow only publishes; the box fetches when
+# you run deploy/deploy.sh. See that script's header for automating it via SSM.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: af-south-1
+
+permissions:
+  id-token: write   # OIDC — no long-lived AWS keys in GitHub
+  contents: read
+
+jobs:
+  # Only rebuild what changed. Rebuilding admin because you edited the organiser
+  # dashboard is what made deploys expensive in the first place.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api:       ${{ steps.filter.outputs.api }}
+      admin:     ${{ steps.filter.outputs.admin }}
+      organiser: ${{ steps.filter.outputs.organiser }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'events-db/**'
+            admin:
+              - 'events-admin/**'
+            organiser:
+              - 'events-organizer/**'
+
+  build:
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing image shouldn't cancel the others mid-push.
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            context: events-db
+            changed: ${{ needs.changes.outputs.api }}
+          - name: admin
+            context: events-admin
+            changed: ${{ needs.changes.outputs.admin }}
+          - name: organiser
+            context: events-organizer
+            changed: ${{ needs.changes.outputs.organiser }}
+
+    steps:
+      - name: Skip unchanged
+        if: matrix.changed != 'true'
+        run: echo "No changes under ${{ matrix.context }} — skipping."
+
+      - uses: actions/checkout@v4
+        if: matrix.changed == 'true'
+
+      - name: Configure AWS credentials
+        if: matrix.changed == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: matrix.changed == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+        if: matrix.changed == 'true'
+
+      - name: Build and push
+        if: matrix.changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          # Two tags: latest for the compose file, the commit sha so you can
+          # roll back by setting IMAGE_TAG in .env.production.
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/tickethawk-${{ matrix.name }}:latest
+            ${{ steps.ecr.outputs.registry }}/tickethawk-${{ matrix.name }}:${{ github.sha }}
+          # NEXT_PUBLIC_* is inlined by Next at BUILD time, so these must be
+          # passed here rather than as runtime env on the box. Harmless for the
+          # api image, which ignores them.
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.ticket-hawk.com/v1
+            NEXT_PUBLIC_ORGANISER_URL=https://organiser.ticket-hawk.com
+            NEXT_PUBLIC_GOOGLE_MAPS_KEY=${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_KEY }}
+          # Layer cache in GitHub's store — keeps npm ci and go mod download
+          # warm between runs.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+          # EC2 t3/m5 are x86_64. If you ever move to Graviton (t4g/c7g), change
+          # this to linux/arm64 — cross-building under emulation is very slow, so
+          # prefer a native arm64 runner instead.
+          platforms: linux/amd64

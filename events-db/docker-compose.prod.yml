@@ -28,6 +28,11 @@ services:
 
   # ── Go API ──────────────────────────────────────────────────────────────────
   api:
+    # image + build together on purpose: `docker compose pull` fetches the
+    # CI-built image (the fast path on EC2), while `docker compose build api`
+    # still works locally when you need it. ECR_REGISTRY and IMAGE_TAG come
+    # from .env.production; IMAGE_TAG=<sha> pins a rollback.
+    image: ${ECR_REGISTRY}/tickethawk-api:${IMAGE_TAG:-latest}
     build: .
     restart: unless-stopped
     env_file:
@@ -42,6 +47,7 @@ services:
 
   # ── Admin dashboard (admin.ticket-hawk.com) ─────────────────────────────────
   admin:
+    image: ${ECR_REGISTRY}/tickethawk-admin:${IMAGE_TAG:-latest}
     build:
       context: ../events-admin
       dockerfile: Dockerfile
@@ -55,6 +61,7 @@ services:
  
   # ── Organiser dashboard (organiser.ticket-hawk.com) ─────────────────────────
   organiser:
+    image: ${ECR_REGISTRY}/tickethawk-organiser:${IMAGE_TAG:-latest}
     build:
       context: ../events-organizer
       dockerfile: Dockerfile
