@@ -298,6 +298,9 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
       // client-side path that preserves the organiser subaccount split. With
       // one, stay on this page and let Apple Pay mount. Guests and PayPal have
       // no access code and keep the redirect flow.
+      // TEMPORARY: confirms the access code reaches the browser. Remove
+      // once the inline sheet is verified working.
+      console.log('[pay] accessCode:', accessCode || '(empty)', 'signedIn:', !!user);
       if (accessCode) {
         setIntent({
           bookingId,
