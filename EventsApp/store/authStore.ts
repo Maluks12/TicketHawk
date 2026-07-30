@@ -14,6 +14,10 @@ interface AuthState {
   register: (dto: RegisterDTO) => Promise<void>;
   logout: () => Promise<void>;
   loadUser: () => Promise<void>;
+  // Applies a freshly-updated profile (e.g. after PATCH /v1/user/me) to
+  // both the store and the on-device cache, so the change survives a
+  // restart without waiting for the next loadUser round-trip.
+  applyUser: (user: AuthUser) => void;
 }
 
 async function saveTokens(access: string, refresh: string) {
@@ -150,5 +154,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       // screens waiting on authReady always proceed.
       set({ authReady: true });
     }
+  },
+  applyUser: (user) => {
+    set({ user });
+    saveCachedUser(user).catch(() => {});
   },
 }));

@@ -1,12 +1,10 @@
-import React, { useCallback, useState } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, Alert, Linking, StyleSheet,
-} from 'react-native';
+import React, { useEffect, useCallback, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, Text, ScrollView, TouchableOpacity, Alert, Linking, StyleSheet, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
-import { openStudioApp } from '../../lib/studioLink';
 import { openLegal } from '../../lib/legalLinks';
 import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
@@ -82,7 +80,65 @@ const Avatar = ({ name, email }: { name: string; email: string }) => {
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
+// ── Notifications preference ─────────────────────────────────────────────────
+//
+// HONEST LIMITATION: this switch currently controls nothing.
+//
+// The app has no push infrastructure — no expo-notifications, no token
+// registration, no device record on the server. The /v1/notifications endpoints
+// are an in-app message FEED (list, unread count, mark read), not a delivery
+// preference. So there is nothing for an "off" position to suppress.
+//
+// It is stored locally so the choice survives a restart and is already in place
+// the day push is added, at which point this is the flag that decides whether to
+// register a token. Until then it is a stated preference, not an active setting.
+//
+// If that gap bothers you more than the missing control, the alternative is to
+// remove the row until push exists rather than show a switch that does nothing.
+const NOTIFS_KEY = 'prefs.notifications.enabled';
+
+function ToggleRow({
+  icon, label, value, onValueChange, colors,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  colors: any;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+      }}
+    >
+      {icon}
+      <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: colors.dividerColor, true: '#ff2d55' }}
+        thumbColor="#fff"
+        ios_backgroundColor={colors.dividerColor}
+      />
+    </View>
+  );
+}
+
 export default function ProfileScreen() {
+  const [notifsOn, setNotifsOn] = useState(true);
+  useEffect(() => {
+    AsyncStorage.getItem(NOTIFS_KEY).then((v) => { if (v !== null) setNotifsOn(v === '1'); });
+  }, []);
+  const setNotifications = useCallback((v: boolean) => {
+    setNotifsOn(v);
+    AsyncStorage.setItem(NOTIFS_KEY, v ? '1' : '0').catch(() => {});
+  }, []);
+
   const insets             = useSafeAreaInsets();
   const router             = useRouter();
   const { user, logout }   = useAuthStore();
@@ -161,83 +217,21 @@ export default function ProfileScreen() {
         {user && <Avatar name={fullName} email={user.email} />}
 
         {/* ── Organiser Studio entry — opens the read-only dashboard ──────── */}
-        {isOrganiser && (
-          <View className={s.section}>
-            <Text className={s.sectionTitle} style={{ color: colors.subText }}>ORGANISER</Text>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => openStudioApp()}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 14,
-                padding: 16,
-                borderRadius: 16,
-                backgroundColor: isDark ? 'rgba(110,123,255,0.10)' : 'rgba(79,70,229,0.07)',
-                borderWidth: StyleSheet.hairlineWidth,
-                borderColor: 'rgba(110,123,255,0.30)',
-              }}
-            >
-              <View
-                style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: 13,
-                  backgroundColor: '#4F46E5',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Feather name="bar-chart-2" size={22} color="#fff" />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>
-                    Organiser Dashboard
-                  </Text>
-                  <View
-                    style={{
-                      backgroundColor: 'rgba(110,123,255,0.16)',
-                      borderRadius: 5,
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                    }}
-                  >
-                    <Text style={{ fontSize: 8.5, fontWeight: '800', letterSpacing: 1, color: '#7C8CFF' }}>
-                      STUDIO
-                    </Text>
-                  </View>
-                </View>
-                <Text style={{ fontSize: 12.5, color: colors.subText, marginTop: 2 }}>
-                  Opens the TicketHawk Studio app
-                </Text>
-              </View>
-              <Feather name="arrow-up-right" size={18} color="#7C8CFF" />
-            </TouchableOpacity>
-          </View>
-        )}
-
         {user && (
           <>
             <Section title="ACCOUNT" colors={colors}>
               <Row
                 icon={<Feather name="user" size={16} color={colors.iconColor} />}
                 label="Edit profile"
-                onPress={() => {}}
+                onPress={() => router.push('/profile/edit' as any)}
                 colors={colors}
               />
               <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
-              <Row
+              <ToggleRow
                 icon={<Ionicons name="notifications-outline" size={16} color={colors.iconColor} />}
                 label="Notifications"
-                onPress={() => {}}
-                colors={colors}
-              />
-              <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
-              <Row
-                icon={<Feather name="lock" size={16} color={colors.iconColor} />}
-                label="Change password"
-                onPress={() => {}}
+                value={notifsOn}
+                onValueChange={setNotifications}
                 colors={colors}
               />
               <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
@@ -246,14 +240,6 @@ export default function ProfileScreen() {
                 icon={<Ionicons name="heart-outline" size={16} color={colors.iconColor} />}
                 label="Following Events"
                 onPress={() => router.push('/profile/following' as any)}
-                colors={colors}
-              />
-              <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
-              {/* Event staff: redeem a join code / scan events you work */}
-              <Row
-                icon={<Ionicons name="qr-code-outline" size={16} color={colors.iconColor} />}
-                label="Event staff"
-                onPress={() => openStudioApp()}
                 colors={colors}
               />
             </Section>

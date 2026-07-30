@@ -582,6 +582,9 @@ func main() {
 	}
 	{
 		user.GET("/me",           handlers.GetMyProfileHandler(pool))
+		// PATCH, not PUT: the edit-profile form submits only changed fields, and
+		// a sparse patch means an omitted field is left alone rather than cleared.
+		user.PATCH("/me",         handlers.UpdateMyProfileHandler(pool))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
 	}
