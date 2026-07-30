@@ -3,10 +3,16 @@ import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
+import { usePushNotifications } from '../lib/usepush';
 
 export default function RootLayout() {
   const loadMode = useThemeStore((s) => s.loadMode);
   const loadUser = useAuthStore((s) => s.loadUser);
+
+  // Push notifications: permission, token registration and tap routing.
+  // Mounted here (not in a tab) so a notification tapped from a killed app is
+  // handled during the very first render, before any screen exists.
+  usePushNotifications();
 
   useEffect(() => {
     loadMode();

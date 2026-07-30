@@ -12,8 +12,6 @@
       "bundleIdentifier": "com.tickethawk.app",
       "associatedDomains": [
         "applinks:ticket-hawk.com",
-        "applinks:www.ticket-hawk.com",
-        "applinks:ticket-hawk.com",
         "applinks:www.ticket-hawk.com"
       ],
       "infoPlist": {
@@ -31,7 +29,8 @@
       "package": "com.tickethawk.app",
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "intentFilters": [
         {
@@ -77,6 +76,15 @@
           "imageWidth": 220,
           "resizeMode": "contain",
           "backgroundColor": "#1d1d29"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#1d1d29",
+          "defaultChannel": "default",
+          "enableBackgroundRemoteNotifications": false
         }
       ]
     ],

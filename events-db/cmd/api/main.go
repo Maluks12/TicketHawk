@@ -103,6 +103,29 @@ func main() {
 	}
 
 	// ==========================================
+	// Push notifications (Expo)
+	// ==========================================
+	// Constructed BEFORE the workers below, not with the other services further
+	// down. The expiry worker runs its first cycle immediately on startup and
+	// can write reminder notifications within milliseconds; registering the
+	// dispatcher after that would silently swallow the first batch of pushes on
+	// every deploy.
+	//
+	// The dispatcher is a package-level hook in internal/repository rather than
+	// a parameter threaded through the workers — see the comment on
+	// repository.SetPushDispatcher for why. The upshot: every producer of a
+	// notification row gets push delivery automatically, including ones added
+	// after this line was written.
+	if cfg.PushEnabled {
+		pushService := services.NewPushService(pool, cfg)
+		pushService.Start(ctx)
+		repository.SetPushDispatcher(pushService.Dispatch)
+		log.Info().Msg("push notifications enabled")
+	} else {
+		log.Warn().Msg("PUSH_ENABLED=false — in-app notification feed still active, no device pushes will be sent")
+	}
+
+	// ==========================================
 	// Workers
 	// ==========================================
 	workers.StartExpiryWorker(pool, eventCache, ctx, 15*time.Minute, 1*time.Minute)
@@ -486,6 +509,15 @@ func main() {
 		notifs.GET("/unread",     handlers.GetUnreadCountHandler(pool))
 		notifs.PATCH("/:id/read", handlers.MarkReadHandler(pool))
 		notifs.POST("/read-all",  handlers.MarkAllReadHandler(pool))
+
+		// Device registry for out-of-app push. The app registers on every cold
+		// start (Expo rotates tokens without warning) and unregisters on logout
+		// and when the Settings toggle goes off.
+		notifs.POST("/push-token",   handlers.RegisterPushTokenHandler(pool))
+		notifs.DELETE("/push-token", handlers.UnregisterPushTokenHandler(pool))
+		// Sends a real push to the caller's own devices through the real
+		// pipeline. Safe in production: authed, rate-limited, self-targeted.
+		notifs.POST("/push-test",    handlers.SendTestPushHandler(pool))
 	}
 
 	// ==========================================

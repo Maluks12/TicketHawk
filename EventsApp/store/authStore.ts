@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { authLogin, authRegister, authLogout, getMe, type AuthUser, type RegisterDTO } from '../lib/api';
+import { unregisterPushNotifications } from '../lib/push';
 
 interface AuthState {
   user: AuthUser | null;
@@ -104,6 +105,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    // ORDER MATTERS: unregister the push token FIRST, while the access token
+    // still exists. DELETE /v1/notifications/push-token is an authed endpoint —
+    // called after clearTokens() it 401s, the interceptor finds no refresh
+    // token, and the device stays registered on the server. The visible symptom
+    // is the worst kind: the next person to use this handset keeps getting the
+    // previous user's booking confirmations.
+    try { await unregisterPushNotifications(); } catch { /* best-effort */ }
+
     try { await authLogout(); } catch { /* clear locally regardless */ }
     await clearTokens();
     await clearCachedUser();

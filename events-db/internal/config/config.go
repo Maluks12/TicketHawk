@@ -89,6 +89,22 @@ type Config struct {
 	// or a deep link bridge). Both gateways append their reference/token.
 	PaymentCallbackURL string
 
+	// ── Push notifications (Expo) ─────────────────────────────────────────────
+	// PushEnabled gates the whole out-of-app delivery pipeline. Default ON.
+	// Turning it OFF leaves the in-app notification feed completely untouched —
+	// rows are still written, the app still lists them, unread counts still
+	// work; only the phone buzz stops. That is the intended kill switch if
+	// Expo is misbehaving or a notification storm needs stopping mid-flight.
+	//
+	// ExpoAccessToken is only REQUIRED when "enhanced security for push
+	// notifications" is enabled on the Expo project (expo.dev → project →
+	// Settings → Access tokens). Without that setting, Expo accepts unsigned
+	// send requests and this can stay empty. Set it anyway if you have it:
+	// otherwise anyone who obtains one of your push tokens can send
+	// notifications that appear to come from TicketHawk.
+	PushEnabled     bool
+	ExpoAccessToken string
+
 	// Fix 3: booking expiry window — defaults to 15 minutes
 	BookingExpiryMinutes int
 }
@@ -144,6 +160,14 @@ func Load() (*Config, error) {
 		PaymentCallbackURL: os.Getenv("PAYMENT_CALLBACK_URL"),
 
 		OrganizerDashboardURL: os.Getenv("ORGANIZER_DASHBOARD_URL"),
+
+		// Default ON: unset means enabled. Note this is the opposite convention
+		// to the other feature flags in this struct (`== "true"`), and
+		// deliberately so — push should work on a fresh deploy without anyone
+		// remembering to add an env var, and the flag exists to switch it OFF
+		// in an emergency, not to switch it on.
+		PushEnabled:     os.Getenv("PUSH_ENABLED") != "false",
+		ExpoAccessToken: os.Getenv("EXPO_ACCESS_TOKEN"),
 	}
 
 	// FIX: validate required fields at startup so the server never silently

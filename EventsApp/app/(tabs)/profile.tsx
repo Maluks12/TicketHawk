@@ -6,6 +6,13 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { openLegal } from '../../lib/legalLinks';
+import {
+  PUSH_PREF_KEY,
+  pushUnavailableReason,
+  registerForPushNotifications,
+  setPushPreference,
+  unregisterPushNotifications,
+} from '../../lib/push';
 import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 import { useAppTheme } from '../../theme/colors';
@@ -82,29 +89,38 @@ const Avatar = ({ name, email }: { name: string; email: string }) => {
 
 // ── Notifications preference ─────────────────────────────────────────────────
 //
-// HONEST LIMITATION: this switch currently controls nothing.
+// This switch is now live: it controls whether this DEVICE is registered for
+// push with the backend.
 //
-// The app has no push infrastructure — no expo-notifications, no token
-// registration, no device record on the server. The /v1/notifications endpoints
-// are an in-app message FEED (list, unread count, mark read), not a delivery
-// preference. So there is nothing for an "off" position to suppress.
+//   ON  → request OS permission if needed, obtain an Expo token, POST it to
+//         /v1/notifications/push-token
+//   OFF → DELETE /v1/notifications/push-token, so the server stops targeting
+//         this device
 //
-// It is stored locally so the choice survives a restart and is already in place
-// the day push is added, at which point this is the flag that decides whether to
-// register a token. Until then it is a stated preference, not an active setting.
+// Turning it off does NOT stop notifications being generated — the in-app feed
+// (/v1/notifications) keeps filling up exactly as before, and unread counts
+// still work. It stops the phone buzzing. That's the honest reading of a
+// "Notifications" switch in a ticketing app: you still want to find your
+// booking confirmation in the app, you just don't want to be interrupted.
 //
-// If that gap bothers you more than the missing control, the alternative is to
-// remove the row until push exists rather than show a switch that does nothing.
-const NOTIFS_KEY = 'prefs.notifications.enabled';
+// The one case the switch cannot handle is a hard OS-level denial. Once someone
+// taps "Don't allow", iOS and Android will not show the prompt again, and
+// requestPermissionsAsync returns 'denied' instantly. There is nothing the app
+// can do but send them to system settings, which is what the alert below does.
+const NOTIFS_KEY = PUSH_PREF_KEY;
 
 function ToggleRow({
-  icon, label, value, onValueChange, colors,
+  icon, label, value, onValueChange, colors, disabled,
 }: {
   icon: React.ReactNode;
   label: string;
   value: boolean;
   onValueChange: (v: boolean) => void;
   colors: any;
+  // Set while a permission prompt / network round-trip is in flight. Without
+  // it, rapid toggling fires overlapping register and unregister calls whose
+  // completion order decides the final server state.
+  disabled?: boolean;
 }) {
   return (
     <View
@@ -121,6 +137,7 @@ function ToggleRow({
       <Switch
         value={value}
         onValueChange={onValueChange}
+        disabled={disabled}
         trackColor={{ false: colors.dividerColor, true: '#ff2d55' }}
         thumbColor="#fff"
         ios_backgroundColor={colors.dividerColor}
@@ -130,13 +147,65 @@ function ToggleRow({
 }
 
 export default function ProfileScreen() {
-  const [notifsOn, setNotifsOn] = useState(true);
+  const [notifsOn, setNotifsOn]   = useState(true);
+  const [notifsBusy, setNotifsBusy] = useState(false);
+
   useEffect(() => {
     AsyncStorage.getItem(NOTIFS_KEY).then((v) => { if (v !== null) setNotifsOn(v === '1'); });
   }, []);
-  const setNotifications = useCallback((v: boolean) => {
+
+  const setNotifications = useCallback(async (v: boolean) => {
+    // Optimistic: the switch moves immediately. If registration turns out to be
+    // impossible we roll it back below rather than leaving the UI claiming a
+    // state the device isn't actually in.
     setNotifsOn(v);
-    AsyncStorage.setItem(NOTIFS_KEY, v ? '1' : '0').catch(() => {});
+    setNotifsBusy(true);
+    await setPushPreference(v);
+
+    try {
+      if (!v) {
+        await unregisterPushNotifications();
+        return;
+      }
+
+      // Turning it ON is the one moment where prompting for OS permission is
+      // unambiguously wanted — the user just asked for notifications.
+      const result = await registerForPushNotifications(true);
+      if (result.ok) return;
+
+      // Every failure path below rolls the switch back, because leaving it ON
+      // when no token was registered is the exact dishonesty this replaced.
+      setNotifsOn(false);
+      await setPushPreference(false);
+
+      if (result.reason === 'denied') {
+        Alert.alert(
+          'Notifications are blocked',
+          "Your phone is blocking notifications for TicketHawk. You'll need to allow them in system settings — we can't re-ask from inside the app.",
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+        return;
+      }
+
+      if (result.reason === 'unavailable') {
+        const why =
+          pushUnavailableReason() === 'simulator'
+            ? 'Push notifications only work on a physical device.'
+            : 'Push notifications need a development or production build — they no longer work in Expo Go.';
+        Alert.alert('Not available here', why);
+        return;
+      }
+
+      Alert.alert(
+        "Couldn't turn on notifications",
+        'Something went wrong setting this up. Please try again in a moment.',
+      );
+    } finally {
+      setNotifsBusy(false);
+    }
   }, []);
 
   const insets             = useSafeAreaInsets();
@@ -232,6 +301,7 @@ export default function ProfileScreen() {
                 label="Notifications"
                 value={notifsOn}
                 onValueChange={setNotifications}
+                disabled={notifsBusy}
                 colors={colors}
               />
               <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
