@@ -59,7 +59,7 @@ export const COMPANY = {
   // someone internally is not sufficient on its own. Registration is free at
   // inforegulator.org.za. By default the responsible person is the CEO/head of
   // the company unless someone else is designated in writing.
-  informationOfficerName: null as string | null,
+  informationOfficerName: 'Siyabonga Shandu',
   informationOfficerEmail: 'privacy@ticket-hawk.com',
 
   website: 'https://ticket-hawk.com',
