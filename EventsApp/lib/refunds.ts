@@ -98,8 +98,28 @@ export async function submitRefund(
 
 // ─── Presentation helpers ────────────────────────────────────────────────────
 
-export const fmtRand = (n: number): string =>
-  `R${Math.round(n).toLocaleString('en-ZA')}`;
+/**
+ * Money for display. Shows cents whenever the amount has them.
+ *
+ * This used to Math.round(), which quietly overstated refunds: a 75% quote on
+ * a R10 ticket is R7.50 and rendered as "R8". The buyer is promised a number
+ * on the button face and then receives 50c less — small in rand, but it is a
+ * broken promise about money, and the kind of discrepancy that produces a
+ * support ticket rather than a shrug. The server's quote is authoritative and
+ * carries cents (see models.roundRand), so the display must too.
+ *
+ * Whole amounts still render clean — R10, not R10.00 — so the common case is
+ * unchanged.
+ */
+export const fmtRand = (n: number): string => {
+  const hasCents = Math.abs(n * 100 - Math.round(n * 100)) < 0.5
+    ? Math.round(n * 100) % 100 !== 0
+    : true;
+  return `R${n.toLocaleString('en-ZA', {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  })}`;
+};
 
 /** "100%", "75%" — the band the buyer currently falls in. */
 export const fmtRate = (rate: number): string => `${Math.round(rate * 100)}%`;

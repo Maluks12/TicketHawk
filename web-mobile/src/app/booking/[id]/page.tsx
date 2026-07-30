@@ -20,6 +20,10 @@ interface BookingDetail {
 
 interface TicketAssignment { id: string; slot_number: number; status: string; assignee_name?: string; assignee_email?: string; qr_scanned_at?: string | null; }
 
+import { getRefundQuote, submitRefund, fmtRand, fmtRate,
+         refundWindowLabel, daysLeftInBand,
+         type RefundQuoteResponse } from '@/lib/refunds';
+
 const STATUS_COLOR: Record<string, string> = { confirmed: '#00e5a0', pending: '#ffb830', cancelled: '#ff4d4d', refunded: '#888' };
 const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
@@ -70,6 +74,9 @@ export default function BookingDetailPage() {
   const [refundLoading, setRefundLoading] = useState(false);
   const [refundErr, setRefundErr] = useState('');
   const [refunded, setRefunded] = useState(false);
+  // Live server quote. Null while loading or when the endpoint fails —
+  // either way no refund button is shown, which is the safe direction.
+  const [refundQuote, setRefundQuote] = useState<RefundQuoteResponse | null>(null);
   const [assignTarget, setAssignTarget] = useState<TicketAssignment | null>(null);
   const [assignName, setAssignName] = useState('');
   const [assignEmail, setAssignEmail] = useState('');
@@ -110,11 +117,28 @@ export default function BookingDetailPage() {
     load();
   }, [id, user, isGuest, guestBn, guestEmail]);
 
+  // Fetch the live quote once we know the booking exists. Deliberately
+  // separate from the booking load: a failed quote must degrade to "no
+  // refund button", never to an error on a screen whose real job is
+  // showing a working ticket.
+  useEffect(() => {
+    if (!booking || booking.booking_status !== 'confirmed') return;
+    let cancelled = false;
+    getRefundQuote(String(id)).then((q) => { if (!cancelled) setRefundQuote(q); });
+    return () => { cancelled = true; };
+  }, [booking, id]);
+
   const handleRefund = async () => {
     if (refundReason.trim().length < 10) { setRefundErr('Please provide at least 10 characters.'); return; }
     setRefundLoading(true); setRefundErr('');
-    try { await api.post(`/v1/bookings/${id}/refund`, { reason: refundReason.trim() }); setRefunded(true); setRefundOpen(false); }
-    catch (e: any) { setRefundErr(e?.response?.data?.error ?? 'Failed to submit. Please try again.'); }
+    try { await submitRefund(String(id), refundReason.trim()); setRefunded(true); setRefundOpen(false); }
+    catch (e: any) {
+      setRefundErr(e?.response?.data?.error ?? 'Failed to submit. Please try again.');
+      // A rejection usually means the window moved under us — e.g. the
+      // booking crossed the 7-day cutoff while this page sat open. Re-fetch
+      // so the button reflects reality instead of repeating the failure.
+      getRefundQuote(String(id)).then(setRefundQuote);
+    }
     finally { setRefundLoading(false); }
   };
 
@@ -151,7 +175,14 @@ export default function BookingDetailPage() {
 
   const status = refunded ? 'refunded' : booking.booking_status;
   const statusCol = STATUS_COLOR[status] ?? '#888';
-  const canRefund = status === 'confirmed' && !refunded && !!user;
+  // Eligibility is the SERVER's decision, never ours. The old test here was
+  // `status === 'confirmed' && !refunded && !!user`, which showed a refund
+  // button for every confirmed booking — including ones inside the 7-day
+  // cutoff, where the server returns 400. A dead button that promises money
+  // is worse than no button at all.
+  const quote = refundQuote?.quote ?? null;
+  const canRefund = status === 'confirmed' && !refunded && !!quote?.eligible;
+  const refundClosed = status === 'confirmed' && !refunded && !!quote && !quote.eligible;
   const hasAssignments = assignments.length > 0;
 
   // ── Pool model (mirrors the app) ────────────────────────────────────────────
@@ -341,10 +372,26 @@ export default function BookingDetailPage() {
           )}
         </div>
 
-        {canRefund && (
-          <button onClick={() => setRefundOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 12, padding: '12px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 16 }}>
-            ↩ Request refund
-          </button>
+        {canRefund && quote && (
+          <div style={{ marginTop: 16 }}>
+            {/* The amount is on the button face on purpose: the buyer should
+                never have to open a sheet to find out what they get back. */}
+            <button onClick={() => setRefundOpen(true)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 12, padding: '13px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+              ↩ Request a refund · {fmtRand(quote.refund_amount)} back
+            </button>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: colors.subText, textAlign: 'center' }}>
+              {refundWindowLabel(quote.days_until_event)} · {fmtRate(quote.rate)} of your ticket price
+              {daysLeftInBand(quote.days_until_event) !== null &&
+                ` · rate drops in ${daysLeftInBand(quote.days_until_event)} days`}
+            </p>
+          </div>
+        )}
+
+        {/* Explain the absence rather than silently hiding the option. */}
+        {refundClosed && (
+          <p style={{ marginTop: 16, fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 1.5 }}>
+            {quote?.reason ?? 'Refunds are not available within 7 days of the event.'}
+          </p>
         )}
       </div>
 
@@ -353,7 +400,9 @@ export default function BookingDetailPage() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setRefundOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
             <h3 style={{ margin: '0 0 8px', color: colors.text }}>Request a refund</h3>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: colors.subText }}>Tell us why you'd like a refund. Processed within 3–5 business days.</p>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: colors.subText }}>
+              {quote ? `${fmtRand(quote.refund_amount)} back — ${fmtRate(quote.rate)} of your ticket price. The ${fmtRand(quote.service_fee_kept)} service fee is not refunded. Processed within 3–5 business days.` : 'Tell us why you\u2019d like a refund. Processed within 3\u20135 business days.'}
+            </p>
             <textarea value={refundReason} onChange={(e) => { setRefundReason(e.target.value); setRefundErr(''); }} placeholder="e.g. I can no longer attend this event due to..." rows={4} style={{ width: '100%', background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${refundErr ? '#ff3c6e' : border}`, borderRadius: 10, padding: '12px', fontSize: 14, boxSizing: 'border-box', outline: 'none', resize: 'vertical' }} />
             <p style={{ margin: '4px 0 12px', fontSize: 12, color: colors.subText, textAlign: 'right' }}>{refundReason.length}/500</p>
             {refundErr && <p style={{ color: '#ff3c6e', fontSize: 13, margin: '0 0 12px' }}>{refundErr}</p>}
