@@ -14,14 +14,18 @@
  *   1. startBookingPayment(bookingId, method) → { authorization_url, ... }
  *   2. openGatewayCheckout(authorization_url) opens the in-app browser
  *   3. the gateway redirects to the backend /payments/return, which verifies
- *      (Paystack) and 302-redirects to eventsapp://payment/return — the browser
- *      detects that scheme, closes, and returns control here
+ *      (Paystack) and 302-redirects to eventsapp://payment/return. On Android
+ *      the auth session detects that scheme and closes itself; on iOS we run
+ *      SFSafariViewController and dismiss it from a Linking listener instead
+ *      (see openGatewayCheckout for why they differ)
  *   4. pollPayment(bookingId) reads the authoritative status
  *
  * This module is ADDITIVE — it reuses the axios `api` instance from ./api.
  */
 
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
+import { Platform } from 'react-native';
 import { api } from './api';
 
 export type PaymentMethod = 'card' | 'paypal' | 'apple_pay' | 'instant_eft';
@@ -74,11 +78,34 @@ export type CheckoutOutcome =
  * WebBrowser.openBrowserAsync + a Linking listener (see app/payment/[id].tsx).
  */
 export async function openGatewayCheckout(authorizationUrl: string): Promise<CheckoutOutcome> {
+  // iOS gets SFSafariViewController; everything else keeps the auth session.
+  //
+  // WHY THE SPLIT. Apple Pay needs a Safari-backed surface, and
+  // ASWebAuthenticationSession — especially with preferEphemeralSession, which
+  // deliberately isolates it from Safari — is a restricted context intended for
+  // OAuth. Whether Apple Pay renders inside it is genuinely unclear;
+  // SFSafariViewController is the fuller context and the safer bet.
+  //
+  // Android is left untouched on purpose. There is no Apple Pay to gain there,
+  // and the auth-session path is what the Android deep-link ghost guard in
+  // app/payment/[id].tsx is tuned against — that guard exists because the
+  // eventsapp:// redirect both resolves the session AND gets picked up by
+  // expo-router, pushing a phantom screen. Changing Android's opener would
+  // disturb a fix that took real effort to land, for no benefit.
+  //
+  // TO REVERT: return openViaAuthSession(authorizationUrl) unconditionally.
+  if (Platform.OS === 'ios') {
+    return openViaSafariView(authorizationUrl);
+  }
+  return openViaAuthSession(authorizationUrl);
+}
+
+/** The original path: the session itself detects the return scheme and closes. */
+async function openViaAuthSession(authorizationUrl: string): Promise<CheckoutOutcome> {
   const result = await WebBrowser.openAuthSessionAsync(authorizationUrl, PAYMENT_RETURN_URL, {
     showInRecents: false,
     // Ephemeral session: no shared Safari cookies, so iOS does NOT show the
-    // "<App> Wants to Use <domain> to Sign In" consent dialog — the user lands
-    // straight on the gateway's card form. Apple Pay / 3-D Secure still work.
+    // "<App> Wants to Use <domain> to Sign In" consent dialog.
     preferEphemeralSession: true,
   });
   if (result.type === 'success') {
@@ -86,6 +113,49 @@ export async function openGatewayCheckout(authorizationUrl: string): Promise<Che
   }
   // 'cancel' | 'dismiss' | 'locked'
   return { type: 'dismissed' };
+}
+
+/**
+ * SFSafariViewController. Unlike the auth session it will NOT close itself when
+ * the gateway redirects to our scheme, so we listen for the deep link, dismiss
+ * the browser ourselves, and resolve.
+ *
+ * Two things can finish this: the deep link arriving, or the user tapping Done.
+ * Both are wired, and `settled` makes sure whichever lands first wins — without
+ * it a Done tap arriving just after the redirect would report 'dismissed' on a
+ * payment that actually succeeded, and the caller would show a cancellation for
+ * money already taken.
+ */
+async function openViaSafariView(authorizationUrl: string): Promise<CheckoutOutcome> {
+  return new Promise<CheckoutOutcome>((resolve) => {
+    let settled = false;
+    const finish = (outcome: CheckoutOutcome) => {
+      if (settled) return;
+      settled = true;
+      sub.remove();
+      resolve(outcome);
+    };
+
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      if (!url || !url.startsWith(PAYMENT_RETURN_URL)) return;
+      // Close the browser we opened; the caller then polls for the real status.
+      WebBrowser.dismissBrowser();
+      finish({ type: 'returned', url });
+    });
+
+    WebBrowser.openBrowserAsync(authorizationUrl, {
+      showInRecents: false,
+      // Keep the sheet visually part of the app rather than a full takeover.
+      presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+      dismissButtonStyle: 'cancel',
+    })
+      .then(() => {
+        // Resolves when the browser closes for ANY reason, including our own
+        // dismissBrowser() above — hence the settled guard.
+        finish({ type: 'dismissed' });
+      })
+      .catch(() => finish({ type: 'dismissed' }));
+  });
 }
 
 /**
