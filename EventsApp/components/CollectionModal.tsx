@@ -3,7 +3,6 @@ import {
   Text,
   Modal,
   ScrollView,
-  Image,
   TouchableOpacity,
   Animated,
   PanResponder,
@@ -14,6 +13,8 @@ import {
   NativeScrollEvent,
   Alert,
 } from 'react-native';
+// expo-image rather than react-native's Image: the two keep separate caches, so an image already fetched elsewhere in the app was being re-downloaded here. expo-image also persists to disk across restarts.
+import { Image as ExpoImage } from 'expo-image';
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -172,11 +173,11 @@ const ImageCarousel = ({ images, tc }: { images: string[]; tc: string }) => {
         style={{ width: W, height: IMAGE_H }}
       >
         {images.map((uri, i) => (
-          <Image
+          <ExpoImage
             key={i}
             source={{ uri }}
             style={{ width: W, height: IMAGE_H }}
-            resizeMode="cover"
+            contentFit="cover" cachePolicy="memory-disk" transition={150}
           />
         ))}
       </ScrollView>
@@ -286,10 +287,10 @@ const CarouselCard = ({
         {/* ── Hero image ───────────────────────────────────────────────── */}
         <View style={{ width: '100%', height: CARD_W * 1.0 }}>
           {heroImage ? (
-            <Image
+            <ExpoImage
               source={{ uri: heroImage }}
               style={StyleSheet.absoluteFillObject}
-              resizeMode="cover"
+              contentFit="cover" cachePolicy="memory-disk" transition={150}
             />
           ) : (
             <View

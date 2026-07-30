@@ -8,6 +8,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet } from 'react-native';
+// expo-image rather than react-native's Image: the two keep separate caches, so an image already fetched elsewhere in the app was being re-downloaded here. expo-image also persists to disk across restarts.
+import { Image as ExpoImage } from 'expo-image';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { cacheBookingsList, getCachedBookingsList, syncManyOffline, syncBookingOffline, cacheBookingDetail, saveGuestTicket, getGuestTickets } from '../../lib/offline';
@@ -103,7 +105,15 @@ const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: numb
   <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={sheet.cardTouchable}>
     <LinearGradient colors={[pal.top, pal.bottom]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={sheet.card}>
       {booking.event?.cover_image_url && (
-        <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} blurRadius={3} />
+        <ExpoImage
+          source={{ uri: booking.event.cover_image_url }}
+          style={StyleSheet.absoluteFillObject}
+          contentFit="cover"
+          blurRadius={3}
+          cachePolicy="memory-disk"
+          transition={150}
+          recyclingKey={booking.id}
+        />
       )}
       {booking.event?.cover_image_url && (
         <LinearGradient colors={[`${pal.top}d8`, `${pal.bottom}f0`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />

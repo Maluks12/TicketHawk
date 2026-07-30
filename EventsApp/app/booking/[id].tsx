@@ -1,10 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, Image,
+  View, Text, ScrollView, TouchableOpacity,
   ActivityIndicator, TextInput, Modal, Animated,
   KeyboardAvoidingView, Platform, Alert, StyleSheet,
   Dimensions,
 } from 'react-native';
+// expo-image, not react-native's Image.
+//
+// This screen was the last one still on the built-in Image after the rest of
+// the app migrated. The two libraries keep SEPARATE caches, so a cover image
+// already downloaded and cached by the event screen counted for nothing here —
+// every visit re-fetched the full-size original over the network, which is why
+// the ticket detail felt slow while the screens either side of it were instant.
+// expo-image also has a real disk cache, so it survives an app restart.
+import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -741,7 +750,16 @@ export default function BookingDetailScreen() {
         {/* Hero */}
         <Animated.View className={s.hero} style={{ opacity: heroOpacity }}>
           {booking.event?.cover_image_url
-            ? <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} />
+            ? <ExpoImage
+                source={{ uri: booking.event.cover_image_url }}
+                style={StyleSheet.absoluteFillObject}
+                contentFit="cover"
+                // memory-disk: reuse whatever the event and purchase screens
+                // already pulled down, and keep it across restarts.
+                cachePolicy="memory-disk"
+                transition={180}
+                recyclingKey={booking.event.cover_image_url}
+              />
             : <View className={s.heroBg} />
           }
           {/* The scrim exists to keep the status badge, title and date legible —
@@ -903,7 +921,16 @@ export default function BookingDetailScreen() {
             /* Fallback for older bookings without per-assignment rows */
             <View style={sheet.qrCard}>
               {booking.qr_code_url ? (
-                <Image source={{ uri: booking.qr_code_url }} style={sheet.qrImage} resizeMode="contain" />
+                <ExpoImage
+                  source={{ uri: booking.qr_code_url }}
+                  style={sheet.qrImage}
+                  contentFit="contain"
+                  // A QR must never render blurred or half-decoded, so no
+                  // transition and no placeholder here — it appears when it is
+                  // readable, or not at all.
+                  cachePolicy="memory-disk"
+                  transition={0}
+                />
               ) : (
                 <View style={sheet.pendingQR}>
                   <Ionicons name="time-outline" size={48} color={t.iconFaint} />

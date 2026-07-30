@@ -1,7 +1,6 @@
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   Animated,
   PanResponder,
@@ -12,6 +11,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+// expo-image rather than react-native's Image: the two keep separate caches, so an image already fetched elsewhere in the app was being re-downloaded here. expo-image also persists to disk across restarts.
+import { Image as ExpoImage } from 'expo-image';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type MerchandiseItem } from '../lib/api';
@@ -93,7 +94,7 @@ function ImageCarousel({ images, tc }: { images: string[]; tc: string }) {
         scrollEventThrottle={16} decelerationRate="fast" style={{ height: IMG_H }}
       >
         {images.map((uri, i) => (
-          <Image key={i} source={{ uri }} style={{ width: SCREEN_W, height: IMG_H }} resizeMode="cover" />
+          <ExpoImage key={i} source={{ uri }} style={{ width: SCREEN_W, height: IMG_H }} contentFit="cover" cachePolicy="memory-disk" transition={150} />
         ))}
       </ScrollView>
       {images.length > 1 && (

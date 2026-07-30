@@ -2,7 +2,6 @@ import {
   View,
   Text,
   FlatList,
-  Image,
   TouchableOpacity,
   Modal,
   ScrollView,
@@ -15,6 +14,8 @@ import {
   Dimensions,
   Alert,
 } from 'react-native';
+// expo-image rather than react-native's Image: the two keep separate caches, so an image already fetched elsewhere in the app was being re-downloaded here. expo-image also persists to disk across restarts.
+import { Image as ExpoImage } from 'expo-image';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -195,19 +196,19 @@ const Collage = ({ images }: { images: string[] }) => {
     return <View style={sheet.collagePlaceholderBox} />;
   }
   if (images.length === 1) {
-    return <Image source={{ uri: images[0] }} style={sheet.collageSingleImg} resizeMode="cover" />;
+    return <ExpoImage source={{ uri: images[0] }} style={sheet.collageSingleImg} contentFit="cover" cachePolicy="memory-disk" transition={150} />;
   }
   return (
     <View style={sheet.collageGridContainer}>
-      <Image source={{ uri: images[0] }} className={s.collageLeft} resizeMode="cover" />
+      <ExpoImage source={{ uri: images[0] }} className={s.collageLeft} contentFit="cover" cachePolicy="memory-disk" transition={150} />
       <View style={sheet.collageRight}>
         {images.slice(1, 3).map((uri, i) => (
-          <Image
+          <ExpoImage
             key={i}
             source={{ uri }}
             className={s.collageSmall}
             style={i === 0 ? { marginBottom: 2 } : undefined}
-            resizeMode="cover"
+            contentFit="cover" cachePolicy="memory-disk" transition={150}
           />
         ))}
       </View>
@@ -254,7 +255,7 @@ const DetailImageCarousel = ({ images, tc }: { images: string[]; tc: string }) =
           )}
         >
           {images.map((uri, i) => (
-            <Image key={i} source={{ uri }} style={{ width: CAROUSEL_W, height: CAROUSEL_H }} resizeMode="cover" />
+            <ExpoImage key={i} source={{ uri }} style={{ width: CAROUSEL_W, height: CAROUSEL_H }} contentFit="cover" cachePolicy="memory-disk" transition={150} />
           ))}
         </Animated.ScrollView>
       </View>
