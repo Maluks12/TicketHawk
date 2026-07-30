@@ -6,7 +6,8 @@
  *
  * Web vs mobile differences:
  *  - Uses window.open() popup instead of expo-web-browser
- *  - No Apple Pay (requires Safari-backed surfaces; not available on web desktop)
+ *  - Apple Pay via InlineJS v2 on Safari / Apple hardware, mounted on our own
+ *    page against the server's access_code (see components/applePayButton.tsx)
  *  - Supports: card, paypal, instant_eft
  *  - Same polling loop and API routes as the mobile client
  *
@@ -35,6 +36,16 @@ export type PaymentStatusValue =
 
 export interface StartPaymentResult {
   authorization_url: string;
+  /**
+   * Paystack access code for the server-initialised transaction.
+   *
+   * Lets InlineJS v2 complete the payment on our own page — an Apple Pay
+   * sheet with no redirect. Crucially it carries the organiser subaccount
+   * split the server attached; a browser-initialised transaction would drop
+   * it silently. Empty for PayPal and for guest checkout, which have no
+   * equivalent — those keep the redirect flow.
+   */
+  access_code: string;
   reference: string;
   payment_method: string;
   amount: number;
@@ -424,6 +435,7 @@ export async function pollPayment(
 function normaliseStart(data: any): StartPaymentResult {
   return {
     authorization_url: data?.authorization_url ?? data?.client_token ?? '',
+    access_code:       data?.access_code ?? '',
     reference:         data?.reference ?? data?.payment_request_id ?? '',
     payment_method:    data?.payment_method ?? '',
     amount:            Number(data?.amount ?? 0),
