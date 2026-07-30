@@ -292,12 +292,41 @@ func (s *PaymentService) CreatePaymentIntent(booking *models.Booking, channel st
 	return s.CreatePaymentIntentWithMethod(booking, models.PaymentCreditCard, channel)
 }
 
+// CreatePaymentIntentAndAccessCode is CreatePaymentIntentWithMethod plus the
+// Paystack access code.
+//
+// The access code is what makes an on-page Apple Pay button possible. Paystack
+// confirmed (DevRel, Jul 2026) that an access code from /transaction/initialize
+// retains the full transaction configuration — subaccount and
+// transaction_charge included — so a payment completed against it in InlineJS
+// v2 preserves the organiser split.
+//
+// That distinction is the whole reason this exists. Handing the browser a raw
+// amount and email would create a NEW, unsplit transaction, and the organiser's
+// share would be silently platform-collected on every Apple Pay sale with
+// nothing in the logs to show it. The access code is the only client-side
+// payment path that cannot lose the split.
+//
+// It is a separate method rather than a signature change so the five other
+// callers of CreatePaymentIntentWithMethod stay untouched.
+func (s *PaymentService) CreatePaymentIntentAndAccessCode(booking *models.Booking, method models.PaymentMethod, channel string) (redirectURL string, accessCode string, reference string, err error) {
+	url, ref, code, err := s.createPaymentIntent(booking, method, channel)
+	return url, code, ref, err
+}
+
 // CreatePaymentIntentWithMethod starts a payment for a booking using the chosen
 // method: card/apple_pay route to Paystack, paypal routes to PayPal. Returns the
 // hosted-checkout URL the client opens, plus the provider reference.
 func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, method models.PaymentMethod, channel string) (redirectURL string, reference string, err error) {
+	url, ref, _, err := s.createPaymentIntent(booking, method, channel)
+	return url, ref, err
+}
+
+// createPaymentIntent is the shared implementation. The third return value is
+// the Paystack access code, empty for gateways that have no equivalent.
+func (s *PaymentService) createPaymentIntent(booking *models.Booking, method models.PaymentMethod, channel string) (redirectURL string, reference string, accessCode string, err error) {
 	if err := s.guardMethod(method); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -354,14 +383,14 @@ func (s *PaymentService) CreatePaymentIntentWithMethod(booking *models.Booking, 
 		})
 	}
 	if err != nil {
-		return "", "", fmt.Errorf("initializing %s payment: %w", gw.Name(), err)
+		return "", "", "", fmt.Errorf("initializing %s payment: %w", gw.Name(), err)
 	}
 
 	if err := s.createPaymentRecord(ctx, booking, gw.Name(), res.Reference, &res.RedirectURL, method, nil); err != nil {
-		return "", "", fmt.Errorf("persisting payment record for booking %s: %w", booking.ID, err)
+		return "", "", "", fmt.Errorf("persisting payment record for booking %s: %w", booking.ID, err)
 	}
 	s.recordSplitOnPayment(ctx, booking.ID, sp)
-	return res.RedirectURL, res.Reference, nil
+	return res.RedirectURL, res.Reference, res.AccessCode, nil
 }
 
 // CreateCartPaymentIntent starts a card (Paystack) payment for a multi-item cart.

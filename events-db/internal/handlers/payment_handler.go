@@ -88,7 +88,7 @@ func CreatePaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 		}
 
 		method := parsePaymentMethod(c)
-		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
+		redirectURL, accessCode, reference, err := paymentService.CreatePaymentIntentAndAccessCode(booking, method, paymentChannel(c))
 		if err != nil {
 			if errors.Is(err, services.ErrPayPalDisabled) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "PayPal is not currently available. Please choose another payment method.", "code": "paypal_disabled"})
@@ -106,6 +106,11 @@ func CreatePaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSe
 			"booking_id":        booking.ID,
 			"booking_number":    booking.BookingNumber,
 			"authorization_url": redirectURL,
+			// access_code lets the browser complete THIS transaction through
+			// InlineJS v2 rather than redirecting. It carries the subaccount split;
+			// a client-side amount+email transaction would not, and every Apple Pay
+			// sale would be silently platform-collected.
+			"access_code":       accessCode,
 			"reference":         reference,
 			"payment_method":    method,
 			"amount":            booking.TotalAmount,
@@ -208,7 +213,7 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 		}
 
 		method := parsePaymentMethod(c)
-		redirectURL, reference, err := paymentService.CreatePaymentIntentWithMethod(booking, method, paymentChannel(c))
+		redirectURL, accessCode, reference, err := paymentService.CreatePaymentIntentAndAccessCode(booking, method, paymentChannel(c))
 		if err != nil {
 			if errors.Is(err, services.ErrPayPalDisabled) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "PayPal is not currently available. Please choose another payment method.", "code": "paypal_disabled"})
@@ -226,6 +231,11 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 			"booking_id":        bookingID,
 			"booking_number":    booking.BookingNumber,
 			"authorization_url": redirectURL,
+			// access_code lets the browser complete THIS transaction through
+			// InlineJS v2 rather than redirecting. It carries the subaccount split;
+			// a client-side amount+email transaction would not, and every Apple Pay
+			// sale would be silently platform-collected.
+			"access_code":       accessCode,
 			"reference":         reference,
 			"payment_method":    method,
 			"amount":            booking.TotalAmount,
