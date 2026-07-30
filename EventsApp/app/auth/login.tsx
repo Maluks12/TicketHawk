@@ -118,6 +118,42 @@ Field.displayName = 'Field';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
+// ── Phone normalisation ──────────────────────────────────────────────────────
+//
+// The +27 chip beside the field is display only — it was never prepended to the
+// submitted value. Combined with a >= 10 digit rule that meant the buyer had to
+// type the leading 0 that the chip already implies, so "+27" and "0686970792"
+// appeared side by side and a correctly-typed 686970792 was rejected as
+// "Enter a valid number".
+//
+// Every other app with a country-code chip accepts both. So do we now: 9 digits,
+// 10 with the national 0, or a pasted +27/27 prefix all resolve to the same
+// number.
+//
+// Output stays LOCAL 0XXXXXXXXX rather than E.164. Two reasons: every existing
+// user row is stored that way, and the API binds phone_number with min=10, so a
+// bare 9-digit national number would be rejected server-side.
+const SA_NATIONAL_DIGITS = 9;
+
+/** Digits only, dropping a +27 / 27 / leading 0 prefix. */
+function phoneNationalDigits(raw: string): string {
+  let d = raw.replace(/\D/g, '');
+  if (d.startsWith('27') && d.length > SA_NATIONAL_DIGITS) d = d.slice(2);
+  if (d.startsWith('0')) d = d.slice(1);
+  return d;
+}
+
+/** True when the input resolves to a plausible SA mobile number. */
+function phoneIsValid(raw: string): boolean {
+  return phoneNationalDigits(raw).length === SA_NATIONAL_DIGITS;
+}
+
+/** Canonical stored form: 0XXXXXXXXX. */
+function phoneToLocal(raw: string): string {
+  const d = phoneNationalDigits(raw);
+  return d ? `0${d}` : '';
+}
+
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -211,7 +247,7 @@ export default function AuthScreen() {
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
     /\S+@\S+\.\S+/.test(regEmail) &&
-    phone.replace(/\D/g, '').length >= 10 &&
+    phoneIsValid(phone) &&
     !!parseDobToISO(dob) &&
     passAllOk &&
     confirmPass === regPassword &&
@@ -239,7 +275,7 @@ export default function AuthScreen() {
     if (!regEmail.trim())  errs.regEmail  = 'Required';
     else if (!/\S+@\S+\.\S+/.test(regEmail)) errs.regEmail = 'Enter a valid email';
     if (!phone.trim())     errs.phone     = 'Required';
-    else if (phone.replace(/\D/g, '').length < 10) errs.phone = 'Enter a valid number';
+    else if (!phoneIsValid(phone)) errs.phone = 'Enter a valid number';
     if (!dob)              errs.dob       = 'Required';
     else if (!parseDobToISO(dob)) errs.dob = 'Use DD/MM/YYYY';
     if (!regPassword)      errs.regPassword = 'Required';
@@ -252,7 +288,7 @@ export default function AuthScreen() {
       await register({
         email: regEmail.trim().toLowerCase(), password: regPassword,
         first_name: firstName.trim(), last_name: lastName.trim(),
-        phone_number: phone.trim(), date_of_birth: parseDobToISO(dob)!,
+        phone_number: phoneToLocal(phone), date_of_birth: parseDobToISO(dob)!,
       });
       router.back();
     } catch (e: any) {

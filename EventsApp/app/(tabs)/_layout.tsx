@@ -1,6 +1,6 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import { View, StyleSheet, StatusBar, Platform } from 'react-native';
 import { House, Storefront, MagnifyingGlass, Ticket, User, type Icon as PhosphorIcon } from 'phosphor-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppTheme } from '../../theme/colors';
@@ -90,15 +90,27 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    borderTopWidth:   StyleSheet.hairlineWidth,
+    // The divider is iOS-only. hairlineWidth is 0.5px on iOS, where it reads
+    // as a subtle separator, but rounds up to a full opaque pixel on most
+    // Android densities and draws a hard grey outline across the bottom of the
+    // screen — clearly visible against the dark theme and absent on iOS.
+    borderTopWidth:   Platform.OS === 'ios' ? StyleSheet.hairlineWidth : 0,
     borderRadius:     0,
     marginHorizontal: 0,
     marginBottom:     0,
-    shadowColor:      '#000',
-    shadowOffset:     { width: 0, height: -2 },
-    shadowOpacity:    0.05,
-    shadowRadius:     8,
-    elevation:        4,
+    // Same story for elevation: Android renders it as a real shadow above the
+    // bar, which on a dark background looks like a second seam rather than
+    // depth. The iOS shadow props below are no-ops on Android anyway.
+    ...Platform.select({
+      ios: {
+        shadowColor:   '#000',
+        shadowOffset:  { width: 0, height: -2 },
+        shadowOpacity: 0.05,
+        shadowRadius:  8,
+      },
+      android: { elevation: 0 },
+      default: {},
+    }),
   },
 
   tabItem: {

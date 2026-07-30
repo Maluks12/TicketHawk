@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tickethawk.app",
+      "sha256_cert_fingerprints": [
+        "C2:C8:72:F8:33:8F:76:42:3E:52:C6:4E:57:49:0C:6A:65:62:A6:37:DD:BB:FD:16:D5:2A:2A:5A:FE:28:DE:CA"
+      ]
+    }
+  }
+]

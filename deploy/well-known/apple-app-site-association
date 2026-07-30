@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "U397P74T8B.com.tickethawk.app",
+        "paths": ["/events/*", "/booking/*", "/claim-ticket*"]
+      }
+    ]
+  }
+}

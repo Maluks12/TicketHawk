@@ -15,7 +15,15 @@ import { s, sheet, setTicketsTheme } from '../../styles/tickets';
 import { useAppTheme } from '../../theme/colors'; 
 
 const CARD_HEIGHT = 210;
-const CARD_PEEK   = 72;
+// Vertical space between cards. This used to be a negative margin of
+// -(CARD_HEIGHT - CARD_PEEK), which overlapped every card onto the one
+// above so only a 72px sliver showed. It looked like a wallet, but it meant
+// the only fully readable ticket was the last one — the event name, date and
+// venue of everything above it were covered, and scrolling never revealed
+// them because the overlap is fixed rather than scroll-driven.
+//
+// Now they simply stack vertically with a gap, matching the category screen.
+const CARD_GAP = 14;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,7 +100,7 @@ const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: numb
     : '#888';
 
  return (
-  <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={[sheet.cardTouchable, { zIndex: 100 - index }]}>
+  <TouchableOpacity activeOpacity={0.93} onPress={onPress} style={sheet.cardTouchable}>
     <LinearGradient colors={[pal.top, pal.bottom]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={sheet.card}>
       {booking.event?.cover_image_url && (
         <Image source={{ uri: booking.event.cover_image_url }} style={StyleSheet.absoluteFillObject} blurRadius={3} />
@@ -152,7 +160,7 @@ const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: n
   return (
     <View>
       {bookings.map((b, i) => (
-        <View key={b.id} style={i > 0 ? { marginTop: -(CARD_HEIGHT - CARD_PEEK) } : undefined}>
+        <View key={b.id} style={i > 0 ? { marginTop: CARD_GAP } : undefined}>
           <TicketCard booking={b} index={offset + i} onPress={() => {
             // Guest bookings have no auth token — route with booking number +
             // email so the detail screen fetches via the /guest/ endpoints.
