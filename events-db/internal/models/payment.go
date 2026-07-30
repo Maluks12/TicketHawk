@@ -53,14 +53,27 @@ type Payment struct {
 }
 
 // PaystackChannels maps a requested payment method to the Paystack channel list
-// passed to /transaction/initialize. Apple Pay surfaces under the card channel.
+// passed to /transaction/initialize.
+//
+// apple_pay is its OWN channel, not a variant of card. The previous comment
+// here claimed Apple Pay surfaced under the card channel, and that was wrong:
+// Paystack's channel enum lists card, bank, ussd, qr, eft, mobile_money,
+// bank_transfer and apple_pay as siblings. Initialising with ["card"] alone
+// produces a transaction that will not offer Apple Pay at checkout, however
+// well configured the account and the frontend are — the channel list is a
+// whitelist, so omitting apple_pay silently forbids it.
+//
+// Both card and apple_pay are requested together so a single transaction can
+// serve either: the buyer picks at the Paystack sheet rather than committing
+// on our checkout page. Apple Pay is card-funded and settles identically, so
+// the subaccount split, transaction charge and reserve logic are unaffected.
 func (pm PaymentMethod) PaystackChannels() []string {
 	switch pm {
 	case PaymentApplePay, PaymentCreditCard:
-		return []string{"card"}
+		return []string{"card", "apple_pay"}
 	case PaymentInstantEFT:
 		return []string{"eft"}
 	default:
-		return []string{"card"}
+		return []string{"card", "apple_pay"}
 	}
 }

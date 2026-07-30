@@ -11,7 +11,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import SeatingMap, { detectVenueType, MapLegend } from '@/components/seatingMap';
 import RiskAcknowledgement from '@/components/risk-acknowledgement';
-import ApplePayButton from '@/components/applePayButton';
+import InlineCheckout from '@/components/inlineCheckout';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtPrice(p: number) {
@@ -648,55 +648,49 @@ return (
       </div>
     )}
 
-      {/* ── Payment sheet: Apple Pay, with card as the fallback ─────────
-          Shown only once the booking exists and we hold an access code.
-          ApplePayButton renders nothing unless Paystack actually mounts an
-          Apple Pay element, so non-Apple browsers fall straight through to
-          the card page and never see this step at all. */}
+      {/* ── Payment sheet ───────────────────────────────────────────────
+          Resumes the server-initialised transaction in place. Apple Pay
+          appears as a channel inside Paystack's sheet on Apple hardware;
+          card for everyone else. Either way the split rides on the access
+          code, so nothing about the money is decided in the browser. */}
       {intent && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 110, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 36px', width: '100%', maxWidth: 520 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: colors.text }}>Complete payment</h3>
-              <button
-                onClick={() => { setIntent(null); discardPendingPopup(); }}
-                aria-label="Close"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.subText, padding: 4 }}
-              ><X size={20} /></button>
+        <InlineCheckout
+          accessCode={intent.accessCode}
+          onSuccess={() => { discardPendingPopup(); router.replace('/tickets'); }}
+          onCancel={() => { /* leave the sheet up so they can retry */ }}
+          onUnavailable={() => {
+            // InlineJS blocked or failed: fall back to the hosted page so
+            // the sale still completes. Guarded — may fire more than once.
+            if (fellBack.current) return;
+            fellBack.current = true;
+            router.push(`/payment/${intent.bookingId}?${intent.payParams}`);
+          }}
+        >
+          {({ open, ready }) => (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 110, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+              <div style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 36px', width: '100%', maxWidth: 520 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: colors.text }}>Complete payment</h3>
+                  <button onClick={() => { setIntent(null); discardPendingPopup(); }} aria-label="Close"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.subText, padding: 4 }}><X size={20} /></button>
+                </div>
+                <p style={{ margin: '0 0 16px', fontSize: 13, color: colors.subText }}>
+                  {`R${Math.round(intent.amount).toLocaleString('en-ZA')} · ${quantity} ${quantity === 1 ? 'ticket' : 'tickets'}`}
+                </p>
+                <button
+                  onClick={open}
+                  disabled={!ready}
+                  style={{ width: '100%', background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '15px', fontSize: 15, fontWeight: 800, cursor: ready ? 'pointer' : 'wait', opacity: ready ? 1 : 0.6 }}
+                >
+                  {ready ? 'Pay securely' : 'Loading…'}
+                </button>
+                <p style={{ margin: '10px 0 0', fontSize: 12, color: colors.subText, textAlign: 'center' }}>
+                  Apple Pay, card and 3-D Secure
+                </p>
+              </div>
             </div>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: colors.subText }}>
-              {`R${Math.round(intent.amount).toLocaleString('en-ZA')} · ${quantity} ${quantity === 1 ? 'ticket' : 'tickets'}`}
-            </p>
-
-            <ApplePayButton
-              accessCode={intent.accessCode}
-              amount={intent.amount}
-              reference={intent.reference}
-              onSuccess={() => {
-                // Paystack's callback is not proof of payment. The server is
-                // told by webhook; /tickets reads the authoritative status.
-                discardPendingPopup();
-                router.replace('/tickets');
-              }}
-              onCancel={() => { /* sheet stays open so they can pay by card */ }}
-              onUnavailable={() => {
-                // Not an Apple surface. Continue to the existing card page
-                // automatically, so nobody gains an extra tap over the old
-                // flow. Guarded: this may fire more than once.
-                if (fellBack.current) return;
-                fellBack.current = true;
-                router.push(`/payment/${intent.bookingId}?${intent.payParams}`);
-              }}
-            />
-
-            <button
-              onClick={() => router.push(`/payment/${intent.bookingId}?${intent.payParams}`)}
-              style={{ width: '100%', marginTop: 12, background: 'transparent', color: colors.text, border: `1px solid ${border}`, borderRadius: 12, padding: '13px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-            >
-              Pay by card instead
-            </button>
-          </div>
-        </div>
+          )}
+        </InlineCheckout>
       )}
 
       {/* ── Guest contact sheet ──────────────────────────────────────── */}
