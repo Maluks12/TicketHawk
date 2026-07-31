@@ -534,7 +534,7 @@ func main() {
 		bookings.POST("",    handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
 		bookings.GET("",     handlers.GetUserBookingsHandler(bookingRepo))
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo))
-		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(bookingRepo, eventRepo, paymentService, emailService))
+		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(pool, bookingRepo, eventRepo, paymentService, emailService))
 		bookings.GET("/:id/refund-quote",                 handlers.RefundQuoteHandler(bookingRepo, eventRepo))
 		bookings.GET("/:id/assignments",                  handlers.GetTicketAssignmentsHandler(pool))
 		bookings.GET("/:id/pool-qr",                      handlers.GetPoolQRTokenHandler(pool, rotatingQRService))

@@ -212,7 +212,66 @@ func (s *RefundService) markBookingRefunded(
 		    updated_at          = CURRENT_TIMESTAMP
 		WHERE id = $3
 	`, amount, reason, bookingID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Notify the buyer that money is on its way back.
+	//
+	// models.NotifRefundProcessed was declared when the notification system was
+	// built and then never emitted by anything — refunds sent email and wrote
+	// no feed row, so buyers had no in-app record and (once push shipped) no
+	// notification either. A refund is one of the things people most reliably
+	// open an app to check on.
+	//
+	// This sits here rather than in RefundEventCancellation because
+	// markBookingRefunded is the single choke point every refund passes
+	// through, so a future refund path gets the notification for free.
+	//
+	// Best-effort by design: a notification failure must never surface as a
+	// failed refund. The money has already moved; the worst case is a missing
+	// feed row, and the buyer still has the email.
+	if userID, evID, ok := s.bookingNotifyTarget(ctx, bookingID); ok {
+		data := map[string]any{"booking_id": bookingID}
+		if evID != "" {
+			data["event_id"] = evID
+		}
+		if amount > 0 {
+			data["refund_amount"] = amount
+		}
+		if nErr := repository.CreateNotification(
+			s.pool, ctx, userID,
+			models.NotifRefundProcessed,
+			"Refund Processed",
+			fmt.Sprintf("Your refund of R%.2f is on its way back to you. Allow a few working days for it to reflect.", amount),
+			data,
+		); nErr != nil {
+			log.Error().Err(nErr).Str("booking_id", bookingID).
+				Msg("refund service: refund notification failed")
+		}
+	}
+
+	return nil
+}
+
+// bookingNotifyTarget resolves the account to notify for a booking.
+//
+// Returns ok=false for GUEST bookings (user_id IS NULL). Guests have no
+// account, so there is no feed to write to and no device to push — they are
+// served by the refund email instead. That is a deliberate skip, not an
+// oversight, and it is why this returns a bool rather than an error.
+func (s *RefundService) bookingNotifyTarget(ctx context.Context, bookingID string) (userID, eventID string, ok bool) {
+	var uid, evID *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT user_id, event_id FROM bookings WHERE id = $1`, bookingID,
+	).Scan(&uid, &evID)
+	if err != nil || uid == nil || *uid == "" {
+		return "", "", false
+	}
+	if evID != nil {
+		eventID = *evID
+	}
+	return *uid, eventID, true
 }
 
 // accrueClawback records the shortfall as organiser debt, writes the audit row,

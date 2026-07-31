@@ -7,12 +7,14 @@ import (
 	"events-db/internal/repository"
 	"events-db/internal/services"
 	"events-db/internal/utils"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
@@ -204,6 +206,7 @@ func GetBookingDetailsHandler(bookings repository.BookingQuerier) gin.HandlerFun
 // booking) so the latency increase is negligible in practice, and the caller
 // now gets a response that accurately reflects whether emails were attempted.
 func RequestRefundHandler(
+	pool *pgxpool.Pool,
 	bookings repository.BookingQuerier,
 	events repository.EventQuerier,
 	paymentService *services.PaymentService,
@@ -291,6 +294,34 @@ func RequestRefundHandler(
 					Str("assignee_email", assignee.Email).
 					Msg("refund: failed to send ticket invalidation notice")
 			}
+		}
+
+		// Feed row + push for the buyer.
+		//
+		// This path does NOT go through RefundService.markBookingRefunded — it
+		// uses RequestRefundWithCascade — so the notification wired in there
+		// covers organiser cancellations only. Buyer-initiated refunds are the
+		// case where someone is actively waiting on an answer, so they need it
+		// more, not less.
+		//
+		// Best-effort: the money has already moved and the response below has
+		// to be a success regardless. A missing feed row is recoverable; a 500
+		// after a completed refund is not.
+		if nErr := repository.CreateNotification(
+			pool, c.Request.Context(), userID.(string),
+			models.NotifRefundProcessed,
+			"Refund Processed",
+			fmt.Sprintf("Your refund of R%.2f for %s is on its way. Allow a few working days for it to reflect.",
+				quote.RefundAmount, event.Title),
+			map[string]any{
+				"booking_id":     bookingID,
+				"booking_number": booking.BookingNumber,
+				"event_id":       event.ID,
+				"refund_amount":  quote.RefundAmount,
+			},
+		); nErr != nil {
+			log.Error().Err(nErr).Str("booking_id", bookingID).
+				Msg("refund: notification failed — refund itself succeeded")
 		}
 
 		c.JSON(http.StatusOK, gin.H{
