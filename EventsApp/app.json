@@ -27,6 +27,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.tickethawk.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",

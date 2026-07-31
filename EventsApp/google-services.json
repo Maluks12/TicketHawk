@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1095131355111",
+    "project_id": "tickethawk-c3e2a",
+    "storage_bucket": "tickethawk-c3e2a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1095131355111:android:b31412490a560173364f42",
+        "android_client_info": {
+          "package_name": "com.tickethawk.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDS9vNu0YVoF2fLgnRCjFZrOezXcqVnzqY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
