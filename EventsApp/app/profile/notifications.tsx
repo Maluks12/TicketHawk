@@ -19,7 +19,7 @@
 // true as new notification types are added.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, ActivityIndicator,
   RefreshControl, FlatList, StyleSheet,
@@ -155,8 +155,16 @@ export default function NotificationsScreen() {
 
   const unreadCount = items.filter((n) => !n.is_read).length;
 
+  // FlatList fires onEndReached several times before a state update lands, so
+  // the in-flight guard has to be a ref. A `loadingMore` state check reads
+  // stale and lets two identical page requests through.
+  const inFlight = useRef(false);
+
   const load = useCallback(async (replace = false) => {
     if (!user) { setLoading(false); return; }
+    if (inFlight.current) return;
+    inFlight.current = true;
+
     try {
       replace ? setLoading(true) : setLoadingMore(true);
 
@@ -166,12 +174,21 @@ export default function NotificationsScreen() {
       const { data } = await api.get<NotificationsResponse>('/v1/notifications', { params });
       const page = data.data ?? [];
 
-      setItems((prev) => (replace ? page : [...prev, ...page]));
+      setItems((prev) => {
+        if (replace) return page;
+        // Merge by id. Belt-and-braces: the server's keyset pagination should
+        // never hand back a row twice, but a duplicate key is a hard React
+        // error that blanks the list, and dropping a repeat is free. Cheap
+        // insurance against a paging bug ever taking the screen down again.
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...page.filter((n) => !seen.has(n.id))];
+      });
       setCursor(data.next_cursor);
     } catch {
       // Leave whatever is already on screen. A failed page-2 fetch shouldn't
       // blank out page 1.
     } finally {
+      inFlight.current = false;
       setLoading(false);
       setLoadingMore(false);
       setRefreshing(false);
@@ -182,9 +199,14 @@ export default function NotificationsScreen() {
 
   // Re-pull on focus so the list reflects anything that arrived by push while
   // the user was on another screen.
+  const didMount = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      if (!loading) void load(true);
+      // Skip the first focus — the mount effect above already loaded. Without
+      // this the screen fires two identical requests on open.
+      if (!didMount.current) { didMount.current = true; return; }
+      setCursor(null);
+      void load(true);
     }, [user?.id])
   );
 

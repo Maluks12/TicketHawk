@@ -144,12 +144,38 @@ func GetNotifications(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	rows, err := pool.Query(ctx, `
+	// KEYSET PAGINATION.
+	//
+	// The cursor argument used to be accepted, decoded by the handler, passed
+	// in here — and then never referenced in the query. Every page returned the
+	// same newest `limit` rows, so any client that followed next_cursor got
+	// page 1 forever. It went unnoticed because nothing in the app read this
+	// endpoint until the notifications inbox was built; the symptom there was
+	// React complaining about duplicate keys as page 1 was appended to itself.
+	//
+	// The predicate compares the (created_at, id) tuple rather than created_at
+	// alone. Timestamps are NOT unique here — the sell-out worker fans out to
+	// every follower inside one loop, so a batch of notifications can share a
+	// created_at down to the microsecond. With only created_at in the ORDER BY
+	// and the predicate, those rows have no stable order between queries and
+	// can be skipped or repeated across a page boundary. The id tiebreaker
+	// makes the ordering total and the pagination exact.
+	query := `
 		SELECT id, user_id, type, title, body, data, is_read, created_at
 		FROM   notifications
-		WHERE  user_id = $1
-		ORDER  BY created_at DESC
-		LIMIT  $2`, userID, limit+1)
+		WHERE  user_id = $1`
+	args := []any{userID, limit + 1}
+
+	if cursor != nil && cursor.ID != "" {
+		query += ` AND (created_at, id) < ($3, $4)`
+		args = append(args, cursor.CreatedAt, cursor.ID)
+	}
+
+	query += `
+		ORDER BY created_at DESC, id DESC
+		LIMIT  $2`
+
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, nil, err
 	}
