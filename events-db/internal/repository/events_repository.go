@@ -1046,7 +1046,36 @@ func AdminGetEventByID(pool *pgxpool.Pool, id string) (*models.Event, error) {
 // GetEventByID fetches a full event by UUID. When requestingUserID is nil only
 // published events are returned; when set, drafts owned by that user are also
 // visible (supporting the organiser preview flow).
+//
+// This is the REQUEST-PATH lookup: it enforces visibility rules. Do not use it
+// from workers or other system contexts — see GetEventByIDInternal.
 func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*models.Event, error) {
+	return getEventByID(pool, id, requestingUserID, false)
+}
+
+// GetEventByIDInternal fetches an event by UUID REGARDLESS OF STATUS.
+//
+// System contexts — the booking worker, refund service, payout service — must
+// keep working on events that have left the published state. An event is
+// 'completed' the moment it ends and 'cancelled' when an organiser pulls it,
+// but bookings against it remain real, paid, and owed tickets.
+//
+// This exists because the booking worker was calling GetEventByID(pool, id, nil),
+// which applies the public visibility filter. Once an event rolled to
+// 'completed', the lookup returned ErrEventNotFound, the worker logged "event
+// no longer exists", and — because its error branch treats every failure as
+// permanent — it marked the booking's tickets as SENT. The buyer got no ticket
+// email, no notification, and the database recorded delivery that never
+// happened. The 24-hour startup-sweep window sits exactly around when events
+// finish, so a late booking whose email hiccups is the realistic path in.
+//
+// NEVER call this from a request handler. It deliberately skips the checks that
+// stop one organiser reading another's drafts.
+func GetEventByIDInternal(pool *pgxpool.Pool, id string) (*models.Event, error) {
+	return getEventByID(pool, id, nil, true)
+}
+
+func getEventByID(pool *pgxpool.Pool, id string, requestingUserID *string, includeAllStatuses bool) (*models.Event, error) {
     ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
@@ -1072,7 +1101,10 @@ func GetEventByID(pool *pgxpool.Pool, id string, requestingUserID *string) (*mod
     // still filter on EventPublished only.
     liveStatuses := []string{string(models.EventPublished), string(models.EventPublishedPrivate)}
     args := []interface{}{id}
-    if requestingUserID == nil {
+    if includeAllStatuses {
+        // No status predicate at all. Callers are trusted system code that
+        // needs draft/completed/cancelled events too.
+    } else if requestingUserID == nil {
         query += ` AND e.status = ANY($2::event_status[])`
         args = append(args, liveStatuses)
     } else {

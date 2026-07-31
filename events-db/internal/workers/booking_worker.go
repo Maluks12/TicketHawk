@@ -134,17 +134,34 @@ func processBookingJob(
 		return
 	}
 
-	event, err := repository.GetEventByID(pool, func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
+	eventID := func() string { if booking.EventID != nil { return *booking.EventID }; return "" }()
+
+	// GetEventByIDInternal, NOT GetEventByID: the request-path lookup filters to
+	// published/published_private, so a booking for an event that has since rolled
+	// to 'completed' or been 'cancelled' looked like a missing event. Combined with
+	// the branch below that treated every error as permanent, that marked real
+	// paid bookings as delivered without ever sending a ticket.
+	event, err := repository.GetEventByIDInternal(pool, eventID)
 	if err != nil {
-		// The event no longer exists (deleted/purged). There is nothing that
-		// can ever be sent for this booking, so mark it sent — otherwise the
-		// startup sweep re-enqueues it on EVERY restart and logs this error
-		// forever.
+		if errors.Is(err, repository.ErrEventNotFound) {
+			// The row is genuinely gone (deleted/purged). Nothing can ever be
+			// sent, so mark it sent — otherwise the startup sweep re-enqueues it
+			// on EVERY restart and logs this forever.
+			log.Error().
+				Str("event_id", eventID).
+				Str("booking_id", bookingID).
+				Msg("booking worker: event row missing — marking booking sent to stop requeue churn")
+			markTicketsSent(pool, bookingID)
+			return
+		}
+
+		// Transient failure (DB blip, timeout, RDS failover). Leave tickets_sent
+		// FALSE so the next sweep retries. Marking it sent here would silently
+		// deny a paying customer their ticket over a five-second outage.
 		log.Error().Err(err).
-			Str("event_id", func() string { if booking.EventID != nil { return *booking.EventID }; return "" }()).
+			Str("event_id", eventID).
 			Str("booking_id", bookingID).
-			Msg("booking worker: failed to fetch event — marking booking sent to stop requeue churn")
-		markTicketsSent(pool, bookingID)
+			Msg("booking worker: transient event fetch failure — leaving booking for retry")
 		return
 	}
 
@@ -324,7 +341,11 @@ func retryEmailSend(
 		return markRetrySent(pool, retryID)
 	}
 
-	event, err := repository.GetEventByID(pool, func() string { if booking.EventID != nil { return *booking.EventID }; return "" }(), nil)
+	// Internal fetch, same reason as the main send path: this retry drain runs
+	// long after the booking was made, so the event has very often rolled to
+	// 'completed' by now. The request-path lookup would report it missing and
+	// permanently fail the retry for an event that is sitting right there.
+	event, err := repository.GetEventByIDInternal(pool, func() string { if booking.EventID != nil { return *booking.EventID }; return "" }())
 	if err != nil {
 		return markRetryFailed(pool, retryID, fmt.Sprintf("fetch event: %v", err))
 	}
