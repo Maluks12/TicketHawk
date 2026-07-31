@@ -3,9 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, ScrollView, TouchableOpacity, Alert, Linking, StyleSheet, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../store/authStore';
 import { openLegal } from '../../lib/legalLinks';
+import { api } from '../../lib/api';
 import {
   PUSH_PREF_KEY,
   pushUnavailableReason,
@@ -214,6 +215,22 @@ export default function ProfileScreen() {
   const { mode, setMode }  = useThemeStore();
   const { isDark, colors } = useAppTheme();
 
+  // Unread badge on the bell. Refreshed whenever this screen regains focus —
+  // which covers returning from the inbox after marking things read, and
+  // coming back into the app after tapping a push.
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) { setUnreadCount(0); return; }
+      let cancelled = false;
+      api.get<{ unread_count: number }>('/v1/notifications/unread')
+        .then(({ data }) => { if (!cancelled) setUnreadCount(data.unread_count ?? 0); })
+        .catch(() => {}); // a missing badge is not worth an error state
+      return () => { cancelled = true; };
+    }, [user?.id])
+  );
+
   const themeModeLabel: Record<ThemeMode, string> = { auto: 'Auto', light: 'Light', dark: 'Dark' };
   const cycleTheme = () => {
     const order: ThemeMode[] = ['auto', 'light', 'dark'];
@@ -239,6 +256,28 @@ export default function ProfileScreen() {
         style={{ paddingTop: insets.top + 10, backgroundColor: colors.background }}
       >
         <Text className={s.headerTitle} style={{ color: colors.text }}>Profile</Text>
+
+        {/* Notifications bell — only shown when signed in, since the inbox is
+            per-user and there is nothing to show a logged-out visitor. The
+            unread count is fetched on focus rather than polled: notifications
+            arrive by push, and a push already updates the app-icon badge. */}
+        {user && (
+          <TouchableOpacity
+            style={ph.bell}
+            activeOpacity={0.7}
+            onPress={() => router.push('/profile/notifications' as any)}
+            accessibilityLabel={
+              unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'
+            }
+          >
+            <Ionicons name="notifications-outline" size={22} color={colors.text} />
+            {unreadCount > 0 && (
+              <View style={ph.badge}>
+                <Text style={ph.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -366,3 +405,17 @@ export default function ProfileScreen() {
     </View>
   );
 }
+
+// Header bell + unread badge. Absolute positioning keeps the "Profile" title
+// in its original place rather than shifting it when the badge appears.
+const ph = StyleSheet.create({
+  bell: { position: 'absolute', right: 18, bottom: 18, padding: 6 },
+  badge: {
+    position: 'absolute', top: 0, right: 0,
+    minWidth: 17, height: 17, borderRadius: 8.5,
+    backgroundColor: '#ff2d55',
+    alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+});
