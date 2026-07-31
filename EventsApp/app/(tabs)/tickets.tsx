@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, RefreshControl,
  ActivityIndicator, Image, TextInput, KeyboardAvoidingView, Platform, Animated,
+  useWindowDimensions, InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -85,7 +86,11 @@ const dedup = (list: Booking[]) => { const seen = new Set<string>(); return list
 
 // ─── Ticket Card ──────────────────────────────────────────────────────────────
 
-const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: number; onPress: () => void }) => {
+// React.memo so a parent re-render doesn't re-run every card's ~15 reads off
+// the `s`/`sheet` Proxy objects in styles/tickets.ts. The comparator ignores
+// `onPress`: TicketStack builds that closure inline on every render, so a
+// default shallow compare would never match and the memo would do nothing.
+const TicketCard = React.memo(({ booking, index, onPress }: { booking: Booking; index: number; onPress: () => void }) => {
   const pal  = PALETTES[index % PALETTES.length];
   const up   = isUpcoming(booking);
   const days = booking.event?.start_time ? daysUntil(booking.event.start_time) : null;
@@ -161,11 +166,17 @@ const TicketCard = ({ booking, index, onPress }: { booking: Booking; index: numb
     </LinearGradient>
   </TouchableOpacity>
 );
-};
+}, (a, b) =>
+  a.booking.id === b.booking.id &&
+  a.booking.booking_status === b.booking.booking_status &&
+  a.index === b.index);
 
 // ─── Stack ────────────────────────────────────────────────────────────────────
 
-const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: number }) => {
+// Memoised: TicketPane re-renders whenever the screen does, and without this
+// the stack re-maps every booking into fresh elements each time. `bookings` is
+// a stable reference from the useMemo upstream, so the compare holds.
+const TicketStack = React.memo(({ bookings, offset = 0 }: { bookings: Booking[]; offset?: number }) => {
   const router = useRouter();
   return (
     <View>
@@ -188,7 +199,7 @@ const TicketStack = ({ bookings, offset = 0 }: { bookings: Booking[]; offset?: n
       ))}
     </View>
   );
-};
+});
 
 // ─── Guest Lookup ─────────────────────────────────────────────────────────────
 
@@ -312,6 +323,68 @@ const GuestLookup = () => {
 
 // ─── Tickets View (auth + local merged) ───────────────────────────────────────
 
+// One tab's content, rendered at a fixed width inside the sliding row below.
+//
+// It does NOT hide itself. The previous version toggled display:'none', which
+// looked free but isn't: Yoga drops a display:'none' subtree out of layout
+// entirely, so restoring it forces a full synchronous re-layout of ~20 cards
+// (each with nested views, two gradients and an image) on the tap. That was the
+// remaining stall after the remount fix — cheaper than remounting, still a
+// frame-blocking layout pass.
+//
+// Now both panes stay laid out permanently and the parent translates between
+// them on the native thread. Layout is computed once; switching costs nothing
+// on the JS thread at all.
+//
+// React.memo holds here because every prop is reference-stable: `colors` is a
+// module constant from useAppTheme, `insets` comes from the safe-area context,
+// `bookings` is memoised upstream, and `onRefresh` is a useCallback.
+const TicketPane = React.memo(({
+  kind, bookings, insets, colors, subTextColor, iconTint, refreshing, onRefresh,
+}: {
+  kind: 'upcoming' | 'past';
+  bookings: Booking[];
+  insets: any;
+  colors: any;
+  subTextColor: string;
+  iconTint: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) => {
+  if (bookings.length === 0) {
+    return (
+      <View style={{ flex: 1 }}>
+        <View className={s.centred}>
+          <View style={sheet.emptyIcon}>
+            <Ionicons name={kind === 'upcoming' ? 'calendar-outline' : 'time-outline'} size={44} color={iconTint} />
+          </View>
+          <Text className={s.emptyTitle} style={{ color: colors.text }}>
+            {kind === 'upcoming' ? 'No upcoming events' : 'No past events'}
+          </Text>
+          <Text className={s.emptySub} style={{ color: subTextColor }}>
+            {kind === 'upcoming'
+              ? 'Your future bookings will show up here.'
+              : "Events you've attended will appear here."}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      className={s.scroll}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={subTextColor} />
+      }
+    >
+      <TicketStack bookings={bookings} offset={0} />
+    </ScrollView>
+  );
+});
+
 const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRetry }: {
   apiBookings: Booking[]; loading: boolean; refreshing: boolean;
   onRefresh: () => void; error: string | null; onRetry: () => void;
@@ -320,23 +393,70 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
   const { colors, isDark } = useAppTheme();
   setTicketsTheme(isDark);
 
-  const all      = dedup([...apiBookings]).filter(isRealTicket);
-  const upcoming = all.filter(isUpcomingActive);
-  const past     = all.filter(b => !isUpcomingActive(b));
+  // useMemo, not bare expressions. These recomputed on EVERY render — so each
+  // tab switch redid the dedup, three filters, and a `new Date()` parse per
+  // booking, synchronously, before React could even start the list swap. That
+  // work on the JS thread is what made the tab transition stall halfway: the
+  // indicator itself animates natively, but the content underneath it froze.
+  // `all` is returned too — the "no tickets at all" empty state below
+  // distinguishes an empty account from an empty tab, so it needs the
+  // unfiltered count, not just the per-tab lists.
+  const { all, upcoming, past } = React.useMemo(() => {
+    const list = dedup([...apiBookings]).filter(isRealTicket);
+    return {
+      all:      list,
+      upcoming: list.filter(isUpcomingActive),
+      past:     list.filter(b => !isUpcomingActive(b)),
+    };
+  }, [apiBookings]);
 
   const [activeTab,   setActiveTab]   = useState<'upcoming' | 'past'>('upcoming');
   const [tabBarWidth, setTabBarWidth] = useState(0);
+  const { width: winWidth } = useWindowDimensions();
+  const paneAnim = React.useRef(new Animated.Value(0)).current;
+
+  // The Past pane is mounted once, AFTER the initial render settles, rather
+  // than on first tap. Mounting ~20 image-backed cards during the switch
+  // animation would hitch the very transition this is meant to smooth;
+  // runAfterInteractions defers it to idle time so it's ready and warm before
+  // the user ever reaches for the tab.
+  const [pastEverShown, setPastEverShown] = useState(false);
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => setPastEverShown(true));
+    return () => task.cancel();
+  }, []);
   const indicatorAnim = React.useRef(new Animated.Value(0)).current;
 
-  const switchTab = (tab: 'upcoming' | 'past') => {
+  const switchTab = React.useCallback((tab: 'upcoming' | 'past') => {
+    // Re-tapping the active tab used to restart the spring and force a full
+    // re-render for no visual change.
+    if (tab === activeTab) return;
+
+    // Animation FIRST, state second. setActiveTab synchronously schedules the
+    // list swap; starting the spring after it meant the animation was queued
+    // behind that render work and visibly began late. Kicking it off first
+    // hands it to the UI thread immediately, so the underline slides smoothly
+    // even while JS is busy mounting the new cards.
+    // Underline and content slide together, both on the native driver. Because
+    // the panes are already laid out, this animation never touches the JS
+    // thread — it stays smooth even if React is busy behind it.
+    Animated.parallel([
+      Animated.spring(indicatorAnim, {
+        toValue: tab === 'past' ? tabBarWidth / 2 : 0,
+        useNativeDriver: true,
+        tension: 180,
+        friction: 22,
+      }),
+      Animated.spring(paneAnim, {
+        toValue: tab === 'past' ? -winWidth : 0,
+        useNativeDriver: true,
+        tension: 180,
+        friction: 22,
+      }),
+    ]).start();
+
     setActiveTab(tab);
-    Animated.spring(indicatorAnim, {
-      toValue: tab === 'past' ? tabBarWidth / 2 : 0,
-      useNativeDriver: true,
-      tension: 180,
-      friction: 22,
-    }).start();
-  };
+  }, [activeTab, tabBarWidth, winWidth, indicatorAnim, paneAnim]);
 
   const subTextColor  = colors.subText;
   const badgeBg       = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
@@ -372,8 +492,6 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
     </View>
   );
 
-  const visibleBookings = activeTab === 'upcoming' ? upcoming : past;
-  const tabEmpty        = visibleBookings.length === 0;
 
   return (
     <View style={{ flex: 1 }}>
@@ -381,7 +499,12 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
       <View style={sheet.tabBarWrapper}>
         <View
           style={[sheet.tabBar, { borderBottomColor: colors.dividerColor }]}
-          onLayout={(e) => setTabBarWidth(e.nativeEvent.layout.width)}
+          onLayout={(e) => {
+            // Guard: onLayout fires on every layout pass, and an unconditional
+            // setState here re-rendered the whole screen mid-transition.
+            const w = e.nativeEvent.layout.width;
+            setTabBarWidth((prev) => (prev === w ? prev : w));
+          }}
         >
           <TouchableOpacity style={sheet.tabItem} activeOpacity={0.75} onPress={() => switchTab('upcoming')}>
             <Text
@@ -415,37 +538,61 @@ const TicketsView = ({ apiBookings, loading, refreshing, onRefresh, error, onRet
         />
       </View>
 
-      {/* ── Content ────────────────────────────────────────────────────── */}
-      {tabEmpty ? (
-        <View className={s.centred}>
-          <View style={sheet.emptyIcon}>
-            <Ionicons
-              name={activeTab === 'upcoming' ? 'calendar-outline' : 'time-outline'}
-              size={44}
-              color={iconTint}
+      {/* ── Content ────────────────────────────────────────────────────────
+          BOTH panes stay mounted; switching tabs only flips `display`.
+
+          Previously the active tab's list was the only thing rendered, so every
+          switch unmounted every card and mounted a fresh set. Each card carries
+          a full-size ExpoImage with blurRadius, two LinearGradients, and ~15
+          reads off the `s`/`sheet` Proxy objects in styles/tickets.ts (every
+          property access there is a proxy trap, which Hermes handles poorly).
+          Twenty cards made that a visible stall — the tab appeared to hang
+          halfway through the transition.
+
+          Keeping both mounted makes a switch a style change: no remount, no
+          image reload, no re-blur, no proxy traps. The Past pane is mounted
+          lazily on first visit so the initial screen load isn't paying for
+          cards the user may never look at, and stays mounted afterwards. */}
+      <View style={{ flex: 1, overflow: 'hidden' }}>
+        <Animated.View
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            width: winWidth * 2,
+            transform: [{ translateX: paneAnim }],
+          }}
+        >
+          <View style={{ width: winWidth }}>
+            <TicketPane
+              kind="upcoming"
+              bookings={upcoming}
+              insets={insets}
+              colors={colors}
+              subTextColor={subTextColor}
+              iconTint={iconTint}
+              refreshing={refreshing}
+              onRefresh={onRefresh}
             />
           </View>
-          <Text className={s.emptyTitle} style={{ color: colors.text }}>
-            {activeTab === 'upcoming' ? 'No upcoming events' : 'No past events'}
-          </Text>
-          <Text className={s.emptySub} style={{ color: subTextColor }}>
-            {activeTab === 'upcoming'
-              ? 'Your future bookings will show up here.'
-              : "Events you've attended will appear here."}
-          </Text>
-        </View>
-      ) : (
-        <ScrollView
-          className={s.scroll}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={subTextColor} />
-          }
-        >
-          <TicketStack bookings={visibleBookings} offset={0} />
-        </ScrollView>
-      )}
+
+          {/* Placeholder keeps the row exactly 2x wide before the Past pane
+              mounts, so the translate lands in the right place regardless. */}
+          <View style={{ width: winWidth }}>
+            {pastEverShown && (
+              <TicketPane
+                kind="past"
+                bookings={past}
+                insets={insets}
+                colors={colors}
+                subTextColor={subTextColor}
+                iconTint={iconTint}
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+              />
+            )}
+          </View>
+        </Animated.View>
+      </View>
     </View>
   );
 };

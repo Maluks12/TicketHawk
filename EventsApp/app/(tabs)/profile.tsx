@@ -37,7 +37,16 @@ const Row = ({ icon, label, value, valueColor, onPress, destructive, hideChevron
   <TouchableOpacity className={s.row} onPress={onPress} activeOpacity={onPress ? 0.65 : 1} disabled={!onPress}>
     <View className={s.rowLeft}>
       <View className={s.rowIconWrap}>{icon}</View>
-      <Text className={s.rowLabel} style={colors && !destructive ? { color: colors.text } : undefined}>{label}</Text>
+      {/* Destructive rows must set their colour explicitly. The s.rowLabel
+          class hardcodes text-white, so falling through to it (as this did)
+          renders white-on-white in light mode — the Log out row was invisible.
+          Red also matches the icon and the iOS destructive convention. */}
+      <Text
+        className={s.rowLabel}
+        style={destructive ? { color: '#ff4d4d' } : colors ? { color: colors.text } : undefined}
+      >
+        {label}
+      </Text>
     </View>
     <View className={s.rowRight}>
       {value ? (
@@ -71,7 +80,11 @@ const Section = ({
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────
 
-const Avatar = ({ name, email }: { name: string; email: string }) => {
+// s.avatarName and s.avatarEmail hardcode text-white / text-white/40, which is
+// invisible on the light theme's white background. Same root cause as the
+// Log out row: a NativeWind class pins the colour and nothing overrides it.
+// The initials stay white — they sit on the solid pink circle, not the page.
+const Avatar = ({ name, email, colors }: { name: string; email: string; colors?: { text: string; subText: string } }) => {
   const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
   return (
     <View className={s.avatarSection}>
@@ -79,8 +92,8 @@ const Avatar = ({ name, email }: { name: string; email: string }) => {
         <Text className={s.avatarInitials}>{initials || '?'}</Text>
       </View>
       <View>
-        <Text className={s.avatarName}>{name}</Text>
-        <Text className={s.avatarEmail}>{email}</Text>
+        <Text className={s.avatarName} style={colors ? { color: colors.text } : undefined}>{name}</Text>
+        <Text className={s.avatarEmail} style={colors ? { color: colors.subText } : undefined}>{email}</Text>
       </View>
     </View>
   );
@@ -115,7 +128,7 @@ function ToggleRow({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: boolean;
+  value: boolean | null;   // null = still hydrating
   onValueChange: (v: boolean) => void;
   colors: any;
   // Set while a permission prompt / network round-trip is in flight. Without
@@ -135,27 +148,42 @@ function ToggleRow({
     >
       {icon}
       <Text style={{ flex: 1, fontSize: 15, color: colors.text }}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        disabled={disabled}
-        trackColor={{ false: colors.dividerColor, true: '#ff2d55' }}
-        thumbColor="#fff"
-        ios_backgroundColor={colors.dividerColor}
-      />
+      {value === null ? (
+        // Placeholder holding the Switch's exact footprint (iOS 51x31) so the
+        // row doesn't shift when the real control mounts. Rendering nothing
+        // here would trade a flashing toggle for a jumping layout.
+        <View style={{ width: 51, height: 31 }} />
+      ) : (
+        <Switch
+          value={value}
+          onValueChange={onValueChange}
+          disabled={disabled}
+          trackColor={{ false: colors.dividerColor, true: '#ff2d55' }}
+          thumbColor="#fff"
+          ios_backgroundColor={colors.dividerColor}
+        />
+      )}
     </View>
   );
 }
 
 export default function ProfileScreen() {
-  const [notifsOn, setNotifsOn]   = useState(true);
+  // null until AsyncStorage has been read. Starting at `true` meant the Switch
+  // mounted ON and then animated itself OFF a frame later for anyone who had
+  // disabled notifications — a toggle that appears to flip on its own every
+  // time you open the screen. The Switch does not animate on its FIRST render,
+  // so the fix is to not mount it until the stored value is known.
+  const [notifsOn, setNotifsOn]   = useState<boolean | null>(null);
   const [notifsBusy, setNotifsBusy] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(NOTIFS_KEY).then((v) => { if (v !== null) setNotifsOn(v === '1'); });
+    AsyncStorage.getItem(NOTIFS_KEY)
+      .then((v) => setNotifsOn(v === null ? true : v === '1'))  // unset = on, matching lib/push
+      .catch(() => setNotifsOn(true));
   }, []);
 
   const setNotifications = useCallback(async (v: boolean) => {
+    if (notifsOn === null) return;  // not hydrated yet — ignore stray taps
     // Optimistic: the switch moves immediately. If registration turns out to be
     // impossible we roll it back below rather than leaving the UI claiming a
     // state the device isn't actually in.
@@ -207,7 +235,10 @@ export default function ProfileScreen() {
     } finally {
       setNotifsBusy(false);
     }
-  }, []);
+    // notifsOn is in the deps because the hydration guard above reads it. With
+    // an empty array this closure would capture the initial null forever and
+    // silently swallow every tap.
+  }, [notifsOn]);
 
   const insets             = useSafeAreaInsets();
   const router             = useRouter();
@@ -322,7 +353,7 @@ export default function ProfileScreen() {
         )}
 
         {/* ── Logged-in ──────────────────────────────────────────────────── */}
-        {user && <Avatar name={fullName} email={user.email} />}
+        {user && <Avatar name={fullName} email={user.email} colors={colors} />}
 
         {/* ── Organiser Studio entry — opens the read-only dashboard ──────── */}
         {user && (
@@ -389,7 +420,7 @@ export default function ProfileScreen() {
         </Section>
 
         {user && (
-          <Section>
+          <Section colors={colors}>
             <Row
               icon={<Feather name="log-out" size={16} color="#ff4d4d" />}
               label="Log out"
