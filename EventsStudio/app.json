@@ -25,8 +25,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.tickethawk.studio",
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.CAMERA"
       ]
     },
     "plugins": [
@@ -35,7 +34,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera to scan ticket QR codes at the door."
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera to scan ticket QR codes at the door.",
+          "microphonePermission": false
         }
       ],
       "expo-sqlite",

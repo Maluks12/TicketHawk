@@ -16,6 +16,14 @@ import { Image } from 'expo-image';
 // Neutral blur-up placeholder so cards never flash blank while loading.
 export const IMG_BLURHASH = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
 
+// IMPORTANT: expo-image resolves a *string* placeholder as `{ uri: string }`.
+// Passing IMG_BLURHASH directly (as this app did everywhere) therefore asked it
+// to fetch a URL called "L6PZfSi_…", which fails silently — which is why cards
+// sat as flat grey rectangles instead of blurring up. A blurhash has to be
+// handed over in the object form below. Always use IMG_PLACEHOLDER in the
+// `placeholder` prop; IMG_BLURHASH stays exported only as the raw hash.
+export const IMG_PLACEHOLDER = { blurhash: IMG_BLURHASH } as const;
+
 function isRemote(u: string): boolean {
   return /^https?:\/\//i.test(u);
 }
@@ -39,12 +47,21 @@ export function thumbUrl(url?: string | null): string | undefined {
  * Warm the disk cache for thumbnails about to scroll into view, so they render
  * instantly instead of starting to download on first sight. Best-effort.
  */
-export function prefetchImages(urls: (string | null | undefined)[]): void {
+export function prefetchImages(urls: (string | null | undefined)[]): Promise<void> {
+  const seen = new Set<string>();
   const list = urls
     .map((u) => thumbUrl(u) ?? (u || undefined))
-    .filter((u): u is string => !!u);
-  if (list.length === 0) return;
-  Image.prefetch(list, 'memory-disk').catch(() => {});
+    .filter((u): u is string => {
+      if (!u || seen.has(u)) return false;
+      seen.add(u);
+      return true;
+    });
+  if (list.length === 0) return Promise.resolve();
+  // Returned (rather than fire-and-forget) so callers that want to hold a
+  // loading state until the first screenful is warm can await it. Existing
+  // fire-and-forget callers are unaffected — an un-awaited promise with a
+  // catch attached behaves exactly as before.
+  return Image.prefetch(list, 'memory-disk').then(() => {}).catch(() => {});
 }
 
 /**

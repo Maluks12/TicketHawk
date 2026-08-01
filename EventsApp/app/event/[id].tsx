@@ -126,25 +126,80 @@ export default function EventDetail() {
   // Fires once when the user opens this screen (after the nav animation).
   // 1. POST /view  — tells the backend a real user opened the screen.
   // 2. GET event   — fetches fresh data so the view count shown is up-to-date.
+  //
+  // The fetch outcome is now TRACKED rather than swallowed. It used to read:
+  //
+  //     .then(res => { if (!res.ok) return; return res.json(); })
+  //     .then(fresh => { if (fresh) setSelectedEvent(fresh); })
+  //     .catch(() => {});
+  //
+  // …which meant every failure path set nothing at all. Combined with the
+  // "store doesn't match the route yet ⇒ show a spinner" guard further down,
+  // any failure left the screen spinning forever with no way out but the OS
+  // back gesture.
+  //
+  // That is not a rare edge case, it is the NORMAL path for an old
+  // notification. GetEventByID filters on status = ANY(published,
+  // published_private), so once an event is marked `completed` (or cancelled)
+  // the endpoint 404s. Tapping a months-old "event reminder" push therefore
+  // routes to /event/<id>, finds nothing in the store, gets a 404, and hangs.
+  const [resolveState, setResolveState] = useState<'loading' | 'ok' | 'gone' | 'error'>(
+    // If the store already holds this event we have something to draw
+    // immediately; the fetch below is then only a freshness update and must
+    // never be able to take the screen down.
+    'loading',
+  );
+  const [retryTick, setRetryTick] = useState(0);
+
   useEffect(() => {
     const eventId = id ?? event?.id ?? event?.slug;
     if (!eventId) return;
 
     const base = getBaseUrl();
+    const controller = new AbortController();
+    // A hung socket is indistinguishable from a slow one from in here, and RN's
+    // fetch has no default timeout — so a dead tunnel spins indefinitely.
+    // Bound it and fall through to the retry screen.
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    let cancelled = false;
+
+    setResolveState('loading');
 
     const task = InteractionManager.runAfterInteractions(() => {
       // 1. Track the view — fire-and-forget, never blocks the UI.
       fetch(`${base}/v1/events/${eventId}/view`, { method: 'POST' }).catch(() => {});
 
       // 2. Fetch fresh event data so views (and anything else) reflect reality.
-      fetch(`${base}/v1/events/${eventId}`)
-        .then((res) => { if (!res.ok) return; return res.json(); })
-        .then((fresh) => { if (fresh) setSelectedEvent(fresh); })
-        .catch(() => {});
+      fetch(`${base}/v1/events/${eventId}`, { signal: controller.signal })
+        .then(async (res) => {
+          if (cancelled) return;
+          // 404 = filtered out by status (completed / cancelled / unpublished)
+          // or genuinely deleted. 410 is included for future-proofing in case
+          // the backend ever starts distinguishing "gone" from "never existed".
+          // Either way there is nothing to show and the user needs to be told.
+          if (res.status === 404 || res.status === 410) { setResolveState('gone'); return; }
+          if (!res.ok) { setResolveState('error'); return; }
+
+          const fresh = await res.json().catch(() => null);
+          if (cancelled) return;
+          if (!fresh || !fresh.id) { setResolveState('error'); return; }
+
+          setSelectedEvent(fresh);
+          setResolveState('ok');
+        })
+        .catch(() => {
+          if (!cancelled) setResolveState('error');
+        })
+        .finally(() => clearTimeout(timeout));
     });
 
-    return () => task.cancel();
-  }, [id]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+      controller.abort();
+      task.cancel();
+    };
+  }, [id, retryTick]);
 
   // ── Recently viewed (deferred, same pattern as before) ────────────────────
   useEffect(() => {
@@ -221,10 +276,66 @@ export default function EventDetail() {
     : (event.id === routeKey || (event as any).slug === routeKey);
   const resolving    = !!routeKey && !storeMatches;
 
-  if (resolving) {
+  // The spinner is now only shown while a fetch is genuinely IN FLIGHT. Once
+  // it settles we always land on something the user can act on.
+  if (resolving && resolveState === 'loading') {
     return (
       <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background }}>
         <ActivityIndicator color={colors.subText} />
+      </View>
+    );
+  }
+
+  // Terminal: the event is no longer available. Overwhelmingly this is a stale
+  // notification or an old shared link for an event that has since finished,
+  // so the copy leads with that rather than with a bare "not found", which
+  // reads as a bug to the user.
+  if (resolving && resolveState === 'gone') {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background, paddingHorizontal: 40 }}>
+        <CalendarDots size={44} color={colors.subText} weight="regular" />
+        <Text style={{ color: colors.text, fontWeight: '800', fontSize: 17, marginTop: 18, textAlign: 'center' }}>
+          This event has ended
+        </Text>
+        <Text style={{ color: colors.subText, fontSize: 13.5, lineHeight: 20, marginTop: 8, textAlign: 'center' }}>
+          It's no longer on sale. If you bought tickets, they're still in your
+          Tickets tab.
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.replace('/(tabs)' as any)}
+          style={{ marginTop: 22, backgroundColor: '#ff2d55', paddingHorizontal: 26, paddingVertical: 12, borderRadius: 22 }}
+          activeOpacity={0.85}
+        >
+          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Browse events</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 14 }} activeOpacity={0.7}>
+          <Text style={{ color: colors.subText, fontSize: 13, fontWeight: '600' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Terminal: something went wrong that a retry might fix (offline, timeout,
+  // 5xx). Distinct from "gone" because the action the user wants is different.
+  if (resolving && resolveState === 'error') {
+    return (
+      <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.background, paddingHorizontal: 40 }}>
+        <Text style={{ color: colors.text, fontWeight: '800', fontSize: 17, textAlign: 'center' }}>
+          Couldn't load this event
+        </Text>
+        <Text style={{ color: colors.subText, fontSize: 13.5, lineHeight: 20, marginTop: 8, textAlign: 'center' }}>
+          Check your connection and try again.
+        </Text>
+        <TouchableOpacity
+          onPress={() => setRetryTick((n) => n + 1)}
+          style={{ marginTop: 22, backgroundColor: '#ff2d55', paddingHorizontal: 26, paddingVertical: 12, borderRadius: 22 }}
+          activeOpacity={0.85}
+        >
+          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Try again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 14 }} activeOpacity={0.7}>
+          <Text style={{ color: colors.subText, fontSize: 13, fontWeight: '600' }}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -258,6 +369,18 @@ export default function EventDetail() {
   const heroImage    = event.banner_image_url ?? event.cover_image_url;
   const maxCap       = ev.max_capacity ?? 0;
   const isSoldOut    = event.is_sold_out ?? false;
+
+  // An event can still resolve from the API while being over: status is only
+  // flipped to `completed` by an operator/worker pass, so there's a window
+  // (and, for events that never get swept, indefinitely) where a past event is
+  // still `published` and fetches fine. Selling a ticket to it would be a real
+  // problem, so the CTA is gated on wall-clock time, not on status.
+  // Matches isEventLive() on the home feed: no end_time ⇒ assume 4h runtime.
+  const endedAtMs = ev.end_time
+    ? new Date(ev.end_time).getTime()
+    : (event.start_time ? new Date(event.start_time).getTime() + 4 * 60 * 60 * 1000 : NaN);
+  const hasEnded     = Number.isFinite(endedAtMs) && endedAtMs < Date.now();
+  const isCancelled  = String(ev.status ?? '').toLowerCase() === 'cancelled';
   const isASport     = event.category?.toLowerCase() === 'sports';
   const teams:      string[] = ev.teams      ?? [];
   const performers: string[] = ev.performers ?? [];
@@ -478,7 +601,17 @@ export default function EventDetail() {
           )}
           <View style={[sheet.metaDivider, { backgroundColor: colors.dividerColor }]} />
           <View className={s.ctaWrap}>
-            {isSoldOut ? (
+            {(hasEnded || isCancelled) ? (
+              /* Past or cancelled: no purchase path. Reusing the sold-out
+                 button style keeps this visually consistent with the other
+                 "can't buy" state rather than inventing a third treatment. */
+              <TouchableOpacity className={s.btnSoldOut} style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }} disabled>
+                <CalendarDots size={18} color="rgba(0,0,0,0.3)" weight="regular" />
+                <Text className={s.btnSoldOutText}>
+                  {isCancelled ? 'EVENT CANCELLED' : 'EVENT HAS ENDED'}
+                </Text>
+              </TouchableOpacity>
+            ) : isSoldOut ? (
               <TouchableOpacity className={s.btnSoldOut} style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }} disabled>
                 <Ticket size={18} color="rgba(0,0,0,0.3)" weight="regular" />
                 <Text className={s.btnSoldOutText}>SOLD OUT</Text>

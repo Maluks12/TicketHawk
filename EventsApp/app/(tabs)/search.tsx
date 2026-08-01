@@ -11,12 +11,22 @@ import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/search';
 import { useAppTheme } from '../../theme/colors';
 import { CoverImage } from '../../components/CoverImage';
+import { prefetchImages } from '../../lib/img';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ACCENT          = '#ff3c6e';
 const SUGGESTED_COUNT = 12;   // how many random picks to show
 const POOL_LIMIT      = 40;   // how many events to pull into the shuffle pool
+
+// Row geometry. The thumbnail (68pt) is always taller than the text column
+// (2 title lines at 21pt + a 15pt meta line), so the row height is fixed —
+// which lets us hand FlatList a getItemLayout and skip on-the-fly measurement.
+const ROW_HEIGHT = 68 + 9 * 2;   // nfThumb height + nfRow vertical padding
+
+// How many rows are visible on a first screenful. These get priority="high" so
+// expo-image's queue serves them before anything below the fold.
+const ABOVE_FOLD = 7;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,13 +57,20 @@ function dedupe(...lists: Event[][]): Event[] {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 // Recommendation / result row: landscape thumbnail · title · date & city · chevron.
-const SuggestedRow = ({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => {
+const SuggestedRow = React.memo(({ item, onPress, colors, priority }: {
+  item: Event; onPress: () => void; colors: any; priority?: 'low' | 'normal' | 'high';
+}) => {
   const meta = [formatDate(item.start_time), item.city].filter(Boolean).join(' · ');
   return (
     <TouchableOpacity style={sheet.nfRow} onPress={onPress} activeOpacity={0.7}>
       <View style={[sheet.nfThumb, { backgroundColor: colors.sectionCardBg }]}>
         {item.cover_image_url
-          ? <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} recyclingKey={item.id} />
+          ? <CoverImage
+              uri={item.cover_image_url}
+              style={StyleSheet.absoluteFillObject}
+              recyclingKey={item.id}
+              priority={priority ?? 'normal'}
+            />
           : <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
               <Ionicons name="ticket-outline" size={22} color={colors.iconColor} />
             </View>
@@ -74,7 +91,7 @@ const SuggestedRow = ({ item, onPress, colors }: { item: Event; onPress: () => v
       <Ionicons name="chevron-forward" size={20} color={colors.iconColor} style={{ flexShrink: 0 }} />
     </TouchableOpacity>
   );
-};
+}, (a, b) => a.item.id === b.item.id && a.priority === b.priority && a.colors === b.colors);
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -110,7 +127,25 @@ export default function SearchScreen() {
         const trendingEvents = trendingRes.status === 'fulfilled' ? (trendingRes.value.data.data ?? []) : [];
         if (!active) return;
         pool.current = dedupe(activeEvents, trendingEvents);
-        setSuggested(shuffle(pool.current).slice(0, SUGGESTED_COUNT));
+        const picks = shuffle(pool.current).slice(0, SUGGESTED_COUNT);
+        setSuggested(picks);
+
+        // Warm the disk cache for the rows that will be on screen the instant
+        // the spinner goes away. Without this, every visible thumbnail started
+        // its download only once its row had mounted, so the list rendered as
+        // a column of empty grey rectangles that filled in one by one over
+        // several seconds. The home feed already did this; search never did.
+        //
+        // Deliberately awaited (with a ceiling) rather than fired and
+        // forgotten: holding the existing spinner for a beat longer reads as
+        // "loading", whereas showing an empty list reads as "broken".
+        await Promise.race([
+          prefetchImages(picks.slice(0, ABOVE_FOLD).map((e) => e.cover_image_url)),
+          new Promise((r) => setTimeout(r, 1200)),   // never block on a bad network
+        ]);
+        // Everything below the fold is warmed in the background — by the time
+        // the user has scrolled, it's already on disk.
+        void prefetchImages(picks.slice(ABOVE_FOLD).map((e) => e.cover_image_url));
       } catch {
         if (active) setSuggested([]);
       } finally {
@@ -130,7 +165,16 @@ export default function SearchScreen() {
     if (!trimmed) { setResults([]); setView('idle'); return; }
     if (trimmed.length < MIN_QUERY_LENGTH) { setResults([]); setView('typing'); return; }
     setLoading(true); setView('results');
-    setResults(await searchEvents(trimmed));
+    const found = await searchEvents(trimmed);
+    // Same treatment as the recommended list: warm the first screenful before
+    // swapping the spinner out, so results appear complete rather than filling
+    // in row by row.
+    await Promise.race([
+      prefetchImages(found.slice(0, ABOVE_FOLD).map((e) => e.cover_image_url)),
+      new Promise((r) => setTimeout(r, 900)),
+    ]);
+    void prefetchImages(found.slice(ABOVE_FOLD).map((e) => e.cover_image_url));
+    setResults(found);
     setLoading(false);
   }, []);
 
@@ -197,9 +241,22 @@ export default function SearchScreen() {
                 Recommended Events
               </Text>
             }
-            renderItem={({ item }) => (
-              <SuggestedRow item={item} onPress={() => handleEventPress(item)} colors={colors} />
+            renderItem={({ item, index }) => (
+              <SuggestedRow
+                item={item}
+                onPress={() => handleEventPress(item)}
+                colors={colors}
+                priority={index < ABOVE_FOLD ? 'high' : 'normal'}
+              />
             )}
+            // Row height is fixed (see ROW_HEIGHT), so FlatList can place rows
+            // without measuring them — no layout pass, no scroll-position
+            // correction, and the first screenful commits in one batch.
+            getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
+            initialNumToRender={ABOVE_FOLD}
+            maxToRenderPerBatch={6}
+            windowSize={7}
+            removeClippedSubviews
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: 24 }}
             ListEmptyComponent={
@@ -238,7 +295,19 @@ export default function SearchScreen() {
             keyExtractor={e => e.id}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => <SuggestedRow item={item} onPress={() => handleEventPress(item)} colors={colors} />}
+            renderItem={({ item, index }) => (
+              <SuggestedRow
+                item={item}
+                onPress={() => handleEventPress(item)}
+                colors={colors}
+                priority={index < ABOVE_FOLD ? 'high' : 'normal'}
+              />
+            )}
+            getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
+            initialNumToRender={ABOVE_FOLD}
+            maxToRenderPerBatch={6}
+            windowSize={7}
+            removeClippedSubviews
             contentContainerStyle={{ paddingBottom: 24 }}
             ListEmptyComponent={
               <View className={s.centred}>

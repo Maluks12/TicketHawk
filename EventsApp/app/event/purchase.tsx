@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image as ExpoImage } from 'expo-image';
-import { IMG_BLURHASH, prefetchFullImages } from '../../lib/img';
+import { IMG_PLACEHOLDER, prefetchFullImages } from '../../lib/img';
 import { useRouter } from 'expo-router';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -505,7 +505,7 @@ export default function TicketPurchaseScreen() {
                     style={ss.bannerImage}
                     contentFit="cover"
                     cachePolicy="memory-disk"
-                    placeholder={IMG_BLURHASH}
+                    placeholder={IMG_PLACEHOLDER}
                     placeholderContentFit="cover"
                     priority="high"
                     transition={150}
