@@ -20,7 +20,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ActivityIndicator,
-  ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking,
+  ScrollView, StyleSheet, Alert, Platform, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -161,15 +161,25 @@ export default function DeleteAccountScreen() {
       </View>
       <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: colors.dividerColor }} />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
-        keyboardVerticalOffset={insets.top + 60}
+      {/* No KeyboardAvoidingView. Wrapping this ScrollView in one with
+          behavior="padding" is what produced the blank slab above the keyboard:
+          the KAV shrank the ScrollView by the keyboard's height, so the parent
+          View's background showed through the vacated strip, and the fields
+          below the fold (reason, delete button) were pushed out of the
+          shortened viewport entirely rather than scrolled to.
+
+          automaticallyAdjustKeyboardInsets does the right thing instead -- it
+          adds the keyboard as a content inset, so the ScrollView keeps its full
+          height, nothing is vacated, and the focused field is scrolled above
+          the keyboard. Android needs neither: Expo builds ship
+          windowSoftInputMode=adjustResize and the OS resizes the window. */}
+      <ScrollView
+        contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 40 }}
-          keyboardShouldPersistTaps="handled"
-        >
           {loading ? (
             <View style={{ paddingTop: 60, alignItems: 'center' }}>
               <ActivityIndicator color={colors.subText} />
@@ -321,8 +331,7 @@ export default function DeleteAccountScreen() {
               </Text>
             </>
           )}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </ScrollView>
     </View>
   );
 }

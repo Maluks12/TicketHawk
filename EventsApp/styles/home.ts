@@ -70,17 +70,29 @@ export const s = {
   hCardBadgeText:        'text-white text-[9px] font-extrabold tracking-[1.2px]',
   hCardPriceBadge:       'absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 py-1',
   hCardPriceBadgeText:   'text-white text-[9px] font-bold',
-  hCardBody:             'pt-2.5 px-0.5',
-  hCardCat:              'text-[10px] font-semibold tracking-[0.5px] mb-0.5',
-  // FIXED HEIGHT, deliberately. The title is numberOfLines={2}, so a card with
-  // a short title used to be 18px shorter than one whose title wrapped. A
-  // horizontal FlatList is only as tall as its tallest MOUNTED row, and
-  // virtualisation mounts/unmounts rows as you swipe -- so the row's height
-  // flipped between the two values mid-scroll and every section below it
-  // (BEST FESTIVALS) jumped up and down. Two lines' worth of space is always
-  // reserved now, so every card is exactly the same height.
-  hCardTitle:            'text-sm font-bold text-black mb-1 leading-[18px] h-[36px]',
-  hCardMeta:             'text-[11px] text-black/40',
+  // FIXED HEIGHT lives on the BODY, not on the title.
+  //
+  // It has to be reserved somewhere: the title is numberOfLines={2}, so a card
+  // with a short title is 18px shorter than one whose title wraps. A horizontal
+  // FlatList is only as tall as its tallest MOUNTED row, and virtualisation
+  // mounts/unmounts rows as you swipe -- so the row's height flipped between
+  // the two values mid-scroll and every section below it jumped up and down.
+  //
+  // It used to be reserved on the TITLE (h-[36px]), which fixed the flicker but
+  // meant a one-line title left an 18px hole between it and the venue name --
+  // the card read as though the title were two lines with the second blank.
+  // Reserving it on the body instead keeps every card exactly the same height
+  // while letting the title hug its own content, so the venue always sits
+  // directly under the last line of the title and the slack falls harmlessly
+  // at the BOTTOM of the card where there is nothing to push apart.
+  //
+  // 80px = pt-2.5 (10) + cat (13 + 2 margin) + title (2 x 18 + 4 margin) + meta (14).
+  // Line heights are set explicitly on all three so that total is deterministic
+  // rather than dependent on the platform's default font metrics.
+  hCardBody:             'pt-2.5 px-0.5 h-[80px] overflow-hidden',
+  hCardCat:              'text-[10px] font-semibold tracking-[0.5px] mb-0.5 leading-[13px]',
+  hCardTitle:            'text-sm font-bold text-black mb-1 leading-[18px]',
+  hCardMeta:             'text-[11px] text-black/40 leading-[14px]',
 
   //  Rank badge (kept for compat) 
   rankBadge:             'absolute bottom-2.5 left-2.5 bg-[#e8c14a] rounded-[2px] px-2 py-0.5',

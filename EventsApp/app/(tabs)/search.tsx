@@ -130,21 +130,23 @@ export default function SearchScreen() {
         const picks = shuffle(pool.current).slice(0, SUGGESTED_COUNT);
         setSuggested(picks);
 
-        // Warm the disk cache for the rows that will be on screen the instant
-        // the spinner goes away. Without this, every visible thumbnail started
-        // its download only once its row had mounted, so the list rendered as
-        // a column of empty grey rectangles that filled in one by one over
-        // several seconds. The home feed already did this; search never did.
+        // Warm the disk cache. Without this, every visible thumbnail started
+        // its download only once its row had mounted, so the list filled in one
+        // row at a time over several seconds. The home feed already did this;
+        // search never did.
         //
-        // Deliberately awaited (with a ceiling) rather than fired and
-        // forgotten: holding the existing spinner for a beat longer reads as
-        // "loading", whereas showing an empty list reads as "broken".
-        await Promise.race([
-          prefetchImages(picks.slice(0, ABOVE_FOLD).map((e) => e.cover_image_url)),
-          new Promise((r) => setTimeout(r, 1200)),   // never block on a bad network
-        ]);
-        // Everything below the fold is warmed in the background — by the time
-        // the user has scrolled, it's already on disk.
+        // NOT awaited. An earlier version held the spinner until the first
+        // screenful was warm, on the theory that an image-less list reads as
+        // "broken". That theory belonged to the old behaviour, where cards
+        // rendered as flat grey rectangles because the blurhash placeholder was
+        // being passed to expo-image as a string (and therefore resolved as a
+        // URI, and therefore never drawn — see lib/img.ts). With the
+        // placeholder actually working, rows blur up immediately and the list
+        // never looks broken, so blocking on the prefetch bought nothing and
+        // cost up to 1.2s of dead time on every visit to the tab.
+        //
+        // Above-fold first so it wins the request queue, then the rest.
+        void prefetchImages(picks.slice(0, ABOVE_FOLD).map((e) => e.cover_image_url));
         void prefetchImages(picks.slice(ABOVE_FOLD).map((e) => e.cover_image_url));
       } catch {
         if (active) setSuggested([]);
@@ -166,16 +168,13 @@ export default function SearchScreen() {
     if (trimmed.length < MIN_QUERY_LENGTH) { setResults([]); setView('typing'); return; }
     setLoading(true); setView('results');
     const found = await searchEvents(trimmed);
-    // Same treatment as the recommended list: warm the first screenful before
-    // swapping the spinner out, so results appear complete rather than filling
-    // in row by row.
-    await Promise.race([
-      prefetchImages(found.slice(0, ABOVE_FOLD).map((e) => e.cover_image_url)),
-      new Promise((r) => setTimeout(r, 900)),
-    ]);
-    void prefetchImages(found.slice(ABOVE_FOLD).map((e) => e.cover_image_url));
+    // Results go on screen the moment they arrive. The prefetch is fire-and-
+    // forget: this runs on every debounced keystroke, so awaiting it here added
+    // ~0.9s to EVERY search — by far the worst place in the app to spend that.
     setResults(found);
     setLoading(false);
+    void prefetchImages(found.slice(0, ABOVE_FOLD).map((e) => e.cover_image_url));
+    void prefetchImages(found.slice(ABOVE_FOLD).map((e) => e.cover_image_url));
   }, []);
 
   const handleQueryChange = (text: string) => {

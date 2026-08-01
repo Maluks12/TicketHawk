@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Animated,
+  ActivityIndicator, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -310,14 +310,25 @@ export default function AuthScreen() {
 
   return (
    <View className={s.root} style={{ backgroundColor: isDark ? '#161618' : colors.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         {/* keyboardShouldPersistTaps: "handled" let the ScrollView swallow the
             first tap whenever the keyboard was up, so moving between fields or
             hitting a button took two taps. "always" delivers every tap straight
             to its target; keyboardDismissMode keeps the swipe-to-dismiss
-            behaviour that "handled" was there for. */}
+            behaviour that "handled" was there for.
+
+            automaticallyAdjustKeyboardInsets replaces a KeyboardAvoidingView
+            that used to wrap this ScrollView. That combination is the classic
+            broken one: behavior="padding" shrinks the ScrollView from the
+            bottom but does NOTHING to scroll the focused input into view, so
+            the email and password fields sat exactly where they were and the
+            keyboard covered them. The inset approach adds the keyboard height
+            as a real content inset AND auto-scrolls the focused field above it,
+            which is the behaviour that was actually wanted. Android is
+            unaffected either way -- Expo builds ship windowSoftInputMode=
+            adjustResize, so the OS resizes the window itself. */}
         <ScrollView className={s.scroll} contentContainerStyle={{ paddingBottom: insets.bottom + 48 }}
           keyboardShouldPersistTaps="always" keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets
           showsVerticalScrollIndicator={false}>
 
           {/* Close */}
@@ -522,7 +533,6 @@ export default function AuthScreen() {
             </View>
           )}     
         </ScrollView>
-      </KeyboardAvoidingView>
     </View>
   );
 }
