@@ -363,6 +363,13 @@ export function routeForNotification(data: PushPayload | undefined | null): stri
       return '/(tabs)/profile';
 
     default:
+      // Unrecognised or MISSING type. Prefer the booking when the payload
+      // carries one: a booking_id is only ever attached to something that
+      // happened to the user's own ticket, so their ticket is a better landing
+      // place than the public event page. This ordering is also the safety net
+      // for a payload that arrives without `type` at all — the case that used
+      // to send in-app inbox taps to the event page instead of the ticket.
+      if (data.booking_id) return `/booking/${data.booking_id}`;
       return data.event_id ? `/event/${data.event_id}` : null;
   }
 }

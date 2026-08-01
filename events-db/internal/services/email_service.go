@@ -16,6 +16,7 @@ import (
 	"net/mail"
 	"net/textproto"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -790,6 +791,86 @@ func (s *EmailService) SendOrganizerHandover(email, businessName, eventTitle, re
 	}
 	if status >= 400 {
 		return fmt.Errorf("organizer handover email API error: %d", status)
+	}
+	return nil
+}
+// SendEmailChangeConfirmation notifies BOTH addresses that the login email on
+// an account has changed.
+//
+// ── Why the old address matters more than the new one ────────────────────────
+//
+// The new address gets a courtesy confirmation. The OLD address gets a security
+// alert, and that is the one this function exists for.
+//
+// Changing the email is the final step of an account takeover: an attacker who
+// has a session moves the account onto an address they control, then uses the
+// ordinary forgot-password flow to lock the real owner out permanently. The
+// owner's first clue is that they can no longer sign in — by which point the
+// account, its tickets and its payment history are gone.
+//
+// UpdateMyProfileHandler already requires the current password before an email
+// change, which raises the bar. This closes the loop: the person who owned the
+// account before the change is TOLD it happened, at an address the attacker no
+// longer controls, while there is still time to act.
+//
+// Both sends are attempted independently and the old-address one is what the
+// error prioritises, for the same reason.
+func (s *EmailService) SendEmailChangeConfirmation(
+	firstName string,
+	oldEmail string,
+	newEmail string,
+	changedAt time.Time,
+) error {
+	when := changedAt.Format("2 January 2006 at 15:04")
+	greeting := "Hi there,"
+	if n := strings.TrimSpace(firstName); n != "" {
+		greeting = fmt.Sprintf("Hi %s,", n)
+	}
+
+	// ── 1. Security alert to the OLD address ─────────────────────────────────
+	oldSubject := "Your TicketHawk email address was changed"
+	oldBody := heading("Your email address was changed") +
+		fmt.Sprintf(`<p style="margin:0 0 14px;">%s</p>`, esc(greeting)) +
+		`<p style="margin:0 0 14px;">The email address on your TicketHawk account has been changed. Sign-in and all future emails now use the new address.</p>` +
+		detailBox("", detailRow("Previous address", oldEmail)+
+			detailRow("New address", newEmail)+
+			detailRow("Changed on", when)) +
+		notice(`<strong>Didn't do this?</strong> Contact us immediately at `+
+			`<a href="mailto:support@ticket-hawk.com" style="color:inherit;">support@ticket-hawk.com</a> `+
+			`from this address. Include the date above. We can reverse the change and secure your account, `+
+			`but we need to hear from you quickly.`) +
+		muted("This alert is sent to your previous address on purpose, so that a change you didn't authorise still reaches you.")
+
+	statusOld, errOld := s.sendHTML(firstName, oldEmail, oldSubject, s.brandEmail(oldSubject, oldBody))
+
+	// ── 2. Courtesy confirmation to the NEW address ──────────────────────────
+	newSubject := "TicketHawk email address updated"
+	newBody := heading("Email address updated") +
+		fmt.Sprintf(`<p style="margin:0 0 14px;">%s</p>`, esc(greeting)) +
+		`<p style="margin:0 0 14px;">This address is now the one you use to sign in to TicketHawk, and where your tickets and booking confirmations will be sent.</p>` +
+		detailBox("", detailRow("New address", newEmail)+
+			detailRow("Changed on", when)) +
+		// Deliberately does NOT say "verified". UpdateUserProfile resets
+		// email_verified to FALSE on every address change, so claiming the
+		// address is confirmed here would contradict the account's own state.
+		`<p style="margin:0 0 14px;">You'll be asked to confirm this address the next time you sign in.</p>` +
+		muted("We've also let your previous address know about this change.")
+
+	statusNew, errNew := s.sendHTML(firstName, newEmail, newSubject, s.brandEmail(newSubject, newBody))
+
+	// The old-address alert is the security-relevant one, so its failure is
+	// reported first and is the error a caller is most likely to want to log.
+	if errOld != nil {
+		return fmt.Errorf("failed to send email-change alert to previous address: %w", errOld)
+	}
+	if statusOld >= 400 {
+		return fmt.Errorf("email-change alert to previous address API error: %d", statusOld)
+	}
+	if errNew != nil {
+		return fmt.Errorf("failed to send email-change confirmation to new address: %w", errNew)
+	}
+	if statusNew >= 400 {
+		return fmt.Errorf("email-change confirmation to new address API error: %d", statusNew)
 	}
 	return nil
 }

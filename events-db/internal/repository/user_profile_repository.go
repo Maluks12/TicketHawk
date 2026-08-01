@@ -127,3 +127,20 @@ func UpdateUserProfile(pool *pgxpool.Pool, ctx context.Context, userID string, u
 	}
 	return &u, nil
 }
+// GetUserContact returns the email and first name currently on an account.
+//
+// Exists for one purpose: UpdateUserProfile overwrites the email in place, so
+// anything that needs to notify the PREVIOUS address about a change has to read
+// it before the write. Kept deliberately narrow — two columns, no password, no
+// role — so it can never become a general-purpose "load the user" that leaks
+// fields into places that shouldn't have them.
+func GetUserContact(pool *pgxpool.Pool, ctx context.Context, userID string) (email, firstName string, err error) {
+	err = pool.QueryRow(ctx,
+		`SELECT email, COALESCE(first_name, '') FROM users WHERE id = $1 AND deleted_at IS NULL`,
+		userID,
+	).Scan(&email, &firstName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrUserNotFound
+	}
+	return email, firstName, err
+}

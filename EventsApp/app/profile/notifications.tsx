@@ -227,7 +227,19 @@ export default function NotificationsScreen() {
         .catch(() => {});
     }
 
-    const route = routeForNotification(item.data ?? undefined);
+    // `type` must be merged back in from the column. routeForNotification()
+    // switches on data.type, but the stored `data` JSONB only ever holds what
+    // the producing worker put there (booking_id, event_id, booking_number) —
+    // `type` is injected by the PUSH SERVICE at send time and never written to
+    // the row. So a notification tapped from the system tray carried a type and
+    // routed to /booking/<id>, while the identical notification tapped HERE
+    // arrived with type undefined, fell through to the default branch, and
+    // opened the event page instead of the ticket.
+    //
+    // The row has the type as a top-level column, so supplying it makes the two
+    // paths behave identically — which is the guarantee the shared
+    // routeForNotification() was introduced to provide in the first place.
+    const route = routeForNotification({ ...(item.data ?? {}), type: item.type });
     if (route) router.push(route as any);
   }, [router]);
 

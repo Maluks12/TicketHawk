@@ -5,13 +5,16 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"events-db/internal/models"
 	"events-db/internal/repository"
+	"events-db/internal/services"
 	"events-db/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -64,7 +67,10 @@ type UpdateProfileRequest struct {
 //
 // Every field is optional; only those present are written. That makes the
 // endpoint safe to call from a form that submits one changed field.
-func UpdateMyProfileHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+//
+// emailService may be nil (tests, or a deployment with email disabled); the
+// change-notification below is skipped rather than panicking in that case.
+func UpdateMyProfileHandler(pool *pgxpool.Pool, emailService *services.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(string)
 
@@ -157,6 +163,17 @@ func UpdateMyProfileHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			upd.Email = &v
 		}
 
+		// Capture the address the account had BEFORE the write. The security
+		// alert has to reach the person who owned the account until a moment
+		// ago, and after UpdateUserProfile runs that address is gone from the
+		// row. Read once, here, only when it will actually be needed.
+		var previousEmail, previousFirstName string
+		if upd.Email != nil {
+			if em, fn, err := repository.GetUserContact(pool, c.Request.Context(), userID); err == nil {
+				previousEmail, previousFirstName = em, fn
+			}
+		}
+
 		if upd.IsEmpty() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No changes supplied"})
 			return
@@ -170,6 +187,20 @@ func UpdateMyProfileHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 			utils.InternalError(c, err, "updating profile")
 			return
+		}
+
+		// Tell both addresses that the login email moved. Fire-and-forget on a
+		// background context: SES latency must not be charged to the user's
+		// request, and a mail failure must not fail a profile update that has
+		// already been committed. Errors are logged, not surfaced.
+		if upd.Email != nil && emailService != nil && previousEmail != "" && previousEmail != *upd.Email {
+			go func(first, oldAddr, newAddr string) {
+				if err := emailService.SendEmailChangeConfirmation(first, oldAddr, newAddr, time.Now()); err != nil {
+					log.Error().Err(err).
+						Str("user_id", userID).
+						Msg("failed to send email-change notification")
+				}
+			}(previousFirstName, previousEmail, *upd.Email)
 		}
 
 		c.JSON(http.StatusOK, gin.H{

@@ -27,7 +27,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Linking,
+  Platform, ActivityIndicator, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -71,6 +71,7 @@ export default function StudioSignup() {
   const [email,     setEmail]     = useState('');
   const [phone,     setPhone]     = useState('');
   const [password,  setPassword]  = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
   const [showPw,    setShowPw]    = useState(false);
   const [wantsOrganiser, setWantsOrganiser] = useState(true);
   const [agreed,    setAgreed]    = useState(false);
@@ -80,6 +81,9 @@ export default function StudioSignup() {
 
   const pwProblems = useMemo(() => passwordProblems(password), [password]);
   const phoneOk    = useMemo(() => normalisePhone(phone) !== null, [phone]);
+  // Only complain once they've actually started the second field, so the error
+  // doesn't flash the instant the first character of the password is typed.
+  const pwMismatch = confirmPw.length > 0 && confirmPw !== password;
 
   const valid =
     firstName.trim().length > 0 &&
@@ -87,6 +91,7 @@ export default function StudioSignup() {
     emailOk(email.trim()) &&
     phoneOk &&
     pwProblems.length === 0 &&
+    confirmPw === password &&
     agreed;
 
   const submit = async () => {
@@ -132,15 +137,21 @@ export default function StudioSignup() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
+      {/* automaticallyAdjustKeyboardInsets rather than a KeyboardAvoidingView.
+          Wrapping a ScrollView in a KAV with behavior="padding" shrinks the
+          scroll view from the bottom without scrolling the focused input into
+          view, so the lower fields (confirm password, the organiser and terms
+          checkboxes, the submit button) end up behind the keyboard with no way
+          to reach them. The inset approach keeps the ScrollView full height and
+          scrolls the focused field above the keyboard. Android is handled by
+          the OS via windowSoftInputMode=adjustResize. */}
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40, paddingTop: 8 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={{ paddingBottom: insets.bottom + 40, paddingTop: 8 }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
           {/* Header */}
           <View style={styles.headerRow}>
             <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={styles.back}>
@@ -230,6 +241,27 @@ export default function StudioSignup() {
               <Text style={styles.fieldHint}>Needs {pwProblems.join(', ')}.</Text>
             )}
 
+            {/* Confirm. A typo in a masked field is invisible and unrecoverable
+                without the password-reset flow, and Studio is the app people
+                install at a venue an hour before doors — the worst possible
+                moment to discover they can't sign in. */}
+            <Text style={[styles.label, { marginTop: 16 }]}>CONFIRM PASSWORD</Text>
+            <TextInput
+              style={[styles.input, pwMismatch && { borderColor: STUDIO.red }]}
+              value={confirmPw}
+              onChangeText={setConfirmPw}
+              placeholder="Re-enter your password"
+              placeholderTextColor={STUDIO.muted}
+              secureTextEntry={!showPw}
+              autoCapitalize="none"
+              textContentType="newPassword"
+            />
+            {pwMismatch && (
+              <Text style={[styles.fieldHint, { color: STUDIO.red }]}>
+                Passwords don't match.
+              </Text>
+            )}
+
             {/* Organiser opt-in */}
             <TouchableOpacity
               style={styles.checkRow}
@@ -285,8 +317,7 @@ export default function StudioSignup() {
               </Text>
             </TouchableOpacity>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </ScrollView>
     </View>
   );
 }
