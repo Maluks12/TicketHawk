@@ -9,7 +9,7 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#08080C",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.tickethawk.studio",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
