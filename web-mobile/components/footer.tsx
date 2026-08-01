@@ -45,6 +45,10 @@ export default function Footer() {
     { href: '/terms',   label: 'Terms of Use' },
     { href: '/privacy', label: 'Privacy Policy' },
     { href: '/legal',   label: 'Legal' },
+    // Listed here as well as being the Support URL given to Apple and Google.
+    // Both stores open that URL during review, and a support page reachable
+    // only by typing it in reads as one made purely to satisfy the checklist.
+    { href: '/support', label: 'Support' },
   ];
 
   return (
