@@ -13,10 +13,14 @@ import { STUDIO } from '../../components/studio/theme';
 // Studio login.
 //
 // One account system across TicketHawk — organisers and door staff sign in with
-// the same credentials they use in the consumer app. There is deliberately no
-// sign-up here: accounts are created in the consumer app or on the web, then
-// this app is where they *work*. After login the auth gate (app/index.tsx)
-// routes by role.
+// the same credentials they use in the consumer app, the web dashboard or here.
+//
+// Studio used to be login-only, on the reasoning that accounts get made
+// elsewhere. That fails App Review (a reviewer who can't create an account
+// can't evaluate the app) and quietly lost every organiser who found Studio
+// first, so app/auth/signup.tsx now exists and is linked below.
+//
+// After login the auth gate (app/index.tsx) routes by role.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function StudioLogin() {
   const insets = useSafeAreaInsets();
@@ -113,9 +117,15 @@ export default function StudioLogin() {
             )}
           </TouchableOpacity>
 
-          <Text style={styles.hint}>
-            No account? Create one in the TicketHawk app, then come back here to scan.
-          </Text>
+          <TouchableOpacity
+            onPress={() => router.push('/auth/signup' as any)}
+            activeOpacity={0.7}
+            style={{ marginTop: 16 }}
+          >
+            <Text style={styles.hint}>
+              No account? <Text style={styles.hintLink}>Create one</Text>
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -174,5 +184,6 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   btnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
-  hint: { color: STUDIO.muted, fontSize: 12.5, textAlign: 'center', marginTop: 16, lineHeight: 18 },
+  hint: { color: STUDIO.muted, fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
+  hintLink: { color: STUDIO.accent, fontWeight: '700' },
 });

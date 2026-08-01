@@ -35,6 +35,11 @@ export default function RootLayout() {
 
         <Stack.Screen name="auth/login" options={{ animation: 'fade' }} />
 
+        {/* Account creation. Studio needs its own sign-up so App Review (and
+            any organiser who installs Studio first) can get in without being
+            sent to another app. */}
+        <Stack.Screen name="auth/signup" options={{ animation: 'slide_from_right' }} />
+
         {/* Organiser Studio — dashboard, event drill-down, scanner, staff. */}
         <Stack.Screen name="organiser" options={{ animation: 'fade' }} />
 

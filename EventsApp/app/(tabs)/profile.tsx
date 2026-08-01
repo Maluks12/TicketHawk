@@ -428,6 +428,20 @@ export default function ProfileScreen() {
               destructive
               hideChevron
             />
+            {/* Account deletion must be reachable from inside the app — Apple
+                App Store Guideline 5.1.1(v). It sits below Log out, in the same
+                destructive group, because that is where people look for it.
+                The confirmation, password re-entry and the warning about
+                upcoming tickets all live on the screen itself rather than in an
+                alert here, so nothing irreversible can happen from one tap. */}
+            <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
+            <Row
+              icon={<Feather name="trash-2" size={16} color="#ff4d4d" />}
+              label="Delete account"
+              onPress={() => router.push('/profile/delete-account' as any)}
+              destructive
+              colors={colors}
+            />
           </Section>
         )}
 

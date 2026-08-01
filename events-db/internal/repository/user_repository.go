@@ -52,10 +52,18 @@ func GetUserByEmail(pool *pgxpool.Pool, email string) (*models.User, error) {
 	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// deleted_at IS NULL is belt-and-braces. Deletion already overwrites the
+	// email with a 'deleted-<uuid>@deleted.invalid' address, so no real address
+	// can match a deleted row — but this is the single query every login goes
+	// through, and it should not be relying on a side effect of the anonymiser
+	// to keep deleted accounts out. If a future migration ever preserves the
+	// original address, this predicate is what stops that becoming a
+	// login-as-deleted-user bug.
 	var query string = `
 		SELECT id, email, password, role, created_at
 		FROM users
 		WHERE email = $1
+		  AND deleted_at IS NULL
 	`
 
 	var user models.User

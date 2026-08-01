@@ -617,6 +617,10 @@ func main() {
 		// PATCH, not PUT: the edit-profile form submits only changed fields, and
 		// a sparse patch means an omitted field is left alone rather than cleared.
 		user.PATCH("/me",         handlers.UpdateMyProfileHandler(pool))
+		// Account deletion (Apple Guideline 5.1.1(v)). The preview drives the
+		// confirmation screen; the DELETE re-authenticates and anonymises.
+		user.GET("/me/deletion-preview", handlers.GetAccountDeletionPreviewHandler(pool))
+		user.DELETE("/me",               handlers.DeleteMyAccountHandler(pool))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
 	}

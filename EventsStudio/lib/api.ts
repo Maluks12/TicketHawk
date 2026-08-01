@@ -135,3 +135,11 @@ export const authLogout = async () =>
   });
 
 export const getMe = () => api.get<AuthUser>('/v1/user/me');
+
+// Applies the signed-in account for an organiser profile. Creates a PENDING
+// profile only — passing KYC is what actually grants the organiser role
+// (see RegisterAsOrganizerHandler / PromoteOrganizerAfterKYC on the backend),
+// so a fresh signup lands on the staff screen until verification completes.
+// Body is optional; the backend derives the business name from the account.
+export const applyAsOrganiser = (body?: { business_name?: string; business_phone?: string }) =>
+  api.post('/v1/register-organizer', body ?? {});

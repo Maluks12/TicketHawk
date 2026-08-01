@@ -121,6 +121,14 @@ export default function RootLayout() {
         name="booking/[id]"
         options={{ animation: 'slide_from_right' }}
       />
+
+      {/* Account deletion (Apple 5.1.1(v)). Registered explicitly so it gets a
+          normal push animation rather than expo-router's default for an
+          unlisted route. */}
+      <Stack.Screen
+        name="profile/delete-account"
+        options={{ animation: 'slide_from_right' }}
+      />
     </Stack>
   );
 }
