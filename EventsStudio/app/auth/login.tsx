@@ -60,7 +60,13 @@ export default function StudioLogin() {
       >
         {/* Brand */}
         <View style={styles.brand}>
-          <Image source={require('../../assets/icon.png')} style={styles.logo} />
+          {/* brand-logo, NOT icon.png. icon.png is the launcher icon: it has an
+              opaque #08080C square baked into it because the OS needs a filled
+              square to mask into a rounded rect. Rendering it inside the app
+              therefore draws a visible dark tile behind the hawk, which is what
+              the black box on this screen was. brand-logo.png is the same mark
+              on transparency, so it sits directly on the screen background. */}
+          <Image source={require('../../assets/brand-logo.png')} style={styles.logo} />
           <View style={styles.brandLine}>
             <Text style={styles.brandWord}>TicketHawk</Text>
             <View style={styles.pill}>
@@ -135,7 +141,9 @@ export default function StudioLogin() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: STUDIO.bg, paddingHorizontal: 22 },
   brand: { alignItems: 'center', marginBottom: 30 },
-  logo: { width: 64, height: 64, borderRadius: 16, marginBottom: 14 },
+  // No borderRadius: there is no longer a square to round off, and rounding a
+  // transparent logo just clips the hawk's outer feathers.
+  logo: { width: 72, height: 72, marginBottom: 14, resizeMode: 'contain' },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   brandWord: { color: STUDIO.text, fontSize: 24, fontWeight: '800', letterSpacing: 0.3 },
   pill: {
