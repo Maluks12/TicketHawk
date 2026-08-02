@@ -123,7 +123,7 @@ const sections: Section[] = [
           {
             kind: 'p',
             text:
-              'In the app, go to **Profile > Delete account**. You will be asked for your password to confirm.',
+              'In the app, go to **Profile > Delete account**. You will be asked for your password to confirm. You can also delete your account on the web at **ticket-hawk.com/account/delete** — you do not need to reinstall the app.',
           },
           {
             kind: 'p',

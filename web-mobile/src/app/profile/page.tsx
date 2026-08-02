@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User, ChevronRight, Heart, Sun, Moon, HelpCircle,
-  FileText, Shield, LogOut, Bell, Lock, LayoutDashboard,
+  FileText, Shield, LogOut, Bell, Lock, LayoutDashboard, Trash2,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore, type ThemeMode } from '@/store/themeStore';
@@ -246,6 +246,16 @@ export default function ProfilePage() {
               onClick={handleLogout}
               destructive
               hideChevron
+            />
+            {/* Deletion must be reachable from the WEB, not only from inside
+                the app: Google Play requires that someone who has already
+                uninstalled can still delete their account without
+                reinstalling. Same endpoint and rules as the in-app screen. */}
+            <Row
+              icon={<Trash2 size={16} color="#ff4d4d" />}
+              label="Delete account"
+              onClick={() => router.push('/account/delete')}
+              destructive
             />
           </Section>
         )}
