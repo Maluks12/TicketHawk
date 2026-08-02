@@ -146,7 +146,19 @@ export default function EventDetailPage() {
   const shortDesc = desc.slice(0, 280);
   const hasMore   = desc.length > 280;
   const avail     = (event as any).available_tickets;
-  const isLow     = avail != null && avail < 20;
+  // available_tickets is not always a count. The API uses -1 as a SENTINEL for
+  // "unlimited" (models.UnlimitedTickets), which is what an event with no
+  // max_capacity and no ticket tiers returns -- a perfectly ordinary
+  // configuration, not an edge case. Without the >= 0 guard, -1 < 20 is true,
+  // so an event with UNLIMITED availability rendered the low-stock badge with
+  // the sentinel printed straight into it: "Only -1 left".
+  //
+  // That is worse than a cosmetic glitch: it is false scarcity messaging shown
+  // to a real buyer, which is exactly what the CPA prohibits.
+  //
+  // The tier-level readers in ./purchase already do this (`< 0 ? null : ...`);
+  // this event-level one was simply missed.
+  const isLow     = avail != null && avail >= 0 && avail < 20;
   const organiser = (event as any).organiser ?? (event as any).organizer ?? (event as any).hosted_by ?? (event as any).organisation ?? event.venue_name;
 
   const handleGetTickets = () => {
@@ -468,7 +480,11 @@ export default function EventDetailPage() {
               <p style={{ margin: 0, fontSize: 38, fontWeight: 800, color: colors.text, letterSpacing: -1.5, lineHeight: 1.1 }}>
                 {fmtPrice(event.price)}
               </p>
-              {avail != null && !isSoldOut && (
+              {/* avail >= 0, not just != null: -1 means unlimited, and the
+                  else-branch below would otherwise print "-1 available". An
+                  unlimited event shows no count, which is right -- there is no
+                  number worth telling the buyer. */}
+              {avail != null && avail >= 0 && !isSoldOut && (
                 <p style={{ margin: '6px 0 0', fontSize: 12, fontWeight: 600, color: isLow ? '#ff9500' : colors.subText }}>
                   {isLow ? `⚡ Only ${avail} left` : `${avail.toLocaleString()} available`}
                 </p>
