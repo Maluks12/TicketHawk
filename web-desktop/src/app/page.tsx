@@ -555,8 +555,6 @@ export default function HomePage() {
   const handleFilterApply = useCallback(async (params: FilterParams) => {
     setFilterParams(params);
     setFilterOpen(false);
-    if (params.city) fetchSections(params.city);
-    else if (!params.city && !params.province && !params.lat) fetchSections();
     const hasLocation = !!(params.city || params.province || params.lat);
     const hasDate     = !!(params.date && params.date !== 'any');
     if (!hasLocation && !hasDate) { setSections(homeSections); return; }
