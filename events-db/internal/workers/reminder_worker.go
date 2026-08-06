@@ -7,6 +7,7 @@ import (
 
 	"events-db/internal/models"
 	"events-db/internal/repository"
+	"events-db/internal/utils"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -99,14 +100,14 @@ func sendReminderNotification(
 		body = fmt.Sprintf(
 			"%s is coming up in 7 days on %s. Make sure you're ready!",
 			c.EventTitle,
-			c.StartTime.Format("Monday, 2 January"),
+			utils.FormatEventDay(c.StartTime, c.EventTimezone),
 		)
 	case 1:
 		title = fmt.Sprintf("🔔 %s is tomorrow!", c.EventTitle)
 		body = fmt.Sprintf(
 			"%s is happening tomorrow, %s. Get excited!",
 			c.EventTitle,
-			c.StartTime.Format("Monday, 2 January"),
+			utils.FormatEventDay(c.StartTime, c.EventTimezone),
 		)
 	default:
 		return fmt.Errorf("unexpected DaysUntil value %d", c.DaysUntil)

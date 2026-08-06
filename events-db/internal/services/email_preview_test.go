@@ -41,6 +41,7 @@ import (
 
 	"events-db/internal/config"
 	"events-db/internal/models"
+	"events-db/internal/utils"
 
 	"github.com/joho/godotenv"
 	"github.com/stretchr/testify/require"
@@ -123,6 +124,7 @@ func previewEvent() *models.Event {
 		VenueName:          "Sandton Convention Centre",
 		Address:            "161 Maude St, Sandown",
 		City:               "Johannesburg",
+		Timezone:           "Africa/Johannesburg",
 		Currency:           "ZAR",
 		Price:              340.00,
 		CancellationReason: &reason,
@@ -244,7 +246,7 @@ func TestEmailPreviewAll(t *testing.T) {
 			testRecipient(),
 			"Thandi Nkosi",
 			previewEvent().Title,
-			previewEvent().StartTime.Format("Monday, 2 January 2006 at 15:04"),
+			utils.FormatEventDateTime(previewEvent().StartTime, previewEvent().Timezone),
 			previewEvent().VenueName,
 			"BK-20260716-001",
 			2,
@@ -259,7 +261,7 @@ func TestEmailPreviewAll(t *testing.T) {
 			testRecipient(),
 			"Thandi Nkosi",
 			previewEvent().Title,
-			previewEvent().StartTime.Format("Monday, 2 January 2006 at 15:04"),
+			utils.FormatEventDateTime(previewEvent().StartTime, previewEvent().Timezone),
 			"BK-20260716-001",
 		))
 		t.Logf("ticket invalidation notice sent to %s", testRecipient())

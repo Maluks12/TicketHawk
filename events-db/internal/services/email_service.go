@@ -8,6 +8,7 @@ import (
 	"errors"
 	"events-db/internal/config"
 	"events-db/internal/models"
+	"events-db/internal/utils"
 	"fmt"
 	"html/template"
 	"io"
@@ -438,7 +439,7 @@ func (s *EmailService) SendRefundConfirmation(booking *models.Booking, event *mo
 			esc(user.GetFullName()), esc(booking.BookingNumber)) +
 		detailBox(event.Title,
 			detailRow("Amount refunded", money(booking.Currency, refunded))+
-				detailRow("Original booking date", booking.CreatedAt.Format("2 January 2006")),
+				detailRow("Original booking date", utils.FormatSADate(booking.CreatedAt)),
 		) +
 		`<p style="margin:0 0 14px;">The refund will reflect in your account within 5&ndash;10 business days.</p>` +
 		muted("We're sorry you couldn't make it. We hope to see you at future events.")
@@ -466,7 +467,7 @@ func (s *EmailService) SendEventCancellation(event *models.Event, user *models.U
 <p style="margin:0 0 14px;">We're sorry to let you know that the following event has been cancelled:</p>`,
 			esc(user.GetFullName())) +
 		detailBox(event.Title,
-			detailRow("Date", event.StartTime.Format("Monday, 2 January 2006"))+
+			detailRow("Date", utils.FormatEventDate(event.StartTime, event.Timezone))+
 				detailRow("Venue", event.VenueName)+
 				detailRow("Reason", reason),
 		) +
@@ -493,7 +494,7 @@ func (s *EmailService) SendWaitlistNotification(event *models.Event, user *model
 <p style="margin:0 0 14px;">Tickets have just become available for an event on your waitlist:</p>`,
 			esc(user.GetFullName())) +
 		detailBox(event.Title,
-			detailRow("Date", event.StartTime.Format("Monday, 2 January 2006"))+
+			detailRow("Date", utils.FormatEventDate(event.StartTime, event.Timezone))+
 				detailRow("Price", fmt.Sprintf("%s per ticket", money(event.Currency, event.Price))),
 		) +
 		`<p style="margin:0;">Tickets are first come, first served &mdash; this notification expires in 24 hours.</p>` +
@@ -595,7 +596,7 @@ func (s *EmailService) SendTicketAssignmentInvite(
 ) error {
 	subject := fmt.Sprintf("You've been given a ticket to %s", eventTitle)
 
-	deadline := expiresAt.Format("Monday, 2 January 2006 at 15:04")
+	deadline := utils.FormatSADateTime(expiresAt)
 
 	body := heading("You've got a ticket") +
 		fmt.Sprintf(`<p style="margin:0 0 14px;">Hi %s,</p>
@@ -746,7 +747,7 @@ func (s *EmailService) renderBookingConfirmation(
 		multiTicketNote +
 		detailBox(event.Title,
 			detailRow("Booking number", booking.BookingNumber)+
-				detailRow("Date & time", event.StartTime.Format("Monday, 2 January 2006 at 15:04"))+
+				detailRow("Date & time", utils.FormatEventDateTime(event.StartTime, event.Timezone))+
 				detailRow("Venue", event.VenueName)+
 				detailRow("Address", event.Address)+
 				detailRow("Tickets", fmt.Sprintf("%d x %s", booking.TicketQuantity, money(booking.Currency, booking.UnitPrice)))+
@@ -821,7 +822,7 @@ func (s *EmailService) SendEmailChangeConfirmation(
 	newEmail string,
 	changedAt time.Time,
 ) error {
-	when := changedAt.Format("2 January 2006 at 15:04")
+	when := utils.FormatSAShortDateTime(changedAt)
 	greeting := "Hi there,"
 	if n := strings.TrimSpace(firstName); n != "" {
 		greeting = fmt.Sprintf("Hi %s,", n)

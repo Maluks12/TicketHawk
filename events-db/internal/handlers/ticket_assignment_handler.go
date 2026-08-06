@@ -5,6 +5,7 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
+	"events-db/internal/utils"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -198,7 +199,7 @@ func ClaimTicketHandler(pool *pgxpool.Pool, emailSvc *services.EmailService, fro
 		// Fetch event details for the confirmation email.
 		booking, err := repository.GetBookingByID(pool, assignment.BookingID)
 		if err == nil && booking.Event != nil {
-			eventDate := booking.Event.StartTime.Format("Monday, 2 January 2006 at 15:04")
+			eventDate := utils.FormatEventDateTime(booking.Event.StartTime, booking.Event.Timezone)
 			venueName := ""
 			if booking.Event.VenueName != "" {
 				venueName = booking.Event.VenueName
