@@ -284,7 +284,7 @@ func RequestRefundHandler(
 				assignee.Email,
 				assignee.Name,
 				event.Title,
-				event.StartTime.Format("Monday, 2 January 2006"),
+				utils.FormatEventDate(event.StartTime, event.Timezone),
 				booking.BookingNumber,
 			); err != nil {
 				emailsFailed++

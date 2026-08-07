@@ -204,12 +204,17 @@ func GetFollowedEvents(
 
 // ReminderCandidate is a minimal row returned by GetFollowsNeedingReminder.
 type ReminderCandidate struct {
-	FollowID      string
-	UserID        string
-	EventID       string
-	EventTitle    string
-	EventSlug     string
-	StartTime     time.Time
+	FollowID   string
+	UserID     string
+	EventID    string
+	EventTitle string
+	EventSlug  string
+	StartTime  time.Time
+	// EventTimezone is the event's own IANA zone. Reminder copy names a day
+	// ("...tomorrow, Friday, 7 August"), and an event starting soon after
+	// midnight local time falls on the PREVIOUS day in UTC — so the day has to
+	// be derived in the event's zone or the reminder names the wrong date.
+	EventTimezone string
 	DaysUntil     int    // 7 or 1 — tells the worker which flag to flip
 	ReminderField string // "reminded_7_days" or "reminded_1_day" — used in the UPDATE
 }
@@ -235,6 +240,7 @@ func GetFollowsNeedingReminder(pool *pgxpool.Pool) ([]ReminderCandidate, error) 
 			e.title,
 			e.slug,
 			e.start_time,
+			COALESCE(e.timezone, ''),
 			CASE
 				WHEN NOT f.reminded_7_days
 				     AND e.start_time BETWEEN NOW() + INTERVAL '6.5 days'
@@ -267,7 +273,7 @@ func GetFollowsNeedingReminder(pool *pgxpool.Pool) ([]ReminderCandidate, error) 
 		var c ReminderCandidate
 		if err := rows.Scan(
 			&c.FollowID, &c.UserID, &c.EventID,
-			&c.EventTitle, &c.EventSlug, &c.StartTime, &c.DaysUntil,
+			&c.EventTitle, &c.EventSlug, &c.StartTime, &c.EventTimezone, &c.DaysUntil,
 		); err != nil {
 			return nil, fmt.Errorf("GetFollowsNeedingReminder scan: %w", err)
 		}
