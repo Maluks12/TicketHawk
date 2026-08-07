@@ -200,7 +200,7 @@ export default function FullKycPage() {
   return (
     <div style={{ padding: 24, maxWidth: 640 }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>Verification &amp; payouts</h1>
-      <p style={{ fontSize: 13.5, color: '#606770', margin: '0 0 18px', lineHeight: 1.5 }}>
+      <p style={{ fontSize: 13.5, color: 'var(--text-2)', margin: '0 0 18px', lineHeight: 1.5 }}>
         Both steps below are required before you can publish a <strong>paid</strong> or{' '}
         <strong>public</strong> event. Your ID is checked against the Home Affairs
         registry — a match verifies you instantly; otherwise our team reviews it,
@@ -228,14 +228,14 @@ export default function FullKycPage() {
         tone={verified ? 'good' : pending ? 'wait' : 'todo'}>
 
         {verified && (
-          <div style={{ fontSize: 13.5, color: '#166534' }}>
+          <div style={{ fontSize: 13.5, color: 'var(--success-fg)' }}>
             Your identity is verified
             {profile?.id_last_4 ? ` against SA ID ending ${profile.id_last_4}` : ''}.
           </div>
         )}
 
         {!verified && pending && (
-          <div style={{ fontSize: 13.5, color: '#606770', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
             Your submission is under review — usually within 1 business day. You can
             keep creating private free events in the meantime.
           </div>
@@ -277,8 +277,8 @@ export default function FullKycPage() {
                 {!askForId ? (
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    gap: 10, padding: '9px 11px', border: '1px solid #dddfe2',
-                    borderRadius: 6, background: '#f7f8fa', fontSize: 14,
+                    gap: 10, padding: '9px 11px', border: '1px solid var(--border)',
+                    borderRadius: 6, background: 'var(--surface-2)', fontSize: 14,
                   }}>
                     <span>Using the ID on your profile — ending <strong>{profile?.id_last_4}</strong></span>
                     <button type="button" className="btn btn-xs"
@@ -328,7 +328,7 @@ export default function FullKycPage() {
         badge={bankReady ? 'On file' : 'Required for paid events'}
         tone={bankReady ? 'good' : 'todo'}>
 
-        <p style={{ fontSize: 13, color: '#606770', margin: '0 0 12px', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', margin: '0 0 12px', lineHeight: 1.5 }}>
           Where we send your ticket money. Settlement runs 48 hours after each
           event completes, minus the 6% organiser commission. The account must
           be in your own name — we check it against your verified ID.
@@ -336,11 +336,11 @@ export default function FullKycPage() {
 
         {bankReady && !editingBank && (
           <div style={{
-            border: '1px solid #dddfe2', borderRadius: 8, padding: 12,
-            background: '#f7f8fa', fontSize: 13.5, lineHeight: 1.6,
+            border: '1px solid var(--border)', borderRadius: 8, padding: 12,
+            background: 'var(--surface-2)', fontSize: 13.5, lineHeight: 1.6,
           }}>
             <div><strong>{payout?.settlement_bank_name ?? 'Bank on file'}</strong></div>
-            <div style={{ color: '#606770' }}>
+            <div style={{ color: 'var(--text-2)' }}>
               {payout?.bank_account_name}
               {payout?.bank_account_last_4 ? ` · account ending ${payout.bank_account_last_4}` : ''}
             </div>
@@ -426,14 +426,14 @@ function Section({
   children: React.ReactNode;
 }) {
   const tones = {
-    good: { bg: '#e6f4ea', fg: '#1e7e34' },
-    wait: { bg: '#fef3c7', fg: '#92400e' },
-    todo: { bg: '#f0f2f5', fg: '#606770' },
+    good: { bg: 'var(--success-bg)', fg: 'var(--success-fg)' },
+    wait: { bg: 'var(--warning-bg)', fg: 'var(--warning-fg)' },
+    todo: { bg: 'var(--bg)', fg: 'var(--text-2)' },
   }[tone];
 
   return (
     <div style={{
-      background: '#fff', border: '1px solid #dddfe2', borderRadius: 10,
+      background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
       padding: 20, marginBottom: 16,
     }}>
       <div style={{
@@ -454,8 +454,8 @@ function Section({
 }
 
 function StepPill({ n, label, done, pending }: { n: number; label: string; done: boolean; pending: boolean }) {
-  const color = done ? '#1e7e34' : pending ? '#92400e' : '#8a8d91';
-  const bg = done ? '#e6f4ea' : pending ? '#fef3c7' : '#f0f2f5';
+  const color = done ? 'var(--success-fg)' : pending ? 'var(--warning-fg)' : 'var(--text-3)';
+  const bg = done ? 'var(--success-bg)' : pending ? 'var(--warning-bg)' : 'var(--bg)';
   return (
     <div style={{
       flex: 1, display: 'flex', alignItems: 'center', gap: 8,
@@ -475,5 +475,5 @@ function StepPill({ n, label, done, pending }: { n: number; label: string; done:
 }
 
 const lbl: React.CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 4 };
-const inp: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid #dddfe2', borderRadius: 6, fontSize: 14, background: '#fff' };
-const hint: React.CSSProperties = { fontSize: 12, color: '#606770', marginTop: 4 };
+const inp: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, background: 'var(--surface)' };
+const hint: React.CSSProperties = { fontSize: 12, color: 'var(--text-2)', marginTop: 4 };

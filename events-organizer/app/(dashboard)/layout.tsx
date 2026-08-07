@@ -1,11 +1,28 @@
 'use client';
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard shell — Studio look, desktop layout
+//
+// Visual change only. The auth gate, the KYC/onboarding bounce, the launch
+// flags and every route in NAV behave exactly as before; what changed is the
+// chrome around them:
+//
+//   • Studio palette via globals.css tokens instead of hardcoded Meta hex, so
+//     the shell follows light/dark with everything else.
+//   • Feather-style stroke icons (components/icons.tsx) replacing the solid
+//     20-unit glyphs, matching the mobile Studio's icon language.
+//   • A real desktop frame: fixed full-height sidebar + top bar with the
+//     current section, a theme switch and the scan shortcut, and a single
+//     scroll region for page content.
+// ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useOrgAuth } from '../../store/authStore';
 import { ToastProvider } from '../../lib/toast';
 import { ConfirmProvider } from '../../lib/confirm';
+import { ThemeToggle } from '../../lib/theme';
 import { getKycStatus } from '../../lib/kyc';
+import { Icon, IconName } from '../../components/icons';
 
 // Launch gate: merch is built but NOT launching — the tab and the event-page
 // merch sections are hidden, not deleted. Flip to true to bring merch back.
@@ -14,39 +31,33 @@ const MERCH_ENABLED = false;
 // re-surface the Campaigns section when paid promotion returns.
 const ADS_ENABLED = false;
 
-const NAV: Array<
-  | { type: 'item'; icon: React.ReactNode; label: string; href: string; exact?: boolean }
-  | { type: 'divider' }
-> = [
-  {
-    type: 'item', href: '/dashboard', exact: true, label: 'Overview',
-    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M2 11l8-8 8 8v7a1 1 0 01-1 1H3a1 1 0 01-1-1v-7z"/></svg>,
-  },
-  {
-    type: 'item', href: '/events', label: 'My Events',
-    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/></svg>,
-  },
+type NavEntry =
+  | { type: 'item'; icon: IconName; label: string; href: string; exact?: boolean }
+  | { type: 'section'; label: string }
+  | { type: 'divider' };
+
+const NAV: NavEntry[] = [
+  { type: 'section', label: 'Dashboard' },
+  { type: 'item', href: '/dashboard', exact: true, label: 'Overview', icon: 'grid' },
+  { type: 'item', href: '/events', label: 'My Events', icon: 'calendar' },
   { type: 'divider' },
+  { type: 'section', label: 'Account' },
   {
     // Verification + payout bank details. Unconditional: this is the only
     // reachable route to the bank form now that /payouts is retired behind
     // ADS_ENABLED, and PublishEvent hard-fails every paid event without it.
-    type: 'item', href: '/kyc', label: 'Verification & Payouts',
-    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg>,
+    type: 'item', href: '/kyc', label: 'Verification & Payouts', icon: 'shield-check',
   },
-  ...(ADS_ENABLED ? [{
-    type: 'item' as const, href: '/campaigns', label: 'Campaigns',
-    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/></svg>,
-  }, { type: 'divider' as const }] : []),
-  ...(MERCH_ENABLED ? [{
+  ...(ADS_ENABLED
+    ? [{ type: 'item' as const, href: '/campaigns', label: 'Campaigns', icon: 'bar-chart' as IconName }]
+    : []),
+  ...(MERCH_ENABLED
     // Collections removed from sidebar — accessible as a tab inside Merch
-    type: 'item' as const, href: '/merch', label: 'Merch',
-    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M10 2a4 4 0 00-4 4v1H5a1 1 0 00-.994.89l-1 9A1 1 0 004 18h12a1 1 0 00.994-1.11l-1-9A1 1 0 0015 7h-1V6a4 4 0 00-4-4zm2 5V6a2 2 0 10-4 0v1h4zm-6 3a1 1 0 112 0 1 1 0 01-2 0zm7-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd"/></svg>,
-  }, { type: 'divider' as const }] : []),
-  ...(ADS_ENABLED ? [{
-    type: 'item' as const, href: '/payouts', label: 'Billing & Payments',
-    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"/><path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd"/></svg>,
-  }] : []),
+    ? [{ type: 'item' as const, href: '/merch', label: 'Merch', icon: 'shopping-bag' as IconName }]
+    : []),
+  ...(ADS_ENABLED
+    ? [{ type: 'item' as const, href: '/payouts', label: 'Billing & Payments', icon: 'credit-card' as IconName }]
+    : []),
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -79,7 +90,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (isLoading || !user || !kycChecked) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f0f2f5' }}>
+      <div className="page-loader">
         <div className="spinner spinner-lg" />
       </div>
     );
@@ -92,83 +103,106 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const initials = (user.email ?? '??').slice(0, 2).toUpperCase();
 
+  // Label for the top bar. Longest match wins so /event/[id] still reads as
+  // "My Events" rather than falling through to the default.
+  const current = NAV.filter((n): n is Extract<NavEntry, { type: 'item' }> => n.type === 'item')
+    .filter((n) => isActive(n.href, n.exact))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  const sectionLabel =
+    current?.label ?? (pathname.startsWith('/event/') ? 'My Events' : 'Studio');
+
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f0f2f5' }}>
-          <aside style={{
-            width: 244, flexShrink: 0, background: '#fff',
-            borderRight: '1px solid #dddfe2',
-            display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          }}>
-            {/* Logo */}
-            <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f2f5', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 32, height: 32, borderRadius: 8, background: '#1877f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg viewBox="0 0 20 20" fill="white" width="16" height="16">
-                    <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
-                  </svg>
+        <div className="app-shell">
+          {/* ── Sidebar ──────────────────────────────────────────────────── */}
+          <aside className="sidebar">
+            <div className="sidebar-brand">
+              <div className="brand-mark">
+                <Icon name="calendar" size={18} />
+              </div>
+              <div className="brand-text" style={{ minWidth: 0 }}>
+                <div className="brand-word">
+                  TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
                 </div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.4, color: '#1c1e21', lineHeight: 1.2 }}>TICKET<span style={{ color: '#FF2D55' }}>HAWK</span></div>
-                  <div style={{ fontSize: 11, color: '#606770', lineHeight: 1 }}>Organiser</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                  <span className="brand-tag">STUDIO</span>
                 </div>
               </div>
             </div>
 
-            {/* Nav */}
-            <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto' }}>
+            <nav className="nav-scroll">
               {NAV.map((item, i) => {
-                if (item.type === 'divider') {
-                  return <div key={i} style={{ height: 1, background: '#f0f2f5', margin: '4px 0' }} />;
+                if (item.type === 'divider') return <div key={`d${i}`} className="nav-divider" />;
+                if (item.type === 'section') {
+                  return <div key={`s${i}`} className="nav-section">{item.label}</div>;
                 }
                 const active = isActive(item.href, item.exact);
                 return (
-                  <Link key={item.href} href={item.href} style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '8px 12px', margin: '1px 8px', borderRadius: 6,
-                    textDecoration: 'none',
-                    color: active ? '#1877f2' : '#1c1e21',
-                    background: active ? '#e7f3ff' : 'transparent',
-                    fontWeight: active ? 600 : 500, fontSize: 14,
-                  }}>
-                    <span style={{ color: active ? '#1877f2' : '#606770', flexShrink: 0 }}>{item.icon}</span>
-                    {item.label}
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`nav-item${active ? ' active' : ''}`}
+                    aria-current={active ? 'page' : undefined}
+                    title={item.label}
+                  >
+                    <span className="nav-icon"><Icon name={item.icon} size={18} /></span>
+                    <span className="nav-label">{item.label}</span>
                   </Link>
                 );
               })}
             </nav>
 
             {/* User strip */}
-            <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#1877f2', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
-                  {initials}
+            <div className="sidebar-foot">
+              <div className="user-strip">
+                <div className="avatar">{initials}</div>
+                <div className="user-text" style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12.5, fontWeight: 700, color: 'var(--text)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {user.email}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Organiser</div>
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1e21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
-                  <div style={{ fontSize: 11, color: '#606770' }}>Organiser</div>
-                </div>
-                <button onClick={async () => { await logout(); router.replace('/login'); }} title="Sign out"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#606770', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
-                  <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
-                    <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1H3zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd"/>
-                  </svg>
+                <button
+                  className="btn-icon"
+                  onClick={async () => { await logout(); router.replace('/login'); }}
+                  title="Sign out"
+                  aria-label="Sign out"
+                >
+                  <Icon name="log-out" size={16} />
                 </button>
               </div>
             </div>
           </aside>
 
-          {/* overflow:auto, NOT hidden. The shell is height:100vh, so anything
-              taller than the viewport was previously clipped with no scrollbar —
-              the KYC/payout form was unreachable below the fold. Pages that run
-              their own scroller (e.g. /events uses flex:1 + overflow:auto) are
-              unaffected: main is a definite-height flex column, so those children
-              still resolve to a bounded height and scroll internally as before;
-              this only adds a fallback scrollbar for pages that don't. */}
-          <main style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-            {children}
-          </main>
+          {/* ── Main column ──────────────────────────────────────────────── */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <header className="topbar">
+              <div className="crumb">
+                <Icon name="layers" size={15} />
+                <span>Studio</span>
+                <Icon name="chevron-right" size={13} />
+                <strong>{sectionLabel}</strong>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <ThemeToggle />
+              </div>
+            </header>
+
+            {/* overflow:auto, NOT hidden. The shell is height:100vh, so anything
+                taller than the viewport was previously clipped with no scrollbar —
+                the KYC/payout form was unreachable below the fold. Pages that run
+                their own scroller (e.g. /events uses flex:1 + overflow:auto) are
+                unaffected: main is a definite-height flex column, so those children
+                still resolve to a bounded height and scroll internally as before;
+                this only adds a fallback scrollbar for pages that don't. */}
+            <main style={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {children}
+            </main>
+          </div>
         </div>
       </ConfirmProvider>
     </ToastProvider>

@@ -10,6 +10,7 @@ import {
   validateRequired,
   firstError,
 } from '../../../lib/validation';
+import { ThemeToggle } from '../../../lib/theme';
 
 type Mode = 'login' | 'register';
 
@@ -124,32 +125,38 @@ export default function LoginPage() {
 
   return (
     <div style={{
-      minHeight: '100vh', background: '#f0f2f5',
+      minHeight: '100vh', background: 'var(--bg)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '24px 16px',
-      fontFamily: "'Figtree', -apple-system, BlinkMacSystemFont, sans-serif",
+      fontFamily: 'var(--font)',
+      position: 'relative',
     }}>
+      {/* Theme switch — the dashboard's lives in the top bar, but someone who
+          has pinned light mode still needs it before they're signed in. */}
+      <div style={{ position: 'absolute', top: 20, right: 20 }}>
+        <ThemeToggle />
+      </div>
       <style>{`
         .org-input {
-          width: 100%; padding: 10px 12px; border: 1px solid #ccd0d5;
-          border-radius: 6px; font-size: 15px; color: #1c1e21;
-          background: #fff; outline: none; box-sizing: border-box;
+          width: 100%; padding: 10px 12px; border: 1px solid var(--border-2);
+          border-radius: var(--r); font-size: 15px; color: var(--text);
+          background: var(--surface); outline: none; box-sizing: border-box;
           font-family: inherit; transition: border-color .15s, box-shadow .15s;
         }
         .org-input:focus {
-          border-color: #1877f2;
-          box-shadow: 0 0 0 2px rgba(24,119,242,.15);
+          border-color: var(--accent);
+          box-shadow: 0 0 0 3px var(--accent-ring);
         }
-        .org-input::placeholder { color: #bec3c9; }
+        .org-input::placeholder { color: var(--text-faint); }
         .pass-wrap { position: relative; }
         .pass-wrap .org-input { padding-right: 42px; }
         .eye-btn {
           position: absolute; right: 0; top: 0; bottom: 0;
           width: 40px; background: none; border: none; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
-          color: #8a8d91; border-radius: 0 6px 6px 0;
+          color: var(--text-3); border-radius: 0 var(--r) var(--r) 0;
         }
-        .eye-btn:hover { color: #1c1e21; }
+        .eye-btn:hover { color: var(--text); }
       `}</style>
 
       <div style={{ width: '100%', maxWidth: 400 }}>
@@ -157,29 +164,29 @@ export default function LoginPage() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{
-            width: 60, height: 60, borderRadius: 14, background: '#0a0a0a',
+            width: 60, height: 60, borderRadius: 14, background: 'var(--accent-deep)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
           }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/brand-logo.png" alt="TicketHawk" width={44} height={44} />
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: '#1c1e21' }}>
-            TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: 'var(--text)' }}>
+            TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
           </div>
-          <div style={{ fontSize: 14, color: '#606770', marginTop: 4 }}>Organiser Dashboard</div>
+          <div style={{ fontSize: 14, color: 'var(--text-2)', marginTop: 4 }}>Organiser Dashboard</div>
         </div>
 
         {/* Card */}
-        <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #dddfe2', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 'var(--r-xl)', border: '1px solid var(--border)', overflow: 'hidden' }}>
 
           {/* Tab bar */}
-          <div style={{ display: 'flex', borderBottom: '1px solid #dddfe2', paddingLeft: 8 }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', paddingLeft: 8 }}>
             {(['login', 'register'] as const).map(m => (
               <button key={m} onClick={() => switchMode(m)} style={{
                 padding: '12px 16px', fontSize: 14, fontWeight: 700,
                 border: 'none', background: 'none', cursor: 'pointer',
-                color: mode === m ? '#1877f2' : '#606770',
-                borderBottom: `2px solid ${mode === m ? '#1877f2' : 'transparent'}`,
+                color: mode === m ? 'var(--accent)' : 'var(--text-2)',
+                borderBottom: `2px solid ${mode === m ? 'var(--accent)' : 'transparent'}`,
                 marginBottom: -1, fontFamily: 'inherit',
               }}>
                 {m === 'login' ? 'Log in' : 'Create account'}
@@ -190,8 +197,8 @@ export default function LoginPage() {
           <div style={{ padding: '20px 24px 24px' }}>
             {error && (
               <div style={{
-                background: '#fff5f5', border: '1px solid #fca5a5', borderRadius: 6,
-                padding: '10px 12px', color: '#b91c1c', fontSize: 13, marginBottom: 16,
+                background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 6,
+                padding: '10px 12px', color: 'var(--danger-fg)', fontSize: 13, marginBottom: 16,
               }}>
                 {error}
               </div>
@@ -222,7 +229,7 @@ export default function LoginPage() {
                   </div>
                 </Field>
                 <SubmitBtn loading={submitting} label="Log in" loadingLabel="Logging in…" />
-                <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: '#606770' }}>
+                <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: 'var(--text-2)' }}>
                   Don't have an account?{' '}
                   <InlineLink onClick={() => switchMode('register')} label="Create one" />
                 </div>
@@ -298,7 +305,7 @@ export default function LoginPage() {
                   </Field>
                 </div>
                 <SubmitBtn loading={submitting} label="Create account" loadingLabel="Creating…" />
-                <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: '#606770' }}>
+                <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: 'var(--text-2)' }}>
                   Already have an account?{' '}
                   <InlineLink onClick={() => switchMode('login')} label="Log in" />
                 </div>
@@ -307,7 +314,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p style={{ textAlign: 'center', fontSize: 12, color: '#8a8d91', marginTop: 14 }}>
+        <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-3)', marginTop: 14 }}>
           Use the same email and password as your EventsApp account.
         </p>
       </div>
@@ -334,7 +341,7 @@ function EyeIcon({ show }: { show: boolean }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1c1e21', marginBottom: 5 }}>
+      <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 5 }}>
         {label}
       </label>
       {children}
@@ -348,7 +355,7 @@ function SubmitBtn({ loading, label, loadingLabel }: {
   return (
     <button type="submit" disabled={loading} style={{
       width: '100%', padding: '11px', borderRadius: 6, marginTop: 4,
-      background: loading ? '#b8d9ff' : '#1877f2',
+      background: loading ? 'var(--accent-border)' : 'var(--accent)',
       border: 'none', color: '#fff', fontSize: 15, fontWeight: 700,
       cursor: loading ? 'not-allowed' : 'pointer',
       fontFamily: 'inherit', transition: 'background .15s',
@@ -361,7 +368,7 @@ function SubmitBtn({ loading, label, loadingLabel }: {
 function InlineLink({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button type="button" onClick={onClick} style={{
-      background: 'none', border: 'none', color: '#1877f2', fontWeight: 700,
+      background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 700,
       cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit',
     }}>
       {label}
