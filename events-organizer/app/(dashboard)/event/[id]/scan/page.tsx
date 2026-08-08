@@ -226,11 +226,11 @@ export default function ScanPage() {
         }}>
           <div style={{
             width: 7, height: 7, borderRadius: '50%',
-            background: admitted > 0 ? '#42b72a' : 'rgba(255,255,255,.3)',
+            background: admitted > 0 ? 'var(--success)' : 'rgba(255,255,255,.3)',
           }} />
           <span style={{
             fontWeight: 700, fontSize: 13,
-            color: admitted > 0 ? '#42b72a' : 'rgba(255,255,255,.45)',
+            color: admitted > 0 ? 'var(--success)' : 'rgba(255,255,255,.45)',
           }}>
             {admitted} admitted
           </span>
@@ -322,7 +322,7 @@ export default function ScanPage() {
               ] as CSSProperties[]).map((style, i) => (
                 <div key={i} style={{
                   position: 'absolute', width: 22, height: 22,
-                  border: '3px solid #1877f2',
+                  border: '3px solid var(--accent)',
                   ...style,
                 }} />
               ))}
@@ -330,7 +330,7 @@ export default function ScanPage() {
               {/* Animated scan line */}
               <div style={{
                 position: 'absolute', left: 4, right: 4, height: 2,
-                background: 'linear-gradient(90deg, transparent 0%, #1877f2 40%, #60a5fa 50%, #1877f2 60%, transparent 100%)',
+                background: 'linear-gradient(90deg, transparent 0%, var(--accent) 40%, var(--info) 50%, var(--accent) 60%, transparent 100%)',
                 borderRadius: 2,
                 animation: 'qrScanLine 1.8s ease-in-out infinite',
                 opacity: phase === 'processing' ? 0 : 1,
@@ -344,7 +344,7 @@ export default function ScanPage() {
                 }}>
                   <div className="spinner spinner-lg" style={{
                     borderColor: 'rgba(255,255,255,.2)',
-                    borderTopColor: '#1877f2',
+                    borderTopColor: 'var(--accent)',
                   }} />
                 </div>
               )}
@@ -369,7 +369,7 @@ export default function ScanPage() {
             background: 'rgba(0,0,0,.72)', backdropFilter: 'blur(6px)',
           }}>
             <div style={{
-              background: '#fff', borderRadius: 18,
+              background: 'var(--bg-elevated)', borderRadius: 18,
               padding: '32px 36px', maxWidth: 320, width: '90%',
               textAlign: 'center',
               boxShadow: '0 24px 80px rgba(0,0,0,.5)',
@@ -381,29 +381,29 @@ export default function ScanPage() {
                 <>
                   <div style={{
                     width: 68, height: 68, borderRadius: '50%',
-                    background: '#e6f4ea',
+                    background: 'var(--success-bg)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     margin: '0 auto 18px',
                   }}>
                     <svg viewBox="0 0 24 24" width="34" height="34" fill="none"
-                      stroke="#1e7e34" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      stroke="var(--success-fg)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
                   </div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: '#1a7f37', letterSpacing: '-.5px' }}>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--success-fg)', letterSpacing: '-.5px' }}>
                     Admitted
                   </div>
                   {result.slotNumber != null && (
-                    <div style={{ fontSize: 14, color: '#606770', marginTop: 6 }}>
+                    <div style={{ fontSize: 14, color: 'var(--text-2)', marginTop: 6 }}>
                       Ticket slot #{result.slotNumber}
                     </div>
                   )}
                   <div style={{
-                    marginTop: 18, fontSize: 12, color: '#adb5bd',
+                    marginTop: 18, fontSize: 12, color: 'var(--text-3)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}>
                     <div style={{
-                      width: 6, height: 6, borderRadius: '50%', background: '#42b72a',
+                      width: 6, height: 6, borderRadius: '50%', background: 'var(--success)',
                       animation: 'pulse 1.2s ease infinite',
                     }} />
                     Resuming scanner…
@@ -416,29 +416,29 @@ export default function ScanPage() {
                 <>
                   <div style={{
                     width: 68, height: 68, borderRadius: '50%',
-                    background: '#fffbeb',
+                    background: 'var(--warning-bg)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     margin: '0 auto 18px',
                   }}>
                     <svg viewBox="0 0 24 24" width="34" height="34" fill="none"
-                      stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      stroke="var(--warning-fg)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10"/>
                       <line x1="12" y1="8" x2="12" y2="12"/>
                       <line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                   </div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: '#b45309', letterSpacing: '-.5px' }}>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--warning-fg)', letterSpacing: '-.5px' }}>
                     Already Used
                   </div>
                   {result.firstScanAt && (
                     <div style={{
-                      marginTop: 8, fontSize: 13, color: '#92400e',
-                      background: '#fef3c7', borderRadius: 8, padding: '6px 12px', display: 'inline-block',
+                      marginTop: 8, fontSize: 13, color: 'var(--warning-fg)',
+                      background: 'var(--warning-bg)', borderRadius: 8, padding: '6px 12px', display: 'inline-block',
                     }}>
                       First scanned at {fmtTime(result.firstScanAt)}
                     </div>
                   )}
-                  <div style={{ marginTop: 14, fontSize: 12, color: '#adb5bd' }}>Resuming scanner…</div>
+                  <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-3)' }}>Resuming scanner…</div>
                 </>
               )}
 
@@ -447,24 +447,24 @@ export default function ScanPage() {
                 <>
                   <div style={{
                     width: 68, height: 68, borderRadius: '50%',
-                    background: '#fff5f5',
+                    background: 'var(--danger-bg)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     margin: '0 auto 18px',
                   }}>
                     <svg viewBox="0 0 24 24" width="34" height="34" fill="none"
-                      stroke="#c41c1c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="10"/>
                       <line x1="15" y1="9" x2="9" y2="15"/>
                       <line x1="9" y1="9" x2="15" y2="15"/>
                     </svg>
                   </div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: '#c41c1c', letterSpacing: '-.5px' }}>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--danger)', letterSpacing: '-.5px' }}>
                     Invalid
                   </div>
-                  <div style={{ fontSize: 13, color: '#606770', marginTop: 6 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 6 }}>
                     {result.message ?? 'Ticket could not be verified'}
                   </div>
-                  <div style={{ marginTop: 14, fontSize: 12, color: '#adb5bd' }}>Resuming scanner…</div>
+                  <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-3)' }}>Resuming scanner…</div>
                 </>
               )}
             </div>

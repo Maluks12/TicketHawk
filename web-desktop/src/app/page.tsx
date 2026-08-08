@@ -722,5 +722,5 @@ export default function HomePage() {
 
       <FilterModal visible={filterOpen} onClose={() => setFilterOpen(false)} initialParams={filterParams} onApply={handleFilterApply} />
     </div>
-  );
+  );``
 }

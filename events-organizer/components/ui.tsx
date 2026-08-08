@@ -15,8 +15,11 @@
 //   2. Raw enum values leaked to organisers. 'published_private' is a database
 //      value, not a phrase anyone should read in a UI. Labels are mapped.
 //
-// Everything uses the CSS custom properties from globals.css rather than
-// literal hex, so a future palette change lands in one place.
+// Restyled to the Studio language (see components/studio/ui.tsx in
+// EventsStudio): chip with a leading status dot, uppercase micro-label on stat
+// cards, tinted icon tile, hairline borders. Every colour is a custom property
+// from globals.css — no literal hex — so both themes come free and a future
+// palette change still lands in one place.
 import type { CSSProperties, ReactNode } from 'react';
 
 // ── Status ───────────────────────────────────────────────────────────────────
@@ -24,11 +27,11 @@ import type { CSSProperties, ReactNode } from 'react';
 type Tone = 'green' | 'grey' | 'amber' | 'red' | 'blue';
 
 const TONES: Record<Tone, { bg: string; fg: string; dot: string }> = {
-  green: { bg: '#e6f4ea', fg: '#1e7e34', dot: 'var(--success)' },
-  grey:  { bg: 'var(--surface-3)', fg: 'var(--text-2)', dot: 'var(--border-2)' },
-  amber: { bg: 'var(--warning-bg)', fg: '#92400e', dot: 'var(--warning)' },
-  red:   { bg: 'var(--danger-bg)', fg: 'var(--danger)', dot: 'var(--danger)' },
-  blue:  { bg: 'var(--blue-light)', fg: 'var(--blue)', dot: 'var(--blue)' },
+  green: { bg: 'var(--success-bg)', fg: 'var(--success-fg)', dot: 'var(--success)' },
+  grey:  { bg: 'var(--surface-strong)', fg: 'var(--text-2)', dot: 'var(--text-3)' },
+  amber: { bg: 'var(--warning-bg)', fg: 'var(--warning-fg)', dot: 'var(--warning)' },
+  red:   { bg: 'var(--danger-bg)', fg: 'var(--danger-fg)', dot: 'var(--danger)' },
+  blue:  { bg: 'var(--info-bg)', fg: 'var(--info-fg)', dot: 'var(--info)' },
 };
 
 /**
@@ -67,9 +70,10 @@ export function StatusPill({ status, style }: { status: string; style?: CSSPrope
       title={meta?.hint}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: '3px 9px', borderRadius: 999,
+        padding: '4px 10px', borderRadius: 999,
         background: tone.bg, color: tone.fg,
-        fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+        fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+        letterSpacing: '.01em',
         ...style,
       }}
     >
@@ -94,33 +98,35 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   const accents = {
-    blue:   { line: 'var(--blue)', bg: 'var(--blue-light)', fg: 'var(--blue)' },
-    green:  { line: '#1a7f37', bg: '#f0fff4', fg: '#1a7f37' },
-    orange: { line: '#e65c00', bg: '#fff8f0', fg: '#e65c00' },
-    grey:   { line: 'var(--border-2)', bg: 'var(--surface-3)', fg: 'var(--text-2)' },
+    blue:   { line: 'var(--accent)',  bg: 'var(--accent-soft)',  fg: 'var(--accent)' },
+    green:  { line: 'var(--success)', bg: 'var(--success-bg)',   fg: 'var(--success-fg)' },
+    orange: { line: 'var(--warning)', bg: 'var(--warning-bg)',   fg: 'var(--warning-fg)' },
+    grey:   { line: 'var(--text-3)',  bg: 'var(--surface-strong)', fg: 'var(--text-2)' },
   }[accent];
 
   return (
     <div style={{
       background: 'var(--surface)',
       border: '1px solid var(--border)',
-      borderTop: `3px solid ${accents.line}`,
+      // Studio marks accent on the leading edge rather than the top edge — a
+      // left rail reads as a category tab instead of a stray underline.
+      boxShadow: `inset 3px 0 0 ${accents.line}`,
       borderRadius: 'var(--r-lg)',
-      padding: 16,
+      padding: 17,
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 10, gap: 8,
+        marginBottom: 11, gap: 8,
       }}>
         <div style={{
-          fontSize: 12, fontWeight: 600, color: 'var(--text-2)',
-          textTransform: 'uppercase', letterSpacing: '.04em',
+          fontSize: 10, fontWeight: 800, color: 'var(--text-3)',
+          textTransform: 'uppercase', letterSpacing: '.1em',
         }}>
           {label}
         </div>
         {icon && (
           <div style={{
-            width: 32, height: 32, borderRadius: 'var(--r)',
+            width: 30, height: 30, borderRadius: 10,
             background: accents.bg, color: accents.fg,
             display: 'grid', placeItems: 'center', flexShrink: 0,
           }}>
@@ -128,11 +134,14 @@ export function StatCard({
           </div>
         )}
       </div>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text)', lineHeight: 1 }}>
+      <div style={{
+        fontSize: 27, fontWeight: 800, color: 'var(--text)',
+        lineHeight: 1, letterSpacing: '-.03em', fontVariantNumeric: 'tabular-nums',
+      }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{sub}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 6 }}>{sub}</div>
       )}
     </div>
   );
@@ -152,16 +161,18 @@ export function Panel({
     <div style={{
       background: 'var(--surface)',
       border: '1px solid var(--border)',
-      borderRadius: 'var(--r-lg)',
+      borderRadius: 'var(--r-xl)',
       overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '14px 16px', borderBottom: '1px solid var(--surface-3)',
+        padding: '15px 18px', borderBottom: '1px solid var(--border)',
       }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{title}</div>
+        <div style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--text)', letterSpacing: '-.01em' }}>
+          {title}
+        </div>
         {action}
       </div>
       <div style={{ padding: bodyPadding, flex: 1 }}>{children}</div>
@@ -179,17 +190,17 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div style={{ padding: '28px 24px', textAlign: 'center' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-2)' }}>{title}</div>
+    <div style={{ padding: '34px 24px', textAlign: 'center' }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-2)' }}>{title}</div>
       {body && (
         <div style={{
-          fontSize: 12.5, color: 'var(--text-3)', marginTop: 4,
-          maxWidth: 320, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.5,
+          fontSize: 12.5, color: 'var(--text-3)', marginTop: 5,
+          maxWidth: 340, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6,
         }}>
           {body}
         </div>
       )}
-      {action && <div style={{ marginTop: 12 }}>{action}</div>}
+      {action && <div style={{ marginTop: 14 }}>{action}</div>}
     </div>
   );
 }

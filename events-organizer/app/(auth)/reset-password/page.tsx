@@ -67,16 +67,16 @@ function ResetPasswordInner() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#f0f2f5', padding: 20,
+      background: 'var(--bg)', padding: 20,
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
       <style>{`
         .org-input {
           width: 100%; padding: 10px 12px; font-size: 14px;
-          border: 1px solid #dddfe2; border-radius: 6px; outline: none;
-          box-sizing: border-box; font-family: inherit; color: #1c1e21;
+          border: 1px solid var(--border); border-radius: 6px; outline: none;
+          box-sizing: border-box; font-family: inherit; color: var(--text);
         }
-        .org-input:focus { border-color: #FF2D55; box-shadow: 0 0 0 2px rgba(255,45,85,0.15); }
+        .org-input:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(255,45,85,0.15); }
       `}</style>
 
       <div style={{ width: '100%', maxWidth: 400 }}>
@@ -84,43 +84,43 @@ function ResetPasswordInner() {
         {/* Brand */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{
-            width: 60, height: 60, borderRadius: 14, background: '#0a0a0a',
+            width: 60, height: 60, borderRadius: 14, background: 'var(--accent-deep)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
           }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/brand-logo.png" alt="TicketHawk" width={44} height={44} />
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: '#1c1e21' }}>
-            TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: 'var(--text)' }}>
+            TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
           </div>
-          <div style={{ fontSize: 14, color: '#606770', marginTop: 4 }}>Organiser Dashboard</div>
+          <div style={{ fontSize: 14, color: 'var(--text-2)', marginTop: 4 }}>Organiser Dashboard</div>
         </div>
 
         {/* Card */}
         <div style={{
-          background: '#fff', borderRadius: 8, border: '1px solid #dddfe2',
+          background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)',
           padding: '24px', overflow: 'hidden',
         }}>
           {done ? (
             <div style={{ textAlign: 'center' }}>
               <div style={{
-                width: 48, height: 48, borderRadius: 24, background: '#e6f6ec',
+                width: 48, height: 48, borderRadius: 24, background: 'var(--success-bg)',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
               }}>
-                <svg viewBox="0 0 20 20" fill="#31a24c" width="24" height="24">
+                <svg viewBox="0 0 20 20" fill="var(--success)" width="24" height="24">
                   <path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-8 8a1 1 0 01-1.4 0l-4-4a1 1 0 111.4-1.4L8 12.6l7.3-7.3a1 1 0 011.4 0z" clipRule="evenodd" />
                 </svg>
               </div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#1c1e21', marginBottom: 6 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
                 Password set
               </div>
-              <div style={{ fontSize: 14, color: '#606770', marginBottom: 20, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, color: 'var(--text-2)', marginBottom: 20, lineHeight: 1.5 }}>
                 Your password has been updated and any other sessions were signed out.
                 You can now log in to your organiser dashboard.
               </div>
               <button onClick={() => router.replace('/login')} style={{
                 width: '100%', padding: '11px', fontSize: 15, fontWeight: 700,
-                background: '#FF2D55', color: '#fff', border: 'none',
+                background: 'var(--brand)', color: '#fff', border: 'none',
                 borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
               }}>
                 Go to login
@@ -128,28 +128,28 @@ function ResetPasswordInner() {
             </div>
           ) : !token ? (
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#1c1e21', marginBottom: 6 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
                 Invalid link
               </div>
-              <div style={{ fontSize: 14, color: '#606770', lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.5 }}>
                 This password link is missing its token. Please open the exact link
                 from your email — or request a new one from the login page.
               </div>
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#1c1e21', marginBottom: 4 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
                 Set your password
               </div>
-              <div style={{ fontSize: 13, color: '#606770', marginBottom: 16, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16, lineHeight: 1.5 }}>
                 Choose a password for your TicketHawk organiser account. It needs at
                 least 8 characters, an uppercase letter, a digit, and a special character.
               </div>
 
               {error && (
                 <div style={{
-                  background: '#fff5f5', border: '1px solid #fca5a5', borderRadius: 6,
-                  padding: '10px 12px', color: '#b91c1c', fontSize: 13, marginBottom: 16,
+                  background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 6,
+                  padding: '10px 12px', color: 'var(--danger-fg)', fontSize: 13, marginBottom: 16,
                 }}>
                   {error}
                 </div>
@@ -157,7 +157,7 @@ function ResetPasswordInner() {
 
               <form onSubmit={handleSubmit} noValidate>
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1c1e21', marginBottom: 5 }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 5 }}>
                     New password
                   </label>
                   <div style={{ position: 'relative' }}>
@@ -168,7 +168,7 @@ function ResetPasswordInner() {
                       aria-label={showPass ? 'Hide password' : 'Show password'}
                       style={{
                         position: 'absolute', right: 0, top: 0, bottom: 0, width: 40,
-                        background: 'none', border: 'none', cursor: 'pointer', color: '#8a8d91',
+                        background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
                       <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
@@ -181,7 +181,7 @@ function ResetPasswordInner() {
                 </div>
 
                 <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1c1e21', marginBottom: 5 }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 5 }}>
                     Confirm password
                   </label>
                   <input className="org-input" type={showPass ? 'text' : 'password'}
@@ -191,7 +191,7 @@ function ResetPasswordInner() {
 
                 <button type="submit" disabled={submitting} style={{
                   width: '100%', padding: '11px', fontSize: 15, fontWeight: 700,
-                  background: '#FF2D55', color: '#fff', border: 'none',
+                  background: 'var(--brand)', color: '#fff', border: 'none',
                   borderRadius: 6, cursor: submitting ? 'not-allowed' : 'pointer',
                   opacity: submitting ? 0.7 : 1, fontFamily: 'inherit',
                 }}>

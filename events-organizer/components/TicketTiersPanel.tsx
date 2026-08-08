@@ -72,7 +72,7 @@ function availabilityOf(t: TicketTier): { available: number | null; soldOut: boo
 }
 
 const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '7px 9px', border: '1px solid #dddfe2',
+  width: '100%', padding: '7px 9px', border: '1px solid var(--border)',
   borderRadius: 6, fontSize: 13, fontFamily: 'inherit',
 };
 
@@ -199,7 +199,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8,
       }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
           Ticket tiers
         </div>
         {!adding && (
@@ -210,7 +210,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
       </div>
 
       {sorted.length === 0 && !adding && (
-        <div style={{ fontSize: 12.5, color: '#8a8d91' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
           Flat pricing — no separate tiers. Add one to sell at more than one price.
         </div>
       )}
@@ -231,20 +231,20 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
               if (editing) {
                 return (
                   <tr key={t.id}>
-                    <td colSpan={7} style={{ background: '#f7f8fa', padding: 12 }}>
+                    <td colSpan={7} style={{ background: 'var(--surface-2)', padding: 12 }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
                         <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>Name</label>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
                           <input style={inputStyle} value={String(draft.name ?? '')}
                             onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>Price</label>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Price</label>
                           <input style={inputStyle} type="number" min={0} value={String(draft.price ?? '')}
                             onChange={(e) => setDraft({ ...draft, price: Number(e.target.value) })} />
                         </div>
                         <div>
-                          <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>
+                          <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>
                             Capacity <span style={{ fontWeight: 400 }}>(blank = unlimited)</span>
                           </label>
                           <input style={inputStyle} type="number" min={t.tickets_sold + t.reserved_count}
@@ -253,7 +253,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                         </div>
                       </div>
                       <div style={{ marginBottom: 10 }}>
-                        <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>Description</label>
+                        <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Description</label>
                         <input style={inputStyle} value={String(draft.description ?? '')}
                           placeholder="Shown to buyers under the tier name"
                           onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
@@ -264,7 +264,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                         </button>
                         <button className="btn btn-sm" onClick={() => setEditingId(null)} disabled={busy}>Cancel</button>
                         {t.tickets_sold + t.reserved_count > 0 && (
-                          <span style={{ fontSize: 11.5, color: '#8a8d91' }}>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
                             Capacity cannot go below {t.tickets_sold + t.reserved_count} (already sold or held)
                           </span>
                         )}
@@ -279,7 +279,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                   <td>
                     <div style={{ fontWeight: 600 }}>{t.name}</div>
                     {t.description && (
-                      <div style={{ fontSize: 12, color: '#8a8d91' }}>{t.description}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{t.description}</div>
                     )}
                   </td>
                   <td>{money(t.price, currency)}</td>
@@ -296,11 +296,11 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                   <td>{available === null ? '∞' : available}</td>
                   <td>
                     {soldOut ? (
-                      <span style={{ color: '#c41c1c', fontWeight: 700, fontSize: 12 }}>Sold out</span>
+                      <span style={{ color: 'var(--danger)', fontWeight: 700, fontSize: 12 }}>Sold out</span>
                     ) : !t.is_visible ? (
-                      <span style={{ color: '#8a8d91', fontWeight: 600, fontSize: 12 }}>Hidden</span>
+                      <span style={{ color: 'var(--text-3)', fontWeight: 600, fontSize: 12 }}>Hidden</span>
                     ) : (
-                      <span style={{ color: '#1a7f37', fontWeight: 600, fontSize: 12 }}>On sale</span>
+                      <span style={{ color: 'var(--success-fg)', fontWeight: 600, fontSize: 12 }}>On sale</span>
                     )}
                   </td>
                   <td>
@@ -322,21 +322,21 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
       )}
 
       {adding && (
-        <div style={{ marginTop: 12, padding: 12, background: '#f7f8fa', borderRadius: 8, border: '1px solid #dddfe2' }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', marginBottom: 10 }}>New tier</div>
+        <div style={{ marginTop: 12, padding: 12, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 10 }}>New tier</div>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>Name</label>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
               <input style={inputStyle} value={newTier.name} placeholder="e.g. Early Bird"
                 onChange={(e) => setNewTier({ ...newTier, name: e.target.value })} />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>Price</label>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Price</label>
               <input style={inputStyle} type="number" min={0} value={newTier.price} placeholder="0"
                 onChange={(e) => setNewTier({ ...newTier, price: e.target.value })} />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>
                 Capacity <span style={{ fontWeight: 400 }}>(blank = unlimited)</span>
               </label>
               <input style={inputStyle} type="number" min={1} value={newTier.capacity}
@@ -344,7 +344,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
             </div>
           </div>
           <div style={{ marginBottom: 10 }}>
-            <label style={{ fontSize: 11, fontWeight: 700, color: '#606770' }}>Description</label>
+            <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Description</label>
             <input style={inputStyle} value={newTier.description}
               placeholder="Shown to buyers under the tier name"
               onChange={(e) => setNewTier({ ...newTier, description: e.target.value })} />

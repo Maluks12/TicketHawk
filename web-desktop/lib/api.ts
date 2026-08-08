@@ -322,6 +322,27 @@ export const authLogout = () =>
 export const getMe = () =>
   api.get<AuthUser>('/v1/user/me');
 
+// Sparse patch: only send fields that actually changed. current_password is
+// only required by the server when email is present — see
+// events-db/internal/handlers/user_profile_handler.go.
+export interface UpdateProfileDTO {
+  first_name?: string;
+  last_name?: string;
+  phone_number?: string;
+  email?: string;
+  current_password?: string;
+}
+
+export interface UpdateProfileResponse {
+  user: AuthUser;
+  // True when the email address changed — the client should tell the user
+  // to go confirm the new address.
+  email_changed: boolean;
+}
+
+export const updateMyProfile = (dto: UpdateProfileDTO) =>
+  api.patch<UpdateProfileResponse>('/v1/user/me', dto);
+
 // ── Event endpoints ────────────────────────────────────────────────────────────
 export const getHomeSections = (city?: string) =>
   api.get<HomeResponse>('/v1/home', city ? { params: { city } } : undefined);

@@ -73,31 +73,31 @@ export default function OnboardingPage() {
 
   if (isLoading || !user) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f0f2f5' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
         <div className="spinner spinner-lg" />
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f0f2f5', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div style={{ width: '100%', maxWidth: 460 }}>
         {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 20 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: '#1877f2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg viewBox="0 0 20 20" fill="white" width="18" height="18">
               <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
             </svg>
           </div>
-          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0.4, color: '#1c1e21' }}>
-            TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
-            <span style={{ fontSize: 12, color: '#606770', fontWeight: 500, marginLeft: 6 }}>Organiser</span>
+          <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)' }}>
+            TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
+            <span style={{ fontSize: 12, color: 'var(--text-2)', fontWeight: 500, marginLeft: 6 }}>Organiser</span>
           </div>
         </div>
 
-        <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 10, padding: 24 }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 24 }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 6px' }}>Complete your profile</h1>
-          <p style={{ fontSize: 13.5, color: '#606770', margin: '0 0 18px', lineHeight: 1.5 }}>
+          <p style={{ fontSize: 13.5, color: 'var(--text-2)', margin: '0 0 18px', lineHeight: 1.5 }}>
             To create and publish events we need to know who you are. This quick step
             lets you create <strong>private free events</strong> right away — it&apos;s
             instant and free. Paid and public events need full verification, which you
@@ -126,7 +126,7 @@ export default function OnboardingPage() {
                 onChange={(e) => setIdNumber(e.target.value.replace(/\D/g, '').slice(0, 13))}
                 placeholder="13 digits" inputMode="numeric" />
             </div>
-            <p style={{ fontSize: 12, color: '#606770', margin: '0 0 14px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-2)', margin: '0 0 14px' }}>
               Validated locally and stored encrypted. No documents needed for this step.
             </p>
 
@@ -140,8 +140,8 @@ export default function OnboardingPage() {
             </button>
           </form>
 
-          <div style={{ height: 1, background: '#f0f2f5', margin: '16px 0' }} />
-          <p style={{ fontSize: 12, color: '#606770', margin: 0, lineHeight: 1.5 }}>
+          <div style={{ height: 1, background: 'var(--bg)', margin: '16px 0' }} />
+          <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, lineHeight: 1.5 }}>
             <strong>What unlocks what:</strong> this step → private free events.
             Full verification (ID photo, checked against Home Affairs) → paid events
             and public listings in the TicketHawk feed.
@@ -152,5 +152,5 @@ export default function OnboardingPage() {
   );
 }
 
-const lbl: React.CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 600, color: '#1c1e21', marginBottom: 4 };
-const inp: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid #dddfe2', borderRadius: 6, fontSize: 14 };
+const lbl: React.CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--text)', marginBottom: 4 };
+const inp: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14 };

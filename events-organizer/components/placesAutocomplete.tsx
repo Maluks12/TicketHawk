@@ -434,7 +434,7 @@ export default function PlacesAutocomplete({
       )}
 
       {showSpinner && <small style={{ color: 'var(--text-3)' }}>Searching…</small>}
-      {status === 'error' && <small style={{ color: '#c79249' }}>{errMsg}</small>}
+      {status === 'error' && <small style={{ color: 'var(--warning-fg)' }}>{errMsg}</small>}
     </div>
   );
 }

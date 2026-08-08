@@ -13,6 +13,10 @@ interface AuthState {
   register: (dto: RegisterDTO) => Promise<void>;
   logout: () => Promise<void>;
   loadUser: () => Promise<void>;
+  // Merges a fresh user object (e.g. from PATCH /v1/user/me) into the store
+  // without a network round-trip. Used by the edit-profile screen so a save
+  // reflects immediately instead of waiting on a re-fetch.
+  applyUser: (user: AuthUser) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -52,6 +56,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     clearTokens();
     set({ user: null });
   },
+
+  applyUser: (user) => set({ user }),
 
   loadUser: async () => {
     if (typeof window === 'undefined') return;

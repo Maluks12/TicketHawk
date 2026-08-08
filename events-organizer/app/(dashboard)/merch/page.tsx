@@ -78,7 +78,7 @@ export default function MerchPage() {
       <div className="page-header">
         <div>
           <div className="page-title">Merch</div>
-          <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2 }}>
             {merch.length} items · {collections.length} collections
           </div>
         </div>
@@ -95,15 +95,15 @@ export default function MerchPage() {
       <div className="tab-bar">
         <button className={`tab-item${tab === 'merch' ? ' active' : ''}`} onClick={() => setTab('merch')}>
           Merch items
-          {merch.length > 0 && <span style={{ marginLeft: 6, background: tab === 'merch' ? '#1877f2' : '#606770', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 11 }}>{merch.length}</span>}
+          {merch.length > 0 && <span style={{ marginLeft: 6, background: tab === 'merch' ? 'var(--accent)' : 'var(--text-2)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 11 }}>{merch.length}</span>}
         </button>
         <button className={`tab-item${tab === 'collections' ? ' active' : ''}`} onClick={() => setTab('collections')}>
           Collections
-          {collections.length > 0 && <span style={{ marginLeft: 6, background: tab === 'collections' ? '#1877f2' : '#606770', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 11 }}>{collections.length}</span>}
+          {collections.length > 0 && <span style={{ marginLeft: 6, background: tab === 'collections' ? 'var(--accent)' : 'var(--text-2)', color: '#fff', borderRadius: 99, padding: '1px 6px', fontSize: 11 }}>{collections.length}</span>}
         </button>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingBottom: 2 }}>
           <div className="search-box" style={{ minWidth: 180 }}>
-            <svg viewBox="0 0 20 20" fill="#606770" width="14" height="14">
+            <svg viewBox="0 0 20 20" fill="var(--text-2)" width="14" height="14">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
             </svg>
             <input value={search} onChange={e => setSearch(e.target.value)}
@@ -112,7 +112,7 @@ export default function MerchPage() {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', background: '#fff' }}>
+      <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface)' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
             <div className="spinner" />
@@ -142,15 +142,15 @@ export default function MerchPage() {
                   <tr key={m.id}>
                     <td>
                       <div style={{ fontWeight: 600 }}>{m.name}</div>
-                      <div style={{ fontSize: 11, color: '#8a8d91' }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
                         {m.event_id ? 'Event merch' : 'Standalone'}
                       </div>
                     </td>
                     <td><span className={`badge badge-${m.status}`}>{m.status}</span></td>
                     <td style={{ fontWeight: 600 }}>{fmtMoney(m.price, m.currency)}</td>
-                    <td style={{ color: '#606770', fontSize: 13 }}>{m.fulfillment_type ?? '—'}</td>
+                    <td style={{ color: 'var(--text-2)', fontSize: 13 }}>{m.fulfillment_type ?? '—'}</td>
                     <td>{m.stock_quantity ?? 'Unlimited'}</td>
-                    <td style={{ fontSize: 12, color: '#606770' }}>
+                    <td style={{ fontSize: 12, color: 'var(--text-2)' }}>
                       {m.sale_start ? `${fmtDate(m.sale_start)} → ${m.sale_end ? fmtDate(m.sale_end) : '∞'}` : 'Always'}
                     </td>
                     <td>
@@ -191,11 +191,11 @@ export default function MerchPage() {
                   <tr key={c.id}>
                     <td>
                       <div style={{ fontWeight: 600 }}>{c.name}</div>
-                      {c.description && <div style={{ fontSize: 12, color: '#8a8d91', marginTop: 2 }}>{c.description.slice(0, 60)}…</div>}
+                      {c.description && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{c.description.slice(0, 60)}…</div>}
                     </td>
                     <td><span className={`badge badge-${c.status}`}>{c.status}</span></td>
                     <td>{c.item_count ?? 0}</td>
-                    <td style={{ color: '#606770' }}>{fmtDate(c.created_at)}</td>
+                    <td style={{ color: 'var(--text-2)' }}>{fmtDate(c.created_at)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                         <button className="btn btn-xs btn-danger" onClick={() => deactivateCollection(c.id)}>
@@ -248,13 +248,13 @@ function CreateCollectionModal({ onClose, onCreated }: { onClose: () => void; on
         <div className="modal-body">
           <div className="field">
             <label>Collection name</label>
-            <input className="field input" value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="e.g. Summer Drop 2025" style={{ width: '100%', padding: '9px 12px', border: '1px solid #ccd0d5', borderRadius: 6, fontSize: 14, outline: 'none', fontFamily: 'inherit' }} />
+            <input className="field input" value={name} onChange={e => setName(e.target.value)} autoFocus placeholder="e.g. Summer Drop 2025" style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border-2)', borderRadius: 6, fontSize: 14, outline: 'none', fontFamily: 'inherit' }} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
             <label>Description (optional)</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Brief description of this collection…" rows={3} style={{ width: '100%', padding: '9px 12px', border: '1px solid #ccd0d5', borderRadius: 6, fontSize: 14, outline: 'none', fontFamily: 'inherit', resize: 'vertical' }} />
+            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Brief description of this collection…" rows={3} style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border-2)', borderRadius: 6, fontSize: 14, outline: 'none', fontFamily: 'inherit', resize: 'vertical' }} />
           </div>
-          {error && <div style={{ color: '#c41c1c', fontSize: 13, marginTop: 8 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 8 }}>{error}</div>}
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={onClose}>Cancel</button>

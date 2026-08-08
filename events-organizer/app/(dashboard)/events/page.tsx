@@ -99,8 +99,8 @@ export default function EventsPage() {
   }
 
   function SortIcon({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <span style={{ color: '#ccd0d5', fontSize: 10 }}>↕</span>;
-    return <span style={{ color: '#1877f2', fontSize: 10 }}>{sortAsc ? '↑' : '↓'}</span>;
+    if (sortKey !== k) return <span style={{ color: 'var(--border-2)', fontSize: 10 }}>↕</span>;
+    return <span style={{ color: 'var(--accent)', fontSize: 10 }}>{sortAsc ? '↑' : '↓'}</span>;
   }
 
   // ── Selection ───────────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ export default function EventsPage() {
       <div className="page-header">
         <div>
           <div className="page-title">My Events</div>
-          <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2 }}>
             {counts.published} published · {counts.draft} draft
           </div>
         </div>
@@ -189,8 +189,8 @@ export default function EventsPage() {
       {/* ── Filter pill strip ────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6,
-        padding: '8px 16px', borderBottom: '1px solid #dddfe2',
-        background: '#fff', flexWrap: 'wrap',
+        padding: '8px 16px', borderBottom: '1px solid var(--border)',
+        background: 'var(--surface)', flexWrap: 'wrap',
       }}>
         {(Object.entries(counts) as [StatusFilter, number][]).map(([s, count]) => (
           <button
@@ -198,17 +198,17 @@ export default function EventsPage() {
             onClick={() => { setStatusFilter(s); setSelected(new Set()); }}
             style={{
               padding: '5px 12px', borderRadius: 16, fontSize: 13, fontWeight: 600,
-              border: `1px solid ${statusFilter === s ? '#1877f2' : '#dddfe2'}`,
-              background: statusFilter === s ? '#e7f3ff' : '#fff',
-              color: statusFilter === s ? '#1877f2' : '#606770',
+              border: `1px solid ${statusFilter === s ? 'var(--accent)' : 'var(--border)'}`,
+              background: statusFilter === s ? 'var(--accent-soft)' : 'var(--surface)',
+              color: statusFilter === s ? 'var(--accent)' : 'var(--text-2)',
               cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
             {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
             {count > 0 && (
               <span style={{
-                background: statusFilter === s ? '#1877f2' : '#ebedf0',
-                color: statusFilter === s ? '#fff' : '#606770',
+                background: statusFilter === s ? 'var(--accent)' : 'var(--surface-3)',
+                color: statusFilter === s ? 'var(--surface)' : 'var(--text-2)',
                 borderRadius: 99, padding: '0 5px', fontSize: 11,
               }}>
                 {count}
@@ -219,7 +219,7 @@ export default function EventsPage() {
 
         <div style={{ marginLeft: 'auto' }}>
           <div className="search-box">
-            <svg viewBox="0 0 20 20" fill="#606770" width="14" height="14">
+            <svg viewBox="0 0 20 20" fill="var(--text-2)" width="14" height="14">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
             </svg>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search events…" />
@@ -231,8 +231,8 @@ export default function EventsPage() {
       {draftInfo && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-          padding: '10px 16px', background: '#fff8e1',
-          borderBottom: '1px solid #fcd34d', color: '#92400e',
+          padding: '10px 16px', background: 'var(--warning-bg)',
+          borderBottom: '1px solid var(--warning-border)', color: 'var(--warning-fg)',
         }}>
           <span style={{ fontSize: 16 }}>📝</span>
           <span style={{ fontSize: 13, flex: 1, minWidth: 140 }}>
@@ -256,8 +256,8 @@ export default function EventsPage() {
 
       {/* ── Action toolbar — shows when rows are selected ─────────────── */}
       {selected.size > 0 && (
-        <div className="toolbar" style={{ background: '#e7f3ff', borderBottom: '1px solid #b8d9ff' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#1877f2' }}>
+        <div className="toolbar" style={{ background: 'var(--accent-soft)', borderBottom: '1px solid var(--accent-border)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>
             {selected.size} selected
           </span>
           <button className="btn btn-sm" onClick={() => {
@@ -278,7 +278,7 @@ export default function EventsPage() {
       )}
 
       {/* ── Table ────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, overflow: 'auto', background: '#fff' }}>
+      <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface)' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
             <div className="spinner" />
@@ -301,7 +301,7 @@ export default function EventsPage() {
               <tr>
                 <th className="col-check">
                   <input type="checkbox" checked={allSelected} onChange={toggleAll}
-                    style={{ accentColor: '#1877f2', cursor: 'pointer' }} />
+                    style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} />
                 </th>
                 <th className="sortable" onClick={() => handleSort('title')}>
                   Event <SortIcon k="title" />
@@ -327,13 +327,13 @@ export default function EventsPage() {
                 const ticketsSold = e.tickets_sold ?? 0;
                 const views = e.views ?? 0;
                 return (
-                  <tr key={e.id} style={{ background: selected.has(e.id) ? '#e7f3ff' : undefined }}>
+                  <tr key={e.id} style={{ background: selected.has(e.id) ? 'var(--accent-soft)' : undefined }}>
                     <td>
                       <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)}
-                        style={{ accentColor: '#1877f2', cursor: 'pointer' }} />
+                        style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} />
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: '#1877f2', cursor: 'pointer' }}
+                      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--accent)', cursor: 'pointer' }}
                         onClick={() => router.push(`/event/${e.id}`)}>
                         {e.title}
                       </div>
@@ -368,7 +368,7 @@ export default function EventsPage() {
                       <div style={{ fontWeight: 600 }}>
                         {ticketsSold.toLocaleString()}
                         {e.max_capacity && (
-                          <span style={{ fontSize: 11, color: '#8a8d91', fontWeight: 400 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 400 }}>
                             {' '}/ {e.max_capacity.toLocaleString()}
                           </span>
                         )}
@@ -378,16 +378,16 @@ export default function EventsPage() {
                           <div className="progress-bar">
                             <div className="progress-fill" style={{
                               width: `${pct}%`,
-                              background: pct >= 90 ? '#c41c1c' : pct >= 70 ? '#e65c00' : '#1877f2',
+                              background: pct >= 90 ? 'var(--danger)' : pct >= 70 ? 'var(--warning)' : 'var(--accent)',
                             }} />
                           </div>
                         </div>
                       )}
                     </td>
-                    <td style={{ color: '#606770' }}>{views.toLocaleString()}</td>
+                    <td style={{ color: 'var(--text-2)' }}>{views.toLocaleString()}</td>
                     <td style={{ fontWeight: 600 }}>
                       {e.price === 0 ? (
-                        <span style={{ color: '#1a7f37', fontSize: 13 }}>Free</span>
+                        <span style={{ color: 'var(--success-fg)', fontSize: 13 }}>Free</span>
                       ) : fmtMoney(e.price, e.currency)}
                     </td>
                     <td>

@@ -84,7 +84,7 @@ export default function DashboardPage() {
       <div className="page-header">
         <div>
           <div className="page-title">Overview</div>
-          <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2 }}>
             {new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </div>
         </div>
@@ -105,21 +105,21 @@ export default function DashboardPage() {
         {kycNotice && (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: 12,
-            background: '#e6f4ea', border: '1px solid #86efac', borderRadius: 8,
+            background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: 8,
             padding: '14px 16px', marginBottom: 16,
           }}>
             <div style={{
-              width: 28, height: 28, borderRadius: '50%', background: '#1e7e34',
+              width: 28, height: 28, borderRadius: '50%', background: 'var(--success-fg)',
               color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 15, fontWeight: 700, flexShrink: 0,
             }}>
               ✓
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14.5, fontWeight: 700, color: '#166534' }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--success-fg)' }}>
                 {kycNotice.title}
               </div>
-              <div style={{ fontSize: 13, color: '#166534', marginTop: 3, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 13, color: 'var(--success-fg)', marginTop: 3, lineHeight: 1.5 }}>
                 {kycNotice.body}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -134,7 +134,7 @@ export default function DashboardPage() {
             <button type="button" onClick={dismissKycNotice} aria-label="Dismiss"
               style={{
                 background: 'none', border: 'none', cursor: 'pointer',
-                color: '#166534', fontSize: 18, lineHeight: 1, padding: 2, flexShrink: 0,
+                color: 'var(--success-fg)', fontSize: 18, lineHeight: 1, padding: 2, flexShrink: 0,
               }}>
               ×
             </button>
@@ -194,18 +194,18 @@ export default function DashboardPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
           {/* Recent Events */}
-          <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '14px 16px', borderBottom: '1px solid #ebedf0',
+              padding: '14px 16px', borderBottom: '1px solid var(--border)',
             }}>
               <div style={{ fontSize: 15, fontWeight: 700 }}>Recent events</div>
-              <Link href="/events" style={{ fontSize: 13, color: '#1877f2' }}>See all</Link>
+              <Link href="/events" style={{ fontSize: 13, color: 'var(--accent)' }}>See all</Link>
             </div>
             {events.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', color: '#8a8d91', fontSize: 13 }}>
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
                 No events yet.{' '}
-                <Link href="/events" style={{ color: '#1877f2' }}>Create one</Link>
+                <Link href="/events" style={{ color: 'var(--accent)' }}>Create one</Link>
               </div>
             ) : (
               <div>
@@ -213,13 +213,13 @@ export default function DashboardPage() {
                   <div key={ev.id} style={{
                     display: 'flex', alignItems: 'center', gap: 12,
                     padding: '10px 16px',
-                    borderBottom: i < events.length - 1 ? '1px solid #f0f2f5' : 'none',
+                    borderBottom: i < events.length - 1 ? '1px solid var(--border)' : 'none',
                   }}>
                     <div style={{
-                      width: 36, height: 36, borderRadius: 6, background: '#e7f3ff',
+                      width: 36, height: 36, borderRadius: 6, background: 'var(--accent-soft)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                     }}>
-                      <svg viewBox="0 0 20 20" fill="#1877f2" width="16" height="16">
+                      <svg viewBox="0 0 20 20" fill="var(--accent)" width="16" height="16">
                         <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
                       </svg>
                     </div>
@@ -227,7 +227,7 @@ export default function DashboardPage() {
                       <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {ev.title}
                       </div>
-                      <div style={{ fontSize: 12, color: '#8a8d91', marginTop: 1 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 1 }}>
                         {fmtDate(ev.start_time)} · {ev.tickets_sold} tickets sold
                       </div>
                     </div>
@@ -239,8 +239,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Quick actions — campaigns removed for launch; ads may return later */}
-          <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid #ebedf0' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
               <div style={{ fontSize: 15, fontWeight: 700 }}>Quick actions</div>
             </div>
             <div style={{ padding: 8 }}>
@@ -253,8 +253,8 @@ export default function DashboardPage() {
                   display: 'block', padding: '12px 10px', borderRadius: 6,
                   textDecoration: 'none', color: 'inherit',
                 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#1877f2' }}>{a.title}</div>
-                  <div style={{ fontSize: 12, color: '#606770', marginTop: 2 }}>{a.desc}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent)' }}>{a.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{a.desc}</div>
                 </Link>
               ))}
             </div>

@@ -92,7 +92,7 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
               Ticket Type {i + 1}
             </span>
             <button type="button" className="btn-icon" onClick={() => del(i)}
-              style={{ fontSize: '.9rem', color: 'var(--danger, #c41c1c)' }}>✕</button>
+              style={{ fontSize: '.9rem', color: 'var(--danger, var(--danger))' }}>✕</button>
           </div>
           <div className="field-row">
             <div className="field" style={{ margin: 0 }}>
@@ -151,7 +151,7 @@ function ImageUploader({
             <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--r)', border: '1px solid var(--border)', display: 'block' }}
               onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }} />
             <button type="button" onClick={onRemove}
-              style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: '#c41c1c', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+              style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
           </div>
         ) : (
           <label style={{ width: 120, height: 80, border: '1px dashed var(--border-2)', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: uploading ? 'wait' : 'pointer', color: 'var(--text-3)', fontSize: '.68rem', gap: '.25rem', background: 'var(--surface-2)', flexShrink: 0 }}>
@@ -177,7 +177,7 @@ const inp: React.CSSProperties = {
   outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
 };
 
-function Required() { return <span style={{ color: '#c41c1c', marginLeft: 2 }}>*</span>; }
+function Required() { return <span style={{ color: 'var(--danger)', marginLeft: 2 }}>*</span>; }
 
 function FormCard({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
   return (
@@ -490,8 +490,8 @@ export default function CreateEventPage() {
           <div style={{
             display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
             padding: '12px 16px', marginBottom: 16,
-            background: '#fff8e1', border: '1px solid #fcd34d',
-            borderRadius: 'var(--r-lg)', color: '#92400e',
+            background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+            borderRadius: 'var(--r-lg)', color: 'var(--warning-fg)',
           }}>
             <span style={{ fontSize: 18 }}>📝</span>
             <div style={{ flex: 1, minWidth: 180 }}>
@@ -628,7 +628,7 @@ export default function CreateEventPage() {
                 {placeId && (
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 8, margin: '-4px 0 14px',
-                    fontSize: 12.5, color: 'var(--ok, #1e7e34)',
+                    fontSize: 12.5, color: 'var(--ok, var(--success-fg))',
                   }}>
                     <span>✓</span>
                     <span style={{ flex: 1 }}>Pinned to <strong>{placeLabel || 'the selected place'}</strong></span>
@@ -860,9 +860,9 @@ export default function CreateEventPage() {
                   <div key={item.label} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
                     <span style={{
                       width: 16, height: 16, borderRadius: '50%', flexShrink: 0, marginTop: 1,
-                      background: item.done ? '#1a7f37' : 'var(--surface-3)',
+                      background: item.done ? 'var(--success-fg)' : 'var(--surface-3)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 10, color: item.done ? '#fff' : 'var(--text-3)',
+                      fontSize: 10, color: item.done ? 'var(--surface)' : 'var(--text-3)',
                     }}>
                       {item.done ? '✓' : '·'}
                     </span>

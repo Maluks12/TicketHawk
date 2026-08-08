@@ -212,8 +212,8 @@ export default function EventDetailPage() {
       {/* ── Page header with breadcrumb ───────────────────────────────── */}
       <div className="page-header">
         <div>
-          <div style={{ fontSize: 12, color: '#606770', marginBottom: 4 }}>
-            <Link href="/events" style={{ color: '#606770' }}>My Events</Link>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>
+            <Link href="/events" style={{ color: 'var(--text-2)' }}>My Events</Link>
             {' → '}
             <span>{ev.title}</span>
           </div>
@@ -223,7 +223,7 @@ export default function EventDetailPage() {
               {ev.status.charAt(0).toUpperCase() + ev.status.slice(1)}
             </span>
           </div>
-          <div style={{ fontSize: 13, color: '#606770', marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 2 }}>
             {fmtDate(ev.start_time)} · {ev.venue_name}, {ev.city}
           </div>
 
@@ -231,11 +231,11 @@ export default function EventDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 6, maxWidth: 360,
-                background: '#f0f2f5', border: '1px solid #dddfe2', borderRadius: 6,
-                padding: '6px 10px', fontSize: 12.5, color: '#1c1e21',
+                background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+                padding: '6px 10px', fontSize: 12.5, color: 'var(--text)',
                 overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
               }}>
-                <svg viewBox="0 0 20 20" fill="#606770" width="14" height="14" style={{ flexShrink: 0 }}>
+                <svg viewBox="0 0 20 20" fill="var(--text-2)" width="14" height="14" style={{ flexShrink: 0 }}>
                   <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z"/>
                   <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z"/>
                 </svg>
@@ -270,7 +270,7 @@ export default function EventDetailPage() {
           style={{
             marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6,
             padding: '7px 14px', borderRadius: 6,
-            background: '#1877f2', color: '#fff',
+            background: 'var(--accent)', color: '#fff',
             fontSize: 13, fontWeight: 700, textDecoration: 'none',
             alignSelf: 'center',
           }}
@@ -289,22 +289,22 @@ export default function EventDetailPage() {
         {tab === 'overview' && (
           <div>
             {/* ── Event images ──────────────────────────────────────────── */}
-            <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-              <div style={{ padding: '14px 16px', borderBottom: '1px solid #ebedf0', fontWeight: 700, fontSize: 15 }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 15 }}>
                 Event images
               </div>
               <div style={{ padding: 16, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
 
                 {/* Cover image */}
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#606770', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Cover image</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Cover image</div>
                   <div style={{ position: 'relative', width: 160, height: 100 }}>
                     {ev.cover_image_url ? (
                       <>
                         <img
                           src={ev.cover_image_url}
                           alt="Cover"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2', display: 'block' }}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', display: 'block' }}
                           onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
                         />
                         <label
@@ -323,10 +323,10 @@ export default function EventDetailPage() {
                       </>
                     ) : (
                       <label style={{
-                        width: '100%', height: '100%', border: '1.5px dashed #ccd0d5', borderRadius: 6,
+                        width: '100%', height: '100%', border: '1.5px dashed var(--border-2)', borderRadius: 6,
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        cursor: coverUploading ? 'wait' : 'pointer', color: '#8a8d91',
-                        fontSize: 11, gap: 4, background: '#f7f8fa',
+                        cursor: coverUploading ? 'wait' : 'pointer', color: 'var(--text-3)',
+                        fontSize: 11, gap: 4, background: 'var(--surface-2)',
                       }}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
                           onChange={e => { const f = e.target.files?.[0]; if (f) { handleCoverUpload(f); e.target.value = ''; } }} />
@@ -336,19 +336,19 @@ export default function EventDetailPage() {
                       </label>
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 6 }}>JPEG · PNG · WebP · max 5 MB</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>JPEG · PNG · WebP · max 5 MB</div>
                 </div>
 
                 {/* Banner image */}
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#606770', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Banner image</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.04em' }}>Banner image</div>
                   <div style={{ position: 'relative', width: 240, height: 100 }}>
                     {ev.banner_image_url ? (
                       <>
                         <img
                           src={ev.banner_image_url}
                           alt="Banner"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2', display: 'block' }}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)', display: 'block' }}
                           onError={e => { (e.target as HTMLImageElement).style.opacity = '0.3'; }}
                         />
                         <label
@@ -367,10 +367,10 @@ export default function EventDetailPage() {
                       </>
                     ) : (
                       <label style={{
-                        width: '100%', height: '100%', border: '1.5px dashed #ccd0d5', borderRadius: 6,
+                        width: '100%', height: '100%', border: '1.5px dashed var(--border-2)', borderRadius: 6,
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        cursor: bannerUploading ? 'wait' : 'pointer', color: '#8a8d91',
-                        fontSize: 11, gap: 4, background: '#f7f8fa',
+                        cursor: bannerUploading ? 'wait' : 'pointer', color: 'var(--text-3)',
+                        fontSize: 11, gap: 4, background: 'var(--surface-2)',
                       }}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={bannerUploading}
                           onChange={e => { const f = e.target.files?.[0]; if (f) { handleBannerUpload(f); e.target.value = ''; } }} />
@@ -380,7 +380,7 @@ export default function EventDetailPage() {
                       </label>
                     )}
                   </div>
-                  <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 6 }}>Wide hero image · JPEG · PNG · WebP · max 8 MB</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>Wide hero image · JPEG · PNG · WebP · max 8 MB</div>
                 </div>
 
               </div>
@@ -404,21 +404,21 @@ export default function EventDetailPage() {
 
             {/* Capacity fill bar */}
             {capacityPct !== null && (
-              <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, padding: '16px 20px', marginBottom: 16 }}>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '16px 20px', marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>Capacity</span>
-                  <span style={{ fontSize: 14, color: '#606770' }}>
+                  <span style={{ fontSize: 14, color: 'var(--text-2)' }}>
                     {ev.tickets_sold} / {ev.max_capacity} ({capacityPct.toFixed(0)}%)
                   </span>
                 </div>
                 <div className="progress-bar" style={{ height: 8 }}>
                   <div className="progress-fill" style={{
                     width: `${capacityPct}%`,
-                    background: capacityPct >= 90 ? '#c41c1c' : capacityPct >= 70 ? '#e65c00' : '#1877f2',
+                    background: capacityPct >= 90 ? 'var(--danger)' : capacityPct >= 70 ? 'var(--warning)' : 'var(--accent)',
                   }} />
                 </div>
                 {capacityPct >= 90 && (
-                  <div style={{ fontSize: 12, color: '#c41c1c', marginTop: 6, fontWeight: 600 }}>
+                  <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 6, fontWeight: 600 }}>
                     ⚠ Almost sold out
                   </div>
                 )}
@@ -428,7 +428,7 @@ export default function EventDetailPage() {
             {/* ── Status notices ─────────────────────────────────────────── */}
             {ev.rejection_reason && (
               <Panel title="Rejected by review">
-                <div style={{ color: '#b91c1c', fontSize: 13.5, lineHeight: 1.6 }}>{ev.rejection_reason}</div>
+                <div style={{ color: 'var(--danger-fg)', fontSize: 13.5, lineHeight: 1.6 }}>{ev.rejection_reason}</div>
               </Panel>
             )}
             {ev.cancelled_at && (
@@ -440,8 +440,8 @@ export default function EventDetailPage() {
 
             {/* ── Description ────────────────────────────────────────────── */}
             <Panel title="Description">
-              <div style={{ fontSize: 13.5, lineHeight: 1.65, color: '#1c1e21', whiteSpace: 'pre-wrap' }}>
-                {ev.description?.trim() || <span style={{ color: '#8a8d91' }}>No description</span>}
+              <div style={{ fontSize: 13.5, lineHeight: 1.65, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
+                {ev.description?.trim() || <span style={{ color: 'var(--text-3)' }}>No description</span>}
               </div>
             </Panel>
 
@@ -503,13 +503,13 @@ export default function EventDetailPage() {
 
             {/* ── Policies ───────────────────────────────────────────────── */}
             <Panel title="Policies">
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', marginBottom: 4 }}>Refund policy</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 4 }}>Refund policy</div>
               <div style={{ fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', marginBottom: 14 }}>
-                {ev.refund_policy?.trim() || <span style={{ color: '#8a8d91' }}>Not set</span>}
+                {ev.refund_policy?.trim() || <span style={{ color: 'var(--text-3)' }}>Not set</span>}
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#606770', marginBottom: 4 }}>Terms &amp; conditions</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 4 }}>Terms &amp; conditions</div>
               <div style={{ fontSize: 13.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {ev.terms_and_conditions?.trim() || <span style={{ color: '#8a8d91' }}>Not set</span>}
+                {ev.terms_and_conditions?.trim() || <span style={{ color: 'var(--text-3)' }}>Not set</span>}
               </div>
             </Panel>
 
@@ -532,7 +532,7 @@ export default function EventDetailPage() {
                   {ev.gallery_images.map((url, i) => (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img key={i} src={url} alt={`Gallery ${i + 1}`}
-                      style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2' }} />
+                      style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }} />
                   ))}
                 </div>
               </Panel>
@@ -560,7 +560,7 @@ export default function EventDetailPage() {
         )}
 
         {tab === 'bookings' && (
-          <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
             {bookings.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-title">No bookings yet</div>
@@ -584,9 +584,9 @@ export default function EventDetailPage() {
                         {b.user ? (
                           <div>
                             <div style={{ fontWeight: 600 }}>{b.user.first_name} {b.user.last_name}</div>
-                            <div style={{ fontSize: 12, color: '#8a8d91' }}>{b.user.email}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{b.user.email}</div>
                           </div>
-                        ) : <span style={{ color: '#8a8d91' }}>Guest</span>}
+                        ) : <span style={{ color: 'var(--text-3)' }}>Guest</span>}
                       </td>
                       <td>
                         <span className={`badge badge-${b.booking_status === 'confirmed' ? 'active' : b.booking_status === 'cancelled' ? 'cancelled' : 'pending'}`}>
@@ -594,7 +594,7 @@ export default function EventDetailPage() {
                         </span>
                       </td>
                       <td style={{ fontWeight: 600 }}>{fmtMoney(b.total_amount, b.currency)}</td>
-                      <td style={{ color: '#606770', fontSize: 13 }}>{fmtDateTime(b.created_at)}</td>
+                      <td style={{ color: 'var(--text-2)', fontSize: 13 }}>{fmtDateTime(b.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -611,7 +611,7 @@ export default function EventDetailPage() {
                 <div className="empty-desc">Add merch items to sell alongside tickets.</div>
               </div>
             ) : (
-              <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                 <table className="meta-table">
                   <thead>
                     <tr>
@@ -651,11 +651,11 @@ export default function EventDetailPage() {
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{
-      background: '#fff', border: '1px solid #dddfe2', borderRadius: 8,
+      background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
       overflow: 'hidden', marginBottom: 16,
     }}>
       <div style={{
-        padding: '14px 16px', borderBottom: '1px solid #ebedf0',
+        padding: '14px 16px', borderBottom: '1px solid var(--border)',
         fontWeight: 700, fontSize: 15,
       }}>
         {title}
@@ -669,11 +669,11 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   return (
     <div style={{
       display: 'flex', gap: 16, padding: '7px 0',
-      borderBottom: '1px solid #f5f6f7', fontSize: 13.5,
+      borderBottom: '1px solid var(--surface-2)', fontSize: 13.5,
     }}>
-      <div style={{ width: 180, flexShrink: 0, color: '#606770' }}>{label}</div>
+      <div style={{ width: 180, flexShrink: 0, color: 'var(--text-2)' }}>{label}</div>
       <div style={{
-        flex: 1, color: '#1c1e21', wordBreak: 'break-word',
+        flex: 1, color: 'var(--text)', wordBreak: 'break-word',
         fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit',
         fontSize: mono ? 12.5 : 13.5,
       }}>
@@ -687,20 +687,20 @@ function ChipRow({ label, items }: { label: string; items?: string[] }) {
   return (
     <div style={{
       display: 'flex', gap: 16, padding: '7px 0',
-      borderBottom: '1px solid #f5f6f7', fontSize: 13.5,
+      borderBottom: '1px solid var(--surface-2)', fontSize: 13.5,
     }}>
-      <div style={{ width: 180, flexShrink: 0, color: '#606770' }}>{label}</div>
+      <div style={{ width: 180, flexShrink: 0, color: 'var(--text-2)' }}>{label}</div>
       <div style={{ flex: 1, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {items && items.length > 0
           ? items.map((t, i) => (
               <span key={i} style={{
-                background: '#f0f2f5', border: '1px solid #dddfe2', borderRadius: 999,
-                padding: '2px 10px', fontSize: 12.5, color: '#1c1e21',
+                background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 999,
+                padding: '2px 10px', fontSize: 12.5, color: 'var(--text)',
               }}>
                 {t}
               </span>
             ))
-          : <span style={{ color: '#8a8d91' }}>None</span>}
+          : <span style={{ color: 'var(--text-3)' }}>None</span>}
       </div>
     </div>
   );
