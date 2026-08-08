@@ -176,7 +176,7 @@ export default function ProfilePage() {
               <Row
                 icon={<Lock size={16} color={colors.iconColor} />}
                 label="Change password"
-                onClick={() => {}}
+                onClick={() => router.push(`/reset-password?email=${encodeURIComponent(user.email)}`)}
               />
               <Divider />
               <Row
