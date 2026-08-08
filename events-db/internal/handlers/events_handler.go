@@ -276,8 +276,14 @@ func GetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), eventID)
+			// Same event, second counter: IncrementView feeds the lifetime
+			// events.views that trending and the public page read, this one
+			// feeds the dashboard's time series. Both are written from the
+			// same request so they stay in agreement.
+			ec.RecordViewBucket(c.Request.Context(), eventID)
 		} else {
 			_ = repository.IncrementViews(pool, eventID)
+			_ = repository.RecordMetricsDirect(pool, eventID, 1, 0, 0)
 		}
 
 		event, err := repository.GetEventByID(pool, eventID, userID)
@@ -409,8 +415,10 @@ func TrackEventViewHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), event.ID)
+			ec.RecordViewBucket(c.Request.Context(), event.ID)
 		} else {
 			_ = repository.IncrementViews(pool, event.ID)
+			_ = repository.RecordMetricsDirect(pool, event.ID, 1, 0, 0)
 		}
 
 		c.JSON(http.StatusOK, gin.H{"ok": true})

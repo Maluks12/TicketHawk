@@ -57,6 +57,7 @@ func StartExpiryWorker(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Con
 
 			case <-viewTicker.C:
 				flushViewCounts(pool, ec, ctx)
+				flushMetricBuckets(pool, ec, ctx)
 
 				case <-ctx.Done():
 				return
