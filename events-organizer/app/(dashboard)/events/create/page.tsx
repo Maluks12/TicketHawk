@@ -90,6 +90,12 @@ const inp: React.CSSProperties = {
   transition: 'border-color .15s ease, box-shadow .15s ease, background .15s ease',
 };
 
+// Selects need an OPAQUE background. `inp` uses a translucent surface, and
+// Chrome derives the native dropdown list's background from the select's own
+// computed background-color — an alpha value there composites over white and
+// produces a white popup in dark mode. Same box visually, different alpha.
+const sel: React.CSSProperties = { ...inp, background: 'var(--surface-2)' };
+
 function Required() {
   return <span style={{ color: 'var(--danger)', marginLeft: 3 }} aria-hidden>*</span>;
 }
@@ -682,7 +688,16 @@ export default function CreateEventPage() {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="page">
+    // The <form> IS the page column, rather than sitting inside it.
+    //
+    // Previously the action bar was `position: sticky` inside the scrolling
+    // content, which is why it floated mid-page: a sticky element is trapped
+    // inside its containing block, so it drifted with the form's own box
+    // instead of pinning to the viewport. Making the form a flex column with
+    // the scroller in the middle means the bar is simply the LAST FLEX CHILD —
+    // it sits at the bottom because there is nowhere else for it to be, with no
+    // sticky maths involved.
+    <form onSubmit={handleSubmit} noValidate className="page">
       <div className="page-header">
         <div style={{ minWidth: 0 }}>
           <button type="button" onClick={() => router.push('/events')}
@@ -712,10 +727,7 @@ export default function CreateEventPage() {
         )}
       </div>
 
-      {/* paddingBottom clears the sticky action bar. Without it the bar sits on
-          top of the last card and the final field can never be scrolled clear
-          of it. */}
-      <div className="page-content" style={{ paddingBottom: 96 }}>
+      <div className="page-content">
         <div style={{ maxWidth: 1440, margin: '0 auto' }}>
 
           {/* ── Draft restore banner ─────────────────────────────────────── */}
@@ -747,7 +759,7 @@ export default function CreateEventPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} noValidate>
+          <div>
             {/* Was `1fr 300px` capped at 980, which left the inputs ~660px wide
                 on any real monitor. minmax(0,…) on the main column is what stops
                 a long venue name blowing the grid out instead of ellipsing. */}
@@ -814,7 +826,7 @@ export default function CreateEventPage() {
                       <label>Ticket scanning window</label>
                       <select value={scanWindowMode}
                         onChange={e => setScanWindowMode(e.target.value as 'default' | 'custom')}
-                        style={inp}>
+                        style={sel}>
                         <option value="default">Default — 2h before, 2h after</option>
                         <option value="custom">Custom — set my own window</option>
                       </select>
@@ -944,7 +956,7 @@ export default function CreateEventPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Category <Required /></label>
-                      <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={inp}>
+                      <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={sel}>
                         <option value="">— Select a category —</option>
                         {categories.length > 0
                           ? categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
@@ -1001,7 +1013,7 @@ export default function CreateEventPage() {
                       </div>
                       <div className="field" style={{ marginBottom: 0 }}>
                         <label>Currency</label>
-                        <select value={currency} onChange={e => setCurrency(e.target.value)} style={inp}>
+                        <select value={currency} onChange={e => setCurrency(e.target.value)} style={sel}>
                           <option value="ZAR">ZAR — South African Rand</option>
                           <option value="USD">USD — US Dollar</option>
                           <option value="EUR">EUR — Euro</option>
@@ -1098,7 +1110,7 @@ export default function CreateEventPage() {
                       if (v !== 'private_free' && kycLevel < 2) { router.push('/kyc'); return; }
                       setEventType(v);
                     }}
-                    style={inp}>
+                    style={sel}>
                     <option value="private_free">Private free event</option>
                     <option value="private_paid" disabled={kycLevel < 2}>
                       Private paid event{kycLevel < 2 ? ' — needs full verification' : ''}
@@ -1179,42 +1191,42 @@ export default function CreateEventPage() {
 
             </div>{/* end grid */}
 
-            {/* ── Sticky action bar ────────────────────────────────────────
-                The form is long enough that a footer at the bottom means
-                scrolling past everything to submit. Sticking it to the bottom of
-                the scroll container keeps Submit reachable from any point. */}
-            <div style={{
-              position: 'sticky', bottom: -1, zIndex: 20,
-              display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-              marginTop: 24, padding: '14px 18px',
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border-2)',
-              borderRadius: 'var(--r-lg)',
-              boxShadow: 'var(--shadow-pop)',
-              backdropFilter: 'blur(10px)',
-            }}>
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting
-                  ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Submitting…</>
-                  : <><Confetti size={15} weight="bold" /> {eventType === 'public' ? 'Submit for review' : 'Create event'}</>}
-              </button>
-              <button type="button" className="btn" disabled={submitting}
-                onClick={() => router.push('/events')}>Cancel</button>
-
-              <span style={{ flex: 1 }} />
-
-              <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                fontSize: 12.5, color: 'var(--text-3)',
-              }}>
-                <Check size={14} weight="bold" />
-                {checklist.filter(i => i.done).length} of {checklist.length} steps done
-              </span>
-            </div>
-
-          </form>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* ── Action bar ───────────────────────────────────────────────────
+          Outside .page-content, so it is never scrolled and never overlaps a
+          field. flex-shrink:0 stops it being squeezed when the form is tall. */}
+      <div style={{
+        flexShrink: 0,
+        borderTop: '1px solid var(--border)',
+        background: 'var(--bg-elevated)',
+        padding: '14px 28px',
+      }}>
+        <div style={{
+          maxWidth: 1440, margin: '0 auto',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        }}>
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
+            {submitting
+              ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Submitting…</>
+              : <><Confetti size={15} weight="bold" /> {eventType === 'public' ? 'Submit for review' : 'Create event'}</>}
+          </button>
+          <button type="button" className="btn" disabled={submitting}
+            onClick={() => router.push('/events')}>Cancel</button>
+
+          <span style={{ flex: 1 }} />
+
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            fontSize: 12.5, color: 'var(--text-3)',
+          }}>
+            <Check size={14} weight="bold" />
+            {checklist.filter(i => i.done).length} of {checklist.length} steps done
+          </span>
+        </div>
+      </div>
+    </form>
   );
 }

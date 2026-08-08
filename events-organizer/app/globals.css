@@ -204,6 +204,50 @@ a:hover { text-decoration: underline; }
 button { font-family: var(--font); cursor: pointer; }
 input, select, textarea { font-family: var(--font); }
 
+/* ── Native select popups ────────────────────────────────────────────────────
+   The dropdown list a <select> opens is drawn by the OS, not by us, and Chrome
+   derives its background from the select's own computed background-color. Our
+   fields use a TRANSLUCENT surface (rgba(255,255,255,.045) in dark), which the
+   popup composites over white — producing the white list and white optgroup
+   header bars regardless of theme.
+
+   Two things fix it, and both are needed:
+     1. color-scheme on the element, so the OS draws its dark variant.
+     2. Explicit OPAQUE colours on option/optgroup, since the popup can't
+        resolve alpha against our surface.
+
+   These are element selectors on purpose. Selects on this dashboard are styled
+   by inline style objects (DateTimePicker and PlacesAutocomplete take a `style`
+   prop and can't take a class), so a .field-scoped rule would miss them. */
+select { color-scheme: inherit; }
+
+select option,
+select optgroup {
+  background-color: var(--bg-elevated);
+  color: var(--text);
+}
+
+/* Group headers read as labels, not as selectable rows. */
+select optgroup {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Options inside a group sit back at normal weight — otherwise they inherit
+   the optgroup's uppercase styling in Firefox. */
+select optgroup option {
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+}
+
+select option:disabled { color: var(--text-faint); }
+
 ::selection { background: var(--accent-soft); color: var(--text); }
 
 :focus-visible {

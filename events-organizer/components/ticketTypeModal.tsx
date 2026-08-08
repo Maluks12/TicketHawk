@@ -224,6 +224,14 @@ function TicketTypeForm({
     fontFamily: 'inherit', boxSizing: 'border-box',
   });
 
+  // Opaque variant for the <select>. Chrome paints the native dropdown list
+  // using the select's computed background-color; a translucent one composites
+  // over white, which is what turned the option list and its group headers
+  // white in dark mode.
+  const selectStyle = (bad?: string): React.CSSProperties => ({
+    ...inputStyle(bad), background: 'var(--surface-2)',
+  });
+
   return (
     <div
       className="modal-overlay"
@@ -268,7 +276,7 @@ function TicketTypeForm({
                 // for input rather than pre-filled with the last preset.
                 upd({ name: v === CUSTOM ? '' : v === '' ? '' : v });
               }}
-              style={inputStyle(err('name'))}
+              style={selectStyle(err('name'))}
             >
               <option value="">— Choose a ticket type —</option>
               {PRESET_GROUPS.map(g => (
