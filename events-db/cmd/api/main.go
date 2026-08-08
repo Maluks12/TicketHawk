@@ -389,6 +389,14 @@ func main() {
 		public.GET("/:id/merch/preview", handlers.GetEventMerchPreviewHandler(pool, eventCache))
 		public.GET("/:id/ticket-types",  handlers.GetTicketTypesHandler(pool))
 		public.POST("/:id/view",         handlers.TrackEventViewHandler(pool, eventCache))
+		// Retention beacon — how long the viewer had the event page open.
+		// Unauthenticated by design (OptionalAuth above means a token is read
+		// if present but never required): requiring one would silently drop
+		// every logged-out visitor, which is most of the traffic organisers
+		// want to measure. Inherits this group's rate limit, and the handler
+		// clamps the reported duration and checks the event is publicly
+		// visible before writing anything.
+		public.POST("/:id/dwell",        handlers.RecordDwellHandler(pool, eventCache))
 		// Must be last — catches both UUIDs and slugs
 		public.GET("/:id",               handlers.GetEventBySlugHandler(pool, eventCache))
 	}
@@ -858,6 +866,18 @@ func main() {
 		orgRoutes.GET("/dashboard/events/:id/bookings", handlers.GetOrganizerEventBookingsHandler(pool))
 		orgRoutes.GET("/dashboard/events/:id/merch",    handlers.GetOrganizerEventMerchHandler(pool))
 		orgRoutes.GET("/dashboard/payouts",             handlers.GetOrganizerPayoutSummaryHandler(pool))
+
+		// ── Analytics ─────────────────────────────────────────────────────
+		// Reach, retention, PSR and door numbers. /overview backs the two
+		// summary rows on the dashboard; the rest back the advanced page.
+		//
+		// Ownership is enforced inside every query in analytics_repository.go
+		// rather than by a check in the handler, so a valid event id belonging
+		// to another organiser returns nothing instead of leaking a row.
+		orgRoutes.GET("/dashboard/analytics/overview",   handlers.GetAnalyticsOverviewHandler(pool))
+		orgRoutes.GET("/dashboard/analytics/events",     handlers.ListEventAnalyticsHandler(pool))
+		orgRoutes.GET("/dashboard/analytics/events/:id", handlers.GetEventAnalyticsHandler(pool))
+		orgRoutes.GET("/dashboard/analytics/series",     handlers.GetAnalyticsSeriesHandler(pool))
 
 		// Lists all the organiser's merch across their events. The dashboard
 		// Merch page depended on this route but it was never registered --

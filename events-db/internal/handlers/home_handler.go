@@ -77,6 +77,7 @@ func HomeSectionsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		// Anonymous, location-free request → the cached shared feed is the whole
 		// response.
 		if !isPersonalized {
+			recordSectionImpressions(ctx, ec, shared.Sections)
 			c.JSON(http.StatusOK, shared)
 			return
 		}
@@ -90,6 +91,7 @@ func HomeSectionsHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 		merged = append(merged, shared.Sections...)
 		merged = append(merged, nearYou...)
 
+		recordSectionImpressions(ctx, ec, merged)
 		c.JSON(http.StatusOK, repository.HomeSectionsResult{Sections: merged})
 	}
 }
