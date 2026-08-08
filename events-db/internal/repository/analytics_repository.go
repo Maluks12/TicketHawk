@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -181,21 +182,41 @@ func RecordMetricsDirect(pool *pgxpool.Pool, eventID string, views, dwellMs, dwe
 	return nil
 }
 
-// EventIsVisible reports whether an event exists and is publicly reachable.
-// The dwell beacon is unauthenticated, so this stops it manufacturing metric
-// rows for arbitrary, draft or someone else's event ids.
-func EventIsVisible(pool *pgxpool.Pool, eventID string) bool {
+// ResolveVisibleEventID turns a slug OR a UUID into the canonical event UUID,
+// and reports whether that event is publicly reachable.
+//
+// Accepting both is not optional: lib/shareLinks.ts PREFERS the slug when the
+// backend supplies one, so most real web traffic arrives at /events/<slug>.
+// A UUID-only check would have silently dropped every one of those beacons and
+// left retention measured only over people who happened to arrive via a UUID
+// URL — a badly biased sample that would still have looked like a working
+// metric. TrackEventViewHandler resolves the same two forms for the same
+// reason.
+//
+// The visibility predicate also stops the unauthenticated beacon manufacturing
+// metric rows for drafts, other organisers' events, or invented ids.
+func ResolveVisibleEventID(pool *pgxpool.Pool, slugOrID string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	var ok bool
-	err := pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM events
-			WHERE id = $1
-			  AND status IN ('published', 'published_private', 'completed')
-		)
-	`, eventID).Scan(&ok)
-	return err == nil && ok
+
+	// Branch rather than OR-ing both predicates: casting a slug to uuid throws
+	// at parse time, so `id = $1::uuid OR slug = $1` errors on every slug.
+	var query string
+	if _, err := uuid.Parse(slugOrID); err == nil {
+		query = `SELECT id::text FROM events
+		         WHERE id = $1::uuid
+		           AND status IN ('published', 'published_private', 'completed')`
+	} else {
+		query = `SELECT id::text FROM events
+		         WHERE slug = $1
+		           AND status IN ('published', 'published_private', 'completed')`
+	}
+
+	var id string
+	if err := pool.QueryRow(ctx, query, slugOrID).Scan(&id); err != nil {
+		return "", false
+	}
+	return id, true
 }
 
 // ── Core metric payload ──────────────────────────────────────────────────────

@@ -250,8 +250,11 @@ func RecordDwellHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 	const maxDwellMs int64 = 30 * 60 * 1000
 
 	return func(c *gin.Context) {
-		eventID := c.Param("id")
-		if _, err := uuid.Parse(eventID); err != nil {
+		// May be a UUID (mobile passes event.id) or a slug (web share links
+		// prefer the slug). Both are accepted; the resolver below returns the
+		// canonical UUID so metrics are always stored against the stable id.
+		slugOrID := c.Param("id")
+		if slugOrID == "" {
 			c.Status(http.StatusNoContent)
 			return
 		}
@@ -267,7 +270,8 @@ func RecordDwellHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFun
 			body.Ms = maxDwellMs
 		}
 
-		if !repository.EventIsVisible(pool, eventID) {
+		eventID, ok := repository.ResolveVisibleEventID(pool, slugOrID)
+		if !ok {
 			c.Status(http.StatusNoContent)
 			return
 		}
