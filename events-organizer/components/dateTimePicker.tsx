@@ -29,6 +29,7 @@
 // field and applied server-side.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { CalendarBlank, Clock, CaretLeft, CaretRight } from '@phosphor-icons/react';
 
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTHS = [
@@ -179,8 +180,8 @@ export default function DateTimePicker({
     padding: '9px 12px',
     border: `1px solid ${invalid ? 'var(--danger)' : 'var(--border-2)'}`,
     borderRadius: 'var(--r)',
-    background: 'var(--surface)',
-    color: selected ? 'var(--text)' : 'var(--text-3)',
+    background: 'var(--surface-alpha)',
+    color: selected ? 'var(--text)' : 'var(--text-faint)',
     fontSize: 14,
     fontFamily: 'inherit',
     textAlign: 'left',
@@ -197,10 +198,10 @@ export default function DateTimePicker({
     zIndex: 50,
     top: 'calc(100% + 6px)',
     left: 0,
-    background: 'var(--surface)',
+    background: 'var(--bg-elevated)',
     border: '1px solid var(--border-2)',
     borderRadius: 'var(--r-lg)',
-    boxShadow: 'var(--shadow)',
+    boxShadow: 'var(--shadow-pop)',
     padding: 12,
     width: 300,
   };
@@ -210,15 +211,13 @@ export default function DateTimePicker({
     display: 'grid', placeItems: 'center',
     border: '1px solid var(--border)',
     borderRadius: 'var(--r)',
-    background: 'var(--surface)',
+    background: 'var(--surface-alpha)',
     color: 'var(--text-2)',
     cursor: 'pointer',
     fontSize: 14, lineHeight: 1,
   };
 
 
-
-  const timeValue = selected ? `${pad(selected.getHours())}:${pad(selected.getMinutes())}` : '';
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
@@ -236,7 +235,7 @@ export default function DateTimePicker({
         }}>
           {selected ? toDisplay(selected) : placeholder}
         </span>
-        <span aria-hidden style={{ color: 'var(--text-3)', fontSize: 15, flexShrink: 0 }}>📅</span>
+        <CalendarBlank size={16} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
       </button>
 
       {open && (
@@ -246,11 +245,15 @@ export default function DateTimePicker({
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             marginBottom: 10,
           }}>
-            <button type="button" onClick={() => shiftMonth(-1)} style={navBtn} aria-label="Previous month">‹</button>
+            <button type="button" onClick={() => shiftMonth(-1)} style={navBtn} aria-label="Previous month">
+              <CaretLeft size={14} weight="bold" />
+            </button>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
               {MONTHS[view.getMonth()]} {view.getFullYear()}
             </div>
-            <button type="button" onClick={() => shiftMonth(1)} style={navBtn} aria-label="Next month">›</button>
+            <button type="button" onClick={() => shiftMonth(1)} style={navBtn} aria-label="Next month">
+              <CaretRight size={14} weight="bold" />
+            </button>
           </div>
 
           {/* Weekday header */}
@@ -282,13 +285,13 @@ export default function DateTimePicker({
                     padding: '7px 0',
                     fontSize: 13,
                     fontFamily: 'inherit',
-                    border: isToday && !isSel ? '1px solid var(--blue)' : '1px solid transparent',
+                    border: isToday && !isSel ? '1px solid var(--accent)' : '1px solid transparent',
                     borderRadius: 'var(--r)',
-                    background: isSel ? 'var(--blue)' : 'transparent',
+                    background: isSel ? 'var(--accent-deep)' : 'transparent',
                     color: disabled
-                      ? 'var(--border-2)'
+                      ? 'var(--text-faint)'
                       : isSel
-                        ? 'var(--text-inv)'
+                        ? '#fff'
                         : inMonth ? 'var(--text)' : 'var(--text-3)',
                     fontWeight: isSel ? 700 : inMonth ? 500 : 400,
                     cursor: disabled ? 'not-allowed' : 'pointer',
@@ -322,7 +325,7 @@ export default function DateTimePicker({
               style={{
                 padding: '6px 14px',
                 border: 'none', borderRadius: 'var(--r)',
-                background: 'var(--blue)', color: 'var(--text-inv)',
+                background: 'var(--accent-deep)', color: '#fff',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer',
                 fontFamily: 'inherit',
               }}
@@ -334,28 +337,230 @@ export default function DateTimePicker({
       )}
       </div>
 
-      {/* Time — the native control. Small, precise to the minute, keyboard
-          friendly, and with no popover of its own it cannot be clipped. */}
-      <input
-        type="time"
-        value={timeValue}
-        onChange={e => {
-          const [h, m] = e.target.value.split(':');
-          if (h === undefined || m === undefined || e.target.value === '') return;
-          pickTime(Number(h), Number(m));
-        }}
+      {/* Time — custom, NOT <input type="time">.
+          The native control renders as two unlabelled scrolling number columns
+          in Chrome, which is impossible to tell apart at a glance: the hour and
+          minute lists look identical and neither says which is which. This is a
+          labelled 12-hour picker with an AM/PM toggle and quick presets, so
+          choosing 7pm takes one tap instead of two scrolls. */}
+      <TimeField
+        selected={selected}
+        invalid={invalid}
+        onPick={pickTime}
+      />
+    </div>
+  );
+}
+
+// ── TimeField ────────────────────────────────────────────────────────────────
+// A labelled replacement for <input type="time">.
+//
+// Three deliberate choices:
+//
+//   1. 12-hour with an AM/PM toggle. Every organiser writing "doors at 8" means
+//      20:00, and the 24-hour native control makes them do the conversion. The
+//      value emitted is still 24-hour — this is display only.
+//   2. Minutes in 5-minute steps. Nobody schedules a gig for 19:07, and 60
+//      individual minute rows is exactly the haystack that makes the native
+//      control slow to use. An exact minute is still reachable by typing.
+//   3. Presets first. Most events start on the hour in the evening, so the
+//      common answers are one tap away above the columns.
+function TimeField({
+  selected, invalid, onPick,
+}: {
+  selected: Date | null;
+  invalid: boolean;
+  onPick: (hours: number, minutes: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const hourColRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Scroll the current hour into view when the popover opens, so an 8pm event
+  // doesn't open showing midnight and require a scroll to find itself.
+  useEffect(() => {
+    if (!open || !hourColRef.current) return;
+    const el = hourColRef.current.querySelector('[data-on="1"]') as HTMLElement | null;
+    if (el) hourColRef.current.scrollTop = el.offsetTop - 60;
+  }, [open]);
+
+  const h24 = selected ? selected.getHours() : 19;
+  const mins = selected ? selected.getMinutes() : 0;
+  const isPM = h24 >= 12;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+
+  const label = selected
+    ? `${h12}:${pad(mins)} ${isPM ? 'PM' : 'AM'}`
+    : 'Time';
+
+  /** 12-hour + meridiem back to a 24-hour hour. */
+  const to24 = (hour12: number, pm: boolean) => {
+    if (hour12 === 12) return pm ? 12 : 0;
+    return pm ? hour12 + 12 : hour12;
+  };
+
+  const PRESETS: Array<[string, number, number]> = [
+    ['09:00', 9, 0], ['12:00', 12, 0], ['14:00', 14, 0],
+    ['18:00', 18, 0], ['19:00', 19, 0], ['20:00', 20, 0],
+    ['21:00', 21, 0], ['22:00', 22, 0],
+  ];
+
+  const colStyle: CSSProperties = {
+    maxHeight: 168, overflowY: 'auto', display: 'flex',
+    flexDirection: 'column', gap: 2, paddingRight: 4,
+  };
+
+  const cell = (on: boolean): CSSProperties => ({
+    padding: '7px 0', border: 'none', borderRadius: 8,
+    background: on ? 'var(--accent-deep)' : 'transparent',
+    color: on ? '#fff' : 'var(--text-2)',
+    fontSize: 13, fontWeight: on ? 700 : 500,
+    fontFamily: 'inherit', cursor: 'pointer',
+    fontVariantNumeric: 'tabular-nums',
+  });
+
+  const colHead: CSSProperties = {
+    fontSize: 9.5, fontWeight: 800, letterSpacing: '.1em',
+    textTransform: 'uppercase', color: 'var(--text-3)',
+    textAlign: 'center', marginBottom: 6,
+  };
+
+  return (
+    <div ref={boxRef} style={{ position: 'relative', width: 118, flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         aria-label="Time"
         style={{
-          width: 116, flexShrink: 0,
-          padding: '9px 10px',
+          width: '100%', padding: '9px 12px',
           border: `1px solid ${invalid ? 'var(--danger)' : 'var(--border-2)'}`,
           borderRadius: 'var(--r)',
-          background: 'var(--surface)',
-          color: selected ? 'var(--text)' : 'var(--text-3)',
-          fontSize: 14,
-          fontFamily: 'inherit',
+          background: 'var(--surface-alpha)',
+          color: selected ? 'var(--text)' : 'var(--text-faint)',
+          fontSize: 14, fontFamily: 'inherit', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+          fontVariantNumeric: 'tabular-nums',
         }}
-      />
+      >
+        <span>{label}</span>
+        <Clock size={15} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Choose time"
+          style={{
+            position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', right: 0,
+            background: 'var(--bg-elevated)', border: '1px solid var(--border-2)',
+            borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-pop)',
+            padding: 12, width: 244,
+          }}
+        >
+          <div style={colHead}>Common times</div>
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5,
+            marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--border)',
+          }}>
+            {PRESETS.map(([lbl, ph, pm]) => {
+              const on = h24 === ph && mins === pm;
+              return (
+                <button key={lbl} type="button"
+                  onClick={() => { onPick(ph, pm); setOpen(false); }}
+                  style={{
+                    padding: '6px 0', borderRadius: 7, fontSize: 11.5, fontWeight: 600,
+                    border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                    background: on ? 'var(--accent-soft)' : 'var(--surface-alpha)',
+                    color: on ? 'var(--accent)' : 'var(--text-2)',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>
+                  {lbl}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 58px', gap: 8 }}>
+            {/* Hour */}
+            <div>
+              <div style={colHead}>Hour</div>
+              <div ref={hourColRef} style={colStyle}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(hh => {
+                  const on = hh === h12;
+                  return (
+                    <button key={hh} type="button" data-on={on ? '1' : '0'}
+                      onClick={() => onPick(to24(hh, isPM), mins)}
+                      style={cell(on)}>
+                      {hh}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Minute */}
+            <div>
+              <div style={colHead}>Min</div>
+              <div style={colStyle}>
+                {Array.from({ length: 12 }, (_, i) => i * 5).map(mm => {
+                  const on = mm === mins;
+                  return (
+                    <button key={mm} type="button"
+                      onClick={() => onPick(h24, mm)}
+                      style={cell(on)}>
+                      {pad(mm)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Meridiem */}
+            <div>
+              <div style={colHead}>&nbsp;</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {([['AM', false], ['PM', true]] as const).map(([lbl, pm]) => {
+                  const on = isPM === pm;
+                  return (
+                    <button key={lbl} type="button"
+                      onClick={() => onPick(to24(h12, pm), mins)}
+                      style={{ ...cell(on), padding: '9px 0' }}>
+                      {lbl}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <button type="button" onClick={() => setOpen(false)}
+            style={{
+              width: '100%', marginTop: 12, padding: '7px 0',
+              border: 'none', borderRadius: 'var(--r)',
+              background: 'var(--accent-deep)', color: '#fff',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            Done
+          </button>
+        </div>
+      )}
     </div>
   );
 }

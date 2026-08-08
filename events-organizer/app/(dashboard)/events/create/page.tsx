@@ -4,8 +4,8 @@ import { useRouter } from 'next/navigation';
 import {
   Article, CalendarBlank, MapPin, Ticket, Tag, ImageSquare,
   MagicWand, Vault, MaskHappy, Confetti,
-  Trash, Plus, X, Check, CheckCircle, Circle,
-  FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck,
+  Trash, Plus, X, Check, CheckCircle, Circle, PencilSimple,
+  FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck, EyeSlash,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { api } from '../../../../lib/api';
@@ -14,6 +14,7 @@ import { validateRequired, validateMinLength, firstError } from '../../../../lib
 import { getKycStatus } from '../../../../lib/kyc';
 import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
 import DateTimePicker from '@/components/dateTimePicker';
+import TicketTypeModal from '@/components/ticketTypeModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI-ONLY REWRITE
@@ -125,11 +126,25 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) 
 }
 
 // ── TicketTypeBuilder ─────────────────────────────────────────────────────────
+// The list is now read-only summaries; composing and editing happen in
+// TicketTypeModal. A tier only enters this array once it has passed validation,
+// so the array can no longer hold a half-filled row that the submit handler
+// silently drops.
 function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange: (r: TicketTypeRow[]) => void }) {
-  function add() {
-    onChange([...rows, { name: '', price: 0, capacity: '', sort_order: rows.length, description: '', is_visible: true }]);
+  const [modalOpen, setModalOpen] = useState(false);
+  // null = adding; a number = editing that index.
+  const [editing, setEditing] = useState<number | null>(null);
+
+  function openAdd()  { setEditing(null); setModalOpen(true); }
+  function openEdit(i: number) { setEditing(i); setModalOpen(true); }
+
+  function confirm(t: TicketTypeRow) {
+    if (editing === null) onChange([...rows, t]);
+    else onChange(rows.map((r, j) => (j === editing ? t : r)));
+    setModalOpen(false);
+    setEditing(null);
   }
-  function upd(i: number, p: Partial<TicketTypeRow>) { onChange(rows.map((r, j) => j === i ? { ...r, ...p } : r)); }
+
   function del(i: number) { onChange(rows.filter((_, j) => j !== i)); }
 
   return (
@@ -139,87 +154,146 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
         <span>Ticket types define pricing tiers (e.g. General, VIP). Leave empty for flat pricing.</span>
       </div>
 
-      {rows.map((r, i) => (
-        <div key={i} className="sub-section">
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            marginBottom: 14,
-          }}>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 7,
-              fontSize: 10.5, fontWeight: 800, color: 'var(--text-3)',
-              textTransform: 'uppercase', letterSpacing: '.1em',
+      {rows.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+          {rows.map((r, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 14,
+              padding: '13px 16px',
+              background: 'var(--surface-alpha)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--r-lg)',
             }}>
-              <Ticket size={14} weight="bold" />
-              Ticket type {i + 1}
-            </span>
-            <button type="button" className="btn-icon" onClick={() => del(i)}
-              aria-label={`Remove ticket type ${i + 1}`}
-              style={{ color: 'var(--danger-fg)' }}>
-              <Trash size={15} />
-            </button>
-          </div>
+              <span style={{
+                width: 30, height: 30, borderRadius: 9, flexShrink: 0,
+                background: 'var(--accent-soft)', color: 'var(--accent)',
+                display: 'grid', placeItems: 'center',
+                fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+              }}>
+                {r.sort_order}
+              </span>
 
-          {/* Four short fields across, rather than two rows of two. The old
-              660px column couldn't fit them; the wider one can. */}
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 12 }}>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Name <Required /></label>
-              <input type="text" value={r.name} style={inp}
-                onChange={e => upd(i, { name: e.target.value })} placeholder="e.g. General Admission" />
-            </div>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Price</label>
-              <input type="number" min="0" step="0.01" value={r.price} style={inp}
-                onChange={e => upd(i, { price: parseFloat(e.target.value) || 0 })} />
-              <div className="field-hint">0 = free</div>
-            </div>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Capacity</label>
-              <input type="number" min="1" value={r.capacity} style={inp}
-                onChange={e => upd(i, { capacity: e.target.value })} placeholder="∞" />
-              <div className="field-hint">Blank = unlimited</div>
-            </div>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Sort order</label>
-              <input type="number" value={r.sort_order} style={inp}
-                onChange={e => upd(i, { sort_order: parseInt(e.target.value) || 0 })} />
-            </div>
-          </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  fontSize: 14, fontWeight: 700, color: 'var(--text)',
+                }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {r.name}
+                  </span>
+                  {!r.is_visible && (
+                    <span title="Hidden from buyers" style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em',
+                      textTransform: 'uppercase', color: 'var(--text-3)',
+                      background: 'var(--surface-strong)', borderRadius: 999,
+                      padding: '2px 8px', flexShrink: 0,
+                    }}>
+                      <EyeSlash size={11} weight="bold" /> Hidden
+                    </span>
+                  )}
+                </div>
+                {r.description && (
+                  <div style={{
+                    fontSize: 12.5, color: 'var(--text-3)', marginTop: 2,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {r.description}
+                  </div>
+                )}
+              </div>
 
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto',
-            gap: 16, alignItems: 'end', marginTop: 12,
-          }}>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Description</label>
-              <input type="text" value={r.description} style={inp} placeholder="Optional — what this tier includes"
-                onChange={e => upd(i, { description: e.target.value })} />
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{
+                  fontSize: 14.5, fontWeight: 800, color: 'var(--text)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {r.price > 0
+                    ? `R${r.price.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}`
+                    : 'Free'}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 1 }}>
+                  {r.capacity ? `${r.capacity} available` : 'Unlimited'}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                <button type="button" className="btn-icon" onClick={() => openEdit(i)}
+                  aria-label={`Edit ${r.name}`}>
+                  <PencilSimple size={15} />
+                </button>
+                <button type="button" className="btn-icon" onClick={() => del(i)}
+                  aria-label={`Remove ${r.name}`} style={{ color: 'var(--danger-fg)' }}>
+                  <Trash size={15} />
+                </button>
+              </div>
             </div>
-            <label className="check-row" style={{ paddingBottom: 11, whiteSpace: 'nowrap' }}>
-              <input type="checkbox" checked={r.is_visible}
-                onChange={e => upd(i, { is_visible: e.target.checked })} />
-              <span style={{ fontSize: 13 }}>Visible to buyers</span>
-            </label>
-          </div>
+          ))}
         </div>
-      ))}
+      )}
 
-      <button type="button" className="btn btn-sm" onClick={add}>
+      <button type="button" className="btn btn-sm" onClick={openAdd}>
         <Plus size={14} weight="bold" />
         Add ticket type
       </button>
+
+      <TicketTypeModal
+        open={modalOpen}
+        initial={editing === null ? null : rows[editing]}
+        index={editing === null ? rows.length : rows[editing].sort_order}
+        // The tier being edited is excluded, otherwise saving it unchanged
+        // would fail the duplicate-name check against itself.
+        existingNames={rows.filter((_, j) => j !== editing).map(r => r.name)}
+        onCancel={() => { setModalOpen(false); setEditing(null); }}
+        onConfirm={confirm}
+      />
     </>
   );
 }
 
 // ── ImageUploader ─────────────────────────────────────────────────────────────
+// Accepts a click OR a dropped file.
+//
+// The drop target is the whole tile and it reports its own state: `isOver`
+// switches the border and tint the moment a file is dragged over it, because a
+// drop zone that looks identical whether or not it will accept the file is a
+// guess, not an affordance.
 function ImageUploader({
   label, imageUrl, uploading, onUpload, onRemove, hint,
 }: {
   label: string; imageUrl: string | null; uploading: boolean;
   onUpload: (f: File) => void; onRemove: () => void; hint?: string;
 }) {
+  const [isOver, setIsOver] = useState(false);
+  const [rejected, setRejected] = useState<string | null>(null);
+
+  const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
+  const MAX_BYTES = 10 * 1024 * 1024;
+
+  // Checked here as well as server-side. Not a security boundary — the point is
+  // that a 40 MB PNG fails instantly with a reason, instead of after a long
+  // upload that ends in a generic error.
+  function accept(f: File): boolean {
+    if (!ACCEPTED.includes(f.type)) {
+      setRejected('That file type isn\u2019t supported — use JPEG, PNG or WebP');
+      return false;
+    }
+    if (f.size > MAX_BYTES) {
+      setRejected(`That file is ${(f.size / 1024 / 1024).toFixed(1)} MB — the limit is 10 MB`);
+      return false;
+    }
+    setRejected(null);
+    return true;
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsOver(false);
+    if (uploading) return;
+    const f = e.dataTransfer.files?.[0];
+    if (f && accept(f)) onUpload(f);
+  }
+
   return (
     <div>
       <label style={{
@@ -251,32 +325,47 @@ function ImageUploader({
           </button>
         </div>
       ) : (
-        // Full-width 16:9 drop zone rather than the old 120×80 thumbnail — it
-        // matches the shape of the image being asked for, so what you drop is
-        // what you get.
-        <label style={{
-          width: '100%', aspectRatio: '16 / 9',
-          border: '1.5px dashed var(--border-2)', borderRadius: 'var(--r-lg)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center',
-          justifyContent: 'center', gap: 8,
-          cursor: uploading ? 'wait' : 'pointer',
-          color: 'var(--text-3)', background: 'var(--surface-alpha)',
-          transition: 'border-color .15s ease, color .15s ease',
-        }}>
+        // Full-width 16:9 drop zone rather than a 120x80 thumbnail — it matches
+        // the shape of the image being asked for, so what you drop is what you
+        // get.
+        <label
+          onDragOver={e => { e.preventDefault(); if (!uploading) setIsOver(true); }}
+          onDragEnter={e => { e.preventDefault(); if (!uploading) setIsOver(true); }}
+          // relatedTarget is null when the pointer leaves the window entirely;
+          // without this the highlight sticks on after dragging away.
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsOver(false); }}
+          onDrop={onDrop}
+          style={{
+            width: '100%', aspectRatio: '16 / 9',
+            border: `1.5px dashed ${isOver ? 'var(--accent)' : 'var(--border-2)'}`,
+            borderRadius: 'var(--r-lg)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: 8,
+            cursor: uploading ? 'wait' : 'pointer',
+            color: isOver ? 'var(--accent)' : 'var(--text-3)',
+            background: isOver ? 'var(--accent-soft)' : 'var(--surface-alpha)',
+            transition: 'border-color .15s ease, color .15s ease, background .15s ease',
+          }}>
           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={uploading}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { onUpload(f); e.target.value = ''; } }} />
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f && accept(f)) onUpload(f);
+              e.target.value = '';
+            }} />
           {uploading
             ? <div className="spinner" />
             : <>
-                <UploadSimple size={26} />
-                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Click to upload</span>
+                <UploadSimple size={26} weight={isOver ? 'bold' : 'regular'} />
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+                  {isOver ? 'Drop to upload' : 'Drag an image here, or click to browse'}
+                </span>
               </>}
         </label>
       )}
 
-      <div className="field-hint" style={{ marginTop: 8 }}>
-        {hint ?? 'JPEG · PNG · WebP'}
-      </div>
+      {rejected
+        ? <div style={{ fontSize: 12, color: 'var(--danger-fg)', marginTop: 8, fontWeight: 500 }}>{rejected}</div>
+        : <div className="field-hint" style={{ marginTop: 8 }}>{hint ?? 'JPEG \u00b7 PNG \u00b7 WebP'}</div>}
     </div>
   );
 }
@@ -623,7 +712,10 @@ export default function CreateEventPage() {
         )}
       </div>
 
-      <div className="page-content">
+      {/* paddingBottom clears the sticky action bar. Without it the bar sits on
+          top of the last card and the final field can never be scrolled clear
+          of it. */}
+      <div className="page-content" style={{ paddingBottom: 96 }}>
         <div style={{ maxWidth: 1440, margin: '0 auto' }}>
 
           {/* ── Draft restore banner ─────────────────────────────────────── */}
@@ -687,7 +779,7 @@ export default function CreateEventPage() {
 
                 {/* Date & time */}
                 <FormCard title="Date & time" icon={CalendarBlank}
-                  subtitle="Shown in the event's own timezone">
+                  subtitle="All times are South African Standard Time (SAST)">
                   {/* Three across — these are the shortest fields on the page and
                       stacking them wasted the most space. */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
@@ -711,19 +803,13 @@ export default function CreateEventPage() {
                     </div>
                   </div>
 
+                  {/* The timezone picker is hidden. `timezone` state still
+                      exists, still round-trips through the draft and is still
+                      sent on submit — it just isn't a decision the organiser is
+                      asked to make. Every event is local, and offering seven
+                      zones invited someone to pick the wrong one and shift
+                      their own event by hours. */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 20 }}>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Timezone</label>
-                      <select value={timezone} onChange={e => setTimezone(e.target.value)} style={inp}>
-                        <option value="Africa/Johannesburg">Africa/Johannesburg (SAST)</option>
-                        <option value="Africa/Cape_Town">Africa/Cape_Town</option>
-                        <option value="UTC">UTC</option>
-                        <option value="Europe/London">Europe/London</option>
-                        <option value="America/New_York">America/New_York</option>
-                        <option value="America/Los_Angeles">America/Los_Angeles</option>
-                        <option value="Asia/Dubai">Asia/Dubai</option>
-                      </select>
-                    </div>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Ticket scanning window</label>
                       <select value={scanWindowMode}
@@ -1098,13 +1184,14 @@ export default function CreateEventPage() {
                 scrolling past everything to submit. Sticking it to the bottom of
                 the scroll container keeps Submit reachable from any point. */}
             <div style={{
-              position: 'sticky', bottom: 0, zIndex: 20,
+              position: 'sticky', bottom: -1, zIndex: 20,
               display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
               marginTop: 24, padding: '14px 18px',
               background: 'var(--bg-elevated)',
-              border: '1px solid var(--border)',
+              border: '1px solid var(--border-2)',
               borderRadius: 'var(--r-lg)',
-              boxShadow: 'var(--shadow)',
+              boxShadow: 'var(--shadow-pop)',
+              backdropFilter: 'blur(10px)',
             }}>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
                 {submitting
