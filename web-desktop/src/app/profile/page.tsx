@@ -194,7 +194,7 @@ export default function ProfilePage() {
                 label="Organiser Studio"
                 value="Manage your events"
                 onClick={() => window.open(
-                  process.env.NEXT_PUBLIC_ORGANISER_URL ?? 'https://organiser.example.com',
+                  process.env.NEXT_PUBLIC_ORGANISER_URL ?? 'https://organiser.ticket-hawk.com/',
                   '_blank',
                 )}
               />
