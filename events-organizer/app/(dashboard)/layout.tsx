@@ -40,6 +40,10 @@ const NAV: NavEntry[] = [
   { type: 'section', label: 'Dashboard' },
   { type: 'item', href: '/dashboard', exact: true, label: 'Overview', icon: 'grid' },
   { type: 'item', href: '/events', label: 'My Events', icon: 'calendar' },
+  // Deep analytics — reach, retention, PSR and door numbers at minute/hour/day
+  // resolution. Kept OFF the Overview and behind its own route so the
+  // dashboard's first screen stays a summary rather than a control panel.
+  { type: 'item', href: '/analytics', label: 'Analytics', icon: 'activity' },
   { type: 'divider' },
   { type: 'section', label: 'Account' },
   {
