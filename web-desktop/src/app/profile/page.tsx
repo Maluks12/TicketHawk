@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User, ChevronRight, Heart, Sun, Moon,
-  LogOut, Bell, Lock, LayoutDashboard, Trash2,
+  LogOut, Lock, LayoutDashboard, Trash2,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore, type ThemeMode } from '@/store/themeStore';
@@ -171,12 +171,6 @@ export default function ProfilePage() {
                 icon={<User size={16} color={colors.iconColor} />}
                 label="Edit profile"
                 onClick={() => router.push('/profile/edit')}
-              />
-              <Divider />
-              <Row
-                icon={<Bell size={16} color={colors.iconColor} />}
-                label="Notifications"
-                onClick={() => {}}
               />
               <Divider />
               <Row
