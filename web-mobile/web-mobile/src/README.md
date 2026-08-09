@@ -1,1 +1,0 @@
-Added accomadations for the web section
