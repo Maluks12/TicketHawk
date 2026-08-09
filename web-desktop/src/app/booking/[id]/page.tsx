@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
 import { api } from '@/lib/api';
 import { RotatingQR } from '@/components/rotatingQR';
+import {
+  WarningCircle, ArrowLeft, Users, Check, EnvelopeSimple, X, PaperPlaneTilt,
+  Calendar, MapPin, MapTrifold, Ticket, CheckCircle, Clock, User, ArrowBendUpLeft,
+  HourglassMedium,
+} from '@phosphor-icons/react';
 
 interface BookingDetail {
   id: string; booking_number: string; event_id: string; ticket_quantity: number;
@@ -30,12 +35,12 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hou
 const fmtMoney = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`;
 const fmtDT = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-function InfoRow({ icon, label, value, valueColor }: { icon: string; label: string; value: string; valueColor?: string }) {
+function InfoRow({ icon, label, value, valueColor }: { icon: ReactNode; label: string; value: string; valueColor?: string }) {
   const { colors } = useAppTheme();
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '10px 0', borderBottom: `1px solid ${colors.dividerColor}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: colors.subText, fontSize: 13 }}>
-        <span>{icon}</span><span>{label}</span>
+        <span style={{ display: 'flex' }}>{icon}</span><span>{label}</span>
       </div>
       <span style={{ fontSize: 13, fontWeight: 600, color: valueColor ?? colors.text, textAlign: 'right', maxWidth: '60%' }}>{value}</span>
     </div>
@@ -168,7 +173,7 @@ export default function BookingDetailPage() {
 
   if (loading) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ width: 32, height: 32, border: '3px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /></div>;
   if (!user) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><h2 style={{ color: colors.text }}>Sign in to view your booking</h2><button onClick={() => router.push('/auth/login')} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Log in</button></div>;
-  if (!booking) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><span style={{ fontSize: 40 }}>⚠️</span><h2 style={{ color: colors.text }}>Booking not found</h2><button onClick={() => router.back()} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Go back</button></div>;
+  if (!booking) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><WarningCircle size={40} weight="regular" color={colors.subText} /><h2 style={{ color: colors.text }}>Booking not found</h2><button onClick={() => router.back()} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Go back</button></div>;
 
   const status = refunded ? 'refunded' : booking.booking_status;
   const statusCol = STATUS_COLOR[status] ?? '#888';
@@ -204,7 +209,7 @@ export default function BookingDetailPage() {
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '24px 0 16px', borderBottom: `1px solid ${border}` }}>
-          <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.text, fontSize: 22 }}>←</button>
+          <button onClick={() => router.back()} style={{ background: 'none', border: 'none', cursor: 'pointer', color: colors.text, display: 'flex' }}><ArrowLeft size={22} weight="regular" /></button>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: colors.text, flex: 1 }} className="truncate">{booking.event?.title ?? 'Ticket'}</h1>
           <span style={{ background: `${statusCol}18`, border: `1px solid ${statusCol}44`, color: statusCol, borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 800 }}>{status.toUpperCase()}</span>
         </div>
@@ -262,7 +267,7 @@ export default function BookingDetailPage() {
       {/* Pool fully handed off */}
       {poolCount === 0 && assignedSlots.length > 0 && showQRs && (
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 20, textAlign: 'center', marginBottom: 12 }}>
-          <span style={{ fontSize: 40 }}>👥</span>
+          <Users size={40} weight="regular" color={colors.subText} />
           <p style={{ margin: '8px 0 0', fontSize: 13, color: colors.subText }}>You&apos;ve assigned all your tickets — everyone below has their own pass.</p>
         </div>
       )}
@@ -276,7 +281,7 @@ export default function BookingDetailPage() {
             return (
               <div key={slot.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: '12px 14px', marginBottom: 8 }}>
                 <div style={{ width: 30, height: 30, borderRadius: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', background: isClaimed ? 'rgba(0,229,160,0.12)' : 'rgba(255,184,48,0.14)', color: isClaimed ? '#00e5a0' : '#ffb830', flexShrink: 0 }}>
-                  {isClaimed ? '✓' : '✉'}
+                  {isClaimed ? <Check size={14} weight="bold" /> : <EnvelopeSimple size={14} weight="regular" />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{slot.assignee_name ?? 'Guest'}</p>
@@ -285,8 +290,8 @@ export default function BookingDetailPage() {
                   </p>
                 </div>
                 {slot.status === 'pending' && status === 'confirmed' && !isGuest && (
-                  <button onClick={() => handleRevoke(slot.id)} disabled={revoking === slot.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(128,128,128,0.7)', fontSize: 18, padding: 4, flexShrink: 0 }} title="Revoke invite">
-                    {revoking === slot.id ? '…' : '✕'}
+                  <button onClick={() => handleRevoke(slot.id)} disabled={revoking === slot.id} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(128,128,128,0.7)', padding: 4, flexShrink: 0, display: 'flex' }} title="Revoke invite">
+                    {revoking === slot.id ? '…' : <X size={16} weight="bold" />}
                   </button>
                 )}
               </div>
@@ -298,7 +303,7 @@ export default function BookingDetailPage() {
       {/* Assign a ticket — peel one off the pool (authed buyer only) */}
       {poolCount > 0 && status === 'confirmed' && !isGuest && firstUnassigned && (
         <button onClick={() => setAssignTarget(firstUnassigned)} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', background: cardBg, border: `1px solid ${border}`, borderRadius: 12, padding: '14px 16px', cursor: 'pointer', marginTop: 4, textAlign: 'left' }}>
-          <div style={{ width: 30, height: 30, borderRadius: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>📤</div>
+          <div style={{ width: 30, height: 30, borderRadius: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}><PaperPlaneTilt size={14} weight="regular" color={colors.text} /></div>
           <div style={{ flex: 1 }}>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: colors.text }}>Assign a ticket</p>
             <p style={{ margin: 0, fontSize: 12, color: colors.subText }}>Send one to someone arriving separately</p>
@@ -312,7 +317,7 @@ export default function BookingDetailPage() {
     <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
       {booking.qr_code_url
         ? <img src={booking.qr_code_url} alt="QR Code" style={{ width: 200, height: 200, borderRadius: 8 }} />
-        : <span style={{ fontSize: 48 }}>⏳</span>
+        : <HourglassMedium size={48} weight="regular" color={colors.subText} />
       }
       <p style={{ margin: 0, fontSize: 13, fontWeight: 800, letterSpacing: 1, color: statusCol }}>#{booking.booking_number}</p>
       <p style={{ margin: 0, fontSize: 12, color: '#888', textAlign: 'center' }}>
@@ -327,27 +332,27 @@ export default function BookingDetailPage() {
         {/* Event Details */}
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>EVENT DETAILS</p>
-          {booking.event?.start_time && <InfoRow icon="📅" label="Date & time" value={`${fmt(booking.event.start_time)} at ${fmtTime(booking.event.start_time)}`} />}
-          {booking.event && <InfoRow icon="📍" label="Venue" value={`${booking.event.venue_name}, ${booking.event.city}`} />}
-          {booking.event?.address && <InfoRow icon="🗺" label="Address" value={booking.event.address} />}
+          {booking.event?.start_time && <InfoRow icon={<Calendar size={14} weight="regular" />} label="Date & time" value={`${fmt(booking.event.start_time)} at ${fmtTime(booking.event.start_time)}`} />}
+          {booking.event && <InfoRow icon={<MapPin size={14} weight="regular" />} label="Venue" value={`${booking.event.venue_name}, ${booking.event.city}`} />}
+          {booking.event?.address && <InfoRow icon={<MapTrifold size={14} weight="regular" />} label="Address" value={booking.event.address} />}
         </div>
 
         {/* Ticket Info */}
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>TICKET INFO</p>
-          <InfoRow icon="🎟" label="Type" value={booking.ticket_type_name ?? 'General Admission'} />
-          <InfoRow icon="👥" label="Quantity" value={`${booking.ticket_quantity} ticket${booking.ticket_quantity > 1 ? 's' : ''}`} />
-          <InfoRow icon="✅" label="Status" value={status.charAt(0).toUpperCase() + status.slice(1)} valueColor={statusCol} />
-          <InfoRow icon="🕐" label="Booked on" value={fmtDT(booking.created_at)} />
-          {booking.confirmed_at && <InfoRow icon="✓" label="Confirmed" value={fmtDT(booking.confirmed_at)} />}
+          <InfoRow icon={<Ticket size={14} weight="regular" />} label="Type" value={booking.ticket_type_name ?? 'General Admission'} />
+          <InfoRow icon={<Users size={14} weight="regular" />} label="Quantity" value={`${booking.ticket_quantity} ticket${booking.ticket_quantity > 1 ? 's' : ''}`} />
+          <InfoRow icon={<CheckCircle size={14} weight="regular" />} label="Status" value={status.charAt(0).toUpperCase() + status.slice(1)} valueColor={statusCol} />
+          <InfoRow icon={<Clock size={14} weight="regular" />} label="Booked on" value={fmtDT(booking.created_at)} />
+          {booking.confirmed_at && <InfoRow icon={<Check size={14} weight="bold" />} label="Confirmed" value={fmtDT(booking.confirmed_at)} />}
         </div>
 
         {/* Attendee */}
         {(booking.attendee_first_name || booking.attendee_email) && (
           <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
             <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>ATTENDEE</p>
-            {(booking.attendee_first_name || booking.attendee_last_name) && <InfoRow icon="👤" label="Name" value={[booking.attendee_first_name, booking.attendee_last_name].filter(Boolean).join(' ')} />}
-            {booking.attendee_email && <InfoRow icon="✉️" label="Email" value={booking.attendee_email} />}
+            {(booking.attendee_first_name || booking.attendee_last_name) && <InfoRow icon={<User size={14} weight="regular" />} label="Name" value={[booking.attendee_first_name, booking.attendee_last_name].filter(Boolean).join(' ')} />}
+            {booking.attendee_email && <InfoRow icon={<EnvelopeSimple size={14} weight="regular" />} label="Email" value={booking.attendee_email} />}
           </div>
         )}
 
@@ -361,7 +366,7 @@ export default function BookingDetailPage() {
           <PriceLine label="Total paid" value={fmtMoney(booking.total_amount)} bold />
           {(status === 'refunded' || refunded) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,229,160,0.1)', borderRadius: 8, padding: '10px 12px', marginTop: 8 }}>
-              <span style={{ color: '#00e5a0' }}>✓</span>
+              <Check size={14} weight="bold" color="#00e5a0" />
               <span style={{ fontSize: 13, color: '#00e5a0', fontWeight: 600 }}>
                 {booking.refunded_amount != null ? `Refund of ${fmtMoney(booking.refunded_amount)} is being processed` : 'Refund request submitted — processing in 3–5 business days'}
               </span>
@@ -374,7 +379,7 @@ export default function BookingDetailPage() {
             {/* The amount is on the button face on purpose: the buyer should
                 never have to open a sheet to find out what they get back. */}
             <button onClick={() => setRefundOpen(true)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 12, padding: '13px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-              ↩ Request a refund · {fmtRand(quote.refund_amount)} back
+              <ArrowBendUpLeft size={16} weight="regular" /> Request a refund · {fmtRand(quote.refund_amount)} back
             </button>
             <p style={{ margin: '8px 0 0', fontSize: 12, color: colors.subText, textAlign: 'center' }}>
               {refundWindowLabel(quote.days_until_event)} · {fmtRate(quote.rate)} of your ticket price
@@ -423,7 +428,7 @@ export default function BookingDetailPage() {
             </div>
             {assignErr && <p style={{ color: '#ff3c6e', fontSize: 13, margin: '8px 0' }}>{assignErr}</p>}
             <button onClick={handleAssign} disabled={assignLoading} style={{ width: '100%', background: '#fff', color: '#0a0a0a', border: 'none', borderRadius: 12, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer', opacity: assignLoading ? 0.6 : 1, marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              📤 {assignLoading ? 'Sending…' : 'Send claim link'}
+              <PaperPlaneTilt size={16} weight="regular" style={{ display: 'inline', verticalAlign: '-2px', marginRight: 6 }} /> {assignLoading ? 'Sending…' : 'Send claim link'}
             </button>
             <button onClick={() => setAssignTarget(null)} style={{ width: '100%', background: 'none', border: 'none', color: colors.subText, padding: '12px', fontSize: 14, cursor: 'pointer', marginTop: 4 }}>Cancel</button>
           </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { MapPin, Calendar, Ticket, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Calendar as CalendarPh, Clock } from '@phosphor-icons/react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
@@ -225,7 +226,7 @@ function GuestLookup() {
         <p className="text-[11px] font-black tracking-[1.5px] mb-4" style={{ color: colors.subText }}>YOUR TICKET</p>
         <TicketCard booking={result} index={0} onPress={() => router.push(`/booking/${result.id}?bn=${encodeURIComponent(result.booking_number)}&email=${encodeURIComponent(email.trim().toLowerCase())}`)} />
         <button onClick={() => setResult(null)} className="mt-6 flex items-center gap-2 text-sm font-bold" style={{ color: colors.subText }}>
-          ← Look up another ticket
+          <ArrowLeft size={14} weight="bold" /> Look up another ticket
         </button>
       </div>
     );
@@ -387,7 +388,7 @@ function TicketsView({
 
       {tabEmpty ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-4xl mb-4">{activeTab === 'upcoming' ? '📅' : '🕐'}</p>
+          <div className="mb-4">{activeTab === 'upcoming' ? <CalendarPh size={36} weight="regular" color={colors.subText} /> : <Clock size={36} weight="regular" color={colors.subText} />}</div>
           <p className="text-lg font-black" style={{ color: colors.text }}>
             {activeTab === 'upcoming' ? 'No upcoming events' : 'No past events'}
           </p>
