@@ -113,7 +113,20 @@ export default function EditProfilePage() {
     } catch (err: any) {
       const status = err?.response?.status;
       const code = err?.response?.data?.code;
-      const msg = err?.response?.data?.error ?? 'Could not save your changes. Please try again.';
+      const raw = err?.response?.data;
+      // Every error path on the server returns { error: string }. If this is
+      // undefined here, the response never carried that shape at all — most
+      // often because the request never reached our handler (backend not
+      // rebuilt after this route was added, backend not running, or a proxy/
+      // 404 in between), not because of anything the user typed. Logging the
+      // raw response makes that distinction visible in devtools instead of
+      // always showing the same generic banner.
+      if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.error('[edit-profile] PATCH /v1/user/me failed', { status, data: raw, err });
+      }
+      const msg = (raw && typeof raw === 'object' ? raw.error : undefined)
+        ?? 'Could not save your changes. Please try again.';
       // 409 is the "email already in use" case and belongs on the field
       // rather than in a banner the user has to parse.
       if (status === 409) setErrors((p) => ({ ...p, email: msg }));
@@ -228,8 +241,7 @@ export default function EditProfilePage() {
               Change your email address?
             </p>
             <p className="text-[13px] leading-5 mb-3" style={{ color: colors.subText }}>
-              You&rsquo;ll sign in with {email.trim().toLowerCase()} from now on, and you&rsquo;ll
-              need to confirm it before your account is fully verified.
+              {`You\u2019ll sign in with ${email.trim().toLowerCase()} from now on, and you\u2019ll need to confirm it before your account is fully verified.`}
             </p>
             <div className="flex gap-2">
               <button

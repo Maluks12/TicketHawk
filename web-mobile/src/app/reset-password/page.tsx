@@ -76,6 +76,9 @@ function ResetPasswordInner() {
 
   const token = useMemo(() => params.get('token')?.trim() ?? '', [params]);
   const mode: 'set' | 'request' = token ? 'set' : 'request';
+  // Prefilled when a signed-in user arrives via /profile → Change password —
+  // saves retyping an address we already know instead of showing a blank form.
+  const prefillEmail = useMemo(() => params.get('email')?.trim() ?? '', [params]);
 
   const [loading, setLoading] = useState(false);
   const [globalErr, setGlobalErr] = useState<string | null>(null);
@@ -86,7 +89,7 @@ function ResetPasswordInner() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   // request mode
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(prefillEmail);
 
   const clearErr = (k: string) =>
     setErrors((e) => { const n = { ...e }; delete n[k]; return n; });

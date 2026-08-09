@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User, ChevronRight, Heart, Sun, Moon,
-  LogOut, Bell, Lock, LayoutDashboard, Trash2,
+  LogOut, Lock, LayoutDashboard, Trash2,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useThemeStore, type ThemeMode } from '@/store/themeStore';
@@ -174,15 +174,9 @@ export default function ProfilePage() {
               />
               <Divider />
               <Row
-                icon={<Bell size={16} color={colors.iconColor} />}
-                label="Notifications"
-                onClick={() => {}}
-              />
-              <Divider />
-              <Row
                 icon={<Lock size={16} color={colors.iconColor} />}
                 label="Change password"
-                onClick={() => {}}
+                onClick={() => router.push(`/reset-password?email=${encodeURIComponent(user.email)}`)}
               />
               <Divider />
               <Row
@@ -200,7 +194,7 @@ export default function ProfilePage() {
                 label="Organiser Studio"
                 value="Manage your events"
                 onClick={() => window.open(
-                  process.env.NEXT_PUBLIC_ORGANISER_URL ?? 'https://organiser.example.com',
+                  process.env.NEXT_PUBLIC_ORGANISER_URL ?? 'https://organiser.ticket-hawk.com/',
                   '_blank',
                 )}
               />

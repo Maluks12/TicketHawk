@@ -6,6 +6,7 @@ import { useToast } from '../../../lib/toast';
 import { fmtMoney, fmtDate } from '../../../lib/utils';
 import { getNotifications, markRead, NOTIF_KYC_APPROVED, Notification } from '../../../lib/notifications';
 import { StatCard, StatusPill } from '@/components/ui';
+import { OverviewSummaryRows } from '@/components/overviewRows';
 
 // Mirrors repository.OrganizerStats as serialised by
 // GET /organiser/dashboard/stats. The names matter: this endpoint returns the
@@ -140,6 +141,14 @@ export default function DashboardPage() {
             </button>
           </div>
         )}
+
+        {/* ── Summary rows ─────────────────────────────────────────────
+            Two shallow rows: the event coming up next, and the average across
+            every event already held so the first row has something to be read
+            against. Deliberately six metrics each and no controls — the deep
+            cuts live on /analytics. Self-fetching and silent on failure, so an
+            analytics outage costs two rows rather than the whole screen. */}
+        <OverviewSummaryRows />
 
         {/* ── Stat cards — 4 across like Meta's account overview ──────── */}
         <div className="stat-grid">
