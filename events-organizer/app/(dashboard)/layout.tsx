@@ -128,8 +128,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* ── Sidebar ──────────────────────────────────────────────────── */}
           <aside className="sidebar">
             <div className="sidebar-brand">
-              <div className="brand-mark">
-                <Icon name="calendar" size={18} />
+              {/* The real mark, not a calendar glyph standing in for one.
+                  eslint-disable below: next/image wants width/height and a
+                  loader config for a 36px static asset that's already in
+                  /public — a plain <img> is the right tool at this size. */}
+              <div className="brand-mark" style={{ background: 'transparent', boxShadow: 'none', padding: 0 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/brand-logo.png"
+                  alt=""
+                  width={36}
+                  height={36}
+                  style={{ display: 'block', width: 36, height: 36, objectFit: 'contain' }}
+                />
               </div>
               <div className="brand-text" style={{ minWidth: 0 }}>
                 <div className="brand-word">
