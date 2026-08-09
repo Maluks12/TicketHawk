@@ -939,6 +939,23 @@ func main() {
 		handlers.GetOrganizerProfileHandler(pool),
 	)
 
+	// Legal acceptance — auth-only, NOT organiser-only, for the same reason as
+	// KYC above: a pending applicant reaches /onboarding and /kyc before the
+	// organiser role is granted, and has to be able to accept the agreements on
+	// the way in. Gating these behind OrganizerOnly would mean the one group of
+	// people being asked to agree couldn't record that they had.
+	//
+	// The dashboard gate FAILS OPEN when these are absent, so the frontend can
+	// ship either side of this without locking anyone out of their dashboard.
+	v1.GET("/organiser/legal",
+		middleware.AuthMiddleware(cfg),
+		handlers.GetLegalAcceptanceHandler(pool),
+	)
+	v1.POST("/organiser/legal/accept",
+		middleware.AuthMiddleware(cfg),
+		handlers.AcceptLegalHandler(pool),
+	)
+
 	// ==========================================
 	// Start Server — Graceful shutdown
 	// ==========================================
