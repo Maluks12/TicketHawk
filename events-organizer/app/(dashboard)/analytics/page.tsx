@@ -28,6 +28,16 @@ import {
   coverageNote, DASH,
 } from '@/lib/analytics';
 
+/**
+ * Pulls an HTTP status off an axios-style rejection.
+ *
+ * Distinguishing 404 (endpoint absent) from everything else is what lets the
+ * page tell you the API needs deploying rather than implying something broke.
+ */
+function httpStatus(e: unknown): number | undefined {
+  return (e as { response?: { status?: number } })?.response?.status;
+}
+
 const GRAINS: Array<{ id: Granularity; label: string }> = [
   { id: 'minute', label: 'By minute' },
   { id: 'hour', label: 'By hour' },
@@ -69,22 +79,34 @@ export default function AnalyticsPage() {
   const seriesLoading = loadedKey !== queryKey;
 
   // ── Static data: overview + event list ──────────────────────────────────
+  //
+  // Settled individually, not Promise.all. With `all`, one failing call
+  // discards the other's result — so a missing /analytics/events endpoint would
+  // also throw away a perfectly good overview and blank the whole page.
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const [ov, evs] = await Promise.all([
-          getAnalyticsOverview(),
-          listEventAnalytics(),
-        ]);
-        if (!alive) return;
-        setOverview(ov);
-        setEvents(evs);
-      } catch {
-        if (alive) setError('Could not load analytics.');
-      } finally {
-        if (alive) setLoading(false);
+      const [ovRes, evRes] = await Promise.allSettled([
+        getAnalyticsOverview(),
+        listEventAnalytics(),
+      ]);
+      if (!alive) return;
+
+      if (ovRes.status === 'fulfilled') setOverview(ovRes.value);
+      if (evRes.status === 'fulfilled') setEvents(evRes.value);
+
+      const failures = [ovRes, evRes].filter(r => r.status === 'rejected');
+      if (failures.length > 0) {
+        // A 404 here means one specific thing: the analytics endpoints aren't
+        // deployed on the API yet. That is a deployment state, not a fault, and
+        // a red "Could not load analytics" for it sends you hunting for a bug
+        // that doesn't exist. Say which it is.
+        const notDeployed = failures.some(
+          f => httpStatus((f as PromiseRejectedResult).reason) === 404,
+        );
+        setError(notDeployed ? 'NOT_DEPLOYED' : 'FAILED');
       }
+      setLoading(false);
     })();
     return () => { alive = false; };
   }, []);
@@ -109,9 +131,10 @@ export default function AnalyticsPage() {
         setSeries(res);
         setLoadedKey(queryKey);
       })
-      .catch(() => {
+      .catch((e) => {
         if (!alive) return;
         setSeries(null);
+        setError(prev => prev ?? (httpStatus(e) === 404 ? 'NOT_DEPLOYED' : 'FAILED'));
         // Mark the key loaded even on failure, otherwise seriesLoading stays
         // true forever and the charts sit dimmed with no explanation.
         setLoadedKey(queryKey);
@@ -162,7 +185,25 @@ export default function AnalyticsPage() {
       <div className="page-content">
         <div className="container" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {error && <div className="alert alert-danger">{error}</div>}
+          {error === 'NOT_DEPLOYED' && (
+            <div className="alert alert-info">
+              <Icon name="info" size={17} />
+              <div>
+                <strong>Analytics isn&apos;t switched on yet.</strong>{' '}
+                The dashboard is ready, but the API doesn&apos;t have the analytics
+                endpoints. Run migration <code>000066_event_analytics</code>, deploy
+                the API with the analytics handlers and routes, then reload this page.
+                Reach and views start recording immediately after that — this page
+                will fill in on its own.
+              </div>
+            </div>
+          )}
+          {error === 'FAILED' && (
+            <div className="alert alert-danger">
+              <Icon name="alert-triangle" size={17} />
+              <span>Could not load analytics. Check your connection and try Refresh.</span>
+            </div>
+          )}
 
           {/* ── Controls ──────────────────────────────────────────────── */}
           <div className="card">
@@ -500,6 +541,17 @@ function MetricTile({
   );
 }
 
+/**
+ * A chart card that can be opened full-screen.
+ *
+ * At 900 viewBox units squeezed into a ~1000px card, a 90-day series puts a
+ * point every 11px — dense enough that a spike and a plateau look the same.
+ * Expanding gives the same chart the whole viewport, which is the difference
+ * between seeing that something moved and seeing when.
+ *
+ * The expanded copy renders the SAME components with the same props, just
+ * taller. There is no second chart implementation to drift out of sync.
+ */
 function ChartCard({
   title, sub, series, labels, kind, format, loading,
 }: {
@@ -511,21 +563,80 @@ function ChartCard({
   format: (n: number) => string;
   loading: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpanded(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [expanded]);
+
+  const chart = (height?: number) => (kind === 'line'
+    ? <LineChart series={series} labels={labels} formatValue={format} height={height} />
+    : <BarChart series={series} labels={labels} formatValue={format} height={height} />);
+
   return (
-    <div className="card">
-      <div className="card-header">
-        <div>
-          <div className="card-title">{title}</div>
-          <div className="section-sub">{sub}</div>
+    <>
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">{title}</div>
+            <div className="section-sub">{sub}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <Legend series={series} />
+            <button type="button" className="btn-icon" onClick={() => setExpanded(true)}
+              title="Expand" aria-label={`Expand ${title}`}>
+              <Icon name="external-link" size={15} />
+            </button>
+          </div>
         </div>
-        <Legend series={series} />
+        {/* The body is the click target, not just the icon — a chart that looks
+            expandable should expand when you click it. */}
+        <div
+          className="card-body"
+          onClick={() => setExpanded(true)}
+          style={{
+            opacity: loading ? 0.45 : 1,
+            transition: 'opacity .15s', cursor: 'zoom-in',
+          }}
+        >
+          {chart()}
+        </div>
       </div>
-      <div className="card-body" style={{ opacity: loading ? 0.45 : 1, transition: 'opacity .15s' }}>
-        {kind === 'line'
-          ? <LineChart series={series} labels={labels} formatValue={format} />
-          : <BarChart series={series} labels={labels} formatValue={format} />}
-      </div>
-    </div>
+
+      {expanded && (
+        <div
+          className="modal-overlay"
+          onMouseDown={e => { if (e.target === e.currentTarget) setExpanded(false); }}
+          style={{ alignItems: 'stretch', padding: 24, zIndex: 1500 }}
+        >
+          <div className="modal" style={{
+            maxWidth: 'none', width: '100%', margin: 0,
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title">{title}</div>
+                <div className="section-sub">{sub}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <Legend series={series} />
+                <button type="button" className="btn-icon" onClick={() => setExpanded(false)}
+                  aria-label="Close">
+                  <Icon name="x" size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="modal-body" style={{ flex: 1, minHeight: 0 }}>
+              {/* Roughly viewport height minus the chrome above and below. */}
+              {chart(Math.max(320, Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) - 260)))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

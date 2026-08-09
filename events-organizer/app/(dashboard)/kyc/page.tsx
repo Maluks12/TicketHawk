@@ -539,6 +539,23 @@ function StepPill({ n, label, done, pending }: { n: number; label: string; done:
   );
 }
 
-const lbl: React.CSSProperties = { display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 4 };
-const inp: React.CSSProperties = { width: '100%', padding: '9px 11px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 14, background: 'var(--surface)' };
+const lbl: React.CSSProperties = {
+  display: 'block', fontSize: 12.5, fontWeight: 600, marginBottom: 4,
+  color: 'var(--text)',
+};
+
+// `color` was missing here, which is why the bank and account-type values
+// rendered in the browser's default near-black on a dark card. An unset color
+// inherits from the UA stylesheet for form controls, NOT from the page — so it
+// stayed dark-on-dark however the theme changed.
+const inp: React.CSSProperties = {
+  width: '100%', padding: '10px 12px',
+  border: '1px solid var(--border-2)', borderRadius: 'var(--r)',
+  fontSize: 14,
+  color: 'var(--text)',
+  // Opaque, not the alpha surface: Chrome paints a native <select> popup using
+  // the element's own background-color, and alpha there composites over white.
+  background: 'var(--surface-2)',
+  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+};
 const hint: React.CSSProperties = { fontSize: 12, color: 'var(--text-2)', marginTop: 4 };
