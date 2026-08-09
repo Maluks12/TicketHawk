@@ -16,7 +16,15 @@ import { validatePasswordMatch, firstError } from '../../../lib/validation';
  *      be activated.
  *   2. Ordinary password resets requested by organisers/admins.
  *
- * Backend: POST /auth/reset_password { token, new_password }
+ * It ALSO serves as the "forgot password" screen. Arriving with no token used
+ * to be a dead end reading "Invalid link" — which is exactly what an organiser
+ * saw after clicking Forgot password on the login page, since that link has no
+ * token to carry. No token now means "you want to START a reset", and the page
+ * asks for an email instead.
+ *
+ * Backend:
+ *   POST /auth/reset_password_request { email }            → sends the email
+ *   POST /auth/reset_password         { token, new_password }
  *   (token must be a bare uuid4; 400 with details on weak passwords)
  */
 
@@ -42,6 +50,29 @@ function ResetPasswordInner() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+
+  // Request-a-link mode (no token in the URL)
+  const [email, setEmail] = useState('');
+  const [requestSent, setRequestSent] = useState(false);
+
+  async function handleRequest(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!email.trim()) { setError('Enter the email address on your account'); return; }
+
+    setError(''); setSubmitting(true);
+    try {
+      await api.post('/auth/reset_password_request', { email: email.trim() });
+    } catch {
+      // Deliberately swallowed. The endpoint answers 200 whether or not the
+      // address exists, specifically so nobody can use this form to discover
+      // which emails have accounts. Surfacing a network error differently for
+      // some addresses would reintroduce exactly that leak, so every outcome
+      // shows the same confirmation.
+    } finally {
+      setSubmitting(false);
+      setRequestSent(true);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -126,16 +157,93 @@ function ResetPasswordInner() {
                 Go to login
               </button>
             </div>
-          ) : !token ? (
+          ) : !token && requestSent ? (
+            // Same wording regardless of whether the address exists — see
+            // handleRequest.
             <div style={{ textAlign: 'center' }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%', margin: '0 auto 14px',
+                background: 'var(--success-bg)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg viewBox="0 0 20 20" fill="var(--success)" width="24" height="24">
+                  <path d="M2.94 6.34A2 2 0 014.5 5h11a2 2 0 011.56.75L10 11.2 2.94 6.34z" />
+                  <path d="M18 8.24V14a2 2 0 01-2 2H4a2 2 0 01-2-2V8.24l7.42 5.1a1 1 0 001.16 0L18 8.24z" />
+                </svg>
+              </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
-                Invalid link
+                Check your email
               </div>
-              <div style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.5 }}>
-                This password link is missing its token. Please open the exact link
-                from your email — or request a new one from the login page.
+              <div style={{ fontSize: 14, color: 'var(--text-2)', lineHeight: 1.55, marginBottom: 20 }}>
+                If an account exists for <strong style={{ color: 'var(--text)' }}>{email.trim()}</strong>,
+                we&apos;ve sent a link to reset your password. It expires in 30 minutes.
+                Remember to check your spam folder.
               </div>
+              <button onClick={() => router.replace('/login')} style={{
+                width: '100%', padding: '11px', fontSize: 15, fontWeight: 700,
+                background: 'var(--accent)', color: '#fff', border: 'none',
+                borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+                Back to login
+              </button>
+              <button onClick={() => { setRequestSent(false); setError(''); }} style={{
+                width: '100%', marginTop: 10, background: 'none', border: 'none',
+                cursor: 'pointer', fontSize: 12.5, color: 'var(--text-3)', fontFamily: 'inherit',
+              }}>
+                Use a different email
+              </button>
             </div>
+          ) : !token ? (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+                Reset your password
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16, lineHeight: 1.5 }}>
+                Enter the email address on your organiser account and we&apos;ll send
+                you a link to set a new password.
+              </div>
+
+              {error && (
+                <div style={{
+                  background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: 6,
+                  padding: '10px 12px', color: 'var(--danger-fg)', fontSize: 13, marginBottom: 16,
+                }}>
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleRequest} noValidate>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 5 }}>
+                    Email address
+                  </label>
+                  <input className="org-input" type="email" value={email}
+                    autoFocus autoComplete="email"
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@example.com" />
+                </div>
+
+                <button type="submit" disabled={submitting} style={{
+                  width: '100%', padding: '11px', fontSize: 15, fontWeight: 700,
+                  background: submitting ? 'var(--accent-border)' : 'var(--accent)',
+                  color: '#fff', border: 'none', borderRadius: 6,
+                  cursor: submitting ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+                }}>
+                  {submitting ? 'Sending…' : 'Send reset link'}
+                </button>
+              </form>
+
+              <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: 'var(--text-2)' }}>
+                Remembered it?{' '}
+                <button onClick={() => router.replace('/login')} style={{
+                  background: 'none', border: 'none', color: 'var(--accent)',
+                  fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0,
+                  fontFamily: 'inherit',
+                }}>
+                  Back to login
+                </button>
+              </div>
+            </>
           ) : (
             <>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
