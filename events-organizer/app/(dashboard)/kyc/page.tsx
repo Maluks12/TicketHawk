@@ -30,6 +30,9 @@ import {
   getBanks, getPayoutProfile, setPayoutDetails, looksLikeAccountNumber,
   Bank, PayoutProfile,
 } from '../../../lib/payouts';
+import FileDropZone from '@/components/fileDropZone';
+import { ShieldCheck, ArrowSquareOut } from '@phosphor-icons/react';
+import { ORGANISER_LEGAL_DOCS, legalLinkProps } from '../../../lib/legalLinks';
 
 const ACCOUNT_TYPES = ['Savings', 'Current', 'Transmission'];
 
@@ -198,7 +201,11 @@ export default function FullKycPage() {
   const readyForPaid = verified && bankReady;
 
   return (
-    <div style={{ padding: 24, maxWidth: 640 }}>
+    // Was maxWidth: 640 — a single 640px column on a 1900px monitor, with the
+    // two steps stacked so the bank form sat a full screen below the identity
+    // form. They're independent and both required, so they now sit side by side
+    // and are visible at the same time.
+    <div style={{ padding: '24px 28px 48px', maxWidth: 1440, margin: '0 auto' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>Verification &amp; payouts</h1>
       <p style={{ fontSize: 13.5, color: 'var(--text-2)', margin: '0 0 18px', lineHeight: 1.5 }}>
         Both steps below are required before you can publish a <strong>paid</strong> or{' '}
@@ -222,6 +229,15 @@ export default function FullKycPage() {
         </div>
       )}
 
+      {/* Two independent, both-required steps. Side by side rather than
+          stacked, so an organiser can see what is still outstanding without
+          scrolling — and so the 640px column stops wasting two thirds of a
+          desktop. alignItems:start keeps each card its natural height instead
+          of stretching the shorter one. */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
+        gap: 18, alignItems: 'start',
+      }}>
       {/* ── Step 1: identity ──────────────────────────────────────────────── */}
       <Section title="1. Identity verification"
         badge={verified ? 'Verified' : pending ? 'Under review' : 'Required'}
@@ -301,17 +317,26 @@ export default function FullKycPage() {
                 )}
               </div>
 
-              <div style={{ marginBottom: 12 }}>
-                <label style={lbl}>ID document photo (required)</label>
-                <input type="file" accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) => setIdDoc(e.target.files?.[0] ?? null)} />
-                <div style={hint}>JPEG, PNG or WebP · max 5MB · all corners visible</div>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={lbl}>Proof of address (optional)</label>
-                <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf"
-                  onChange={(e) => setProof(e.target.files?.[0] ?? null)} />
-              </div>
+              <FileDropZone
+                label="ID document photo"
+                required
+                file={idDoc}
+                onPick={setIdDoc}
+                accept={['image/jpeg', 'image/png', 'image/webp']}
+                maxMB={5}
+                hint="All four corners visible, no glare over the ID number"
+              />
+              {/* PDF is allowed here and not above: proof of address is
+                  normally a downloaded bank statement or municipal bill, which
+                  arrives as a PDF, whereas an ID is always a photo. */}
+              <FileDropZone
+                label="Proof of address (optional)"
+                file={proof}
+                onPick={setProof}
+                accept={['image/jpeg', 'image/png', 'image/webp', 'application/pdf']}
+                maxMB={5}
+                hint="Bank statement or municipal bill, less than 3 months old"
+              />
 
               {error && <div className="alert alert-danger" style={{ fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
@@ -411,6 +436,46 @@ export default function FullKycPage() {
           </form>
         )}
       </Section>
+      </div>
+
+      {/* ── Legal ───────────────────────────────────────────────────────────
+          Reference copy, not a consent point. The acceptance itself happens at
+          sign-up (new accounts) or through the gate in the dashboard shell
+          (existing accounts); duplicating a checkbox here would create a second
+          record of the same consent that could disagree with the first. */}
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--r-xl)', padding: 20, marginTop: 18,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{
+            width: 30, height: 30, borderRadius: 9, flexShrink: 0,
+            background: 'var(--accent-soft)', color: 'var(--accent)',
+            display: 'grid', placeItems: 'center',
+          }}>
+            <ShieldCheck size={17} weight="bold" />
+          </span>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Your agreements</div>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.6, margin: '0 0 12px' }}>
+          Selling tickets on TicketHawk is governed by the documents below. They
+          cover the commission split, when settlement runs, who carries a
+          chargeback, and the refund policy buyers are entitled to.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {ORGANISER_LEGAL_DOCS.map(d => (
+            <a
+              key={d.key}
+              {...legalLinkProps(d.key)}
+              className="btn btn-sm"
+              style={{ textDecoration: 'none' }}
+            >
+              {d.label}
+              <ArrowSquareOut size={13} />
+            </a>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

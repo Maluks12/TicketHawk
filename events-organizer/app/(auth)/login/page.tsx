@@ -11,6 +11,8 @@ import {
   firstError,
 } from '../../../lib/validation';
 import { ThemeToggle } from '../../../lib/theme';
+import DateTimePicker from '@/components/dateTimePicker';
+import { ORGANISER_LEGAL_DOCS, legalLinkProps, CURRENT_LEGAL_VERSION } from '../../../lib/legalLinks';
 
 type Mode = 'login' | 'register';
 
@@ -34,6 +36,10 @@ export default function LoginPage() {
   const [dob,              setDob]               = useState('');
   const [showRegPass,      setShowRegPass]       = useState(false);
   const [showConfirmPass,  setShowConfirmPass]   = useState(false);
+  // Explicit, unticked by default. A pre-ticked box is not consent in any
+  // jurisdiction that matters here, and POPIA in particular expects the act to
+  // be voluntary and specific.
+  const [acceptedLegal,    setAcceptedLegal]     = useState(false);
 
   const [error,      setError]      = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -101,6 +107,10 @@ export default function LoginPage() {
       confirm:   validatePasswordMatch(regPassword, confirmPassword),
     });
     if (err) { setError(err); return; }
+    if (!acceptedLegal) {
+      setError('Please accept the Terms of Service, Privacy Policy and Organiser Agreement to continue.');
+      return;
+    }
 
     setError(''); setSubmitting(true);
     try {
@@ -109,6 +119,12 @@ export default function LoginPage() {
         email: regEmail, password: regPassword,
         phone_number: phoneNumber.trim(),
         date_of_birth: new Date(dob).toISOString(),
+        // Recorded at the moment of consent, with the version accepted. The
+        // version is what lets a later material change re-prompt: without it,
+        // "accepted" is permanent and a new fee model could never be
+        // re-consented. Ignored by older backends, which is harmless.
+        accepted_legal_version: CURRENT_LEGAL_VERSION,
+        accepted_legal_at: new Date().toISOString(),
       });
       await login(regEmail, regPassword);
       // New account is a plain user — onboarding turns them into an organiser.
@@ -228,6 +244,16 @@ export default function LoginPage() {
                     </button>
                   </div>
                 </Field>
+                {/* The /reset-password route already existed but nothing on
+                    this screen linked to it, so a locked-out organiser had no
+                    route back in short of guessing the URL. */}
+                <div style={{ textAlign: 'right', marginTop: -6, marginBottom: 16 }}>
+                  <a href="/reset-password" style={{
+                    fontSize: 12.5, color: 'var(--text-3)', textDecoration: 'none',
+                  }}>
+                    Forgot password?
+                  </a>
+                </div>
                 <SubmitBtn loading={submitting} label="Log in" loadingLabel="Logging in…" />
                 <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: 'var(--text-2)' }}>
                   Don't have an account?{' '}
@@ -267,9 +293,25 @@ export default function LoginPage() {
                       placeholder="+27 82 123 4567" />
                   </Field>
                   <Field label="Date of birth">
-                    <input className="org-input" type="date" value={dob}
+                    {/* Was <input type="date">, the last un-themed control in
+                        the product — it rendered Chrome's own light calendar on
+                        a dark page. Same picker the event form uses, in
+                        date-only mode, with month/year dropdowns because paging
+                        back to a birth year one month at a time is ~400
+                        clicks. */}
+                    <DateTimePicker
+                      value={dob}
+                      onChange={setDob}
+                      dateOnly
                       max={new Date().toISOString().split('T')[0]}
-                      onChange={e => setDob(e.target.value)} />
+                      placeholder="Select your date of birth"
+                      style={{
+                        width: '100%', padding: '11px 13px',
+                        border: '1px solid var(--border-2)', borderRadius: 'var(--r)',
+                        background: 'var(--surface-alpha)', color: 'var(--text)',
+                        fontSize: 15, fontFamily: 'inherit', boxSizing: 'border-box',
+                      }}
+                    />
                   </Field>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -304,7 +346,59 @@ export default function LoginPage() {
                     </div>
                   </Field>
                 </div>
-                <SubmitBtn loading={submitting} label="Create account" loadingLabel="Creating…" />
+                {/* ── Legal acceptance ────────────────────────────────────
+                    One checkbox covering all four documents, each individually
+                    linked. Grouping them is what keeps the form usable; linking
+                    each one separately is what keeps the consent informed —
+                    "I agree to the terms" with no way to read them is not
+                    meaningfully agreement. Unticked by default, and the submit
+                    button is disabled until it's ticked, so the state of the
+                    form always matches what will happen. */}
+                <div style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  padding: '12px 14px', marginBottom: 16,
+                  background: 'var(--surface-alpha)',
+                  border: `1px solid ${acceptedLegal ? 'var(--accent-border)' : 'var(--border)'}`,
+                  borderRadius: 'var(--r-lg)',
+                  transition: 'border-color .15s ease',
+                }}>
+                  <input
+                    id="accept-legal"
+                    type="checkbox"
+                    checked={acceptedLegal}
+                    onChange={e => setAcceptedLegal(e.target.checked)}
+                    style={{
+                      width: 16, height: 16, marginTop: 2,
+                      accentColor: 'var(--accent-deep)', cursor: 'pointer', flexShrink: 0,
+                    }}
+                  />
+                  <label htmlFor="accept-legal" style={{
+                    fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-2)', cursor: 'pointer',
+                  }}>
+                    I have read and agree to the{' '}
+                    {ORGANISER_LEGAL_DOCS.map((d, i) => (
+                      <span key={d.key}>
+                        <a
+                          {...legalLinkProps(d.key)}
+                          onClick={e => e.stopPropagation()}
+                          style={{ color: 'var(--accent)', textDecoration: 'underline' }}
+                        >
+                          {d.label}
+                        </a>
+                        {i < ORGANISER_LEGAL_DOCS.length - 2 ? ', '
+                          : i === ORGANISER_LEGAL_DOCS.length - 2 ? ' and ' : ''}
+                      </span>
+                    ))}
+                    .
+                  </label>
+                </div>
+
+                <SubmitBtn
+                  loading={submitting}
+                  disabled={!acceptedLegal}
+                  label="Create account"
+                  loadingLabel="Creating…"
+                />
                 <div style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: 'var(--text-2)' }}>
                   Already have an account?{' '}
                   <InlineLink onClick={() => switchMode('login')} label="Log in" />
@@ -349,16 +443,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function SubmitBtn({ loading, label, loadingLabel }: {
+function SubmitBtn({ loading, label, loadingLabel, disabled = false }: {
   loading: boolean; label: string; loadingLabel: string;
+  /** Blocked for a reason other than being in flight — e.g. legal not accepted. */
+  disabled?: boolean;
 }) {
+  const off = loading || disabled;
   return (
-    <button type="submit" disabled={loading} style={{
+    <button type="submit" disabled={off} style={{
       width: '100%', padding: '11px', borderRadius: 6, marginTop: 4,
-      background: loading ? 'var(--accent-border)' : 'var(--accent)',
+      background: off ? 'var(--accent-border)' : 'var(--accent)',
       border: 'none', color: '#fff', fontSize: 15, fontWeight: 700,
-      cursor: loading ? 'not-allowed' : 'pointer',
-      fontFamily: 'inherit', transition: 'background .15s',
+      cursor: off ? 'not-allowed' : 'pointer',
+      opacity: disabled && !loading ? 0.7 : 1,
+      fontFamily: 'inherit', transition: 'background .15s, opacity .15s',
     }}>
       {loading ? loadingLabel : label}
     </button>

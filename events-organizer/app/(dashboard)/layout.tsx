@@ -23,6 +23,7 @@ import { ConfirmProvider } from '../../lib/confirm';
 import { ThemeToggle } from '../../lib/theme';
 import { getKycStatus } from '../../lib/kyc';
 import { Icon, IconName } from '../../components/icons';
+import LegalGate from '../../components/legalGate';
 
 // Launch gate: merch is built but NOT launching — the tab and the event-page
 // merch sections are hidden, not deleted. Flip to true to bring merch back.
@@ -118,6 +119,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <ToastProvider>
       <ConfirmProvider>
+        {/* Existing organisers never saw the sign-up consent checkbox, so this
+            is where they're told. Fails open — if the status endpoint is down
+            or not yet deployed, nobody is blocked out of their dashboard. */}
+        <LegalGate onLogout={async () => { await logout(); router.replace('/login'); }} />
+
         <div className="app-shell">
           {/* ── Sidebar ──────────────────────────────────────────────────── */}
           <aside className="sidebar">

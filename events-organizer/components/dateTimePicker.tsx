@@ -66,6 +66,11 @@ function toDisplay(d: Date): string {
 }
 
 /** Midnight on the same day — used for date-only comparisons. */
+/** '8 Aug 2026' — no time, for dateOnly mode. */
+function toDisplayDate(d: Date): string {
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -94,20 +99,45 @@ interface Props {
   /** Shown when empty. */
   placeholder?: string;
   style?: CSSProperties;
+  /** Upper bound, same format. Later days are shown but not selectable. */
+  max?: string;
   /** Marks the trigger with an error outline (form validation). */
   invalid?: boolean;
+  /**
+   * Date-only: hides the time field and emits 'YYYY-MM-DD'.
+   *
+   * Used for date-of-birth on sign-up, which has no meaningful time component —
+   * and where the native <input type="date"> was the last un-themed control
+   * left in the product, rendering Chrome's own light-on-dark calendar.
+   */
+  dateOnly?: boolean;
 }
 
 export default function DateTimePicker({
   value,
   onChange,
   min,
-  placeholder = 'Select date and time',
+  max,
+  placeholder,
   style,
   invalid = false,
+  dateOnly = false,
 }: Props) {
-  const selected = useMemo(() => fromValue(value), [value]);
-  const minDate = useMemo(() => (min ? fromValue(min) : null), [min]);
+  // In dateOnly mode the value is a bare 'YYYY-MM-DD'; fromValue expects a time
+  // part, so one is appended for parsing and stripped again on emit.
+  const selected = useMemo(
+    () => fromValue(dateOnly && value && !value.includes('T') ? `${value}T00:00` : value),
+    [value, dateOnly],
+  );
+  const minDate = useMemo(
+    () => (min ? fromValue(min.includes('T') ? min : `${min}T00:00`) : null),
+    [min],
+  );
+  const maxDate = useMemo(
+    () => (max ? fromValue(max.includes('T') ? max : `${max}T23:59`) : null),
+    [max],
+  );
+  const ph = placeholder ?? (dateOnly ? 'Select a date' : 'Select date and time');
 
   const [open, setOpen] = useState(false);
   // The month being browsed, which is independent of the selected day —
@@ -139,21 +169,28 @@ export default function DateTimePicker({
   const cells = useMemo(() => monthGrid(view.getFullYear(), view.getMonth()), [view]);
   const today = useMemo(() => startOfDay(new Date()), []);
   const minDay = minDate ? startOfDay(minDate) : null;
+  const maxDay = maxDate ? startOfDay(maxDate) : null;
+
+  /** Emit in the format the caller expects: date-only or date+time. */
+  const emit = (d: Date) => onChange(dateOnly ? toValue(d).slice(0, 10) : toValue(d));
 
   /** Apply a new date while preserving the chosen time (default 19:00). */
   const pickDay = (day: Date) => {
     const base = selected ?? new Date(day.getFullYear(), day.getMonth(), day.getDate(), 19, 0);
     const next = new Date(
       day.getFullYear(), day.getMonth(), day.getDate(),
-      base.getHours(), base.getMinutes(),
+      dateOnly ? 0 : base.getHours(), dateOnly ? 0 : base.getMinutes(),
     );
     // Selecting the boundary day can land before `min` if the time is earlier;
     // clamp rather than emitting a value the form will just reject.
-    if (minDate && next < minDate) {
-      onChange(toValue(minDate));
+    if (!dateOnly && minDate && next < minDate) {
+      emit(minDate);
+      if (dateOnly) setOpen(false);
       return;
     }
-    onChange(toValue(next));
+    emit(next);
+    // Date-only has no second step, so the popover has nothing left to do.
+    if (dateOnly) setOpen(false);
   };
 
   /** Apply a new time while preserving the chosen day (default today). */
@@ -163,14 +200,47 @@ export default function DateTimePicker({
       base.getFullYear(), base.getMonth(), base.getDate(), hours, minutes,
     );
     if (minDate && next < minDate) {
-      onChange(toValue(minDate));
+      emit(minDate);
       return;
     }
-    onChange(toValue(next));
+    emit(next);
   };
 
   const shiftMonth = (delta: number) =>
     setView(v => new Date(v.getFullYear(), v.getMonth() + delta, 1));
+
+  /**
+   * Years offered in the jump dropdown.
+   *
+   * Bounded by min/max when the caller gives them, so a date-of-birth field
+   * capped at today can't offer 2030, and an event picker can't offer 1920.
+   * Newest first: both use cases start from the recent end.
+   */
+  const yearRange = useMemo(() => {
+    const now = new Date().getFullYear();
+    const lo = minDate ? minDate.getFullYear() : now - 100;
+    const hi = maxDate ? maxDate.getFullYear() : now + 10;
+    const out: number[] = [];
+    for (let y = hi; y >= lo; y--) out.push(y);
+    // The current view might sit outside the bound range (a restored draft, or
+    // a value that predates a later-added min). Keep it selectable rather than
+    // letting the select fall back to a year nobody chose.
+    const vy = view.getFullYear();
+    if (!out.includes(vy)) out.push(vy);
+    return out;
+  }, [minDate, maxDate, view]);
+
+  const jumpSelect: CSSProperties = {
+    padding: '4px 6px',
+    border: '1px solid var(--border)',
+    borderRadius: 7,
+    // Opaque, not the alpha surface: Chrome derives the native option list's
+    // background from the select's own, and alpha there composites over white.
+    background: 'var(--surface-2)',
+    color: 'var(--text)',
+    fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+    cursor: 'pointer', outline: 'none',
+  };
 
   // ── Styles (inline: this component is used inside .field blocks that already
   // style bare inputs, and a stylesheet entry would be one more file to keep in
@@ -233,13 +303,15 @@ export default function DateTimePicker({
         <span style={{
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {selected ? toDisplay(selected) : placeholder}
+          {selected
+            ? (dateOnly ? toDisplayDate(selected) : toDisplay(selected))
+            : ph}
         </span>
         <CalendarBlank size={16} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
       </button>
 
       {open && (
-        <div style={popover} role="dialog" aria-label="Choose date and time">
+        <div style={popover} role="dialog" aria-label={dateOnly ? 'Choose a date' : 'Choose date and time'}>
           {/* Month navigation */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -248,8 +320,28 @@ export default function DateTimePicker({
             <button type="button" onClick={() => shiftMonth(-1)} style={navBtn} aria-label="Previous month">
               <CaretLeft size={14} weight="bold" />
             </button>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
-              {MONTHS[view.getMonth()]} {view.getFullYear()}
+            {/* Month and year are SELECTS, not just a label.
+                Paging one month at a time is fine for an event three weeks out
+                and unusable for a date of birth — reaching 1994 from today
+                would be nearly 400 clicks on the arrow. The arrows stay for
+                fine adjustment; the dropdowns make any date two clicks away. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <select
+                aria-label="Month"
+                value={view.getMonth()}
+                onChange={e => setView(v => new Date(v.getFullYear(), Number(e.target.value), 1))}
+                style={jumpSelect}
+              >
+                {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+              </select>
+              <select
+                aria-label="Year"
+                value={view.getFullYear()}
+                onChange={e => setView(v => new Date(Number(e.target.value), v.getMonth(), 1))}
+                style={{ ...jumpSelect, width: 76 }}
+              >
+                {yearRange.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
             </div>
             <button type="button" onClick={() => shiftMonth(1)} style={navBtn} aria-label="Next month">
               <CaretRight size={14} weight="bold" />
@@ -274,7 +366,9 @@ export default function DateTimePicker({
               const inMonth = day.getMonth() === view.getMonth();
               const isSel = selected ? sameDay(day, selected) : false;
               const isToday = sameDay(day, today);
-              const disabled = minDay ? startOfDay(day) < minDay : false;
+              const dayStart = startOfDay(day);
+              const disabled = (minDay ? dayStart < minDay : false)
+                            || (maxDay ? dayStart > maxDay : false);
               return (
                 <button
                   key={i}
@@ -343,11 +437,13 @@ export default function DateTimePicker({
           minute lists look identical and neither says which is which. This is a
           labelled 12-hour picker with an AM/PM toggle and quick presets, so
           choosing 7pm takes one tap instead of two scrolls. */}
-      <TimeField
-        selected={selected}
-        invalid={invalid}
-        onPick={pickTime}
-      />
+      {!dateOnly && (
+        <TimeField
+          selected={selected}
+          invalid={invalid}
+          onPick={pickTime}
+        />
+      )}
     </div>
   );
 }
