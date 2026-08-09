@@ -615,11 +615,22 @@ export function cartItemSubtitle(item: CartItem): string | null {
       parts.push(item.variant_attributes);
     }
   }
-  if (item.fulfillment_method === 'delivery') parts.push('📦 Delivery');
+  if (item.fulfillment_method === 'delivery') parts.push('Delivery');
   else if (item.fulfillment_method === 'pickup') {
-    parts.push(item.pickup_location ? `🏪 Pickup · ${item.pickup_location}` : '🏪 Pickup');
+    parts.push(item.pickup_location ? `Pickup · ${item.pickup_location}` : 'Pickup');
   }
   return parts.join(' · ') || null;
+}
+
+// This is a plain string helper — it can't embed a React icon component, so
+// the fulfillment glyph that used to live inline in cartItemSubtitle above
+// (📦 / 🏪) now comes from here instead. Call sites render the matching
+// Phosphor icon (Package / Storefront) next to the subtitle text.
+export function cartItemFulfillmentIcon(item: CartItem): 'delivery' | 'pickup' | null {
+  if (item.item_type !== 'merchandise') return null;
+  if (item.fulfillment_method === 'delivery') return 'delivery';
+  if (item.fulfillment_method === 'pickup') return 'pickup';
+  return null;
 }
 
 // ── Payments ───────────────────────────────────────────────────────────────────
