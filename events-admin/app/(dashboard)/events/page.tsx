@@ -163,7 +163,7 @@ function DraftCard({ draft, onResume, onDelete }: { draft: LocalDraft; onResume:
   })();
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.75rem 1rem', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r)', minWidth: 0 }}>
-      <div style={{ width: '36px', height: '36px', borderRadius: 'var(--r)', background: '#e7f3ff', border: '1px solid #b8d9ff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <div style={{ width: '36px', height: '36px', borderRadius: 'var(--r)', background: 'var(--accent-soft)', border: '1px solid var(--accent-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <span style={{ fontSize: '1rem' }}>📝</span>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -449,7 +449,7 @@ export default function EventsPage() {
         <div style={{ padding: '16px 20px 0', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Local Drafts</span>
-            <span style={{ background: '#e7f3ff', color: '#1877f2', borderRadius: 99, padding: '1px 8px', fontSize: 12, fontWeight: 700 }}>{drafts.length}</span>
+            <span style={{ background: 'var(--accent-soft)', color: 'var(--accent)', borderRadius: 99, padding: '1px 8px', fontSize: 12, fontWeight: 700 }}>{drafts.length}</span>
             <span style={{ fontSize: 13, color: 'var(--text-3)', marginLeft: 2 }}>Unsaved forms are auto-saved when you close the modal</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '.5rem' }}>
@@ -531,7 +531,7 @@ export default function EventsPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
                 <div className="modal-title">{editingId ? 'Edit Event' : currentDraftId ? 'Resume Draft' : 'Create Event'}</div>
                 {currentDraftId && (
-                  <span style={{ fontSize: 12, fontWeight: 700, background: '#e7f3ff', color: '#1877f2', borderRadius: 99, padding: '2px 8px' }}>DRAFT</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, background: 'var(--accent-soft)', color: 'var(--accent)', borderRadius: 99, padding: '2px 8px' }}>DRAFT</span>
                 )}
               </div>
               <button className="modal-close" onClick={() => closeModal()}>✕</button>

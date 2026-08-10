@@ -41,7 +41,7 @@ export default function LoginPage() {
         <div style={{ fontSize: '1.1rem', fontWeight: 800, letterSpacing: '.05em', marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '.6rem', color: 'var(--text)' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand-logo.png" alt="" width={30} height={30} style={{ borderRadius: 6 }} />
-          TICKET<span style={{ color: '#FF2D55' }}>HAWK</span>
+          TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
           <span style={{ color: 'var(--text-2)', fontWeight: 400, fontFamily: 'var(--font-mono)', fontSize: '.9rem' }}>/admin</span>
         </div>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 600, marginBottom: '.25rem', color: 'var(--text)' }}>Admin Dashboard</h1>
@@ -59,7 +59,7 @@ export default function LoginPage() {
               onKeyDown={e => e.key === 'Enter' && handleSubmit(e as unknown as React.FormEvent)} />
           </div>
           {error && (
-            <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 'var(--r)', padding: '.6rem .75rem', color: '#fca5a5', fontSize: '.85rem', marginBottom: '1rem' }}>
+            <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 'var(--r)', padding: '.6rem .75rem', color: 'var(--danger-border)', fontSize: '.85rem', marginBottom: '1rem' }}>
               {error}
             </div>
           )}

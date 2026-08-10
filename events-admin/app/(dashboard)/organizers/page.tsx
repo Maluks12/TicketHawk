@@ -57,8 +57,8 @@ function TierBadge({ tier }: { tier: string }) {
   return (
     <span style={{
       fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
-      background: instant ? '#e7f3ff' : '#f0f2f5',
-      color: instant ? '#1877f2' : '#606770',
+      background: instant ? 'var(--accent-soft)' : 'var(--bg)',
+      color: instant ? 'var(--accent)' : 'var(--text-2)',
     }}>
       {instant ? '⚡ Instant' : 'Held (post-event)'}
     </span>
@@ -67,12 +67,12 @@ function TierBadge({ tier }: { tier: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, [string, string]> = {
-    pending:    ['#fff4e5', '#b45309'],
-    processing: ['#e7f3ff', '#1877f2'],
-    paid:       ['#e6f4ea', '#137333'],
-    failed:     ['#fce8e6', '#c5221f'],
+    pending:    ['var(--warning-bg)', 'var(--warning-fg)'],
+    processing: ['var(--accent-soft)', 'var(--accent)'],
+    paid:       ['var(--success-bg)', 'var(--success-fg)'],
+    failed:     ['var(--danger-bg)', 'var(--danger-fg)'],
   };
-  const [bg, fg] = colors[status] ?? ['#f0f2f5', '#606770'];
+  const [bg, fg] = colors[status] ?? ['var(--bg)', 'var(--text-2)'];
   return (
     <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: bg, color: fg }}>
       {status}
@@ -82,7 +82,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function Check({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: ok ? '#137333' : '#606770' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: ok ? 'var(--success-fg)' : 'var(--text-2)' }}>
       <span style={{ fontWeight: 700 }}>{ok ? '✓' : '○'}</span> {children}
     </div>
   );
@@ -216,17 +216,17 @@ export default function OrganizersPage() {
     }
   }
 
-  const th: React.CSSProperties = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, color: '#606770', textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: '1px solid #dddfe2' };
-  const td: React.CSSProperties = { padding: '10px 12px', fontSize: 13, color: '#1c1e21', borderBottom: '1px solid #f0f2f5', verticalAlign: 'top' };
-  const btn: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid #dddfe2', background: '#fff', cursor: 'pointer' };
-  const btnPrimary: React.CSSProperties = { ...btn, background: '#1877f2', borderColor: '#1877f2', color: '#fff' };
+  const th: React.CSSProperties = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: '1px solid var(--border)' };
+  const td: React.CSSProperties = { padding: '10px 12px', fontSize: 13, color: 'var(--text)', borderBottom: '1px solid var(--border)', verticalAlign: 'top' };
+  const btn: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer' };
+  const btnPrimary: React.CSSProperties = { ...btn, background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' };
 
   return (
     <div style={{ padding: 24, maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1c1e21', margin: 0 }}>Organizers &amp; Payouts</h1>
-          <p style={{ fontSize: 13, color: '#606770', margin: '4px 0 0' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', margin: 0 }}>Organizers &amp; Payouts</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-2)', margin: '4px 0 0' }}>
             Payout tiers, bank details, and the settlement ledger.
           </p>
         </div>
@@ -240,7 +240,7 @@ export default function OrganizersPage() {
 
       {/* ── Organizers tab ─────────────────────────────────────────────────── */}
       {!loading && tab === 'organizers' && (
-        <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #dddfe2', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr>
               <th style={th}>Business</th>
@@ -257,30 +257,30 @@ export default function OrganizersPage() {
                   <tr key={org.organizer_id}>
                     <td style={td}>
                       <div style={{ fontWeight: 600 }}>{org.business_name}</div>
-                      <div style={{ fontSize: 12, color: '#606770' }}>{org.business_email}</div>
-                      <div style={{ fontSize: 11, color: '#606770' }}>status: {org.status}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-2)' }}>{org.business_email}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-2)' }}>status: {org.status}</div>
                     </td>
                     <td style={td}>
                       <TierBadge tier={org.payout_tier} />
                       {org.tier_upgraded_at && org.payout_tier === 'instant' && (
-                        <div style={{ fontSize: 11, color: '#606770', marginTop: 4 }}>since {fmtDateTime(org.tier_upgraded_at)}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 4 }}>since {fmtDateTime(org.tier_upgraded_at)}</div>
                       )}
                     </td>
                     <td style={td}>
                       {org.has_subaccount ? (
                         <>
                           <div>{org.settlement_bank_name} ····{org.bank_account_last_4}</div>
-                          <div style={{ fontSize: 11, color: '#606770' }}>{org.bank_account_name}</div>
-                          <div style={{ fontSize: 11, color: '#606770', fontFamily: 'monospace' }}>{org.subaccount_code}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-2)' }}>{org.bank_account_name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'monospace' }}>{org.subaccount_code}</div>
                         </>
                       ) : (
-                        <span style={{ fontSize: 12, color: '#b45309', fontWeight: 600 }}>No bank details</span>
+                        <span style={{ fontSize: 12, color: 'var(--warning-fg)', fontWeight: 600 }}>No bank details</span>
                       )}
                     </td>
                     <td style={td}>
                       {e ? (
                         <>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: e.eligible ? '#137333' : '#606770', cursor: 'pointer' }}
+                          <div style={{ fontSize: 12, fontWeight: 700, color: e.eligible ? 'var(--success-fg)' : 'var(--text-2)', cursor: 'pointer' }}
                                onClick={() => setExpanded(open ? null : org.organizer_id)}>
                             {e.eligible ? '✓ Eligible for Instant' : 'Not yet eligible'} {open ? '▾' : '▸'}
                           </div>
@@ -302,7 +302,7 @@ export default function OrganizersPage() {
                             </div>
                           )}
                         </>
-                      ) : <span style={{ fontSize: 12, color: '#606770' }}>—</span>}
+                      ) : <span style={{ fontSize: 12, color: 'var(--text-2)' }}>—</span>}
                     </td>
                     <td style={{ ...td, whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
@@ -326,7 +326,7 @@ export default function OrganizersPage() {
                 );
               })}
               {organizers.length === 0 && (
-                <tr><td style={{ ...td, textAlign: 'center', color: '#606770' }} colSpan={5}>No organizers yet</td></tr>
+                <tr><td style={{ ...td, textAlign: 'center', color: 'var(--text-2)' }} colSpan={5}>No organizers yet</td></tr>
               )}
             </tbody>
           </table>
@@ -343,7 +343,7 @@ export default function OrganizersPage() {
               </button>
             ))}
           </div>
-          <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #dddfe2', overflow: 'hidden' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>
                 <th style={th}>Event</th>
@@ -359,10 +359,10 @@ export default function OrganizersPage() {
                     <td style={td}>
                       <div style={{ fontWeight: 600 }}>{p.event_title || p.event_id}</div>
                       {p.paystack_transfer_code && (
-                        <div style={{ fontSize: 11, color: '#606770', fontFamily: 'monospace' }}>{p.paystack_transfer_code}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'monospace' }}>{p.paystack_transfer_code}</div>
                       )}
                       {p.failure_reason && (
-                        <div style={{ fontSize: 11, color: '#c5221f', marginTop: 2 }}>{p.failure_reason}</div>
+                        <div style={{ fontSize: 11, color: 'var(--danger-fg)', marginTop: 2 }}>{p.failure_reason}</div>
                       )}
                     </td>
                     <td style={td}>{p.kind === 'event_settlement' ? 'Event settlement' : 'Reserve release'}</td>
@@ -370,7 +370,7 @@ export default function OrganizersPage() {
                     <td style={td}><StatusBadge status={p.status} /></td>
                     <td style={td}>
                       {fmtDateTime(p.created_at)}
-                      {p.paid_at && <div style={{ fontSize: 11, color: '#137333' }}>paid {fmtDateTime(p.paid_at)}</div>}
+                      {p.paid_at && <div style={{ fontSize: 11, color: 'var(--success-fg)' }}>paid {fmtDateTime(p.paid_at)}</div>}
                     </td>
                     <td style={{ ...td, textAlign: 'right' }}>
                       {(p.status === 'failed' || p.status === 'pending' || p.status === 'processing') && (
@@ -382,7 +382,7 @@ export default function OrganizersPage() {
                   </tr>
                 ))}
                 {payouts.length === 0 && (
-                  <tr><td style={{ ...td, textAlign: 'center', color: '#606770' }} colSpan={6}>No payouts{payoutFilter ? ` with status '${payoutFilter}'` : ' yet'}</td></tr>
+                  <tr><td style={{ ...td, textAlign: 'center', color: 'var(--text-2)' }} colSpan={6}>No payouts{payoutFilter ? ` with status '${payoutFilter}'` : ' yet'}</td></tr>
                 )}
               </tbody>
             </table>
@@ -394,31 +394,31 @@ export default function OrganizersPage() {
       {bankFormFor && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
              onClick={() => !saving && setBankFormFor(null)}>
-          <div style={{ background: '#fff', borderRadius: 10, padding: 20, width: 420, maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
+          <div style={{ background: 'var(--surface)', borderRadius: 10, padding: 20, width: 420, maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
             <h2 style={{ fontSize: 16, fontWeight: 800, margin: '0 0 4px' }}>Payout details — {bankFormFor.business_name}</h2>
-            <p style={{ fontSize: 12, color: '#606770', margin: '0 0 14px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-2)', margin: '0 0 14px' }}>
               Creates the Paystack subaccount + transfer recipient. Only the last 4 digits are stored on our side.
             </p>
 
-            <label style={{ fontSize: 12, fontWeight: 700, color: '#606770', display: 'block', marginBottom: 4 }}>Bank</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', display: 'block', marginBottom: 4 }}>Bank</label>
             <select value={bankForm.bank_code}
                     onChange={e => setBankForm(f => ({ ...f, bank_code: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #dddfe2', fontSize: 13, marginBottom: 12 }}>
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, marginBottom: 12 }}>
               <option value="">{banks.length ? 'Select a bank…' : 'Loading banks…'}</option>
               {banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
             </select>
 
-            <label style={{ fontSize: 12, fontWeight: 700, color: '#606770', display: 'block', marginBottom: 4 }}>Account number</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', display: 'block', marginBottom: 4 }}>Account number</label>
             <input value={bankForm.account_number}
                    onChange={e => setBankForm(f => ({ ...f, account_number: e.target.value.replace(/\D/g, '') }))}
                    placeholder="e.g. 1234567890" inputMode="numeric"
-                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #dddfe2', fontSize: 13, marginBottom: 12, boxSizing: 'border-box' }} />
+                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, marginBottom: 12, boxSizing: 'border-box' }} />
 
-            <label style={{ fontSize: 12, fontWeight: 700, color: '#606770', display: 'block', marginBottom: 4 }}>Account holder name</label>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', display: 'block', marginBottom: 4 }}>Account holder name</label>
             <input value={bankForm.account_name}
                    onChange={e => setBankForm(f => ({ ...f, account_name: e.target.value }))}
-                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #dddfe2', fontSize: 13, marginBottom: 6, boxSizing: 'border-box' }} />
-            <p style={{ fontSize: 11, color: '#b45309', margin: '0 0 14px' }}>
+                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, marginBottom: 6, boxSizing: 'border-box' }} />
+            <p style={{ fontSize: 11, color: 'var(--warning-fg)', margin: '0 0 14px' }}>
               ⚠️ Paystack does not verify ZA account-holder names — double-check the account number. Money sent to a wrong account is not recoverable by us.
             </p>
 

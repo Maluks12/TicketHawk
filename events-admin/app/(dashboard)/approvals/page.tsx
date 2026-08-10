@@ -67,7 +67,7 @@ function timeAgo(iso: string) {
   return fmtDate(iso);
 }
 
-function Pill({ label, color = '#1877f2' }: { label: string; color?: string }) {
+function Pill({ label, color = 'var(--accent)' }: { label: string; color?: string }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center',
@@ -80,9 +80,9 @@ function Pill({ label, color = '#1877f2' }: { label: string; color?: string }) {
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid #f0f2f5' }}>
-      <div style={{ width: 140, flexShrink: 0, fontSize: 12, fontWeight: 600, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em', paddingTop: 2 }}>{label}</div>
-      <div style={{ flex: 1, fontSize: 14, color: '#1c1e21', lineHeight: 1.6 }}>{children}</div>
+    <div style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ width: 140, flexShrink: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em', paddingTop: 2 }}>{label}</div>
+      <div style={{ flex: 1, fontSize: 14, color: 'var(--text)', lineHeight: 1.6 }}>{children}</div>
     </div>
   );
 }
@@ -92,8 +92,8 @@ function EmptyQueue() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, padding: 40, textAlign: 'center' }}>
       <div style={{ fontSize: 48, opacity: .25 }}>✓</div>
-      <div style={{ fontSize: 18, fontWeight: 700, color: '#1c1e21' }}>All clear!</div>
-      <div style={{ fontSize: 14, color: '#606770', maxWidth: 280 }}>No organiser events are waiting for review. Check back later.</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>All clear!</div>
+      <div style={{ fontSize: 14, color: 'var(--text-2)', maxWidth: 280 }}>No organiser events are waiting for review. Check back later.</div>
     </div>
   );
 }
@@ -199,7 +199,7 @@ export default function ApprovalsPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {!queueLoading && (
-            <span style={{ fontSize: 13, color: '#606770' }}>
+            <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
               {queue.length === 0 ? 'No events pending' : `${queue.length} event${queue.length !== 1 ? 's' : ''} pending review`}
             </span>
           )}
@@ -212,15 +212,15 @@ export default function ApprovalsPage() {
 
         {/* ── Left: Queue list ── */}
         <div style={{
-          width: 320, flexShrink: 0, borderRight: '1px solid #dddfe2',
-          display: 'flex', flexDirection: 'column', background: '#f7f8fa', overflowY: 'auto',
+          width: 320, flexShrink: 0, borderRight: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column', background: 'var(--surface-2)', overflowY: 'auto',
         }}>
           {queueLoading ? (
-            <div style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 10, color: '#606770', fontSize: 14 }}>
+            <div style={{ padding: 24, display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-2)', fontSize: 14 }}>
               <div className="spinner" style={{ width: 16, height: 16 }} /> Loading…
             </div>
           ) : queue.length === 0 ? (
-            <div style={{ padding: 24, color: '#8a8d91', fontSize: 14, textAlign: 'center', marginTop: 24 }}>
+            <div style={{ padding: 24, color: 'var(--text-3)', fontSize: 14, textAlign: 'center', marginTop: 24 }}>
               No events pending review
             </div>
           ) : (
@@ -232,19 +232,19 @@ export default function ApprovalsPage() {
                   onClick={() => setSelectedId(ev.id)}
                   style={{
                     display: 'block', width: '100%', textAlign: 'left', border: 'none',
-                    borderBottom: '1px solid #dddfe2', padding: '12px 14px',
-                    background: selected ? '#fff' : 'transparent',
-                    cursor: 'pointer', borderLeft: selected ? '3px solid #1877f2' : '3px solid transparent',
+                    borderBottom: '1px solid var(--border)', padding: '12px 14px',
+                    background: selected ? 'var(--surface)' : 'transparent',
+                    cursor: 'pointer', borderLeft: selected ? '3px solid var(--accent)' : '3px solid transparent',
                     transition: 'background .12s',
                   }}
                 >
-                  <div style={{ fontWeight: 600, fontSize: 13, color: '#1c1e21', marginBottom: 4, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)', marginBottom: 4, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
                     {ev.title}
                   </div>
-                  <div style={{ fontSize: 12, color: '#606770', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {[ev.venue_name, ev.city].filter(Boolean).join(', ') || 'No location'}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#8a8d91' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-3)' }}>
                     <span>{ev.start_time ? fmtDate(ev.start_time) : '—'}</span>
                     <span>·</span>
                     <span>{fmtMoney(ev.price, ev.currency)}</span>
@@ -261,11 +261,11 @@ export default function ApprovalsPage() {
           {!selectedId ? (
             <EmptyQueue />
           ) : detailLoading ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, color: '#606770' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--text-2)' }}>
               <div className="spinner" /> Loading event details…
             </div>
           ) : !detail ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8a8d91' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)' }}>
               Could not load event details
             </div>
           ) : (
@@ -276,10 +276,10 @@ export default function ApprovalsPage() {
                 {/* Title + status */}
                 <div style={{ marginBottom: 20 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
-                    <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1c1e21', lineHeight: 1.3, flex: 1, minWidth: 0 }}>{detail.title}</h2>
-                    <span style={{ background: '#fff3e0', color: '#e65100', border: '1px solid #fcd34d', borderRadius: 99, padding: '3px 10px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>Pending Review</span>
+                    <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, flex: 1, minWidth: 0 }}>{detail.title}</h2>
+                    <span style={{ background: 'var(--warning-bg)', color: 'var(--warning-fg)', border: '1px solid var(--warning-border)', borderRadius: 99, padding: '3px 10px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>Pending Review</span>
                   </div>
-                  <div style={{ fontSize: 13, color: '#8a8d91' }}>Submitted {timeAgo(detail.created_at)}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Submitted {timeAgo(detail.created_at)}</div>
                 </div>
 
                 {/* Images */}
@@ -289,13 +289,13 @@ export default function ApprovalsPage() {
                       {detail.cover_image_url && (
                         <button
                           onClick={() => setActiveImageTab('cover')}
-                          style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1px solid', cursor: 'pointer', background: activeImageTab === 'cover' ? '#1877f2' : '#fff', borderColor: activeImageTab === 'cover' ? '#1877f2' : '#dddfe2', color: activeImageTab === 'cover' ? '#fff' : '#606770' }}
+                          style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1px solid', cursor: 'pointer', background: activeImageTab === 'cover' ? 'var(--accent)' : 'var(--surface)', borderColor: activeImageTab === 'cover' ? 'var(--accent)' : 'var(--border)', color: activeImageTab === 'cover' ? 'var(--surface)' : 'var(--text-2)' }}
                         >Cover</button>
                       )}
                       {detail.banner_image_url && (
                         <button
                           onClick={() => setActiveImageTab('banner')}
-                          style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1px solid', cursor: 'pointer', background: activeImageTab === 'banner' ? '#1877f2' : '#fff', borderColor: activeImageTab === 'banner' ? '#1877f2' : '#dddfe2', color: activeImageTab === 'banner' ? '#fff' : '#606770' }}
+                          style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1px solid', cursor: 'pointer', background: activeImageTab === 'banner' ? 'var(--accent)' : 'var(--surface)', borderColor: activeImageTab === 'banner' ? 'var(--accent)' : 'var(--border)', color: activeImageTab === 'banner' ? 'var(--surface)' : 'var(--text-2)' }}
                         >Banner</button>
                       )}
                     </div>
@@ -303,7 +303,7 @@ export default function ApprovalsPage() {
                       <img
                         src={detail.cover_image_url}
                         alt="Cover"
-                        style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 8, border: '1px solid #dddfe2', display: 'block' }}
+                        style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)', display: 'block' }}
                         onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
                     )}
@@ -311,7 +311,7 @@ export default function ApprovalsPage() {
                       <img
                         src={detail.banner_image_url}
                         alt="Banner"
-                        style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 8, border: '1px solid #dddfe2', display: 'block' }}
+                        style={{ width: '100%', maxHeight: 260, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)', display: 'block' }}
                         onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
                     )}
@@ -321,11 +321,11 @@ export default function ApprovalsPage() {
                 {/* Gallery */}
                 {detail.gallery_images && detail.gallery_images.length > 0 && (
                   <div style={{ marginBottom: 20 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Gallery</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>Gallery</div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {detail.gallery_images.map((url, i) => (
                         <img key={i} src={url} alt={`Gallery ${i + 1}`}
-                          style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid #dddfe2' }}
+                          style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }}
                           onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
                       ))}
@@ -334,14 +334,14 @@ export default function ApprovalsPage() {
                 )}
 
                 {/* Core details */}
-                <div style={{ background: '#fff', border: '1px solid #dddfe2', borderRadius: 8, padding: '0 16px', marginBottom: 20 }}>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '0 16px', marginBottom: 20 }}>
                   <DetailRow label="Description">
-                    <div style={{ whiteSpace: 'pre-wrap', color: '#3c4043' }}>{detail.description || '—'}</div>
+                    <div style={{ whiteSpace: 'pre-wrap', color: 'var(--text-2)' }}>{detail.description || '—'}</div>
                   </DetailRow>
                   <DetailRow label="Venue">
                     <div>{detail.venue_name || '—'}</div>
-                    {detail.address && <div style={{ color: '#606770', fontSize: 13 }}>{detail.address}</div>}
-                    {detail.city && <div style={{ color: '#606770', fontSize: 13 }}>{detail.city}</div>}
+                    {detail.address && <div style={{ color: 'var(--text-2)', fontSize: 13 }}>{detail.address}</div>}
+                    {detail.city && <div style={{ color: 'var(--text-2)', fontSize: 13 }}>{detail.city}</div>}
                   </DetailRow>
                   <DetailRow label="Date & Time">
                     <div>
@@ -354,74 +354,74 @@ export default function ApprovalsPage() {
                         {new Date(detail.end_time).toLocaleString('en-ZA', { dateStyle: 'full', timeStyle: 'short' })}
                       </div>
                     )}
-                    {detail.timezone && <div style={{ color: '#8a8d91', fontSize: 12, marginTop: 2 }}>Timezone: {detail.timezone}</div>}
+                    {detail.timezone && <div style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 2 }}>Timezone: {detail.timezone}</div>}
                   </DetailRow>
                   <DetailRow label="Pricing">
                     <span style={{ fontWeight: 600, fontSize: 15 }}>{fmtMoney(detail.price, detail.currency)}</span>
                     {detail.max_capacity && (
-                      <span style={{ marginLeft: 12, fontSize: 13, color: '#606770' }}>· Capacity: {detail.max_capacity.toLocaleString()}</span>
+                      <span style={{ marginLeft: 12, fontSize: 13, color: 'var(--text-2)' }}>· Capacity: {detail.max_capacity.toLocaleString()}</span>
                     )}
                     {detail.allow_waitlist && (
-                      <span style={{ marginLeft: 8, fontSize: 12, color: '#42b72a', fontWeight: 600 }}>· Waitlist enabled</span>
+                      <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--success)', fontWeight: 600 }}>· Waitlist enabled</span>
                     )}
                   </DetailRow>
                   {(detail.tags && detail.tags.length > 0) && (
                     <DetailRow label="Tags">
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {detail.tags.map((t, i) => <Pill key={i} label={t} color="#606770" />)}
+                        {detail.tags.map((t, i) => <Pill key={i} label={t} color="var(--text-2)" />)}
                       </div>
                     </DetailRow>
                   )}
                   {(detail.performers && detail.performers.length > 0) && (
                     <DetailRow label="Performers">
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {detail.performers.map((p, i) => <Pill key={i} label={p} color="#1877f2" />)}
+                        {detail.performers.map((p, i) => <Pill key={i} label={p} color="var(--accent)" />)}
                       </div>
                     </DetailRow>
                   )}
                   {(detail.teams && detail.teams.length > 0) && (
                     <DetailRow label="Teams">
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {detail.teams.map((t, i) => <Pill key={i} label={t} color="#9333ea" />)}
+                        {detail.teams.map((t, i) => <Pill key={i} label={t} color="var(--accent)" />)}
                       </div>
                     </DetailRow>
                   )}
                   {detail.refund_policy && (
                     <DetailRow label="Refund Policy">
-                      <div style={{ color: '#3c4043', whiteSpace: 'pre-wrap' }}>{detail.refund_policy}</div>
+                      <div style={{ color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>{detail.refund_policy}</div>
                     </DetailRow>
                   )}
                   {detail.terms_and_conditions && (
                     <DetailRow label="T&Cs">
-                      <div style={{ color: '#3c4043', whiteSpace: 'pre-wrap' }}>{detail.terms_and_conditions}</div>
+                      <div style={{ color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>{detail.terms_and_conditions}</div>
                     </DetailRow>
                   )}
                   <DetailRow label="Organiser ID">
-                    <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#606770' }}>{detail.organizer_id || 'N/A'}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-2)' }}>{detail.organizer_id || 'N/A'}</span>
                   </DetailRow>
                 </div>
               </div>
 
               {/* ── Sticky action bar ── */}
               <div style={{
-                flexShrink: 0, padding: '14px 28px', borderTop: '1px solid #dddfe2',
-                background: '#fff', display: 'flex', alignItems: 'center', gap: 10,
+                flexShrink: 0, padding: '14px 28px', borderTop: '1px solid var(--border)',
+                background: 'var(--surface)', display: 'flex', alignItems: 'center', gap: 10,
               }}>
-                <div style={{ flex: 1, fontSize: 13, color: '#8a8d91' }}>
+                <div style={{ flex: 1, fontSize: 13, color: 'var(--text-3)' }}>
                   Review this event carefully before approving.
                 </div>
                 <button
                   className="btn"
                   onClick={() => { setRejectOpen(true); setRejectReason(''); }}
                   disabled={submitting}
-                  style={{ borderColor: '#fa3e3e', color: '#fa3e3e', fontWeight: 600 }}
+                  style={{ borderColor: 'var(--danger)', color: 'var(--danger)', fontWeight: 600 }}
                 >✕ Deny</button>
                 <button
                   className="btn"
                   onClick={() => approveAndPromote(detail.id)}
                   disabled={submitting}
                   title="Approve and feature this event on the home page as a sponsored card — no ad spend required."
-                  style={{ background: '#1877f2', borderColor: '#1877f2', color: '#fff', fontWeight: 600 }}
+                  style={{ background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff', fontWeight: 600 }}
                 >
                   {submitting ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Processing…</> : '★ Approve & Add to Home'}
                 </button>
@@ -429,7 +429,7 @@ export default function ApprovalsPage() {
                   className="btn"
                   onClick={() => approve(detail.id)}
                   disabled={submitting}
-                  style={{ background: '#42b72a', borderColor: '#42b72a', color: '#fff', fontWeight: 600 }}
+                  style={{ background: 'var(--success)', borderColor: 'var(--success)', color: '#fff', fontWeight: 600 }}
                 >
                   {submitting ? <><div className="spinner" style={{ width: 14, height: 14 }} /> Processing…</> : '✓ Approve & Publish'}
                 </button>
@@ -452,7 +452,7 @@ export default function ApprovalsPage() {
                 The organiser will receive your reason and can revise and resubmit the event.
               </div>
               {detail && (
-                <div style={{ padding: '8px 12px', background: '#f7f8fa', borderRadius: 6, marginBottom: 14, fontSize: 13, color: '#606770', fontWeight: 500 }}>
+                <div style={{ padding: '8px 12px', background: 'var(--surface-2)', borderRadius: 6, marginBottom: 14, fontSize: 13, color: 'var(--text-2)', fontWeight: 500 }}>
                   "{detail.title}"
                 </div>
               )}
@@ -465,7 +465,7 @@ export default function ApprovalsPage() {
                   placeholder="e.g. Missing venue details, description too vague, start date conflicts with local regulations…"
                   autoFocus
                 />
-                <div style={{ fontSize: 12, color: rejectReason.trim().length >= 10 ? '#42b72a' : '#8a8d91', marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: rejectReason.trim().length >= 10 ? 'var(--success)' : 'var(--text-3)', marginTop: 4 }}>
                   {rejectReason.trim().length} characters {rejectReason.trim().length < 10 ? `(${10 - rejectReason.trim().length} more needed)` : '✓'}
                 </div>
               </div>
@@ -476,7 +476,7 @@ export default function ApprovalsPage() {
                 className="btn"
                 onClick={submitReject}
                 disabled={rejectReason.trim().length < 10 || submitting}
-                style={{ background: '#fa3e3e', borderColor: '#fa3e3e', color: '#fff', fontWeight: 600 }}
+                style={{ background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff', fontWeight: 600 }}
               >
                 {submitting ? 'Denying…' : 'Deny Event'}
               </button>

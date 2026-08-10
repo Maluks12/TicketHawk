@@ -44,17 +44,17 @@ const TABS = [
 ] as const;
 
 const MATCH_STYLES: Record<string, { color: string; label: string; hint: string }> = {
-  match:   { color: '#1a7f37', label: 'Full match',    hint: 'Bank account name matches the legal name on the ID.' },
-  partial: { color: '#b58a00', label: 'Partial match', hint: 'Surname matches — initials or a business account. Judgement call.' },
-  none:    { color: '#c62828', label: 'No match',      hint: 'Bank account name does not contain the legal surname. Investigate before approving.' },
-  unknown: { color: '#8a8d91', label: 'No bank details', hint: 'Organizer has not saved payout bank details yet.' },
+  match:   { color: 'var(--success-fg)', label: 'Full match',    hint: 'Bank account name matches the legal name on the ID.' },
+  partial: { color: 'var(--warning-fg)', label: 'Partial match', hint: 'Surname matches — initials or a business account. Judgement call.' },
+  none:    { color: 'var(--danger-fg)', label: 'No match',      hint: 'Bank account name does not contain the legal surname. Investigate before approving.' },
+  unknown: { color: 'var(--text-3)', label: 'No bank details', hint: 'Organizer has not saved payout bank details yet.' },
 };
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
-    pending_review: '#b58a00', verified: '#1a7f37', rejected: '#c62828', none: '#8a8d91',
+    pending_review: 'var(--warning-fg)', verified: 'var(--success-fg)', rejected: 'var(--danger-fg)', none: 'var(--text-3)',
   };
-  const color = map[status] || '#8a8d91';
+  const color = map[status] || 'var(--text-3)';
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center',
@@ -67,9 +67,9 @@ function StatusPill({ status }: { status: string }) {
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', gap: 12, padding: '9px 0', borderBottom: '1px solid #f0f2f5' }}>
-      <div style={{ width: 150, flexShrink: 0, fontSize: 12, fontWeight: 600, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em', paddingTop: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, color: '#1c1e21', flex: 1, wordBreak: 'break-word' }}>{children}</div>
+    <div style={{ display: 'flex', gap: 12, padding: '9px 0', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ width: 150, flexShrink: 0, fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em', paddingTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 14, color: 'var(--text)', flex: 1, wordBreak: 'break-word' }}>{children}</div>
     </div>
   );
 }
@@ -203,7 +203,7 @@ export default function KYCPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 18 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>KYC review</h1>
-        <span style={{ fontSize: 13, color: '#8a8d91' }}>
+        <span style={{ fontSize: 13, color: 'var(--text-3)' }}>
           Identity checks for organizers publishing paid events
         </span>
       </div>
@@ -213,46 +213,46 @@ export default function KYCPage() {
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
             padding: '7px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-            border: '1px solid ' + (tab === t.key ? '#1877f2' : '#dde1e6'),
-            background: tab === t.key ? '#1877f215' : '#fff',
-            color: tab === t.key ? '#1877f2' : '#5f6368',
+            border: '1px solid ' + (tab === t.key ? 'var(--accent)' : 'var(--border)'),
+            background: tab === t.key ? 'var(--accent-soft)' : 'var(--surface)',
+            color: tab === t.key ? 'var(--accent)' : 'var(--text-2)',
           }}>{t.label}</button>
         ))}
       </div>
 
       {/* Queue */}
-      <div style={{ background: '#fff', border: '1px solid #e4e6eb', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ padding: 32, textAlign: 'center', color: '#8a8d91', fontSize: 14 }}>Loading…</div>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>Loading…</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 32, textAlign: 'center', color: '#8a8d91', fontSize: 14 }}>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
             {tab === 'pending_review' ? 'No submissions waiting — the queue is clear.' : 'Nothing here.'}
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
-              <tr style={{ background: '#f7f8fa', textAlign: 'left' }}>
+              <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
                 {['Business', 'Legal name', 'Status', 'Method', 'Submitted', 'Registry', ''].map(h => (
-                  <th key={h} style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em' }}>{h}</th>
+                  <th key={h} style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.map(r => (
-                <tr key={r.organizer_id} style={{ borderTop: '1px solid #f0f2f5' }}>
+                <tr key={r.organizer_id} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '11px 14px' }}>
                     <div style={{ fontWeight: 600 }}>{r.business_name}</div>
-                    <div style={{ fontSize: 12, color: '#8a8d91' }}>{r.business_email}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.business_email}</div>
                   </td>
                   <td style={{ padding: '11px 14px' }}>{[r.legal_first_name, r.legal_last_name].filter(Boolean).join(' ') || '—'}</td>
                   <td style={{ padding: '11px 14px' }}><StatusPill status={r.status} /></td>
-                  <td style={{ padding: '11px 14px', color: '#5f6368' }}>{r.method || '—'}</td>
-                  <td style={{ padding: '11px 14px', color: '#5f6368' }}>{r.submitted_at ? fmtDateTime(r.submitted_at) : '—'}</td>
-                  <td style={{ padding: '11px 14px', color: '#5f6368' }}>{r.has_registry_check ? 'Yes' : '—'}</td>
+                  <td style={{ padding: '11px 14px', color: 'var(--text-2)' }}>{r.method || '—'}</td>
+                  <td style={{ padding: '11px 14px', color: 'var(--text-2)' }}>{r.submitted_at ? fmtDateTime(r.submitted_at) : '—'}</td>
+                  <td style={{ padding: '11px 14px', color: 'var(--text-2)' }}>{r.has_registry_check ? 'Yes' : '—'}</td>
                   <td style={{ padding: '11px 14px', textAlign: 'right' }}>
                     <button onClick={() => openDetail(r.organizer_id)} style={{
-                      padding: '6px 12px', borderRadius: 8, border: '1px solid #1877f2',
-                      background: '#fff', color: '#1877f2', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      padding: '6px 12px', borderRadius: 8, border: '1px solid var(--accent)',
+                      background: 'var(--surface)', color: 'var(--accent)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
                     }}>Review</button>
                   </td>
                 </tr>
@@ -269,21 +269,21 @@ export default function KYCPage() {
           display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '5vh 16px', overflowY: 'auto',
         }}>
           <div onClick={e => e.stopPropagation()} style={{
-            background: '#fff', borderRadius: 14, width: '100%', maxWidth: 860,
+            background: 'var(--surface)', borderRadius: 14, width: '100%', maxWidth: 860,
             padding: 22, boxShadow: '0 12px 40px rgba(0,0,0,.18)',
           }}>
             {!detail ? (
-              <div style={{ padding: 40, textAlign: 'center', color: '#8a8d91' }}>Loading…</div>
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>Loading…</div>
             ) : (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                   <div>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{detail.business_name}</h2>
-                    <div style={{ fontSize: 13, color: '#8a8d91' }}>{detail.business_email}</div>
+                    <div style={{ fontSize: 13, color: 'var(--text-3)' }}>{detail.business_email}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <StatusPill status={detail.status} />
-                    <button onClick={closeDetail} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: '#8a8d91' }}>✕</button>
+                    <button onClick={closeDetail} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-3)' }}>✕</button>
                   </div>
                 </div>
 
@@ -305,13 +305,13 @@ export default function KYCPage() {
                           display: 'inline-flex', background: match.color + '18', border: `1px solid ${match.color}40`,
                           color: match.color, borderRadius: 99, padding: '2px 9px', fontSize: 12, fontWeight: 600,
                         }}>{match.label}</span>
-                        <div style={{ fontSize: 12, color: '#8a8d91', marginTop: 4 }}>{match.hint}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{match.hint}</div>
                       </Row>
                     )}
                     {registryRaw && (
                       <Row label="DHA registry result">
                         <pre style={{
-                          margin: 0, fontSize: 11, background: '#f7f8fa', border: '1px solid #eceef1',
+                          margin: 0, fontSize: 11, background: 'var(--surface-2)', border: '1px solid var(--surface-3)',
                           borderRadius: 8, padding: 10, maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap',
                         }}>{registryRaw}</pre>
                       </Row>
@@ -319,8 +319,8 @@ export default function KYCPage() {
                     {detail.has_proof_of_address && (
                       <Row label="Proof of address">
                         <button onClick={openProofOfAddress} style={{
-                          padding: '5px 11px', borderRadius: 8, border: '1px solid #dde1e6',
-                          background: '#fff', fontSize: 13, cursor: 'pointer',
+                          padding: '5px 11px', borderRadius: 8, border: '1px solid var(--border)',
+                          background: 'var(--surface)', fontSize: 13, cursor: 'pointer',
                         }}>Open in new tab</button>
                       </Row>
                     )}
@@ -328,22 +328,22 @@ export default function KYCPage() {
 
                   {/* Right: ID photo */}
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#8a8d91', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>ID document</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>ID document</div>
                     <div style={{
-                      border: '1px solid #e4e6eb', borderRadius: 10, minHeight: 200,
+                      border: '1px solid var(--border)', borderRadius: 10, minHeight: 200,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: '#f7f8fa', overflow: 'hidden',
+                      background: 'var(--surface-2)', overflow: 'hidden',
                     }}>
                       {docLoading ? (
-                        <span style={{ color: '#8a8d91', fontSize: 13 }}>Loading photo…</span>
+                        <span style={{ color: 'var(--text-3)', fontSize: 13 }}>Loading photo…</span>
                       ) : docURL ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={docURL} alt="ID document" style={{ width: '100%', height: 'auto', display: 'block' }} />
                       ) : (
-                        <span style={{ color: '#8a8d91', fontSize: 13 }}>No document</span>
+                        <span style={{ color: 'var(--text-3)', fontSize: 13 }}>No document</span>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: '#8a8d91', marginTop: 6 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
                       Check: photo is a real SA ID, the number matches the one on the left, name matches, face is visible.
                     </div>
                   </div>
@@ -351,28 +351,28 @@ export default function KYCPage() {
 
                 {/* Actions */}
                 {detail.status === 'pending_review' && (
-                  <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #f0f2f5' }}>
+                  <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
                     <textarea
                       value={reason}
                       onChange={e => setReason(e.target.value)}
                       placeholder="Rejection reason (required to reject — the organizer sees this)"
                       style={{
-                        width: '100%', minHeight: 56, borderRadius: 10, border: '1px solid #dde1e6',
+                        width: '100%', minHeight: 56, borderRadius: 10, border: '1px solid var(--border)',
                         padding: 10, fontSize: 13, resize: 'vertical', boxSizing: 'border-box',
                       }}
                     />
                     <div style={{ display: 'flex', gap: 10, marginTop: 10, justifyContent: 'flex-end' }}>
                       <button onClick={runRegistryCheck} disabled={busy} style={{
-                        padding: '9px 16px', borderRadius: 10, border: '1px solid #dde1e6',
-                        background: '#fff', color: '#5f6368', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                        padding: '9px 16px', borderRadius: 10, border: '1px solid var(--border)',
+                        background: 'var(--surface)', color: 'var(--text-2)', fontSize: 14, fontWeight: 600, cursor: 'pointer',
                       }}>Run DHA registry check</button>
                       <button onClick={() => decide(false)} disabled={busy} style={{
-                        padding: '9px 16px', borderRadius: 10, border: '1px solid #c62828',
-                        background: '#fff', color: '#c62828', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                        padding: '9px 16px', borderRadius: 10, border: '1px solid var(--danger-fg)',
+                        background: 'var(--surface)', color: 'var(--danger-fg)', fontSize: 14, fontWeight: 600, cursor: 'pointer',
                       }}>Reject</button>
                       <button onClick={() => decide(true)} disabled={busy} style={{
                         padding: '9px 18px', borderRadius: 10, border: 'none',
-                        background: '#1a7f37', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                        background: 'var(--success-fg)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
                       }}>{busy ? 'Working…' : 'Verify identity'}</button>
                     </div>
                   </div>
