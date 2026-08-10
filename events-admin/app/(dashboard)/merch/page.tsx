@@ -578,7 +578,7 @@ export default function MerchPage() {
                       <Badge status={m.fulfillment_mode} />
                       {m.category && <span className="badge badge-draft">{m.category}</span>}
                       {m.approval_status && m.approval_status !== 'approved' && (
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.65rem', padding: '1px 6px', borderRadius: '99px', background: 'rgba(255,165,0,.15)', color: '#ffa500', border: '1px solid rgba(255,165,0,.25)' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '.65rem', padding: '1px 6px', borderRadius: '99px', background: 'rgba(255,165,0,.15)', color: 'var(--warning)', border: '1px solid rgba(255,165,0,.25)' }}>
                           ⏳ {m.approval_status === 'rejected' ? 'rejected' : 'pending'}
                         </span>
                       )}
@@ -621,7 +621,7 @@ export default function MerchPage() {
                     <button className="btn btn-sm" onClick={() => openEditMerch(m)}>✎ Edit</button>
                     <button className="btn btn-sm" onClick={() => openVariant(m)}>+ Variant</button>
                     {m.approval_status && m.approval_status !== 'approved' && (
-                      <button className="btn btn-sm" style={{ color: '#ffa500', borderColor: 'rgba(255,165,0,.4)' }} onClick={() => approveMerch(m.id, m.name)}>✓ Approve</button>
+                      <button className="btn btn-sm" style={{ color: 'var(--warning)', borderColor: 'rgba(255,165,0,.4)' }} onClick={() => approveMerch(m.id, m.name)}>✓ Approve</button>
                     )}
                     {m.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivateMerch(m.id, m.name)}>Deactivate</button>}
                     <span style={{ fontSize: '.74rem', color: 'var(--text-3)', marginLeft: 'auto' }}>{m.variants?.length || 0} variants</span>
@@ -950,7 +950,7 @@ export default function MerchPage() {
                         fontWeight: sizeMode === opt.key ? 600 : 400,
                         border: 'none', cursor: 'pointer',
                         background: sizeMode === opt.key ? 'var(--accent)' : 'transparent',
-                        color:      sizeMode === opt.key ? '#000' : 'var(--text-2)',
+                        color:      sizeMode === opt.key ? 'var(--on-accent)' : 'var(--text-2)',
                         transition: 'all .15s',
                       }}>
                       {opt.label}
@@ -980,7 +980,7 @@ export default function MerchPage() {
                               cursor: isExisting ? 'not-allowed' : 'pointer',
                               border: `1px solid ${isSelected ? 'var(--accent)' : isExisting ? 'var(--border)' : 'var(--border)'}`,
                               background: isSelected ? 'var(--accent)' : isExisting ? 'var(--surface-2)' : 'var(--surface-3)',
-                              color: isSelected ? '#000' : isExisting ? 'var(--text-3)' : 'var(--text)',
+                              color: isSelected ? 'var(--on-accent)' : isExisting ? 'var(--text-3)' : 'var(--text)',
                               textDecoration: isExisting ? 'line-through' : 'none',
                               opacity: isExisting ? 0.45 : 1,
                               transition: 'all .12s',
