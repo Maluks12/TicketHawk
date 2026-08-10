@@ -46,12 +46,20 @@
 --
 -- Deliberately ordered least → most privileged so `>=`-style comparisons in Go
 -- read naturally against the enum's ordinal.
-CREATE TYPE staff_role AS ENUM (
-    'read_only',  -- lists, names, roles. No PII, no writes.
-    'access',     -- + emails, KYC status, masked bank tail. Still read-only.
-    'editor',     -- + act on accounts, and LOG requests for dangerous actions.
-    'admin'       -- + approve requests. Still cannot read ID docs or bank numbers.
-);
+-- Wrapped in a DO block because Postgres has no `CREATE TYPE IF NOT EXISTS`.
+-- Without this guard, re-running this migration after any partial failure
+-- (e.g. a killed container) fails forever on this line, since every other
+-- statement below is idempotent but this one wasn't.
+DO $$ BEGIN
+    CREATE TYPE staff_role AS ENUM (
+        'read_only',  -- lists, names, roles. No PII, no writes.
+        'access',     -- + emails, KYC status, masked bank tail. Still read-only.
+        'editor',     -- + act on accounts, and LOG requests for dangerous actions.
+        'admin'       -- + approve requests. Still cannot read ID docs or bank numbers.
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- NULL = not staff. No default, so every existing account starts non-staff and
 -- access is granted deliberately rather than inherited by an ALTER TABLE.
@@ -66,24 +74,32 @@ CREATE INDEX IF NOT EXISTS idx_users_staff_role
     ON users (staff_role) WHERE staff_role IS NOT NULL;
 
 -- ── Request kinds ────────────────────────────────────────────────────────────
-CREATE TYPE staff_request_kind AS ENUM (
-    'bank_details_delete',
-    'bank_details_add',
-    'event_takedown',
-    'role_change',
-    'credential_reset',      -- password/email reset for a compromised account
-    'account_delete'
-);
+DO $$ BEGIN
+    CREATE TYPE staff_request_kind AS ENUM (
+        'bank_details_delete',
+        'bank_details_add',
+        'event_takedown',
+        'role_change',
+        'credential_reset',      -- password/email reset for a compromised account
+        'account_delete'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TYPE staff_request_status AS ENUM (
-    'pending_approval',        -- waiting on a second admin
-    'awaiting_subject',        -- approved; waiting on the organiser's OTP
-    'ready',                   -- all gates passed, cooling-off may still apply
-    'executed',
-    'rejected',
-    'cancelled',               -- withdrawn by the requester
-    'expired'                  -- nobody acted in time
-);
+DO $$ BEGIN
+    CREATE TYPE staff_request_status AS ENUM (
+        'pending_approval',        -- waiting on a second admin
+        'awaiting_subject',        -- approved; waiting on the organiser's OTP
+        'ready',                   -- all gates passed, cooling-off may still apply
+        'executed',
+        'rejected',
+        'cancelled',               -- withdrawn by the requester
+        'expired'                  -- nobody acted in time
+    );
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ── The request table ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS staff_requests (
