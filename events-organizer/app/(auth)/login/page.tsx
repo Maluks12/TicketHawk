@@ -179,13 +179,20 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{
-            width: 60, height: 60, borderRadius: 14, background: 'var(--accent-deep)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
-          }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand-logo.png" alt="TicketHawk" width={44} height={44} />
-          </div>
+          {/* No plate behind the mark.
+              The hawk is a CIRCLE and the tile was a rounded SQUARE, so the
+              indigo could only ever show through at the corners and as a rim
+              around the circle's edge — which read as an unwanted border. The
+              artwork already carries its own shape, so it renders directly on
+              the page background. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand-logo.png"
+            alt="TicketHawk"
+            width={60}
+            height={60}
+            style={{ display: 'block', margin: '0 auto 12px', width: 60, height: 60 }}
+          />
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: 'var(--text)' }}>
             TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
           </div>
