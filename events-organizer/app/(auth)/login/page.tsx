@@ -179,12 +179,21 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          {/* The mark fills the tile edge to edge.
+              This needed a change to the ASSET, not just CSS: the source PNG
+              wrapped the hawk in 83px of transparent pixels on every side — a
+              third of the canvas — so object-fit was faithfully scaling a box
+              that was mostly nothing. public/brand-logo.png is now trimmed to
+              the artwork, which is why 100% here actually reaches the edges.
+              overflow:hidden clips the circle to the rounded corners. */}
           <div style={{
             width: 60, height: 60, borderRadius: 14, background: 'var(--accent-deep)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+            overflow: 'hidden', marginBottom: 12,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand-logo.png" alt="TicketHawk" width={44} height={44} />
+            <img src="/brand-logo.png" alt="TicketHawk" width={60} height={60}
+              style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: 'var(--text)' }}>
             TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
