@@ -274,10 +274,10 @@ COMMENT ON TABLE staff_audit_log IS
 -- it. Settlement already runs 48h after an event, so this usually costs
 -- nothing in practice — it only bites when details changed recently, which is
 -- exactly when it should.
-ALTER TABLE organizer_profiles
+ALTER TABLE organizers
     ADD COLUMN IF NOT EXISTS payout_hold_until TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS payout_hold_reason TEXT;
 
-COMMENT ON COLUMN organizer_profiles.payout_hold_until IS
+COMMENT ON COLUMN organizers.payout_hold_until IS
     'Payout worker must skip this organiser until now() > payout_hold_until. '
     'Set automatically when bank details change. NULL means no hold.';

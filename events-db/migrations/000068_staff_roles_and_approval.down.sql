@@ -21,7 +21,7 @@ DROP TABLE IF EXISTS staff_requests;
 DROP TYPE IF EXISTS staff_request_status;
 DROP TYPE IF EXISTS staff_request_kind;
 
-ALTER TABLE organizer_profiles
+ALTER TABLE organizers
     DROP COLUMN IF EXISTS payout_hold_until,
     DROP COLUMN IF EXISTS payout_hold_reason;
 
