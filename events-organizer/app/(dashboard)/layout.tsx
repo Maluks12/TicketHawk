@@ -132,14 +132,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   eslint-disable below: next/image wants width/height and a
                   loader config for a 36px static asset that's already in
                   /public — a plain <img> is the right tool at this size. */}
-              {/* .brand-mark still supplies the 36px box and the flex-shrink,
-                  but its indigo plate and accent glow are both switched off —
-                  the glow was the halo visible around the circle. Left as an
-                  inline override so the class stays reusable for a future
-                  square mark. */}
-              <div className="brand-mark" style={{
-                background: 'transparent', boxShadow: 'none', padding: 0,
-              }}>
+              <div className="brand-mark" style={{ background: 'transparent', boxShadow: 'none', padding: 0 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/brand-logo.png"
