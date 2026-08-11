@@ -156,7 +156,7 @@ func auditDenied(pool *pgxpool.Pool, c *gin.Context, email string, role *models.
 		_, err := pool.Exec(ctx, `
 			INSERT INTO staff_audit_log
 				(actor_id, actor_email, actor_role, action, allowed, detail, ip, user_agent)
-			VALUES ($1, $2, $3::staff_role, $4, FALSE,
+			VALUES ($1, $2, $3::console_role, $4, FALSE,
 			        jsonb_build_object('reason', $5::text, 'path', $6::text), $7, $8)
 		`, userID, email, roleStr, action, reason,
 			c.Request.URL.Path, c.ClientIP(), c.Request.UserAgent())
@@ -193,7 +193,7 @@ func AuditAllowed(pool *pgxpool.Pool, c *gin.Context, action, targetType string,
 			INSERT INTO staff_audit_log
 				(actor_id, actor_email, actor_role, action, target_type, target_id,
 				 allowed, detail, ip, user_agent)
-			VALUES ($1, $2, $3::staff_role, $4, $5, $6, TRUE, $7, $8, $9)
+			VALUES ($1, $2, $3::console_role, $4, $5, $6, TRUE, $7, $8, $9)
 		`, userID, emailStr, roleStr, action, targetType, targetID,
 			detail, c.ClientIP(), c.Request.UserAgent())
 		if err != nil {

@@ -21,11 +21,13 @@ DROP TABLE IF EXISTS staff_requests;
 DROP TYPE IF EXISTS staff_request_status;
 DROP TYPE IF EXISTS staff_request_kind;
 
-ALTER TABLE organizers
+ALTER TABLE organizer_profiles
     DROP COLUMN IF EXISTS payout_hold_until,
     DROP COLUMN IF EXISTS payout_hold_reason;
 
 -- Dropped last: the enum can't go while a column still uses it.
 DROP INDEX IF EXISTS idx_users_staff_role;
 ALTER TABLE users DROP COLUMN IF EXISTS staff_role;
-DROP TYPE IF EXISTS staff_role;
+-- console_role, NOT staff_role: staff_role belongs to migration 000050
+-- (event door staff) and dropping it here would break ticket scanning.
+DROP TYPE IF EXISTS console_role;

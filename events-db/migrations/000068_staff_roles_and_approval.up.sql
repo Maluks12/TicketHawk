@@ -44,26 +44,42 @@
 
 -- ── Staff roles ──────────────────────────────────────────────────────────────
 --
--- Deliberately ordered least → most privileged so `>=`-style comparisons in Go
--- read naturally against the enum's ordinal.
--- Wrapped in a DO block because Postgres has no `CREATE TYPE IF NOT EXISTS`.
--- Without this guard, re-running this migration after any partial failure
--- (e.g. a killed container) fails forever on this line, since every other
--- statement below is idempotent but this one wasn't.
+-- The TYPE is console_role, not staff_role.
+--
+-- staff_role is already taken: migration 000050 created it as
+-- ENUM ('scanner','manager') for EVENT DOOR STAFF, which is an unrelated
+-- concept — who may scan tickets at a specific event, granted by the organiser.
+-- This one is who may operate the internal admin console, granted by us.
+--
+-- Reusing the name meant `ALTER TABLE users ADD COLUMN staff_role staff_role`
+-- silently resolved to the door-staff enum, producing a column that accepts
+-- 'scanner' and 'manager' and rejects 'admin'.
+--
+-- The COLUMN is still users.staff_role — only the type name changed, so no Go
+-- struct field, JSON key or query column name moves.
+--
+-- Ordered least → most privileged so the enum's ordinal reads naturally.
+--
+-- The DO-block guard is safe HERE and was dangerous on staff_role. Postgres has
+-- no CREATE TYPE IF NOT EXISTS, so swallowing duplicate_object is the standard
+-- way to make a migration re-runnable — but it only means "already created by a
+-- previous run of THIS migration" when the name is one we own. On a name
+-- another migration already took, the same guard turns a loud collision into a
+-- silent bind to somebody else's type, which is exactly how users.staff_role
+-- ended up accepting 'scanner' and 'manager'.
 DO $$ BEGIN
-    CREATE TYPE staff_role AS ENUM (
-        'read_only',  -- lists, names, roles. No PII, no writes.
-        'access',     -- + emails, KYC status, masked bank tail. Still read-only.
-        'editor',     -- + act on accounts, and LOG requests for dangerous actions.
-        'admin'       -- + approve requests. Still cannot read ID docs or bank numbers.
-    );
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
+CREATE TYPE console_role AS ENUM (
+    'read_only',  -- lists, names, roles. No PII, no writes.
+    'access',     -- + emails, KYC status, masked bank tail. Still read-only.
+    'editor',     -- + act on accounts, and LOG requests for dangerous actions.
+    'admin'       -- + approve requests. Still cannot read ID docs or bank numbers.
+);
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- NULL = not staff. No default, so every existing account starts non-staff and
 -- access is granted deliberately rather than inherited by an ALTER TABLE.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_role staff_role;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS staff_role console_role;
 
 COMMENT ON COLUMN users.staff_role IS
     'Internal console capability. Orthogonal to users.role. NULL means not '
@@ -75,30 +91,28 @@ CREATE INDEX IF NOT EXISTS idx_users_staff_role
 
 -- ── Request kinds ────────────────────────────────────────────────────────────
 DO $$ BEGIN
-    CREATE TYPE staff_request_kind AS ENUM (
-        'bank_details_delete',
-        'bank_details_add',
-        'event_takedown',
-        'role_change',
-        'credential_reset',      -- password/email reset for a compromised account
-        'account_delete'
-    );
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
+CREATE TYPE staff_request_kind AS ENUM (
+    'bank_details_delete',
+    'bank_details_add',
+    'event_takedown',
+    'role_change',
+    'credential_reset',      -- password/email reset for a compromised account
+    'account_delete'
+);
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE staff_request_status AS ENUM (
-        'pending_approval',        -- waiting on a second admin
-        'awaiting_subject',        -- approved; waiting on the organiser's OTP
-        'ready',                   -- all gates passed, cooling-off may still apply
-        'executed',
-        'rejected',
-        'cancelled',               -- withdrawn by the requester
-        'expired'                  -- nobody acted in time
-    );
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
+CREATE TYPE staff_request_status AS ENUM (
+    'pending_approval',        -- waiting on a second admin
+    'awaiting_subject',        -- approved; waiting on the organiser's OTP
+    'ready',                   -- all gates passed, cooling-off may still apply
+    'executed',
+    'rejected',
+    'cancelled',               -- withdrawn by the requester
+    'expired'                  -- nobody acted in time
+);
+EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ── The request table ────────────────────────────────────────────────────────
@@ -229,7 +243,7 @@ CREATE TABLE IF NOT EXISTS staff_audit_log (
     at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     actor_id    UUID        REFERENCES users(id) ON DELETE SET NULL,
     actor_email TEXT        NOT NULL,  -- denormalised: survives account deletion
-    actor_role  staff_role,
+    actor_role  console_role,
     action      TEXT        NOT NULL,  -- 'bank.delete', 'user.view_pii', …
     -- What was touched.
     target_type TEXT,
