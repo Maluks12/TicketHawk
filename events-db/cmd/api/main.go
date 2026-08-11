@@ -805,6 +805,23 @@ func main() {
 			staffAPI.PUT("/staff/:id/role",
 				middleware.RequireCapability(pool, models.CapManageStaff),
 				handlers.SetStaffRoleHandler(pool))
+
+			// ── Phase 4: GMV and the dashboard lists ───────────────────────
+			//
+			// Separate from /admin/stats, which reports SUM(subtotal) as
+			// "revenue". That figure is ticket FACE VALUE — almost all of it is
+			// the organiser's money, and reporting it as revenue overstates
+			// what the business earns by roughly the inverse of the take rate.
+			// This endpoint splits volume (GMV) from what TicketHawk keeps.
+			//
+			// Gated on CapViewUserList — the weakest staff capability — because
+			// these are platform aggregates containing no personal data.
+			staffAPI.GET("/stats/gmv",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetPlatformGMVHandler(pool))
+			staffAPI.GET("/dashboard/lists",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetDashboardListsHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
