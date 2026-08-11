@@ -822,6 +822,13 @@ func main() {
 			staffAPI.GET("/dashboard/lists",
 				middleware.RequireCapability(pool, models.CapViewUserList),
 				handlers.GetDashboardListsHandler(pool))
+
+			// ── Phase 5: platform analytics time series ────────────────────
+			// Aggregates only — no personal data — so the weakest staff
+			// capability gates it, same as the GMV endpoint above.
+			staffAPI.GET("/analytics/series",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetAdminAnalyticsSeriesHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
