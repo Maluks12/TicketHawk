@@ -785,6 +785,26 @@ func main() {
 				handlers.SendConfirmationCodeHandler(pool, nil))
 			staffAPI.POST("/requests/:id/confirm",
 				handlers.ConfirmStaffRequestHandler(pool))
+
+			// ── Phase 3: capability-scoped people listings ─────────────────
+			//
+			// Replaces the console's use of /admin/users, which returned every
+			// field to every admin. This endpoint changes the SHAPE of its
+			// response by capability — a read_only caller's payload has no
+			// email key at all, so there is nothing for the client to leak.
+			//
+			// The old /admin/users route is left registered: other tooling may
+			// call it, and removing it is a separate decision from adding this.
+			staffAPI.GET("/people",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetScopedPeopleHandler(pool))
+
+			// Granting console access. Admin only, and the handler additionally
+			// refuses self-changes and removal of the last admin — either would
+			// lock everyone out with no recovery path short of psql.
+			staffAPI.PUT("/staff/:id/role",
+				middleware.RequireCapability(pool, models.CapManageStaff),
+				handlers.SetStaffRoleHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
