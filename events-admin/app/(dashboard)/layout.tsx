@@ -32,6 +32,13 @@ const NAV: Array<
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/></svg>,
   },
   {
+    // Sits with Event Approvals: both are "things waiting on a decision", and
+    // an approvals queue nobody navigates to is an approvals queue nobody
+    // clears.
+    type: 'item', href: '/requests', label: 'Staff Requests',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clipRule="evenodd"/></svg>,
+  },
+  {
     type: 'item', href: '/kyc', label: 'KYC Review',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm3 3a2 2 0 100 4 2 2 0 000-4zm-2.5 6.5a3.5 3.5 0 015 0 .75.75 0 01-.61 1.19H5.11a.75.75 0 01-.61-1.19zM12 8a1 1 0 100 2h3a1 1 0 100-2h-3zm0 3.5a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/></svg>,
   },
