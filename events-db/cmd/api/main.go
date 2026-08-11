@@ -846,6 +846,25 @@ func main() {
 			staffAPI.PUT("/events/:id/approve-with-feature",
 				middleware.RequireCapability(pool, models.CapFeatureEvent),
 				handlers.ApproveEventWithFeatureHandler(pool, eventCache))
+
+			// ── Phase 7: execution, the last gate ──────────────────────────
+			//
+			// Everything before this was ABOUT an action; this is where one
+			// happens. The handler does NOT re-decide authorisation — four-eyes,
+			// subject confirmation and cooling-off were settled earlier, and the
+			// staff_requests_execution_gated CHECK refuses the write if any were
+			// skipped. It takes a row lock so two admins clicking Execute on the
+			// same queued request cannot both proceed.
+			staffAPI.POST("/requests/:id/execute",
+				middleware.RequireCapability(pool, models.CapApproveRequests),
+				handlers.ExecuteStaffRequestHandler(pool, eventCache))
+
+			// Editors log a takedown; an admin approves it; only then does it
+			// run. The event is UNPUBLISHED, not cancelled or deleted — ticket
+			// holders keep their tickets and their QR codes keep scanning.
+			staffAPI.POST("/events/:id/request-takedown",
+				middleware.RequireCapability(pool, models.CapRequestDangerous),
+				handlers.RequestEventTakedownHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
