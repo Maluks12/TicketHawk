@@ -829,6 +829,23 @@ func main() {
 			staffAPI.GET("/analytics/series",
 				middleware.RequireCapability(pool, models.CapViewUserList),
 				handlers.GetAdminAnalyticsSeriesHandler(pool))
+
+			// ── Phase 6: event review and approval-with-featuring ──────────
+			//
+			// The review endpoint returns the FULL event plus its ticket tiers.
+			// The old approvals screen showed a summary, which meant nobody
+			// ever saw the tiers — where the actual mistakes are (a VIP tier
+			// priced at R0, unlimited capacity at a 200-seat venue).
+			staffAPI.GET("/events/:id/review",
+				middleware.RequireCapability(pool, models.CapApproveEvent),
+				handlers.GetEventReviewHandler(pool))
+
+			// Approve, optionally with a BOUNDED featuring window. Replaces the
+			// console's "Approve & Add to Home", which set is_featured with no
+			// end date — which is how a finished event stays on the homepage.
+			staffAPI.PUT("/events/:id/approve-with-feature",
+				middleware.RequireCapability(pool, models.CapFeatureEvent),
+				handlers.ApproveEventWithFeatureHandler(pool, eventCache))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))

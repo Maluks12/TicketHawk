@@ -64,6 +64,10 @@ const (
 	CapViewUserContact  Capability = "user.contact"       // email, phone
 	CapViewBankTail     Capability = "bank.view_tail"     // last 4 digits only
 	CapViewKYCStatus    Capability = "kyc.status"         // verified / pending
+	// CapViewKYCDocument is retained for the console's own gating — it is held
+	// by NO console role, so the console never fetches an ID image. Viewing a
+	// document happens in the separate document store, under the master-admin
+	// path below, not here.
 	CapViewKYCDocument  Capability = "kyc.document"       // the actual ID image
 	CapViewAuditLog     Capability = "audit.view"
 
@@ -131,18 +135,58 @@ var capabilities = map[StaffRole]map[Capability]bool{
 		CapApproveRequests:  true,
 		CapViewStaff:        true,
 		CapManageStaff:      true,
-		// CapViewKYCDocument is DELIBERATELY ABSENT.
+		// CapViewKYCDocument is DELIBERATELY ABSENT, and stays absent.
 		//
-		// Not an oversight, and not something to "fix" later by adding a line:
-		// no staff role can read an identity document through the console. KYC
-		// verification is done against the DHA registry result, which is a
-		// match/no-match answer plus the fields needed to judge it — it does
-		// not require a human to look at a photograph of someone's ID.
+		// Identity documents no longer live in this database (migration
+		// 000070) — they are in a separate store with its own key and its own
+		// access policy. Reading one is not a console action at all:
 		//
-		// If a document genuinely must be reviewed by a person, that should be
-		// a separate, individually-audited, time-boxed grant — not a standing
-		// capability attached to a login that also approves payouts.
+		//   • The console verifies against the DHA registry result, which is
+		//     the information the decision actually rests on.
+		//   • After-the-fact access, for a regulator request or a dispute, goes
+		//     through the master-admin path below: separate credentials,
+		//     separate store, mandatory reason, logged in
+		//     kyc_document_access_log rather than in the console's own log.
+		//
+		// So this is not "admin can't do their job" — it is that looking at a
+		// photograph of someone's ID is a different job, performed rarely,
+		// with a different key.
 	},
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Master admin
+//
+// A SEPARATE AXIS FROM StaffRole, not its top rung.
+//
+// The distinction is deliberate. Console admin is an operational role held by
+// several people who use it daily — approving events, managing staff, handling
+// support. Master admin is a break-glass role that reads identity documents,
+// used rarely and by one or two people.
+//
+// Making it StaffAdmin+1 would mean everyone who needs to approve an event day
+// to day also carries the ability to read every organiser's ID, because roles
+// on a ladder accumulate. Keeping it orthogonal means the daily role stays
+// boring, and the dangerous one is held by whoever actually needs it.
+//
+// Enforced by users.is_master_admin (migration 000071) — NOT by staff_role —
+// so granting console admin can never accidentally grant document access.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// MasterAdminCapability is not in the StaffRole matrix on purpose: no value of
+// staff_role can produce it.
+const CapReadIdentityDocument Capability = "identity.document.read"
+
+// DocumentAccessRequest is what a master admin must supply to read a document.
+// Every field is mandatory, and the reason is length-checked in the database —
+// a read with no stated purpose is precisely the read worth asking about later.
+type DocumentAccessRequest struct {
+	OrganizerID string `json:"organizer_id"`
+	Reason      string `json:"reason"`
+	// One of: 'dispute', 'regulator_request', 'fraud_investigation', 'other'.
+	// Free text alone drifts into "checking"; a category makes the access log
+	// aggregatable, so "how many regulator requests this quarter" is answerable.
+	Category string `json:"category"`
 }
 
 // Can reports whether a role holds a capability.
