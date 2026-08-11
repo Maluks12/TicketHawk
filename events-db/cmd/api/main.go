@@ -21,6 +21,7 @@ import (
 	"events-db/internal/database"
 	"events-db/internal/handlers"
 	"events-db/internal/middleware"
+	"events-db/internal/models"
 	"events-db/internal/ratelimit"
 	"events-db/internal/repository"
 	"events-db/internal/services"
@@ -733,6 +734,79 @@ func main() {
 			"admin"))
 	}
 	{
+		// ── Staff capability layer (migration 000068) ─────────────────────
+		//
+		// Registered INSIDE the existing admin group, so these inherit
+		// AuthMiddleware + AdminOnlyMiddleware + the admin rate limit, and add
+		// RequireStaff on top.
+		//
+		// DELIBERATELY NOT `admin.Use(middleware.RequireStaff(pool))`.
+		//
+		// Migration 000068 leaves users.staff_role NULL for every existing
+		// account — by design, so console access is granted rather than
+		// inherited. Putting RequireStaff on the whole group would therefore
+		// 403 every current admin the moment this deploys, including whoever
+		// needs to log in and grant the first staff_role. The console would
+		// lock its own key inside.
+		//
+		// So the new endpoints are gated now, the existing ones are not, and
+		// the group-level switch is flipped in Phase 3 once staff roles have
+		// actually been assigned. See the bootstrap note in the README.
+		staffAPI := admin.Group("")
+		staffAPI.Use(middleware.RequireStaff(pool))
+		{
+			// What the console may draw. No capability required beyond being
+			// staff — it is the call that TELLS you what you have.
+			staffAPI.GET("/me/capabilities", handlers.GetMyCapabilitiesHandler(pool))
+
+			// Layer 1 — log a request. Editors and admins.
+			staffAPI.POST("/requests",
+				middleware.RequireCapability(pool, models.CapRequestDangerous),
+				handlers.CreateStaffRequestHandler(pool))
+			staffAPI.GET("/requests",
+				middleware.RequireCapability(pool, models.CapRequestDangerous),
+				handlers.ListStaffRequestsHandler(pool))
+
+			// Layer 2 — a DIFFERENT admin approves. The four-eyes rule is
+			// enforced by the handler's WHERE clause and, independently, by a
+			// CHECK constraint in 000068.
+			staffAPI.POST("/requests/:id/approve",
+				middleware.RequireCapability(pool, models.CapApproveRequests),
+				handlers.ApproveStaffRequestHandler(pool))
+			staffAPI.POST("/requests/:id/reject",
+				middleware.RequireCapability(pool, models.CapApproveRequests),
+				handlers.RejectStaffRequestHandler(pool))
+
+			// Layer 3 — the affected organiser confirms by OTP. Sending the
+			// code needs the requester's capability; the code itself goes to
+			// the organiser and is never returned in the response.
+			staffAPI.POST("/requests/:id/send-code",
+				middleware.RequireCapability(pool, models.CapRequestDangerous),
+				handlers.SendConfirmationCodeHandler(pool, nil))
+			staffAPI.POST("/requests/:id/confirm",
+				handlers.ConfirmStaffRequestHandler(pool))
+
+			// ── Phase 3: capability-scoped people listings ─────────────────
+			//
+			// Replaces the console's use of /admin/users, which returned every
+			// field to every admin. This endpoint changes the SHAPE of its
+			// response by capability — a read_only caller's payload has no
+			// email key at all, so there is nothing for the client to leak.
+			//
+			// The old /admin/users route is left registered: other tooling may
+			// call it, and removing it is a separate decision from adding this.
+			staffAPI.GET("/people",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetScopedPeopleHandler(pool))
+
+			// Granting console access. Admin only, and the handler additionally
+			// refuses self-changes and removal of the last admin — either would
+			// lock everyone out with no recovery path short of psql.
+			staffAPI.PUT("/staff/:id/role",
+				middleware.RequireCapability(pool, models.CapManageStaff),
+				handlers.SetStaffRoleHandler(pool))
+		}
+
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
 		admin.PUT("/events/:id/organizer", handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
 		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
