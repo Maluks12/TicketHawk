@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { ThemeToggle } from '../../lib/theme';
 import { useAdminAuth } from '../../store/authStore';
 import { ToastProvider } from '../../lib/toast';
 import { ConfirmProvider } from '../../lib/confirm';
@@ -13,6 +14,13 @@ const NAV: Array<
   {
     type: 'item', href: '/dashboard', exact: true, label: 'Dashboard',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M2 11l8-8 8 8v7a1 1 0 01-1 1H3a1 1 0 01-1-1v-7z"/></svg>,
+  },
+  {
+    // Sits directly under Dashboard, above the divider: the dashboard answers
+    // "where are we" and this answers "which way are we moving" — they're read
+    // together, so they belong in the same group.
+    type: 'item', href: '/analytics', label: 'Analytics',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M2 13h3v5H2v-5zm5.5-5h3v10h-3V8zM13 3h3v15h-3V3z"/></svg>,
   },
   { type: 'divider' },
   {
@@ -70,7 +78,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (isLoading || !user) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#f0f2f5' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
         <div className="spinner spinner-lg" />
       </div>
     );
@@ -87,30 +95,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f0f2f5' }}>
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
 
           {/* Sidebar */}
           <aside style={{
             width: 244, flexShrink: 0,
-            background: '#ffffff',
-            borderRight: '1px solid #dddfe2',
+            background: 'var(--surface)',
+            borderRight: '1px solid var(--border)',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
             {/* Logo */}
-            <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f2f5', flexShrink: 0 }}>
+            <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: '#1877f2',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <svg viewBox="0 0 20 20" fill="white" width="16" height="16">
-                    <path d="M2 11l8-8 8 8v7a1 1 0 01-1 1H3a1 1 0 01-1-1v-7z"/>
-                  </svg>
-                </div>
+                {/* Was a generic house glyph on a blue square. Same mark the
+                    organiser dashboard and the phone apps use, rendered without
+                    a plate — the artwork carries its own circular shape. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/brand-logo.png"
+                  alt=""
+                  width={32}
+                  height={32}
+                  style={{ display: 'block', width: 32, height: 32, flexShrink: 0 }}
+                />
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.4, color: '#1c1e21', lineHeight: 1.2 }}>TICKET<span style={{ color: '#FF2D55' }}>HAWK</span></div>
-                  <div style={{ fontSize: 11, color: '#606770', lineHeight: 1 }}>Admin Panel</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: 0.4, color: 'var(--text)', lineHeight: 1.2 }}>TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span></div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1 }}>Admin Panel</div>
                 </div>
               </div>
             </div>
@@ -119,7 +129,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto' }}>
               {NAV.map((item, i) => {
                 if (item.type === 'divider') {
-                  return <div key={i} style={{ height: 1, background: '#f0f2f5', margin: '4px 0' }} />;
+                  return <div key={i} style={{ height: 1, background: 'var(--bg)', margin: '4px 0' }} />;
                 }
                 const active = isActive(item.href, item.exact);
                 return (
@@ -127,16 +137,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     display: 'flex', alignItems: 'center', gap: 10,
                     padding: '8px 12px', margin: '1px 8px', borderRadius: 6,
                     textDecoration: 'none',
-                    color: active ? '#1877f2' : '#1c1e21',
-                    background: active ? '#e7f3ff' : 'transparent',
+                    color: active ? 'var(--accent)' : 'var(--text)',
+                    background: active ? 'var(--accent-soft)' : 'transparent',
                     fontWeight: active ? 600 : 500, fontSize: 14,
                     transition: 'background .12s, color .12s',
                   }}>
-                    <span style={{ color: active ? '#1877f2' : '#606770', flexShrink: 0 }}>{item.icon}</span>
+                    <span style={{ color: active ? 'var(--accent)' : 'var(--text-2)', flexShrink: 0 }}>{item.icon}</span>
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {item.badge === true && oversoldCount > 0 && (
                       <span style={{
-                        background: '#fa3e3e', color: '#fff', fontSize: 11, fontWeight: 700,
+                        background: 'var(--danger)', color: 'var(--surface)', fontSize: 11, fontWeight: 700,
                         borderRadius: '99px', padding: '1px 7px', minWidth: 20, textAlign: 'center',
                       }}>
                         {oversoldCount}
@@ -144,7 +154,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     )}
                     {item.badge === 'approval' && approvalCount > 0 && (
                       <span style={{
-                        background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 700,
+                        background: 'var(--warning)', color: 'var(--surface)', fontSize: 11, fontWeight: 700,
                         borderRadius: '99px', padding: '1px 7px', minWidth: 20, textAlign: 'center',
                       }}>
                         {approvalCount}
@@ -156,26 +166,32 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </nav>
 
             {/* User strip */}
-            <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f2f5', flexShrink: 0 }}>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: '50%',
-                  background: '#1877f2', color: '#fff',
+                  background: 'var(--accent)', color: 'var(--surface)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 12, fontWeight: 700, flexShrink: 0,
                 }}>
                   {initials}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1c1e21', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
-                  <div style={{ fontSize: 11, color: '#606770' }}>Administrator</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)' }}>Administrator</div>
                 </div>
                 <button onClick={handleLogout} title="Sign out"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#8a8d91', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}>
                   <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
                     <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h4a1 1 0 100-2H4V5h3a1 1 0 100-2H3zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd"/>
                   </svg>
                 </button>
+              </div>
+
+              {/* Theme switch lives in the sidebar foot rather than a top bar,
+                  because this shell has no top bar to put it in. */}
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 10 }}>
+                <ThemeToggle />
               </div>
             </div>
           </aside>
