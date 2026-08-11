@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { api } from '../../../lib/api';
 import { fmtDateTime } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
+import { useStaff } from '../../../lib/permissions';
 import { useConfirm } from '../../../lib/confirm';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -77,7 +78,14 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function KYCPage() {
   const toast = useToast();
+  // Held by no console role — see lib/permissions and migration 000071. The
+  // check stays rather than being hardcoded false so that if a future
+  // break-glass grant is wired in, this screen honours it without edits.
+  const canViewDoc = useStaff((st) => st.can('kyc.document'));
+  const loadCaps = useStaff((st) => st.load);
   const confirm = useConfirm();
+
+  useEffect(() => { loadCaps(); }, [loadCaps]);
 
   const [tab, setTab] = useState<string>('pending_review');
   const [rows, setRows] = useState<QueueRow[]>([]);
@@ -116,7 +124,15 @@ export default function KYCPage() {
       const { data } = await api.get(`/admin/kyc/${organizerId}`);
       setDetail(data.detail);
       setRegistryRaw(data.registry_raw || null);
-      if (data.detail?.has_id_document) {
+      // Gated on kyc.document, which Phase 2 grants to NO role.
+      //
+      // Not fetching is the point: the old screen pulled the ID photo on every
+      // open, so simply hiding the <img> would still have moved the image to
+      // the browser of anyone who opened a submission. Verification runs on the
+      // DHA registry match shown on the left, which is the information the
+      // decision actually rests on — a human comparing a face to a name adds
+      // nothing the registry check hasn't already answered.
+      if (data.detail?.has_id_document && canViewDoc) {
         setDocLoading(true);
         // The ID photo only leaves the DB via this authenticated call — fetch
         // as a blob and render locally; no public URL ever exists.
@@ -326,26 +342,62 @@ export default function KYCPage() {
                     )}
                   </div>
 
-                  {/* Right: ID photo */}
+                  {/* Right: verification basis */}
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8 }}>ID document</div>
                     <div style={{
-                      border: '1px solid var(--border)', borderRadius: 10, minHeight: 200,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: 'var(--surface-2)', overflow: 'hidden',
+                      fontSize: 12, fontWeight: 600, color: 'var(--text-3)',
+                      textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 8,
                     }}>
-                      {docLoading ? (
-                        <span style={{ color: 'var(--text-3)', fontSize: 13 }}>Loading photo…</span>
-                      ) : docURL ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={docURL} alt="ID document" style={{ width: '100%', height: 'auto', display: 'block' }} />
-                      ) : (
-                        <span style={{ color: 'var(--text-3)', fontSize: 13 }}>No document</span>
-                      )}
+                      {canViewDoc ? 'ID document' : 'Verification basis'}
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
-                      Check: photo is a real SA ID, the number matches the one on the left, name matches, face is visible.
-                    </div>
+
+                    {canViewDoc ? (
+                      <div style={{
+                        border: '1px solid var(--border)', borderRadius: 10, minHeight: 200,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'var(--surface-2)', overflow: 'hidden',
+                      }}>
+                        {docLoading ? (
+                          <span style={{ color: 'var(--text-3)', fontSize: 13 }}>Loading photo…</span>
+                        ) : docURL ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={docURL} alt="ID document" style={{ width: '100%', height: 'auto', display: 'block' }} />
+                        ) : (
+                          <span style={{ color: 'var(--text-3)', fontSize: 13 }}>No document</span>
+                        )}
+                      </div>
+                    ) : (
+                      // Explains the absence rather than leaving a blank panel.
+                      // A reviewer who expects a photo and sees nothing assumes
+                      // the upload failed and rejects a valid submission.
+                      <div style={{
+                        border: '1px solid var(--border)', borderRadius: 10, padding: 18,
+                        background: 'var(--surface-2)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--success)"
+                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            <path d="M9 12l2 2 4-4" />
+                          </svg>
+                          <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)' }}>
+                            Verified against the Home Affairs registry
+                          </span>
+                        </div>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-2)', margin: 0, lineHeight: 1.65 }}>
+                          Decide on the DHA result and the name match on the left.
+                          {detail.has_id_document
+                            ? ' An ID document was uploaded and is held securely, but is not viewable from this console.'
+                            : ' No ID document was uploaded.'}
+                        </p>
+                        <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '10px 0 0', lineHeight: 1.6 }}>
+                          Identity photographs are not readable by any console role,
+                          including Admin. The registry check answers the same
+                          question without putting a copy of someone&apos;s ID in a
+                          browser.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
