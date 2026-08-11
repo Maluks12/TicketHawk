@@ -57,9 +57,17 @@ func GetMyCapabilitiesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		for i, cp := range caps {
 			out[i] = string(cp)
 		}
+		// Email is returned so the console can identify the caller's OWN
+		// requests and disable self-approval with a reason on the button.
+		// Sourced from the context set by RequireStaff, not from a second
+		// query — the middleware already looked it up.
+		email, _ := c.Get("actor_email")
+		emailStr, _ := email.(string)
+
 		c.JSON(http.StatusOK, gin.H{
 			"staff_role":   string(role),
 			"capabilities": out,
+			"email":        emailStr,
 		})
 	}
 }

@@ -829,6 +829,42 @@ func main() {
 			staffAPI.GET("/analytics/series",
 				middleware.RequireCapability(pool, models.CapViewUserList),
 				handlers.GetAdminAnalyticsSeriesHandler(pool))
+
+			// ── Phase 6: event review and approval-with-featuring ──────────
+			//
+			// The review endpoint returns the FULL event plus its ticket tiers.
+			// The old approvals screen showed a summary, which meant nobody
+			// ever saw the tiers — where the actual mistakes are (a VIP tier
+			// priced at R0, unlimited capacity at a 200-seat venue).
+			staffAPI.GET("/events/:id/review",
+				middleware.RequireCapability(pool, models.CapApproveEvent),
+				handlers.GetEventReviewHandler(pool))
+
+			// Approve, optionally with a BOUNDED featuring window. Replaces the
+			// console's "Approve & Add to Home", which set is_featured with no
+			// end date — which is how a finished event stays on the homepage.
+			staffAPI.PUT("/events/:id/approve-with-feature",
+				middleware.RequireCapability(pool, models.CapFeatureEvent),
+				handlers.ApproveEventWithFeatureHandler(pool, eventCache))
+
+			// ── Phase 7: execution, the last gate ──────────────────────────
+			//
+			// Everything before this was ABOUT an action; this is where one
+			// happens. The handler does NOT re-decide authorisation — four-eyes,
+			// subject confirmation and cooling-off were settled earlier, and the
+			// staff_requests_execution_gated CHECK refuses the write if any were
+			// skipped. It takes a row lock so two admins clicking Execute on the
+			// same queued request cannot both proceed.
+			staffAPI.POST("/requests/:id/execute",
+				middleware.RequireCapability(pool, models.CapApproveRequests),
+				handlers.ExecuteStaffRequestHandler(pool, eventCache))
+
+			// Editors log a takedown; an admin approves it; only then does it
+			// run. The event is UNPUBLISHED, not cancelled or deleted — ticket
+			// holders keep their tickets and their QR codes keep scanning.
+			staffAPI.POST("/events/:id/request-takedown",
+				middleware.RequireCapability(pool, models.CapRequestDangerous),
+				handlers.RequestEventTakedownHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
