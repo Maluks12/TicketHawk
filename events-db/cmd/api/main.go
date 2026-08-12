@@ -226,6 +226,10 @@ func main() {
 	router.TrustedPlatform = gin.PlatformCloudflare
 
 	router.Use(middleware.RequestID())
+	// Live presence. Registered globally and once: it calls c.Next() first, so
+	// user_id is populated by whichever AuthMiddleware ran, whatever group the
+	// route belongs to. Requests that never authenticated are skipped.
+	router.Use(middleware.TrackPresence(eventCache))
 	router.Use(middleware.Logger())
 	router.Use(gin.Recovery())
 
@@ -826,6 +830,12 @@ func main() {
 			// ── Phase 5: platform analytics time series ────────────────────
 			// Aggregates only — no personal data — so the weakest staff
 			// capability gates it, same as the GMV endpoint above.
+			// Polled every 60s by the console, so it is deliberately Redis-only
+			// rather than another field on the GMV aggregate.
+			staffAPI.GET("/stats/presence",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetPresenceHandler(eventCache))
+
 			staffAPI.GET("/analytics/series",
 				middleware.RequireCapability(pool, models.CapViewUserList),
 				handlers.GetAdminAnalyticsSeriesHandler(pool))
