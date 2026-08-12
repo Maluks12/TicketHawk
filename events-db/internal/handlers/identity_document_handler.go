@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"events-db/internal/models"
 	"events-db/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,92 @@ import (
 // at someone's identity document is the thing this exists to prevent, so the
 // log is a precondition rather than a side effect.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// RequireDocumentAccess implements the two-phase rule.
+//
+//	kyc_status pending    any staff role with CapViewKYCDocument may look —
+//	                      you cannot verify an identity you are not allowed to
+//	                      see, and refusing here would mean approving on faith
+//	kyc_status verified   MASTER ADMIN ONLY — the document has done its job;
+//	                      every later read is a dispute, a regulator request or
+//	                      a retention audit, not routine work
+//
+// The gate is on the SUBJECT'S STATE, not the caller's role, which is why it
+// cannot live in the capability matrix. Both branches log.
+func RequireDocumentAccess(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		organizerID := c.Param("id")
+
+		userID, ok := c.Get("user_id")
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		var isMaster bool
+		var email string
+		var staffRole *string
+		if err := pool.QueryRow(ctx, `
+			SELECT COALESCE(is_master_admin, FALSE), email, staff_role::text
+			FROM users WHERE id = $1
+		`, userID).Scan(&isMaster, &email, &staffRole); err != nil {
+			log.Error().Err(err).Msg("document access check failed")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
+			return
+		}
+		c.Set("actor_email", email)
+		c.Set("is_master_admin", isMaster)
+
+		// Master admin passes in both phases, so the verification state is only
+		// consulted for everyone else.
+		if isMaster {
+			c.Next()
+			return
+		}
+
+		var kycStatus *string
+		if err := pool.QueryRow(ctx,
+			`SELECT kyc_status::text FROM organizers WHERE id = $1`, organizerID,
+		).Scan(&kycStatus); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "organiser not found"})
+				return
+			}
+			log.Error().Err(err).Msg("kyc status lookup failed")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
+			return
+		}
+
+		verified := kycStatus != nil && *kycStatus == "verified"
+		if verified {
+			logDocAccess(pool, c, &organizerID, email, "view_denied",
+				"Post-verification read attempted without master admin rights", nil)
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "this organiser is already verified — documents can only be " +
+					"viewed by a master admin after approval",
+				"phase": "post_verification",
+			})
+			return
+		}
+
+		// Pre-verification: any staff role holding the capability may look.
+		if staffRole == nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "staff access required"})
+			return
+		}
+		role, err := models.ParseStaffRole(*staffRole)
+		if err != nil || !models.Can(&role, models.CapViewKYCDocument) {
+			logDocAccess(pool, c, &organizerID, email, "view_denied",
+				"Pre-verification read attempted without the required capability", nil)
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "you cannot view identity documents"})
+			return
+		}
+		c.Next()
+	}
+}
 
 // RequireMasterAdmin gates the routes below.
 //
@@ -111,13 +198,27 @@ func GetIdentityDocumentHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
+		isMasterVal, _ := c.Get("is_master_admin")
+		isMaster, _ := isMasterVal.(bool)
+
+		// A first-time reviewer looking at a pending submission is doing the
+		// job the document was uploaded for, so a default reason is supplied
+		// rather than demanded — friction there just produces "checking"
+		// typed a hundred times. Post-verification reads are the ones that
+		// need justifying, and those only reach here as master admin.
 		if len(trimmed(body.Reason)) < 10 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "a reason of at least 10 characters is required and is recorded permanently",
-			})
-			return
+			if isMaster {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "a reason of at least 10 characters is required and is recorded permanently",
+				})
+				return
+			}
+			body.Reason = "First-time KYC review of a pending submission"
+			body.Category = "kyc_review"
 		}
-		if !validCategories[body.Category] {
+		if body.Category == "kyc_review" {
+			// allowed for the pre-verification path
+		} else if !validCategories[body.Category] {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "category must be dispute, regulator_request, fraud_investigation or other",
 			})

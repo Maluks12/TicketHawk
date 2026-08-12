@@ -128,7 +128,7 @@ func GetPlatformGMVHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if err := pool.QueryRow(ctx, `
 			SELECT COALESCE(SUM(total_amount), 0)::numeric
 			FROM merch_orders
-			WHERE status = 'fulfilled'
+			WHERE fulfillment_status = 'fulfilled'
 		`).Scan(&b.MerchGMV); err != nil {
 			utils.InternalError(c, err, "could not load merch totals")
 			return

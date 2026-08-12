@@ -158,7 +158,7 @@ func GetAdminAnalyticsSeriesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				SELECT date_trunc($1::text, created_at AT TIME ZONE $4::text) AS b,
 				       SUM(total_amount) AS merch_gmv
 				FROM merch_orders
-				WHERE status = 'fulfilled'
+				WHERE fulfillment_status = 'fulfilled'
 				  AND created_at >= $2::timestamptz AND created_at <= $3::timestamptz
 				GROUP BY 1
 			),
