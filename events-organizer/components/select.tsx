@@ -1,9 +1,15 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 // A native <select> popup is drawn by the OS, so its list can never match the
-// trigger — that mismatch is what makes the dropdowns look unfinished. This
-// renders the list ourselves.
+// trigger. This renders the list ourselves.
+//
+// The list goes in a PORTAL on document.body, positioned from the trigger's
+// bounding rect. An absolutely-positioned list is clipped by any ancestor with
+// overflow:hidden — .card has it, so the dropdown was being cut off inside the
+// analytics toolbar. A portal cannot be clipped by an ancestor because it has
+// none, and it sidesteps z-index stacking contexts at the same time.
 //
 // Keyboard behaviour matches a native select: arrows move, Enter/Space commit,
 // Escape cancels, typing jumps to a match.
@@ -38,6 +44,39 @@ export default function Select({
   const boxRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const queryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; flip: boolean } | null>(null);
+
+  const measure = useCallback(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom;
+    // Flip above only when there genuinely isn't room below AND there is more
+    // room above — otherwise a trigger near the bottom of a short window would
+    // flip into even less space.
+    const flip = below < 240 && r.top > below;
+    setPos({
+      top: flip ? r.top - 6 : r.bottom + 6,
+      left: r.left,
+      width: r.width,
+      flip,
+    });
+  }, []);
+
+  useLayoutEffect(() => { if (open) measure(); }, [open, measure]);
+
+  useEffect(() => {
+    if (!open) return;
+    // capture:true so scrolling an ancestor container moves the list too, not
+    // just scrolling the window.
+    const onMove = () => measure();
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open, measure]);
 
   const selected = options.find(o => o.value === value) ?? null;
 
@@ -54,7 +93,10 @@ export default function Select({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (boxRef.current?.contains(t)) return;
+      if (listRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
@@ -154,12 +196,17 @@ export default function Select({
         </svg>
       </button>
 
-      {open && (
+      {open && pos && createPortal(
         <div
           ref={listRef}
           role="listbox"
           style={{
-            position: 'absolute', zIndex: 80, top: 'calc(100% + 6px)', left: 0, right: 0,
+            position: 'fixed',
+            top: pos.flip ? undefined : pos.top,
+            bottom: pos.flip ? window.innerHeight - pos.top : undefined,
+            left: pos.left,
+            width: pos.width,
+            zIndex: 3000,
             background: 'var(--bg-elevated)',
             border: '1px solid var(--border-2)',
             borderRadius: 'var(--r-lg)',
@@ -222,7 +269,8 @@ export default function Select({
               })}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
