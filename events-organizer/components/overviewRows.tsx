@@ -24,7 +24,7 @@ import Link from 'next/link';
 import { Icon, IconName } from './icons';
 import {
   getAnalyticsOverview, AnalyticsOverview,
-  fmtCompact, fmtMoneyCompact, fmtDuration, fmtPct, DASH,
+  fmtCompact, fmtMoneyCompact, fmtDuration,
 } from '../lib/analytics';
 
 interface Chip {
@@ -56,20 +56,15 @@ export function OverviewSummaryRows() {
   // and then back down when the rows arrive.
   if (!data) {
     return (
-      <div style={{ display: 'grid', gap: 12, marginBottom: 18 }}>
-        <SkeletonRow />
+      <div style={{ marginBottom: 18 }}>
         <SkeletonRow />
       </div>
     );
   }
 
   const up = data.upcoming;
-  const avg = data.averages;
 
-  // Nothing to summarise at all — a brand-new organiser with no live event and
-  // no history. Showing two rows of em dashes would be worse than showing
-  // nothing, so the rows simply don't appear until there's something in them.
-  if (!up && !avg) return null;
+  if (!up) return null;
 
   const upcomingChips: Chip[] = up ? [
     { label: 'Impressions', value: fmtCompact(up.metrics.impressions), icon: 'layers' },
@@ -80,46 +75,16 @@ export function OverviewSummaryRows() {
     { label: 'Scanned', value: fmtCompact(up.metrics.scanned), icon: 'qr' },
   ] : [];
 
-  const averageChips: Chip[] = avg ? [
-    { label: 'Impressions', value: fmtCompact(avg.avg_impressions), icon: 'layers' },
-    { label: 'Views', value: fmtCompact(avg.avg_views), icon: 'eye' },
-    { label: 'Retention', value: fmtDuration(avg.retention_seconds), icon: 'clock' },
-    { label: 'Tickets sold', value: fmtCompact(avg.avg_tickets_sold), icon: 'ticket' },
-    { label: 'PSR', value: fmtMoneyCompact(avg.avg_psr, avg.currency), icon: 'dollar' },
-    {
-      label: 'No-shows',
-      value: avg.avg_no_shows != null ? fmtCompact(avg.avg_no_shows) : DASH,
-      icon: 'user',
-    },
-  ] : [];
-
   return (
     <div style={{ display: 'grid', gap: 12, marginBottom: 18 }}>
-      {up && (
-        <SummaryRow
-          eyebrow="Coming up next"
-          title={up.title}
-          meta={daysToGoLabel(up.days_to_go)}
-          accent="var(--accent)"
-          chips={upcomingChips}
-          href={`/analytics?event=${up.event_id}`}
-        />
-      )}
-
-      {avg && (
-        <SummaryRow
-          eyebrow="Your average"
-          title={`Across ${avg.events_counted} ${avg.events_counted === 1 ? 'event' : 'events'} held`}
-          meta={
-            avg.attendance_rate != null
-              ? `${fmtPct(avg.attendance_rate, 0)} attendance`
-              : undefined
-          }
-          accent="var(--text-3)"
-          chips={averageChips}
-          href="/analytics"
-        />
-      )}
+      <SummaryRow
+        eyebrow="Coming up next"
+        title={up.title}
+        meta={daysToGoLabel(up.days_to_go)}
+        accent="var(--accent)"
+        chips={upcomingChips}
+        href={`/analytics?event=${up.event_id}`}
+      />
     </div>
   );
 }
@@ -137,70 +102,73 @@ function SummaryRow({
   href: string;
 }) {
   return (
-    <div
-      style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--r-lg)',
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--r-xl)',
+      display: 'flex',
+      alignItems: 'stretch',
+      flexWrap: 'wrap',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        padding: '16px 20px',
+        borderRight: '1px solid var(--border)',
+        minWidth: 230, flex: '0 1 280px',
+        display: 'flex', flexDirection: 'column', justifyContent: 'center',
         boxShadow: `inset 3px 0 0 ${accent}`,
-        padding: '13px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 18,
-        flexWrap: 'wrap',
-      }}
-    >
-      {/* Identity — fixed minimum so the chip columns start at the same x on
-          both rows and stay vertically comparable. */}
-      <div style={{ minWidth: 210, flex: '0 1 260px' }}>
+      }}>
         <div style={{
-          fontSize: 9.5, fontWeight: 800, letterSpacing: '.12em',
+          fontSize: 10, fontWeight: 800, letterSpacing: '.12em',
           textTransform: 'uppercase', color: 'var(--text-3)',
         }}>
           {eyebrow}
         </div>
         <div style={{
-          fontSize: 14.5, fontWeight: 800, color: 'var(--text)',
-          letterSpacing: '-.01em', marginTop: 3,
+          fontSize: 16, fontWeight: 700, color: 'var(--text)',
+          letterSpacing: '-.02em', marginTop: 4,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {title}
         </div>
         {meta && (
-          <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>{meta}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 3 }}>{meta}</div>
         )}
       </div>
 
-      {/* Metrics */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 22,
-        flex: 1, flexWrap: 'wrap', minWidth: 0,
-      }}>
-        {chips.map((c) => (
-          <div key={c.label} style={{ minWidth: 78 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              fontSize: 9.5, fontWeight: 800, letterSpacing: '.08em',
-              textTransform: 'uppercase', color: 'var(--text-3)',
-            }}>
-              <Icon name={c.icon} size={11} />
-              {c.label}
-            </div>
-            <div style={{
-              fontSize: 17, fontWeight: 800, color: 'var(--text)',
-              letterSpacing: '-.02em', marginTop: 3,
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              {c.value}
-            </div>
+      {/* Same hairline-divided treatment as the analytics metric row, so the
+          Overview and Analytics read as one system. */}
+      {chips.map((c) => (
+        <div key={c.label} style={{
+          padding: '16px 18px',
+          borderRight: '1px solid var(--border)',
+          flex: '1 1 110px', minWidth: 108,
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em',
+            color: 'var(--text-3)',
+          }}>
+            <Icon name={c.icon} size={11} />
+            {c.label}
           </div>
-        ))}
-      </div>
+          <div style={{
+            fontSize: 20, fontWeight: 700, color: 'var(--text)',
+            letterSpacing: '-.025em', marginTop: 6,
+            fontVariantNumeric: 'tabular-nums',
+          }}>
+            {c.value}
+          </div>
+        </div>
+      ))}
 
       <Link
         href={href}
         className="btn btn-sm"
-        style={{ flexShrink: 0, textDecoration: 'none' }}
+        style={{
+          alignSelf: 'center', margin: '0 16px',
+          textDecoration: 'none', flexShrink: 0,
+        }}
       >
         Details
         <Icon name="chevron-right" size={13} />

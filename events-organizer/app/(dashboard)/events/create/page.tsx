@@ -15,6 +15,7 @@ import { getKycStatus } from '../../../../lib/kyc';
 import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
 import DateTimePicker from '@/components/dateTimePicker';
 import TicketTypeModal from '@/components/ticketTypeModal';
+import Select from '@/components/select';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI-ONLY REWRITE
@@ -89,12 +90,6 @@ const inp: React.CSSProperties = {
   outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
   transition: 'border-color .15s ease, box-shadow .15s ease, background .15s ease',
 };
-
-// Selects need an OPAQUE background. `inp` uses a translucent surface, and
-// Chrome derives the native dropdown list's background from the select's own
-// computed background-color — an alpha value there composites over white and
-// produces a white popup in dark mode. Same box visually, different alpha.
-const sel: React.CSSProperties = { ...inp, background: 'var(--surface-2)' };
 
 function Required() {
   return <span style={{ color: 'var(--danger)', marginLeft: 3 }} aria-hidden>*</span>;
@@ -824,12 +819,15 @@ export default function CreateEventPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 20 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Ticket scanning window</label>
-                      <select value={scanWindowMode}
-                        onChange={e => setScanWindowMode(e.target.value as 'default' | 'custom')}
-                        style={sel}>
-                        <option value="default">Default — 2h before, 2h after</option>
-                        <option value="custom">Custom — set my own window</option>
-                      </select>
+                      <Select
+                        ariaLabel="Ticket scanning window"
+                        value={scanWindowMode}
+                        onChange={(v) => setScanWindowMode(v as 'default' | 'custom')}
+                        options={[
+                          { value: 'default', label: 'Default', hint: '2h before, 2h after' },
+                          { value: 'custom', label: 'Custom', hint: 'Set my own window' },
+                        ]}
+                      />
                       <div className="field-hint">When staff can scan at the door</div>
                     </div>
                   </div>
@@ -956,16 +954,19 @@ export default function CreateEventPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Category <Required /></label>
-                      <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={sel}>
-                        <option value="">— Select a category —</option>
-                        {categories.length > 0
-                          ? categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                      <Select
+                        ariaLabel="Category"
+                        value={categoryId}
+                        onChange={setCategoryId}
+                        placeholder="Select a category"
+                        options={(categories.length > 0
+                          ? categories.map(c => ({ value: String(c.id), label: c.name }))
                           : [['1','Music'],['2','Sports'],['3','Arts & Culture'],['4','Food & Drink'],
                              ['5','Technology'],['6','Business'],['7','Health & Wellness'],
                              ['8','Education'],['9','Comedy'],['10','Other'],
-                            ].map(([v, l]) => <option key={v} value={v}>{l}</option>)
-                        }
-                      </select>
+                            ].map(([v, l]) => ({ value: v, label: l }))
+                        )}
+                      />
                     </div>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Pricing</label>
@@ -1013,14 +1014,19 @@ export default function CreateEventPage() {
                       </div>
                       <div className="field" style={{ marginBottom: 0 }}>
                         <label>Currency</label>
-                        <select value={currency} onChange={e => setCurrency(e.target.value)} style={sel}>
-                          <option value="ZAR">ZAR — South African Rand</option>
-                          <option value="USD">USD — US Dollar</option>
-                          <option value="EUR">EUR — Euro</option>
-                          <option value="GBP">GBP — British Pound</option>
-                          <option value="KES">KES — Kenyan Shilling</option>
-                          <option value="NGN">NGN — Nigerian Naira</option>
-                        </select>
+                        <Select
+                          ariaLabel="Currency"
+                          value={currency}
+                          onChange={setCurrency}
+                          options={[
+                            { value: 'ZAR', label: 'ZAR — South African Rand' },
+                            { value: 'USD', label: 'USD — US Dollar' },
+                            { value: 'EUR', label: 'EUR — Euro' },
+                            { value: 'GBP', label: 'GBP — British Pound' },
+                            { value: 'KES', label: 'KES — Kenyan Shilling' },
+                            { value: 'NGN', label: 'NGN — Nigerian Naira' },
+                          ]}
+                        />
                       </div>
                     </div>
                   )}
@@ -1104,21 +1110,27 @@ export default function CreateEventPage() {
                   borderRadius: 'var(--r-xl)', padding: 20,
                 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 800, marginBottom: 12 }}>Event type</div>
-                  <select value={eventType}
-                    onChange={(e) => {
-                      const v = e.target.value as typeof eventType;
+                  <Select
+                    ariaLabel="Event type"
+                    value={eventType}
+                    onChange={(v) => {
                       if (v !== 'private_free' && kycLevel < 2) { router.push('/kyc'); return; }
-                      setEventType(v);
+                      setEventType(v as typeof eventType);
                     }}
-                    style={sel}>
-                    <option value="private_free">Private free event</option>
-                    <option value="private_paid" disabled={kycLevel < 2}>
-                      Private paid event{kycLevel < 2 ? ' — needs full verification' : ''}
-                    </option>
-                    <option value="public" disabled={kycLevel < 2}>
-                      Public event{kycLevel < 2 ? ' — needs full verification' : ''}
-                    </option>
-                  </select>
+                    options={[
+                      { value: 'private_free', label: 'Private free event' },
+                      {
+                        value: 'private_paid', label: 'Private paid event',
+                        hint: kycLevel < 2 ? 'Needs full verification' : undefined,
+                        disabled: kycLevel < 2,
+                      },
+                      {
+                        value: 'public', label: 'Public event',
+                        hint: kycLevel < 2 ? 'Needs full verification' : undefined,
+                        disabled: kycLevel < 2,
+                      },
+                    ]}
+                  />
                   <p style={{ fontSize: 12.5, color: 'var(--text-3)', margin: '10px 0 0', lineHeight: 1.6 }}>
                     {eventType === 'private_free' && 'Invite-only via a shareable link. Free tickets only. Goes live immediately — no admin review.'}
                     {eventType === 'private_paid' && 'Invite-only via a shareable link, with paid tickets. Goes live immediately — no admin review. Requires full verification and payout bank details.'}
