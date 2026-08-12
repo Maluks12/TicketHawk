@@ -201,6 +201,15 @@ body, .card, .stat-card, .modal, .toolbar, .page-header, aside, main {
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
+
+/* A link styled as a button is a button. The global a:hover underline was
+   striking through "+ Create event" on hover. */
+a.btn:hover, a.btn:focus { text-decoration: none; }
+a.btn-primary:hover {
+  background: var(--accent-h);
+  border-color: var(--accent-h);
+  box-shadow: 0 2px 12px var(--accent-ring);
+}
 button { font-family: var(--font); cursor: pointer; }
 input, select, textarea { font-family: var(--font); }
 
@@ -260,16 +269,17 @@ select option:disabled { color: var(--text-faint); }
 .stat-value, .meta-table td, .tabular { font-variant-numeric: tabular-nums; }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--surface-alpha); }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-2);
+  background: var(--text-faint);
   border-radius: 99px;
-  border: 3px solid transparent;
+  border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-3); background-clip: content-box; }
-* { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--text-faint) var(--surface-alpha); }
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .btn {
@@ -790,4 +800,61 @@ select option:disabled { color: var(--text-faint); }
 }
 @media (max-width: 620px) {
   .stat-grid { grid-template-columns: 1fr; }
+}
+
+
+/* ── Metric row ──────────────────────────────────────────────────────────────
+   Analytics tools (Stripe, Amplitude, Plausible) present headline numbers as
+   one continuous band divided by hairlines, not as a grid of separate cards.
+   Eight bordered boxes read as eight unrelated things; a divided row reads as
+   one dataset, and the numbers can be larger because they aren't each paying
+   for their own padding and border. */
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+.metric-row + .metric-row { margin-top: -1px; border-radius: 0 0 var(--r-xl) var(--r-xl); }
+.metric-row:has(+ .metric-row) { border-radius: var(--r-xl) var(--r-xl) 0 0; }
+
+.metric {
+  padding: 18px 20px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.metric:last-child { border-right: none; }
+
+.metric-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  color: var(--text-3);
+  margin-bottom: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.metric-value {
+  font-size: 30px; font-weight: 700; line-height: 1.05;
+  letter-spacing: -.035em; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.metric-value.muted { color: var(--text-faint); font-weight: 600; }
+.metric-sub {
+  font-size: 12px; color: var(--text-3); margin-top: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.metric-delta { font-weight: 600; }
+.metric-delta.up { color: var(--success); }
+.metric-delta.down { color: var(--danger-fg); }
+
+@media (max-width: 1180px) {
+  .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric:nth-child(2n) { border-right: none; }
+  .metric:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+}
+@media (max-width: 620px) {
+  .metric-row { grid-template-columns: 1fr; }
+  .metric { border-right: none; border-bottom: 1px solid var(--border); }
+  .metric:last-child { border-bottom: none; }
 }

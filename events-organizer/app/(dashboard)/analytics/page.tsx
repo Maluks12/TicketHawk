@@ -16,10 +16,11 @@
 // that rate, so it can't disagree with the same rate elsewhere in the product.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/icons';
 import { LineChart, BarChart, Funnel, Legend, Series } from '@/components/charts';
 import { StatusPill } from '@/components/ui';
+import Select from '@/components/select';
 import {
   getAnalyticsOverview, listEventAnalytics, getSeries,
   AnalyticsOverview, EventAnalyticsRow, SeriesResult, Granularity,
@@ -47,7 +48,10 @@ const GRAINS: Array<{ id: Granularity; label: string }> = [
 export default function AnalyticsPage() {
   const [grain, setGrain] = useState<Granularity>('day');
   const [rangeId, setRangeId] = useState<string>('30d');
-  const [scope, setScope] = useState<string>('all'); // 'all' | event id
+  const params = useSearchParams();
+  // Overview links here as /analytics?event=<id>; without this the page always
+  // opened on "All events" and the link looked broken.
+  const [scope, setScope] = useState<string>(() => params.get('event') ?? 'all');
 
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [events, setEvents] = useState<EventAnalyticsRow[]>([]);
@@ -154,6 +158,14 @@ export default function AnalyticsPage() {
   // one event ⇒ that event's lifetime totals; all events ⇒ the window totals.
   const focus = selectedEvent?.metrics ?? series?.totals ?? null;
 
+  const recentHeld = useMemo(
+    () => events
+      .filter((e) => e.ended)
+      .sort((a, b) => +new Date(b.start_time) - +new Date(a.start_time))
+      .slice(0, 3),
+    [events],
+  );
+
   const labels = useMemo(
     () => (series?.points ?? []).map((p) => fmtBucket(p.bucket, series!.granularity)),
     [series],
@@ -234,19 +246,16 @@ export default function AnalyticsPage() {
                 </ControlGroup>
               </div>
 
-              <div className="toolbar-right">
-                <select
-                  className="filter-select"
+              <div className="toolbar-right" style={{ minWidth: 240 }}>
+                <Select
+                  ariaLabel="Event scope"
                   value={scope}
-                  onChange={(e) => setScope(e.target.value)}
-                  style={{ minWidth: 220 }}
-                  aria-label="Event scope"
-                >
-                  <option value="all">All events</option>
-                  {events.map((e) => (
-                    <option key={e.event_id} value={e.event_id}>{e.title}</option>
-                  ))}
-                </select>
+                  onChange={setScope}
+                  options={[
+                    { value: 'all', label: 'All events' },
+                    ...events.map((e) => ({ value: e.event_id, label: e.title })),
+                  ]}
+                />
               </div>
             </div>
 
@@ -276,57 +285,53 @@ export default function AnalyticsPage() {
               {selectedEvent && <StatusPill status={selectedEvent.status} />}
             </div>
 
-            <div className="stat-grid" style={{ marginBottom: 14 }}>
-              <MetricTile
-                label="Impressions" icon="layers" accent="var(--accent)"
+            <div className="metric-row">
+              <Metric
+                label="Impressions"
                 value={fmtCompact(focus?.impressions)}
                 sub="Times your card appeared in a feed"
               />
-              <MetricTile
-                label="Views" icon="eye" accent="var(--info)"
+              <Metric
+                label="Views"
                 value={fmtCompact(focus?.views)}
-                sub={focus?.ctr !== undefined ? `${fmtPct(focus?.ctr ?? null)} of impressions` : undefined}
+                sub={focus?.ctr != null ? `${fmtPct(focus.ctr)} of impressions` : 'No impressions yet'}
               />
-              <MetricTile
-                label="Retention" icon="clock" accent="var(--warning)"
+              <Metric
+                label="Retention"
                 value={fmtDuration(focus?.retention_seconds ?? null)}
                 sub={focus ? (coverageNote(focus) ?? 'Average time on your event page') : undefined}
               />
-              <MetricTile
-                label="PSR" icon="dollar" accent="var(--success)"
+              <Metric
+                label="PSR"
                 value={fmtMoneyCompact(focus?.psr ?? null, selectedEvent?.currency)}
                 sub="Revenue after the platform cut"
               />
             </div>
 
-            <div className="stat-grid">
-              <MetricTile
-                label="Tickets sold" icon="ticket" accent="var(--accent)"
+            <div className="metric-row">
+              <Metric
+                label="Tickets sold"
                 value={fmtNum(focus?.tickets_sold)}
                 sub={`${fmtNum(focus?.bookings)} bookings`}
               />
-              <MetricTile
-                label="Conversion" icon="trending-up" accent="var(--info)"
+              <Metric
+                label="Conversion"
                 value={fmtPct(focus?.conversion ?? null)}
                 sub="Tickets sold per view"
               />
-              <MetricTile
-                label="Scanned in" icon="qr" accent="var(--success)"
+              <Metric
+                label="Scanned in"
                 value={fmtNum(focus?.scanned)}
-                sub={
-                  focus?.attendance_rate != null
-                    ? `${fmtPct(focus.attendance_rate)} of tickets sold`
-                    : 'No scans recorded yet'
-                }
+                sub={focus?.attendance_rate != null
+                  ? `${fmtPct(focus.attendance_rate)} of tickets sold`
+                  : 'No scans recorded yet'}
               />
-              <MetricTile
-                label="No-shows" icon="user" accent="var(--danger)"
+              <Metric
+                label="No-shows"
                 value={focus?.no_shows != null ? fmtNum(focus.no_shows) : DASH}
-                sub={
-                  focus?.no_shows != null
-                    ? 'Tickets never scanned at the door'
-                    : 'Calculated once the event has ended'
-                }
+                sub={focus?.no_shows != null
+                  ? 'Tickets never scanned at the door'
+                  : 'Calculated once the event has ended'}
               />
             </div>
           </div>
@@ -432,13 +437,13 @@ export default function AnalyticsPage() {
             </div>
           )}
 
-          {/* ── Per-event breakdown ───────────────────────────────────── */}
+          {/* ── Last 3 events held ────────────────────────────────────── */}
           <div className="card">
             <div className="card-header">
-              <div className="card-title">Every event</div>
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                {events.length} total
-              </span>
+              <div>
+                <div className="card-title">Last 3 events held</div>
+                <div className="section-sub">Use the picker above for any other event</div>
+              </div>
             </div>
             <div className="table-wrap">
               <table className="meta-table">
@@ -447,8 +452,6 @@ export default function AnalyticsPage() {
                     <th>Event</th>
                     <th style={{ textAlign: 'right' }}>Impressions</th>
                     <th style={{ textAlign: 'right' }}>Views</th>
-                    <th style={{ textAlign: 'right' }}>CTR</th>
-                    <th style={{ textAlign: 'right' }}>Retention</th>
                     <th style={{ textAlign: 'right' }}>Sold</th>
                     <th style={{ textAlign: 'right' }}>PSR</th>
                     <th style={{ textAlign: 'right' }}>Scanned</th>
@@ -456,22 +459,22 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {events.length === 0 && (
+                  {recentHeld.length === 0 && (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-3)', padding: 28 }}>
-                        No events yet.
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-3)', padding: 28 }}>
+                        No events held yet.
                       </td>
                     </tr>
                   )}
-                  {events.map((e) => (
-                    <tr key={e.event_id}>
+                  {recentHeld.map((e) => (
+                    <tr
+                      key={e.event_id}
+                      onClick={() => setScope(e.event_id)}
+                      style={{ cursor: 'pointer' }}
+                      title="Show this event above"
+                    >
                       <td>
-                        <Link
-                          href={`/event/${e.event_id}`}
-                          style={{ fontWeight: 600, color: 'var(--text)' }}
-                        >
-                          {e.title}
-                        </Link>
+                        <div style={{ fontWeight: 600, color: 'var(--text)' }}>{e.title}</div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>
                           {new Date(e.start_time).toLocaleDateString('en-ZA', {
                             day: 'numeric', month: 'short', year: 'numeric',
@@ -480,8 +483,6 @@ export default function AnalyticsPage() {
                       </td>
                       <Num>{fmtNum(e.metrics.impressions)}</Num>
                       <Num>{fmtNum(e.metrics.views)}</Num>
-                      <Num>{fmtPct(e.metrics.ctr)}</Num>
-                      <Num>{fmtDuration(e.metrics.retention_seconds)}</Num>
                       <Num>{fmtNum(e.metrics.tickets_sold)}</Num>
                       <Num>{fmtMoney(e.metrics.psr, e.currency)}</Num>
                       <Num>{fmtNum(e.metrics.scanned)}</Num>
@@ -516,42 +517,19 @@ function ControlGroup({ label, children }: { label: string; children: React.Reac
   );
 }
 
-function MetricTile({
-  label, value, sub, icon, accent,
-}: {
-  label: string; value: string; sub?: string; icon: React.ComponentProps<typeof Icon>['name']; accent: string;
+function Metric({ label, value, sub }: {
+  label: string; value: string; sub?: string;
 }) {
+  const muted = value === DASH;
   return (
-    <div className="stat-card" style={{ boxShadow: `inset 3px 0 0 ${accent}` }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 8, marginBottom: 11,
-      }}>
-        <div className="stat-label" style={{ marginBottom: 0 }}>{label}</div>
-        <div style={{
-          width: 30, height: 30, borderRadius: 10, color: accent,
-          background: 'var(--surface-strong)', display: 'grid', placeItems: 'center',
-        }}>
-          <Icon name={icon} size={15} />
-        </div>
-      </div>
-      <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
+    <div className="metric">
+      <div className="metric-label">{label}</div>
+      <div className={`metric-value${muted ? ' muted' : ''}`}>{value}</div>
+      {sub && <div className="metric-sub" title={sub}>{sub}</div>}
     </div>
   );
 }
 
-/**
- * A chart card that can be opened full-screen.
- *
- * At 900 viewBox units squeezed into a ~1000px card, a 90-day series puts a
- * point every 11px — dense enough that a spike and a plateau look the same.
- * Expanding gives the same chart the whole viewport, which is the difference
- * between seeing that something moved and seeing when.
- *
- * The expanded copy renders the SAME components with the same props, just
- * taller. There is no second chart implementation to drift out of sync.
- */
 function ChartCard({
   title, sub, series, labels, kind, format, loading,
 }: {

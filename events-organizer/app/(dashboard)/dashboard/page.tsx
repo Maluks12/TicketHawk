@@ -5,7 +5,7 @@ import { api } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
 import { fmtMoney, fmtDate } from '../../../lib/utils';
 import { getNotifications, markRead, NOTIF_KYC_APPROVED, Notification } from '../../../lib/notifications';
-import { StatCard, StatusPill } from '@/components/ui';
+import { StatusPill } from '@/components/ui';
 import { OverviewSummaryRows } from '@/components/overviewRows';
 
 // Mirrors repository.OrganizerStats as serialised by
@@ -91,7 +91,7 @@ export default function DashboardPage() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Link href="/events/create" className="btn btn-primary">
-            + Create event
+            Create event
           </Link>
         </div>
       </div>
@@ -151,52 +151,33 @@ export default function DashboardPage() {
         <OverviewSummaryRows />
 
         {/* ── Stat cards — 4 across like Meta's account overview ──────── */}
-        <div className="stat-grid">
-          <StatCard
-            label="Published events"
-            value={stats?.published_events ?? 0}
-            sub={`of ${stats?.total_events ?? 0} total`}
-            accent="blue"
-            icon={
-              <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
-                <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
-              </svg>
-            }
-          />
-          <StatCard
-            label="Net earnings"
-            value={fmtMoney(stats?.total_net_earnings ?? 0)}
-            sub={`${fmtMoney(stats?.gross_ticket_revenue ?? 0)} gross · ${fmtMoney(stats?.platform_fees_paid ?? 0)} fees`}
-            accent="green"
-            icon={
-              <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
-                <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd"/>
-              </svg>
-            }
-          />
-          <StatCard
-            label="Tickets sold"
-            value={(stats?.total_tickets_sold ?? 0).toLocaleString()}
-            sub={`across ${(stats?.total_bookings ?? 0).toLocaleString()} confirmed bookings`}
-            accent="orange"
-            icon={
-              <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
-                <path d="M2 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 100 4v2a2 2 0 01-2 2H4a2 2 0 01-2-2v-2a2 2 0 100-4V6z"/>
-              </svg>
-            }
-          />
-          <StatCard
-            label="Today"
-            value={fmtMoney(stats?.revenue_today ?? 0)}
-            sub={`${(stats?.bookings_today ?? 0).toLocaleString()} bookings since midnight`}
-            accent="grey"
-            icon={
-              <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.5 2.5a1 1 0 001.414-1.414L11 9.586V6z" clipRule="evenodd"/>
-              </svg>
-            }
-          />
+        <div className="metric-row">
+          <div className="metric">
+            <div className="metric-label">Published events</div>
+            <div className="metric-value">{stats?.published_events ?? 0}</div>
+            <div className="metric-sub">of {stats?.total_events ?? 0} total</div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Net earnings</div>
+            <div className="metric-value">{fmtMoney(stats?.total_net_earnings ?? 0)}</div>
+            <div className="metric-sub">
+              {fmtMoney(stats?.gross_ticket_revenue ?? 0)} gross · {fmtMoney(stats?.platform_fees_paid ?? 0)} fees
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Tickets sold</div>
+            <div className="metric-value">{(stats?.total_tickets_sold ?? 0).toLocaleString()}</div>
+            <div className="metric-sub">
+              across {(stats?.total_bookings ?? 0).toLocaleString()} confirmed bookings
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Today</div>
+            <div className="metric-value">{fmtMoney(stats?.revenue_today ?? 0)}</div>
+            <div className="metric-sub">
+              {(stats?.bookings_today ?? 0).toLocaleString()} bookings since midnight
+            </div>
+          </div>
         </div>
 
         {/* ── Two-column lower section ─────────────────────────────────── */}
@@ -224,14 +205,6 @@ export default function DashboardPage() {
                     padding: '10px 16px',
                     borderBottom: i < events.length - 1 ? '1px solid var(--border)' : 'none',
                   }}>
-                    <div style={{
-                      width: 36, height: 36, borderRadius: 6, background: 'var(--accent-soft)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    }}>
-                      <svg viewBox="0 0 20 20" fill="var(--accent)" width="16" height="16">
-                        <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
-                      </svg>
-                    </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {ev.title}

@@ -40,7 +40,7 @@ type NavEntry =
 const NAV: NavEntry[] = [
   { type: 'section', label: 'Dashboard' },
   { type: 'item', href: '/dashboard', exact: true, label: 'Overview', icon: 'grid' },
-  { type: 'item', href: '/events', label: 'My Events', icon: 'calendar' },
+  { type: 'item', href: '/events', label: 'My Events', icon: 'ticket' },
   // Deep analytics — reach, retention, PSR and door numbers at minute/hour/day
   // resolution. Kept OFF the Overview and behind its own route so the
   // dashboard's first screen stays a summary rather than a control panel.
@@ -132,7 +132,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   eslint-disable below: next/image wants width/height and a
                   loader config for a 36px static asset that's already in
                   /public — a plain <img> is the right tool at this size. */}
-              <div className="brand-mark" style={{ background: 'transparent', boxShadow: 'none', padding: 0 }}>
+              {/* .brand-mark still supplies the 36px box and the flex-shrink,
+                  but its indigo plate and accent glow are both switched off —
+                  the glow was the halo visible around the circle. Left as an
+                  inline override so the class stays reusable for a future
+                  square mark. */}
+              <div className="brand-mark" style={{
+                background: 'transparent', boxShadow: 'none', padding: 0,
+              }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/brand-logo.png"
