@@ -204,7 +204,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </aside>
 
           {/* Main */}
-          <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          {/* overflow:auto, not hidden — the shell is height:100vh, so anything
+              taller than the viewport was clipped with no scrollbar at all.
+              display:flex is gone too: as a flex item, a page wrapper with
+              `margin: 0 auto` loses align-items:stretch and shrinks to its
+              CONTENT width, which is why the dashboard sat in a narrow column
+              with empty space either side. As a block container, the same
+              wrapper fills the width and caps at its max-width. */}
+          <main style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
             {children}
           </main>
         </div>
