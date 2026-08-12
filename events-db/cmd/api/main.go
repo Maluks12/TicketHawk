@@ -226,6 +226,10 @@ func main() {
 	router.TrustedPlatform = gin.PlatformCloudflare
 
 	router.Use(middleware.RequestID())
+	// Live presence. Registered globally and once: it calls c.Next() first, so
+	// user_id is populated by whichever AuthMiddleware ran, whatever group the
+	// route belongs to. Requests that never authenticated are skipped.
+	router.Use(middleware.TrackPresence(eventCache))
 	router.Use(middleware.Logger())
 	router.Use(gin.Recovery())
 
@@ -826,6 +830,12 @@ func main() {
 			// ── Phase 5: platform analytics time series ────────────────────
 			// Aggregates only — no personal data — so the weakest staff
 			// capability gates it, same as the GMV endpoint above.
+			// Polled every 60s by the console, so it is deliberately Redis-only
+			// rather than another field on the GMV aggregate.
+			staffAPI.GET("/stats/presence",
+				middleware.RequireCapability(pool, models.CapViewUserList),
+				handlers.GetPresenceHandler(eventCache))
+
 			staffAPI.GET("/analytics/series",
 				middleware.RequireCapability(pool, models.CapViewUserList),
 				handlers.GetAdminAnalyticsSeriesHandler(pool))
@@ -877,11 +887,24 @@ func main() {
 		// Every read requires a stated reason and is written to
 		// kyc_document_access_log BEFORE the bytes are returned — if the log
 		// write fails, the read is refused.
-		masterAPI := admin.Group("/kyc")
-		masterAPI.Use(handlers.RequireMasterAdmin(pool))
+		kycDocs := admin.Group("/kyc")
 		{
-			masterAPI.POST("/:id/document", handlers.GetIdentityDocumentHandler(pool))
-			masterAPI.GET("/access-log",    handlers.GetDocumentAccessLogHandler(pool))
+			// Two-phase, decided by the ORGANISER'S state rather than the
+			// caller's role:
+			//   pending  → any staff role may look, because you cannot verify
+			//              an identity you are not allowed to see
+			//   verified → master admin only, because the document has done its
+			//              job and later reads are regulatory, not routine
+			kycDocs.POST("/:id/document",
+				handlers.RequireDocumentAccess(pool),
+				handlers.GetIdentityDocumentHandler(pool))
+
+			// The log itself stays master-admin only: it names who looked at
+			// whose identity document, which is more sensitive than any single
+			// entry in it.
+			kycDocs.GET("/access-log",
+				handlers.RequireMasterAdmin(pool),
+				handlers.GetDocumentAccessLogHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))

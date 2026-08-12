@@ -33,7 +33,15 @@ interface GMV {
   tickets_sold: number; tickets_free: number; tickets_paid: number;
   events_public_free: number; events_public_paid: number;
   events_private_free: number; events_private_paid: number;
-  total_users: number; active_users: number; organisers: number;
+  total_users: number; booked_90d: number; organisers: number;
+}
+
+interface Presence {
+  available: boolean;
+  active_now: number;
+  active_1h: number;
+  active_24h: number;
+  as_of: string;
 }
 
 type Gran = 'day' | 'hour';
@@ -61,12 +69,29 @@ export default function AdminAnalyticsPage() {
   const [points, setPoints] = useState<Point[]>([]);
   const [gmv, setGmv] = useState<GMV | null>(null);
   const [clampNote, setClampNote] = useState<string | null>(null);
+  const [presence, setPresence] = useState<Presence | null>(null);
 
   // Only ever set FALSE — see the dashboard for why a synchronous setState at
   // the top of a fetch called from an effect is a cascading render.
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadCaps(); }, [loadCaps]);
+
+  // Presence polls on its own 60-second interval, independent of the charts.
+  // Separate because it is a cheap Redis read while the series is four
+  // aggregate queries — tying them together would mean either a stale number
+  // or re-running the heavy work every minute.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      api.get('/admin/stats/presence')
+        .then(({ data }) => { if (alive) setPresence(data); })
+        .catch(() => { if (alive) setPresence(null); });
+    };
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   // Ranges are grain-specific; reconciling happens in the click handler rather
   // than an effect, so changing grain is one render and one request instead of
@@ -182,9 +207,18 @@ export default function AdminAnalyticsPage() {
           sub="Value transacted" />
         <Tile label="Our revenue" value={fmtMoney(gmv?.our_revenue ?? 0)} accent="var(--success)"
           sub={gmv?.take_rate != null ? `${(gmv.take_rate * 100).toFixed(1)}% take rate` : '—'} />
-        <Tile label="Active users" value={(gmv?.active_users ?? 0).toLocaleString('en-ZA')}
+        {/* Live, not a cohort. The old tile showed 90-day bookers under the
+            label "Active users", which is why the number looked wrong — it was
+            answering a different question. */}
+        <Tile
+          label="Active now"
+          value={presence?.available ? presence.active_now.toLocaleString('en-ZA') : '—'}
           accent="var(--info)"
-          sub={`of ${(gmv?.total_users ?? 0).toLocaleString('en-ZA')} registered`} />
+          sub={presence?.available
+            ? `in the last 5 min · ${presence.active_24h.toLocaleString('en-ZA')} today`
+            : 'Presence tracking unavailable'}
+          live={presence?.available}
+        />
         <Tile label="Organisers" value={String(gmv?.organisers ?? 0)} accent="var(--warning)"
           sub="With a profile" />
       </div>
@@ -251,6 +285,15 @@ export default function AdminAnalyticsPage() {
           ]}
         />
         <Breakdown
+          title="People"
+          sub="Registered, and how many still book"
+          rows={[
+            ['Registered', gmv?.total_users ?? 0],
+            ['Booked in 90 days', gmv?.booked_90d ?? 0],
+            ['Organisers', gmv?.organisers ?? 0],
+          ]}
+        />
+        <Breakdown
           title="Revenue split"
           sub="Where our cut comes from"
           money
@@ -280,14 +323,33 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Tile({ label, value, sub, accent }: {
-  label: string; value: string; sub?: string; accent: string;
+function Tile({ label, value, sub, accent, live = false }: {
+  label: string; value: string; sub?: string; accent: string; live?: boolean;
 }) {
   return (
     <div className="stat-card" style={{ boxShadow: `inset 3px 0 0 ${accent}` }}>
-      <div className="stat-label">{label}</div>
+      <div className="stat-label" style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+      }}>
+        {label}
+        {/* A live number that looks identical to a static one invites the
+            reader to assume it is stale. The dot says it is moving. */}
+        {live && (
+          <span
+            title="Updates every minute"
+            style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: 'var(--success)', flexShrink: 0,
+              animation: 'presencePulse 2s ease-in-out infinite',
+            }}
+          />
+        )}
+      </div>
       <div className="stat-value">{value}</div>
       {sub && <div className="stat-sub">{sub}</div>}
+      {live && (
+        <style>{`@keyframes presencePulse{0%,100%{opacity:1}50%{opacity:.25}}`}</style>
+      )}
     </div>
   );
 }
@@ -379,7 +441,8 @@ function Definitions() {
     ['Take rate', 'Our revenue divided by ticket GMV. The single number that says whether the model works.'],
     ['Organiser PSR', 'Post-split revenue — what organisers keep after our commission.'],
     ['Free vs paid tickets', 'Decided per booking by its unit price, not by the event\u2019s headline price. An event with a free tier and a VIP tier counts in both.'],
-    ['Active users', 'Confirmed a booking in the last 90 days. Deliberately activity rather than last login — someone who signs in and buys nothing is not an active customer.'],
+    ['Active now', 'Distinct users who made an authenticated request in the last 5 minutes. Updates every minute. Measured in Redis on the tail of each request, so it reflects real use rather than sign-ins.'],
+    ['Booked (90d)', 'Distinct users who confirmed a booking in the last 90 days — a retention cohort, not a liveness measure. Both are useful; they answer different questions.'],
     ['Merch revenue', 'Not shown: merch_orders stores no commission split, so there is nothing in the database that says what we earn on a merch sale.'],
   ];
   return (

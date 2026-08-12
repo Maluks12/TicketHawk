@@ -16,7 +16,7 @@
 // that rate, so it can't disagree with the same rate elsewhere in the product.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { Icon } from '@/components/icons';
 import { LineChart, BarChart, Funnel, Legend, Series } from '@/components/charts';
 import { StatusPill } from '@/components/ui';

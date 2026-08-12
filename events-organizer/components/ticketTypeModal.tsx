@@ -12,8 +12,9 @@
 // Cancel discards it. The same dialog edits an existing tier, so there is one
 // place where a tier's rules live rather than two that can drift.
 // ─────────────────────────────────────────────────────────────────────────────
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Warning, Ticket, Check } from '@phosphor-icons/react';
+import Select, { SelectOption } from './select';
 
 export interface TicketTypeRow {
   name: string; price: number; capacity: string;
@@ -188,7 +189,6 @@ function TicketTypeForm({
   // is still typing the first character is noise, not help.
   const [touched, setTouched] = useState(false);
 
-  const firstRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
@@ -196,7 +196,6 @@ function TicketTypeForm({
     return () => document.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
-  useEffect(() => { firstRef.current?.focus(); }, []);
 
   const upd = (p: Partial<TicketTypeRow>) => {
     setRow(r => {
@@ -216,6 +215,13 @@ function TicketTypeForm({
 
   const err = (k: keyof TicketErrors) => (touched ? errors[k] : undefined);
 
+  const presetOptions: SelectOption[] = [
+    ...PRESET_GROUPS.flatMap(g =>
+      g.options.map(o => ({ value: o, label: o, group: g.group })),
+    ),
+    { value: CUSTOM, label: 'Custom', hint: 'Type your own name', group: 'Other' },
+  ];
+
   const inputStyle = (bad?: string): React.CSSProperties => ({
     width: '100%', padding: '11px 13px',
     border: `1px solid ${bad ? 'var(--danger)' : 'var(--border-2)'}`,
@@ -228,10 +234,6 @@ function TicketTypeForm({
   // using the select's computed background-color; a translucent one composites
   // over white, which is what turned the option list and its group headers
   // white in dark mode.
-  const selectStyle = (bad?: string): React.CSSProperties => ({
-    ...inputStyle(bad), background: 'var(--surface-2)',
-  });
-
   return (
     <div
       className="modal-overlay"
@@ -265,27 +267,16 @@ function TicketTypeForm({
           {/* Name — preset or custom */}
           <div className="field">
             <label htmlFor="tt-preset">Ticket name <span style={{ color: 'var(--danger)' }}>*</span></label>
-            <select
-              id="tt-preset"
-              ref={firstRef}
+            <Select
+              ariaLabel="Ticket name"
               value={preset}
-              onChange={e => {
-                const v = e.target.value;
+              placeholder="Choose a ticket type"
+              onChange={(v) => {
                 setPreset(v);
-                // Switching to Custom clears the box so it's obviously waiting
-                // for input rather than pre-filled with the last preset.
-                upd({ name: v === CUSTOM ? '' : v === '' ? '' : v });
+                upd({ name: v === CUSTOM ? '' : v });
               }}
-              style={selectStyle(err('name'))}
-            >
-              <option value="">— Choose a ticket type —</option>
-              {PRESET_GROUPS.map(g => (
-                <optgroup key={g.group} label={g.group}>
-                  {g.options.map(o => <option key={o} value={o}>{o}</option>)}
-                </optgroup>
-              ))}
-              <option value={CUSTOM}>Custom — type your own…</option>
-            </select>
+              options={presetOptions}
+            />
 
             {preset === CUSTOM && (
               <input

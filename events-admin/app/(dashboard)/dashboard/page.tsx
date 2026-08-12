@@ -32,7 +32,7 @@ interface GMV {
   events_public_free: number; events_public_paid: number;
   events_private_free: number; events_private_paid: number;
   events_pending_count: number;
-  total_users: number; active_users: number; organisers: number;
+  total_users: number; booked_90d: number; organisers: number;
 }
 
 interface DashEvent {
@@ -55,6 +55,7 @@ export default function DashboardPage() {
   // event handler, not an effect.
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeNow, setActiveNow] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -80,6 +81,20 @@ export default function DashboardPage() {
   }, [toast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Live presence, polled every minute on its own timer — a cheap Redis read,
+  // deliberately not folded into the GMV aggregate above.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      api.get('/admin/stats/presence')
+        .then(({ data }) => { if (alive) setActiveNow(data?.available ? data.active_now : null); })
+        .catch(() => { if (alive) setActiveNow(null); });
+    };
+    tick();
+    const id = setInterval(tick, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   function refresh() {
     setRefreshing(true);
@@ -213,8 +228,12 @@ export default function DashboardPage() {
             ['Free', String(gmv?.events_private_free ?? 0)],
           ]} />
           <MiniGroup title="People" rows={[
-            ['Users', (gmv?.total_users ?? 0).toLocaleString('en-ZA')],
-            ['Active (90d)', (gmv?.active_users ?? 0).toLocaleString('en-ZA')],
+            // "Active now" is live and updates every minute; "Booked (90d)" is
+            // the retention cohort. Labelled apart because conflating them is
+            // what made the old number look wrong.
+            ['Active now', activeNow === null ? '—' : activeNow.toLocaleString('en-ZA')],
+            ['Registered', (gmv?.total_users ?? 0).toLocaleString('en-ZA')],
+            ['Booked (90d)', (gmv?.booked_90d ?? 0).toLocaleString('en-ZA')],
             ['Organisers', String(gmv?.organisers ?? 0)],
           ]} />
           <MiniGroup title="Organiser side" rows={[

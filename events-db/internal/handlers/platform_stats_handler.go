@@ -83,9 +83,13 @@ type gmvBreakdown struct {
 	EventsPendingCount int64 `json:"events_pending_count"`
 
 	// ── People ───────────────────────────────────────────────────────────────
-	TotalUsers  int64 `json:"total_users"`
-	ActiveUsers int64 `json:"active_users"`
-	Organisers  int64 `json:"organisers"`
+	TotalUsers int64 `json:"total_users"`
+	// Renamed from active_users. It is a 90-day BOOKING cohort — a retention
+	// measure, not a liveness one — and calling it "active users" on a tile is
+	// what made the dashboard read as untrue. Live presence comes from
+	// /admin/stats/presence, backed by Redis.
+	Booked90d  int64 `json:"booked_90d"`
+	Organisers int64 `json:"organisers"`
 }
 
 // GET /admin/stats/gmv
@@ -128,7 +132,7 @@ func GetPlatformGMVHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if err := pool.QueryRow(ctx, `
 			SELECT COALESCE(SUM(total_amount), 0)::numeric
 			FROM merch_orders
-			WHERE status = 'fulfilled'
+			WHERE fulfillment_status = 'fulfilled'
 		`).Scan(&b.MerchGMV); err != nil {
 			utils.InternalError(c, err, "could not load merch totals")
 			return
@@ -163,13 +167,12 @@ func GetPlatformGMVHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		// ── People ───────────────────────────────────────────────────────────
-		// "Active" = has confirmed a booking in the last 90 days.
-		//
-		// Deliberately activity, not last_login: someone who signs in and buys
-		// nothing is not an active customer of a ticketing platform, and
-		// last_login would flatter the number with people who opened the app
-		// once. 90 days because event-going is seasonal — a 30-day window would
-		// mark a regular festival-goer inactive every winter.
+		// booked_90d: distinct users who confirmed a booking in the last 90
+		// days. A retention cohort — how many customers the product still has —
+		// which is a genuinely useful number, just not the one a tile labelled
+		// "Active users" is read as. 90 days because event-going is seasonal
+		// and a 30-day window marks a regular festival-goer inactive every
+		// winter.
 		if err := pool.QueryRow(ctx, `
 			SELECT
 				(SELECT COUNT(*) FROM users)::bigint,
@@ -178,7 +181,7 @@ func GetPlatformGMVHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				    AND confirmed_at > now() - INTERVAL '90 days'
 				    AND user_id IS NOT NULL)::bigint,
 				(SELECT COUNT(*) FROM organizers)::bigint
-		`).Scan(&b.TotalUsers, &b.ActiveUsers, &b.Organisers); err != nil {
+		`).Scan(&b.TotalUsers, &b.Booked90d, &b.Organisers); err != nil {
 			utils.InternalError(c, err, "could not load user counts")
 			return
 		}

@@ -64,11 +64,20 @@ const (
 	CapViewUserContact  Capability = "user.contact"       // email, phone
 	CapViewBankTail     Capability = "bank.view_tail"     // last 4 digits only
 	CapViewKYCStatus    Capability = "kyc.status"         // verified / pending
-	// CapViewKYCDocument is retained for the console's own gating — it is held
-	// by NO console role, so the console never fetches an ID image. Viewing a
-	// document happens in the separate document store, under the master-admin
-	// path below, not here.
-	CapViewKYCDocument  Capability = "kyc.document"       // the actual ID image
+	// CapViewKYCDocument gates the ID image DURING first-time review only.
+	//
+	// The rule is two-phase, and the phase — not the role — decides:
+	//
+	//   before verification  any staff role may look, because you cannot verify
+	//                        an identity you are not allowed to see
+	//   after verification   master admin only, because the document has done
+	//                        its job and every later read is a regulatory or
+	//                        dispute matter rather than routine work
+	//
+	// So this capability is necessary but not sufficient: the handler also
+	// checks the organiser's KYC status, and refuses post-verification reads to
+	// everyone here regardless of role.
+	CapViewKYCDocument  Capability = "kyc.document"       // ID image, PRE-verification only
 	CapViewAuditLog     Capability = "audit.view"
 
 	// ── Acting ───────────────────────────────────────────────────────────────
@@ -98,12 +107,17 @@ const (
 var capabilities = map[StaffRole]map[Capability]bool{
 	StaffReadOnly: {
 		CapViewUserList: true,
+		// Read-only staff do first-line KYC review, so they need the document
+		// while a submission is still pending. The handler blocks them the
+		// moment it is verified.
+		CapViewKYCDocument: true,
 	},
 	StaffAccess: {
 		CapViewUserList:    true,
 		CapViewUserContact: true,
 		CapViewBankTail:    true,
 		CapViewKYCStatus:   true,
+		CapViewKYCDocument: true, // pre-verification only
 	},
 	StaffEditor: {
 		CapViewUserList:     true,
@@ -115,6 +129,7 @@ var capabilities = map[StaffRole]map[Capability]bool{
 		CapResetCredentials: true,
 		CapApproveEvent:     true,
 		CapFeatureEvent:     true,
+		CapViewKYCDocument:  true, // pre-verification only
 		// Editors may ASK for a takedown or a bank deletion. They may never
 		// carry one out — that is the entire point of the split.
 		CapRequestDangerous: true,
@@ -131,26 +146,18 @@ var capabilities = map[StaffRole]map[Capability]bool{
 		CapApproveEvent:     true,
 		CapFeatureEvent:     true,
 		CapVerifyKYC:        true,
+		CapViewKYCDocument:  true, // pre-verification only
 		CapRequestDangerous: true,
 		CapApproveRequests:  true,
 		CapViewStaff:        true,
 		CapManageStaff:      true,
-		// CapViewKYCDocument is DELIBERATELY ABSENT, and stays absent.
-		//
-		// Identity documents no longer live in this database (migration
-		// 000070) — they are in a separate store with its own key and its own
-		// access policy. Reading one is not a console action at all:
-		//
-		//   • The console verifies against the DHA registry result, which is
-		//     the information the decision actually rests on.
-		//   • After-the-fact access, for a regulator request or a dispute, goes
-		//     through the master-admin path below: separate credentials,
-		//     separate store, mandatory reason, logged in
-		//     kyc_document_access_log rather than in the console's own log.
-		//
-		// So this is not "admin can't do their job" — it is that looking at a
-		// photograph of someone's ID is a different job, performed rarely,
-		// with a different key.
+		// Note that holding CapViewKYCDocument does NOT let an admin read a
+		// VERIFIED organiser's document. Once verification is done the
+		// document's job is done, and every later read — a dispute, a regulator
+		// request, a retention audit — goes through the master-admin path with
+		// a stated reason. The phase gate lives in the handler, not here,
+		// because it depends on the subject's state rather than the caller's
+		// role.
 	},
 }
 
