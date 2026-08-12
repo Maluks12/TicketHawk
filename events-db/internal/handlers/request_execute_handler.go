@@ -160,7 +160,7 @@ func executeAction(
 		_, err := tx.Exec(ctx, `
 			UPDATE organizers
 			SET bank_account_last_4 = NULL,
-			    bank_name = NULL,
+			    settlement_bank_name = NULL,
 			    bank_account_name = NULL,
 			    payout_hold_until = now() + ($2 || ' hours')::interval,
 			    payout_hold_reason = 'Bank details removed by staff request'
