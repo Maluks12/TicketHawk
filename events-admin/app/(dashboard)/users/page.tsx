@@ -186,8 +186,8 @@ export default function PeoplePage() {
                     {fields.contact && <th>Email</th>}
                     {fields.kyc && <th>KYC</th>}
                     {fields.bank && <th>Bank</th>}
-                    {tab === 'staff' && can('staff.manage') && (
-                      <th style={{ textAlign: 'right' }}>Access level</th>
+                    {can('staff.manage') && (
+                      <th style={{ textAlign: 'right' }}>Console access</th>
                     )}
                   </tr>
                 </thead>
@@ -195,7 +195,11 @@ export default function PeoplePage() {
                   {!loading && people.length === 0 && (
                     <tr>
                       <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-3)', padding: 30 }}>
-                        {search ? 'Nobody matches that search.' : 'Nobody here yet.'}
+                        {search
+                          ? 'Nobody matches that search.'
+                          : tab === 'staff'
+                            ? 'No staff yet. Grant console access from the Users tab.'
+                            : 'Nobody here yet.'}
                       </td>
                     </tr>
                   )}
@@ -260,7 +264,7 @@ export default function PeoplePage() {
                         </td>
                       )}
 
-                      {tab === 'staff' && can('staff.manage') && (
+                      {can('staff.manage') && (
                         <td style={{ textAlign: 'right' }}>
                           <select
                             className="filter-select"
@@ -283,7 +287,7 @@ export default function PeoplePage() {
             </div>
           </div>
 
-          {tab === 'staff' && can('staff.manage') && <RoleLegend />}
+          {can('staff.manage') && <RoleLegend />}
         </>
       )}
     </div>

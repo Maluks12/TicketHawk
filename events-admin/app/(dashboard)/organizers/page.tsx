@@ -216,31 +216,59 @@ export default function OrganizersPage() {
     }
   }
 
-  const th: React.CSSProperties = { textAlign: 'left', padding: '10px 12px', fontSize: 11, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: '1px solid var(--border)' };
-  const td: React.CSSProperties = { padding: '10px 12px', fontSize: 13, color: 'var(--text)', borderBottom: '1px solid var(--border)', verticalAlign: 'top' };
-  const btn: React.CSSProperties = { fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer' };
-  const btnPrimary: React.CSSProperties = { ...btn, background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' };
+  // Matched to .meta-table in globals.css: sticky uppercase micro-headers,
+  // hairline rules, tabular figures. Kept as inline objects rather than moved
+  // to classes because this table is built with raw <table> markup and
+  // rewriting it would be a functional change, not a visual one.
+  const th: React.CSSProperties = {
+    textAlign: 'left', padding: '11px 14px',
+    fontSize: 10.5, fontWeight: 800, color: 'var(--text-3)',
+    textTransform: 'uppercase', letterSpacing: '.09em',
+    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+  };
+  const td: React.CSSProperties = {
+    padding: '13px 14px', fontSize: 13.5, color: 'var(--text)',
+    borderBottom: '1px solid var(--border)', verticalAlign: 'top',
+  };
+  const btn: React.CSSProperties = {
+    fontSize: 12.5, fontWeight: 600, padding: '7px 13px',
+    borderRadius: 'var(--r)', border: '1px solid var(--border-2)',
+    background: 'var(--surface-alpha)', color: 'var(--text-2)',
+    cursor: 'pointer', fontFamily: 'inherit',
+  };
+  const btnPrimary: React.CSSProperties = {
+    ...btn, background: 'var(--accent-deep)',
+    borderColor: 'var(--accent-deep)', color: '#fff',
+  };
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+    <div style={{ padding: '24px 28px 48px', maxWidth: 1600, margin: '0 auto' }}>
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: 16, marginBottom: 18, flexWrap: 'wrap',
+      }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text)', margin: 0 }}>Organizers &amp; Payouts</h1>
-          <p style={{ fontSize: 13, color: 'var(--text-2)', margin: '4px 0 0' }}>
-            Payout tiers, bank details, and the settlement ledger.
-          </p>
+          <div className="page-title">Organizers &amp; Payouts</div>
+          <div className="page-sub">Payout tiers, bank details, and the settlement ledger.</div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={tab === 'organizers' ? btnPrimary : btn} onClick={() => setTab('organizers')}>Organizers</button>
-          <button style={tab === 'payouts' ? btnPrimary : btn} onClick={() => setTab('payouts')}>Payout ledger</button>
-        </div>
+      </div>
+
+      {/* Tabs moved out of the header and onto the shared .tabs control, so
+          this page switches views the same way People and Staff Requests do.
+          Same two buttons, same handlers — only the presentation changed. */}
+      <div className="tabs">
+        <button className={`tab${tab === 'organizers' ? ' active' : ''}`}
+          onClick={() => setTab('organizers')}>Organizers</button>
+        <button className={`tab${tab === 'payouts' ? ' active' : ''}`}
+          onClick={() => setTab('payouts')}>Payout ledger</button>
       </div>
 
       {loading && <div className="spinner spinner-lg" style={{ margin: '48px auto' }} />}
 
       {/* ── Organizers tab ─────────────────────────────────────────────────── */}
       {!loading && tab === 'organizers' && (
-        <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div className="card">
+          <div className="table-wrap">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr>
               <th style={th}>Business</th>
@@ -330,20 +358,26 @@ export default function OrganizersPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {/* ── Payout ledger tab ──────────────────────────────────────────────── */}
       {!loading && tab === 'payouts' && (
         <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            {['', 'pending', 'processing', 'paid', 'failed'].map(s => (
-              <button key={s || 'all'} style={payoutFilter === s ? btnPrimary : btn} onClick={() => setPayoutFilter(s)}>
-                {s || 'All'}
-              </button>
-            ))}
+          <div className="table-toolbar">
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {['', 'pending', 'processing', 'paid', 'failed'].map(s => (
+                <button key={s || 'all'}
+                  className={`pill${payoutFilter === s ? ' active' : ''}`}
+                  onClick={() => setPayoutFilter(s)}>
+                  {s ? s.charAt(0).toUpperCase() + s.slice(1) : 'All'}
+                </button>
+              ))}
+            </div>
           </div>
-          <div style={{ background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+          <div className="card">
+            <div className="table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr>
                 <th style={th}>Event</th>
@@ -386,6 +420,7 @@ export default function OrganizersPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}
