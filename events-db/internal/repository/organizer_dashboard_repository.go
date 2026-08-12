@@ -128,7 +128,10 @@ type OrganizerEventRow struct {
 	Title       string             `json:"title"`
 	Status      models.EventStatus `json:"status"`
 	StartTime   time.Time          `json:"start_time"`
+	EndTime     *time.Time         `json:"end_time"`
 	City        string             `json:"city"`
+	VenueName   string             `json:"venue_name"`
+	Views       int                `json:"views"`
 	Price       float64            `json:"price"`
 	Currency    string             `json:"currency"`
 	MaxCapacity *int               `json:"max_capacity,omitempty"`
@@ -178,8 +181,9 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 
 	query := fmt.Sprintf(`
 		SELECT
-			e.id, e.slug, e.title, e.status, e.start_time,
-			e.city, e.price, e.currency, e.max_capacity, e.tickets_sold,
+			e.id, e.slug, e.title, e.status, e.start_time, e.end_time,
+			e.city, COALESCE(e.venue_name, ''), e.price, e.currency,
+			e.max_capacity, e.tickets_sold, COALESCE(e.views, 0),
 			COALESCE(COUNT(b.id)  FILTER (WHERE b.booking_status = 'confirmed'), 0)::int,
 			COALESCE(SUM(b.subtotal)     FILTER (WHERE b.booking_status = 'confirmed'), 0),
 			COALESCE(SUM(b.organizer_fee) FILTER (WHERE b.booking_status = 'confirmed'), 0),
@@ -206,8 +210,9 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 		var ev OrganizerEventRow
 		var grossTicket, platformFee, grossMerch float64
 		if err := rows.Scan(
-			&ev.ID, &ev.Slug, &ev.Title, &ev.Status, &ev.StartTime,
-			&ev.City, &ev.Price, &ev.Currency, &ev.MaxCapacity, &ev.TicketsSold,
+			&ev.ID, &ev.Slug, &ev.Title, &ev.Status, &ev.StartTime, &ev.EndTime,
+			&ev.City, &ev.VenueName, &ev.Price, &ev.Currency,
+			&ev.MaxCapacity, &ev.TicketsSold, &ev.Views,
 			&ev.TotalBookings,
 			&grossTicket, &platformFee,
 			&ev.MerchUnitsSold, &grossMerch,

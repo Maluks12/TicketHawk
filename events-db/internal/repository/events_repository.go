@@ -218,13 +218,9 @@ func PublishEvent(pool *pgxpool.Pool, eventID string, organizerID string, declar
 		}
 	}
 
-	// Listing fee: free public events with 20+ capacity, as before.
-	if reqs.ListingFeeApplies && eventPrice == 0 && !isPaid {
-		effectiveCapacity := computeEffectiveCapacity(maxCap, ttCapSum)
-		if effectiveCapacity >= ListingFeeThreshold && !feePaid {
-			return nil, ErrListingFeeRequired
-		}
-	}
+	// Free-event monetisation is scrapped: free events publish at any capacity.
+	// The listing_fee_paid column and its endpoints are left in place so existing
+	// paid rows keep their history; nothing reads them as a gate any more.
 
 	targetStatus := models.EventPendingReview
 	outcome := &PublishOutcome{Slug: slug}
