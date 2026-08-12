@@ -183,7 +183,7 @@ export default function EventsPage() {
             {counts.published} published · {counts.draft} draft
           </div>
         </div>
-        <Link href="/events/create" className="btn btn-primary">+ Create event</Link>
+        <Link href="/events/create" className="btn btn-primary">Create event</Link>
       </div>
 
       {/* ── Filter pill strip ────────────────────────────────────────── */}

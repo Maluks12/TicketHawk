@@ -1,5 +1,6 @@
 'use client';
 import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { X } from '@phosphor-icons/react';
 
 interface ConfirmState { title: string; msg: string; cb: () => Promise<void>; }
 const Ctx = createContext<(title: string, msg: string, cb: () => Promise<void>) => void>(() => {});
@@ -27,7 +28,17 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           <div className="modal modal-sm">
             <div className="modal-header">
               <div className="modal-title">{state.title}</div>
-              <button className="modal-close" onClick={() => setState(null)}>✕</button>
+              <button
+                type="button"
+                onClick={() => setState(null)}
+                aria-label="Close"
+                style={{
+                  background: 'none', border: 'none', padding: 4, cursor: 'pointer',
+                  color: 'var(--text-3)', display: 'inline-flex', borderRadius: 8,
+                }}
+              >
+                <X size={17} />
+              </button>
             </div>
             <div className="modal-body">
               <p style={{ color: 'var(--text-2)', fontSize: '.9rem' }}>{state.msg}</p>

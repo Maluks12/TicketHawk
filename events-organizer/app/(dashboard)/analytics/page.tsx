@@ -16,7 +16,6 @@
 // that rate, so it can't disagree with the same rate elsewhere in the product.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Icon } from '@/components/icons';
 import { LineChart, BarChart, Funnel, Legend, Series } from '@/components/charts';
@@ -158,6 +157,14 @@ export default function AnalyticsPage() {
   // Scope drives which metric set the summary tiles and funnel describe:
   // one event ⇒ that event's lifetime totals; all events ⇒ the window totals.
   const focus = selectedEvent?.metrics ?? series?.totals ?? null;
+
+  const recentHeld = useMemo(
+    () => events
+      .filter((e) => e.ended)
+      .sort((a, b) => +new Date(b.start_time) - +new Date(a.start_time))
+      .slice(0, 3),
+    [events],
+  );
 
   const labels = useMemo(
     () => (series?.points ?? []).map((p) => fmtBucket(p.bucket, series!.granularity)),
@@ -430,13 +437,13 @@ export default function AnalyticsPage() {
             </div>
           )}
 
-          {/* ── Per-event breakdown ───────────────────────────────────── */}
+          {/* ── Last 3 events held ────────────────────────────────────── */}
           <div className="card">
             <div className="card-header">
-              <div className="card-title">Every event</div>
-              <span style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                {events.length} total
-              </span>
+              <div>
+                <div className="card-title">Last 3 events held</div>
+                <div className="section-sub">Use the picker above for any other event</div>
+              </div>
             </div>
             <div className="table-wrap">
               <table className="meta-table">
@@ -445,8 +452,6 @@ export default function AnalyticsPage() {
                     <th>Event</th>
                     <th style={{ textAlign: 'right' }}>Impressions</th>
                     <th style={{ textAlign: 'right' }}>Views</th>
-                    <th style={{ textAlign: 'right' }}>CTR</th>
-                    <th style={{ textAlign: 'right' }}>Retention</th>
                     <th style={{ textAlign: 'right' }}>Sold</th>
                     <th style={{ textAlign: 'right' }}>PSR</th>
                     <th style={{ textAlign: 'right' }}>Scanned</th>
@@ -454,22 +459,22 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {events.length === 0 && (
+                  {recentHeld.length === 0 && (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-3)', padding: 28 }}>
-                        No events yet.
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-3)', padding: 28 }}>
+                        No events held yet.
                       </td>
                     </tr>
                   )}
-                  {events.map((e) => (
-                    <tr key={e.event_id}>
+                  {recentHeld.map((e) => (
+                    <tr
+                      key={e.event_id}
+                      onClick={() => setScope(e.event_id)}
+                      style={{ cursor: 'pointer' }}
+                      title="Show this event above"
+                    >
                       <td>
-                        <Link
-                          href={`/event/${e.event_id}`}
-                          style={{ fontWeight: 600, color: 'var(--text)' }}
-                        >
-                          {e.title}
-                        </Link>
+                        <div style={{ fontWeight: 600, color: 'var(--text)' }}>{e.title}</div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>
                           {new Date(e.start_time).toLocaleDateString('en-ZA', {
                             day: 'numeric', month: 'short', year: 'numeric',
@@ -478,8 +483,6 @@ export default function AnalyticsPage() {
                       </td>
                       <Num>{fmtNum(e.metrics.impressions)}</Num>
                       <Num>{fmtNum(e.metrics.views)}</Num>
-                      <Num>{fmtPct(e.metrics.ctr)}</Num>
-                      <Num>{fmtDuration(e.metrics.retention_seconds)}</Num>
                       <Num>{fmtNum(e.metrics.tickets_sold)}</Num>
                       <Num>{fmtMoney(e.metrics.psr, e.currency)}</Num>
                       <Num>{fmtNum(e.metrics.scanned)}</Num>

@@ -546,10 +546,6 @@ export default function EventDetailPage() {
               <Row label="Published"   value={ev.published_at ? fmtDateTime(ev.published_at) : 'Not published'} />
               <Row label="Rights declared"
                    value={ev.rights_declared_at ? fmtDateTime(ev.rights_declared_at) : 'Not declared'} />
-              <Row label="Listing fee"
-                   value={ev.listing_fee_amount
-                     ? `${fmtMoney(ev.listing_fee_amount, ev.currency)} — ${ev.listing_fee_paid ? 'paid' : 'unpaid'}`
-                     : 'Not applicable'} />
               <Row label="Featured"        value={ev.is_featured ? 'Yes' : 'No'} />
               <Row label="Admin promoted"  value={ev.admin_promoted ? 'Yes' : 'No'} />
               <Row label="Created"         value={ev.created_at ? fmtDateTime(ev.created_at) : '—'} />

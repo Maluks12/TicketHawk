@@ -1,9 +1,14 @@
 'use client';
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { CheckCircle, XCircle, Info } from '@phosphor-icons/react';
 
 type ToastType = 'success' | 'error' | 'info';
 interface Toast { id: number; msg: string; type: ToastType; }
-const icons = { success: '✓', error: '✕', info: 'ℹ' };
+const icons = {
+  success: <CheckCircle size={17} weight="fill" />,
+  error: <XCircle size={17} weight="fill" />,
+  info: <Info size={17} weight="fill" />,
+};
 
 const Ctx = createContext<(msg: string, type?: ToastType) => void>(() => {});
 export const useToast = () => useContext(Ctx);
