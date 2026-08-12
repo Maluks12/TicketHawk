@@ -867,6 +867,23 @@ func main() {
 				handlers.RequestEventTakedownHandler(pool))
 		}
 
+		// ── Identity documents — MASTER ADMIN ONLY ─────────────────────────
+		//
+		// Registered OUTSIDE staffAPI on purpose. These are not gated by a
+		// console capability at all: no value of console_role reaches them.
+		// RequireMasterAdmin reads users.is_master_admin, a separate column, so
+		// growing the admin team never grants document access.
+		//
+		// Every read requires a stated reason and is written to
+		// kyc_document_access_log BEFORE the bytes are returned — if the log
+		// write fails, the read is refused.
+		masterAPI := admin.Group("/kyc")
+		masterAPI.Use(handlers.RequireMasterAdmin(pool))
+		{
+			masterAPI.POST("/:id/document", handlers.GetIdentityDocumentHandler(pool))
+			masterAPI.GET("/access-log",    handlers.GetDocumentAccessLogHandler(pool))
+		}
+
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
 		admin.PUT("/events/:id/organizer", handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
 		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))

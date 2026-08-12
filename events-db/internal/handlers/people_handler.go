@@ -118,7 +118,7 @@ func GetScopedPeopleHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				o.kyc_level,
 				o.kyc_status::text,
 				o.bank_account_last_4,
-				o.bank_name,
+				o.settlement_bank_name,
 				(o.id IS NOT NULL) AS is_organiser
 			FROM users u
 			LEFT JOIN organizers o ON o.user_id = u.id
