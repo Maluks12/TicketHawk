@@ -28,6 +28,7 @@ import {
   fmtNum, fmtCompact, fmtMoney, fmtMoneyCompact, fmtPct, fmtDuration, fmtBucket,
   coverageNote, DASH,
 } from '@/lib/analytics';
+import { useSearchParams } from 'next/navigation';
 
 /**
  * Pulls an HTTP status off an axios-style rejection.
