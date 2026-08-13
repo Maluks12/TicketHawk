@@ -727,6 +727,11 @@ func main() {
 	v1.GET("/drops", handlers.GetDropsFeedHandler(pool))
 
 	// ==========================================
+	// Staff invite acceptance — token-authenticated, no session yet.
+	v1.GET("/staff/invite",           handlers.GetStaffInviteHandler(pool))
+	v1.POST("/staff/invite/start",    handlers.StartStaffInviteHandler(pool, nil))
+	v1.POST("/staff/invite/complete", handlers.CompleteStaffInviteHandler(pool))
+
 	// Admin Routes
 	// ==========================================
 	admin := v1.Group("/admin")
@@ -806,6 +811,18 @@ func main() {
 			// Granting console access. Admin only, and the handler additionally
 			// refuses self-changes and removal of the last admin — either would
 			// lock everyone out with no recovery path short of psql.
+			// Staff invitations. Accepting needs the emailed link AND an OTP
+			// that goes to the master admin, who passes it on out of band.
+			staffAPI.POST("/staff/invites",
+				middleware.RequireCapability(pool, models.CapManageStaff),
+				handlers.CreateStaffInviteHandler(pool, nil))
+			staffAPI.GET("/staff/invites",
+				middleware.RequireCapability(pool, models.CapManageStaff),
+				handlers.ListStaffInvitesHandler(pool))
+			staffAPI.DELETE("/staff/invites/:id",
+				middleware.RequireCapability(pool, models.CapManageStaff),
+				handlers.RevokeStaffInviteHandler(pool))
+
 			staffAPI.PUT("/staff/:id/role",
 				middleware.RequireCapability(pool, models.CapManageStaff),
 				handlers.SetStaffRoleHandler(pool))
