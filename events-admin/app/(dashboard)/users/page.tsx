@@ -46,6 +46,11 @@ interface Person {
 
 interface Fields { contact: boolean; bank: boolean; kyc: boolean }
 
+interface Invite {
+  id: string; email: string; staff_role: StaffRole; status: string;
+  invited_at: string; expires_at: string; invited_by: string;
+}
+
 type Tab = 'users' | 'staff';
 
 export default function PeoplePage() {
@@ -62,8 +67,52 @@ export default function PeoplePage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [denied, setDenied] = useState(false);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<StaffRole>('read_only');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
 
   useEffect(() => { loadCaps(); }, [loadCaps]);
+
+  const loadInvites = useCallback(() => {
+    return api.get('/admin/staff/invites')
+      .then(({ data }) => setInvites(data?.invites ?? []))
+      .catch(() => setInvites([]));
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'staff' && can('staff.manage')) loadInvites();
+  }, [tab, can, loadInvites]);
+
+  async function sendInvite() {
+    setInviteBusy(true);
+    try {
+      const { data } = await api.post('/admin/staff/invites', {
+        email: inviteEmail.trim(), staff_role: inviteRole,
+      });
+      setInviteLink(data?.link ?? null);
+      setInviteEmail('');
+      loadInvites();
+      toast('Invite sent', 'success');
+    } catch (e) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast(msg ?? 'Could not send the invite', 'error');
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  async function revokeInvite(id: string) {
+    try {
+      await api.delete(`/admin/staff/invites/${id}`);
+      toast('Invite revoked', 'success');
+      loadInvites();
+    } catch {
+      toast('Could not revoke', 'error');
+    }
+  }
 
   const load = useCallback(async (which: Tab, q: string) => {
     setLoading(true);
@@ -158,9 +207,16 @@ export default function PeoplePage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder={fields.contact ? 'Search by name or email…' : 'Search by name…'}
             />
-            <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
-              {loading ? 'Loading…' : `${people.length} ${people.length === 1 ? 'person' : 'people'}`}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
+                {loading ? 'Loading…' : `${people.length} ${people.length === 1 ? 'person' : 'people'}`}
+              </span>
+              {tab === 'staff' && can('staff.manage') && (
+                <button className="btn btn-sm btn-primary" onClick={() => { setAddOpen(true); setInviteLink(null); }}>
+                  Add staff
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Says WHY the table is sparse. Without it, a read_only member sees
@@ -182,12 +238,12 @@ export default function PeoplePage() {
                   <tr>
                     <th>Name</th>
                     <th>Role</th>
-                    {tab === 'staff' && <th>Console access</th>}
+                    {tab === 'staff' && <th>Access level</th>}
                     {fields.contact && <th>Email</th>}
                     {fields.kyc && <th>KYC</th>}
                     {fields.bank && <th>Bank</th>}
-                    {can('staff.manage') && (
-                      <th style={{ textAlign: 'right' }}>Console access</th>
+                    {tab === 'staff' && can('staff.manage') && (
+                      <th style={{ textAlign: 'right' }}>Change</th>
                     )}
                   </tr>
                 </thead>
@@ -198,7 +254,7 @@ export default function PeoplePage() {
                         {search
                           ? 'Nobody matches that search.'
                           : tab === 'staff'
-                            ? 'No staff yet. Grant console access from the Users tab.'
+                            ? 'No staff yet. Use Add staff to invite someone.'
                             : 'Nobody here yet.'}
                       </td>
                     </tr>
@@ -264,7 +320,7 @@ export default function PeoplePage() {
                         </td>
                       )}
 
-                      {can('staff.manage') && (
+                      {tab === 'staff' && can('staff.manage') && (
                         <td style={{ textAlign: 'right' }}>
                           <select
                             className="filter-select"
@@ -287,7 +343,119 @@ export default function PeoplePage() {
             </div>
           </div>
 
-          {can('staff.manage') && <RoleLegend />}
+          {tab === 'staff' && can('staff.manage') && invites.length > 0 && (
+            <div className="card" style={{ marginTop: 18 }}>
+              <div className="card-header">
+                <div className="card-title">Pending invites</div>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{invites.length}</span>
+              </div>
+              <div className="table-wrap">
+                <table className="meta-table">
+                  <thead>
+                    <tr>
+                      <th>Email</th><th>Access level</th><th>Status</th>
+                      <th>Invited by</th><th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {invites.map((i) => (
+                      <tr key={i.id}>
+                        <td style={{ fontWeight: 600 }}>{i.email}</td>
+                        <td><span className="badge badge-admin">{ROLE_LABEL[i.staff_role]}</span></td>
+                        <td>
+                          <span className={`badge badge-${i.status === 'started' ? 'pending' : 'draft'}`}>
+                            {i.status === 'started' ? 'Awaiting code' : 'Not opened'}
+                          </span>
+                        </td>
+                        <td style={{ color: 'var(--text-2)' }}>{i.invited_by}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button className="btn btn-sm" onClick={() => revokeInvite(i.id)}>Revoke</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {tab === 'staff' && can('staff.manage') && <RoleLegend />}
+
+          {addOpen && (
+            <div className="modal-overlay" onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setAddOpen(false);
+            }}>
+              <div className="modal modal-sm" role="dialog" aria-modal="true">
+                <div className="modal-header">
+                  <div className="modal-title">Add staff</div>
+                  <button className="modal-close" onClick={() => setAddOpen(false)}>×</button>
+                </div>
+                <div className="modal-body">
+                  {inviteLink ? (
+                    <>
+                      <div className="alert alert-success" style={{ fontSize: 13 }}>
+                        <span>
+                          Invite sent. When they open the link, a 6-digit code is
+                          emailed to <strong>you</strong> — pass it to them directly.
+                          They cannot finish without it.
+                        </span>
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Invite link</label>
+                        <input readOnly value={inviteLink} onFocus={(e) => e.target.select()}
+                          style={{
+                            width: '100%', padding: '10px 12px', fontSize: 12.5,
+                            border: '1px solid var(--border-2)', borderRadius: 'var(--r)',
+                            background: 'var(--surface-2)', color: 'var(--text)',
+                            fontFamily: 'var(--font-mono)', boxSizing: 'border-box',
+                          }} />
+                        <div className="field-hint">Share only if the email does not arrive</div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="field">
+                        <label>Email address</label>
+                        <input type="email" value={inviteEmail}
+                          onChange={(e) => setInviteEmail(e.target.value)}
+                          placeholder="them@ticket-hawk.com"
+                          style={{
+                            width: '100%', padding: '11px 13px', fontSize: 14,
+                            border: '1px solid var(--border-2)', borderRadius: 'var(--r)',
+                            background: 'var(--surface-alpha)', color: 'var(--text)',
+                            fontFamily: 'inherit', boxSizing: 'border-box',
+                          }} />
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Access level</label>
+                        <select className="filter-select" value={inviteRole}
+                          onChange={(e) => setInviteRole(e.target.value as StaffRole)}
+                          style={{ width: '100%', padding: '11px 13px', fontSize: 14 }}>
+                          <option value="read_only">Read only</option>
+                          <option value="access">Access</option>
+                          <option value="editor">Editor</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                        <div className="field-hint">{ROLE_DESCRIPTION[inviteRole]}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button className="btn" onClick={() => setAddOpen(false)}>
+                    {inviteLink ? 'Done' : 'Cancel'}
+                  </button>
+                  {!inviteLink && (
+                    <button className="btn btn-primary"
+                      disabled={inviteBusy || !inviteEmail.includes('@')}
+                      onClick={sendInvite}>
+                      {inviteBusy ? 'Sending…' : 'Send invite'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
