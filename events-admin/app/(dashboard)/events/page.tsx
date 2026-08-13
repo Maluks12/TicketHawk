@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { api } from '../../../lib/api';
-import { fmtMoney, fmtDate, toLocalInput, Badge } from '../../../lib/utils';
+import { fmtMoney, fmtDate, fmtDateTime, toLocalInput, Badge } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
+import { useStaff } from '../../../lib/permissions';
 import { useConfirm } from '../../../lib/confirm';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -194,6 +195,11 @@ export default function EventsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  // Editing a live event changes what buyers already paid for, so it stays with
+  // admins; everyone else reads the record.
+  const canEdit = useStaff((st) => st.can('event.approve'));
+  const loadStaffCaps = useStaff((st) => st.load);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [activeTab, setActiveTab] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -220,6 +226,7 @@ export default function EventsPage() {
   const currentDraftIdRef = useRef(currentDraftId);
   const editingIdRef = useRef(editingId);
 
+  useEffect(() => { loadStaffCaps(); }, [loadStaffCaps]);
   useEffect(() => { formRef.current = form; }, [form]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { coverRef.current = coverImageUrl; }, [coverImageUrl]);
@@ -499,7 +506,15 @@ export default function EventsPage() {
                 <tr><td colSpan={7} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-3)' }}>No events found.</td></tr>
               ) : events.map(e => (
                 <tr key={e.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '10px 12px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.title}>{e.title}</td>
+                  <td style={{ padding: '10px 12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.title}>
+                    <button type="button" onClick={() => setViewingId(e.id)}
+                      style={{
+                        background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                        font: 'inherit', fontWeight: 600, color: 'var(--accent)', textAlign: 'left',
+                      }}>
+                      {e.title}
+                    </button>
+                  </td>
                   <td style={{ padding: '10px 12px' }}><Badge status={e.status} /></td>
                   <td style={{ padding: '10px 12px', fontSize: 13, color: 'var(--text-2)' }}>{fmtDate(e.start_time)}</td>
                   <td style={{ padding: '10px 12px' }}>{fmtMoney(e.price, e.currency)}</td>
@@ -507,7 +522,10 @@ export default function EventsPage() {
                   <td style={{ padding: '10px 12px' }}>{fmtMoney(e.ticket_revenue)}</td>
                   <td style={{ padding: '10px 12px', overflow: 'visible', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '.3rem' }}>
-                      <button className="btn-icon" onClick={() => openEdit(e.id)} title="Edit">✎</button>
+                      <button className="btn-icon" onClick={() => setViewingId(e.id)} title="View details">👁</button>
+                      {canEdit && (
+                        <button className="btn-icon" onClick={() => openEdit(e.id)} title="Edit">✎</button>
+                      )}
                       {(e.status === 'draft' || e.status === 'pending_review') && (
                         <button className="btn btn-success btn-sm" onClick={() => publishEvent(e.id)}>Publish</button>
                       )}
@@ -693,6 +711,180 @@ export default function EventsPage() {
           </div>
         </div>
       )}
+
+      {viewingId && (
+        <EventDetailModal id={viewingId} onClose={() => setViewingId(null)} />
+      )}
+    </div>
+  );
+}
+
+interface ReviewTier {
+  name: string; price: number; capacity: number | null; is_visible: boolean;
+}
+interface ReviewEventDetail {
+  id: string; title: string; status: string;
+  description: string | null; start_time: string; end_time: string | null;
+  expires_at: string | null; venue_name: string | null; address: string | null;
+  city: string | null; price: number; currency: string;
+  max_capacity: number | null; max_tickets_per_user: number | null;
+  cover_image_url: string | null; banner_image_url: string | null;
+  category_name: string | null; organiser_name: string | null;
+  organiser_email: string | null; is_featured: boolean; tickets_sold: number;
+}
+
+function EventDetailModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const [data, setData] = useState<{ event: ReviewEventDetail; ticket_types: ReviewTier[] } | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.get(`/admin/events/${id}/review`)
+      .then(({ data: d }) => { if (alive) setData(d); })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; };
+  }, [id]);
+
+  const ev = data?.event;
+  const tiers = data?.ticket_types ?? [];
+
+  return (
+    <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal modal-lg" role="dialog" aria-modal="true">
+        <div className="modal-header">
+          <div>
+            <div style={{
+              fontSize: 10, fontWeight: 800, letterSpacing: '.12em',
+              textTransform: 'uppercase', color: 'var(--text-3)',
+            }}>
+              Event record
+            </div>
+            <div className="modal-title">{ev?.title ?? 'Loading…'}</div>
+          </div>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="modal-body">
+          {failed && <div className="alert alert-danger">Could not load this event.</div>}
+          {!data && !failed && (
+            <div style={{ textAlign: 'center', padding: 30 }}><div className="spinner spinner-lg" style={{ margin: '0 auto' }} /></div>
+          )}
+
+          {ev && (
+            <>
+              {(ev.banner_image_url || ev.cover_image_url) && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: ev.banner_image_url && ev.cover_image_url ? '2fr 1fr' : '1fr',
+                  gap: 10, marginBottom: 18,
+                }}>
+                  {ev.banner_image_url && (
+                    <div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={ev.banner_image_url} alt="Banner"
+                        style={{ width: '100%', aspectRatio: '16/7', objectFit: 'cover', borderRadius: 'var(--r-lg)', display: 'block' }} />
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>Banner</div>
+                    </div>
+                  )}
+                  {ev.cover_image_url && (
+                    <div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={ev.cover_image_url} alt="Cover"
+                        style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 'var(--r-lg)', display: 'block' }} />
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>Cover</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <DRow label="Status" value={String(ev.status ?? '').replace(/_/g, ' ')} />
+              <DRow label="Organiser" value={ev.organiser_name} />
+              <DRow label="Organiser email" value={ev.organiser_email} />
+              <DRow label="Category" value={ev.category_name} />
+              <DRow label="Description" value={ev.description} wide />
+              <DRow label="Starts" value={ev.start_time ? fmtDateTime(ev.start_time) : null} />
+              <DRow label="Ends" value={ev.end_time ? fmtDateTime(ev.end_time) : null} />
+              <DRow label="Sales close" value={ev.expires_at ? fmtDateTime(ev.expires_at) : null} />
+              <DRow label="Venue" value={ev.venue_name} />
+              <DRow label="Address" value={ev.address} />
+              <DRow label="City" value={ev.city} />
+              <DRow label="Price" value={ev.price > 0 ? fmtMoney(ev.price, ev.currency) : 'Free'} />
+              <DRow label="Capacity" value={ev.max_capacity ? String(ev.max_capacity) : 'Unlimited'} />
+              <DRow label="Max per buyer" value={ev.max_tickets_per_user ? String(ev.max_tickets_per_user) : 'No limit'} />
+              <DRow label="Tickets sold" value={String(ev.tickets_sold ?? 0)} />
+              <DRow label="Featured" value={ev.is_featured ? 'Yes' : 'No'} />
+              <DRow label="Event ID" value={String(ev.id ?? '')} mono />
+
+              <div style={{ marginTop: 18 }}>
+                <div style={{
+                  fontSize: 10.5, fontWeight: 800, letterSpacing: '.09em',
+                  textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 8,
+                }}>
+                  Ticket types
+                </div>
+                {tiers.length === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Flat pricing — no tiers.</div>
+                ) : (
+                  <table className="meta-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th style={{ textAlign: 'right' }}>Price</th>
+                        <th style={{ textAlign: 'right' }}>Capacity</th>
+                        <th>Visible</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tiers.map((t, i) => (
+                        <tr key={i}>
+                          <td>{t.name}</td>
+                          <td style={{ textAlign: 'right' }}>{t.price > 0 ? fmtMoney(t.price, ev.currency) : 'Free'}</td>
+                          <td style={{ textAlign: 'right' }}>{t.capacity ?? '∞'}</td>
+                          <td>{t.is_visible ? 'Yes' : 'Hidden'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DRow({ label, value, mono = false, wide = false }: {
+  label: string; value: unknown; mono?: boolean; wide?: boolean;
+}) {
+  const text = value == null || value === '' ? null : String(value);
+  return (
+    <div style={{
+      display: wide ? 'block' : 'grid',
+      gridTemplateColumns: wide ? undefined : '150px minmax(0, 1fr)',
+      gap: wide ? 4 : 14, padding: '10px 0',
+      borderBottom: '1px solid var(--border)',
+    }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, letterSpacing: '.05em',
+        textTransform: 'uppercase', color: 'var(--text-3)',
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: 13.5, lineHeight: 1.6,
+        color: text ? 'var(--text)' : 'var(--text-faint)',
+        fontFamily: mono ? 'var(--font-mono)' : undefined,
+        whiteSpace: wide ? 'pre-wrap' : undefined,
+        userSelect: mono ? 'all' : undefined,
+      }}>
+        {text ?? 'Not provided'}
+      </div>
     </div>
   );
 }

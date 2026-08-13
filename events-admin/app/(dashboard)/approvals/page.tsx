@@ -262,10 +262,29 @@ export default function ApprovalsPage() {
                 </div>
               </div>
 
-              {shown.banner_image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={shown.banner_image_url} alt=""
-                  style={{ width: '100%', aspectRatio: '16/6', objectFit: 'cover', display: 'block' }} />
+              {(shown.banner_image_url || shown.cover_image_url) ? (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: shown.banner_image_url && shown.cover_image_url
+                    ? 'minmax(0, 2fr) minmax(0, 1fr)' : '1fr',
+                  gap: 1, background: 'var(--border)',
+                }}>
+                  {shown.banner_image_url && (
+                    <Figure label="Banner" hint="Wide hero at the top of the event page"
+                      src={shown.banner_image_url} ratio="16/7" />
+                  )}
+                  {shown.cover_image_url && (
+                    <Figure label="Cover" hint="Card thumbnail in the feed"
+                      src={shown.cover_image_url} ratio="16/9" />
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  padding: 26, textAlign: 'center',
+                  color: 'var(--warning-fg)', fontSize: 13, background: 'var(--warning-bg)',
+                }}>
+                  No images uploaded — the event will show a placeholder in the feed.
+                </div>
               )}
             </div>
 
@@ -515,6 +534,27 @@ export default function ApprovalsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function Figure({ label, hint, src, ratio }: {
+  label: string; hint: string; src: string; ratio: string;
+}) {
+  return (
+    <figure style={{ margin: 0, background: 'var(--surface)' }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={label}
+        style={{ width: '100%', aspectRatio: ratio, objectFit: 'cover', display: 'block' }} />
+      <figcaption style={{ padding: '9px 14px' }}>
+        <div style={{
+          fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em',
+          textTransform: 'uppercase', color: 'var(--text-3)',
+        }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 2 }}>{hint}</div>
+      </figcaption>
+    </figure>
   );
 }
 
