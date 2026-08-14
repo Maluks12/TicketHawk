@@ -729,7 +729,11 @@ func main() {
 	// ==========================================
 	// Staff invite acceptance — token-authenticated, no session yet.
 	v1.GET("/staff/invite",           handlers.GetStaffInviteHandler(pool))
-	v1.POST("/staff/invite/start",    handlers.StartStaffInviteHandler(pool, nil))
+	// The code goes to the master admins, never to the invitee.
+	v1.POST("/staff/invite/start", handlers.StartStaffInviteHandler(pool,
+		func(adminEmail, code, invitee string) error {
+			return emailService.SendStaffInviteCode(adminEmail, code, invitee)
+		}))
 	v1.POST("/staff/invite/complete", handlers.CompleteStaffInviteHandler(pool))
 
 	// Admin Routes
@@ -791,7 +795,10 @@ func main() {
 			// the organiser and is never returned in the response.
 			staffAPI.POST("/requests/:id/send-code",
 				middleware.RequireCapability(pool, models.CapRequestDangerous),
-				handlers.SendConfirmationCodeHandler(pool, nil))
+				handlers.SendConfirmationCodeHandler(pool,
+					func(to, code string) error {
+						return emailService.SendStaffConfirmationCode(to, code)
+					}))
 			staffAPI.POST("/requests/:id/confirm",
 				handlers.ConfirmStaffRequestHandler(pool))
 
@@ -815,7 +822,10 @@ func main() {
 			// that goes to the master admin, who passes it on out of band.
 			staffAPI.POST("/staff/invites",
 				middleware.RequireCapability(pool, models.CapManageStaff),
-				handlers.CreateStaffInviteHandler(pool, nil))
+				handlers.CreateStaffInviteHandler(pool,
+					func(to, link, role string) error {
+						return emailService.SendStaffInvite(to, link, role)
+					}))
 			staffAPI.GET("/staff/invites",
 				middleware.RequireCapability(pool, models.CapManageStaff),
 				handlers.ListStaffInvitesHandler(pool))

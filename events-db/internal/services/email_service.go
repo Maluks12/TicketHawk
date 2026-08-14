@@ -538,6 +538,92 @@ func (s *EmailService) SendPasswordReset(email string, resetLink string) error {
 	return nil
 }
 
+// SendStaffInvite invites someone to the admin console. The link alone is not
+// enough to accept — a code is sent separately to the master admins.
+func (s *EmailService) SendStaffInvite(email, inviteLink, role string) error {
+	subject := "You've been invited to the TicketHawk admin console"
+
+	body := heading("Admin console invitation") +
+		`<p style="margin:0 0 14px;">You have been invited to the TicketHawk admin console with <strong>` +
+		esc(prettyRole(role)) + `</strong> access.</p>` +
+		button(inviteLink, "Set up my account") +
+		linkFallback(inviteLink) +
+		`<p style="margin:14px 0;">After you set a password you will be asked for a 6-digit code. ` +
+		`That code is sent to the administrator who invited you, not to this inbox — ask them for it directly.</p>` +
+		muted("This invitation expires in 7 days. If you were not expecting it, ignore this email and tell your administrator.")
+
+	status, err := s.sendHTML("", email, subject, s.brandEmail(subject, body))
+	if err != nil {
+		return fmt.Errorf("failed to send staff invite email: %w", err)
+	}
+	if status >= 400 {
+		return fmt.Errorf("staff invite email API error: %d", status)
+	}
+	return nil
+}
+
+// SendStaffInviteCode delivers the acceptance code to a MASTER ADMIN. It must
+// never be sent to the invitee: the whole point is that they have to obtain it
+// from the person granting access.
+func (s *EmailService) SendStaffInviteCode(adminEmail, code, inviteeEmail string) error {
+	subject := "Code for " + inviteeEmail + "'s console access"
+
+	body := heading("Console access code") +
+		`<p style="margin:0 0 14px;"><strong>` + esc(inviteeEmail) +
+		`</strong> is setting up their admin console account and needs this code to finish.</p>` +
+		`<p style="font-size:30px;font-weight:700;letter-spacing:8px;text-align:center;` +
+		`margin:22px 0;font-family:monospace;">` + esc(code) + `</p>` +
+		`<p style="margin:0 0 14px;">Give it to them directly — in person, by phone, or over a channel you trust. ` +
+		`Do not forward this email.</p>` +
+		muted("If you did not invite this person, do not share the code. Revoke the invite from the Staff tab in the admin console.")
+
+	status, err := s.sendHTML("", adminEmail, subject, s.brandEmail(subject, body))
+	if err != nil {
+		return fmt.Errorf("failed to send staff invite code email: %w", err)
+	}
+	if status >= 400 {
+		return fmt.Errorf("staff invite code email API error: %d", status)
+	}
+	return nil
+}
+
+// SendStaffConfirmationCode asks an organiser to confirm a staff-initiated
+// action on their account — the third gate on dangerous requests.
+func (s *EmailService) SendStaffConfirmationCode(email, code string) error {
+	subject := "Confirm a change to your TicketHawk account"
+
+	body := heading("Confirm this change") +
+		`<p style="margin:0 0 14px;">Our team has requested a change to your account and needs your confirmation before it goes ahead.</p>` +
+		`<p style="font-size:30px;font-weight:700;letter-spacing:8px;text-align:center;` +
+		`margin:22px 0;font-family:monospace;">` + esc(code) + `</p>` +
+		`<p style="margin:0 0 14px;">Give this code to the TicketHawk staff member you are speaking to. It expires in 15 minutes.</p>` +
+		muted("If you are not expecting this, do not share the code — contact support instead. Nothing changes without it.")
+
+	status, err := s.sendHTML("", email, subject, s.brandEmail(subject, body))
+	if err != nil {
+		return fmt.Errorf("failed to send staff confirmation code: %w", err)
+	}
+	if status >= 400 {
+		return fmt.Errorf("staff confirmation code email API error: %d", status)
+	}
+	return nil
+}
+
+func prettyRole(role string) string {
+	switch role {
+	case "read_only":
+		return "Read only"
+	case "access":
+		return "Access"
+	case "editor":
+		return "Editor"
+	case "admin":
+		return "Admin"
+	default:
+		return role
+	}
+}
+
 // SendOrganizerApproval - Notify user they're approved as organizer
 func (s *EmailService) SendOrganizerApproval(user *models.User, organizer *models.Organizer) error {
 	subject := "You're approved as a TicketHawk organiser"
