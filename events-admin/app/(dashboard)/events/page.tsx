@@ -421,7 +421,7 @@ export default function EventsPage() {
   async function submitCancel() {
     if (cancelReason.length < 10) { toast('Reason must be at least 10 characters', 'error'); return; }
     try {
-      await api.post(`/organiser/events/${cancelId}/cancel`, { reason: cancelReason });
+      await api.post(`/admin/events/${cancelId}/cancel`, { reason: cancelReason });
       toast('Event cancelled', 'success'); setCancelModalOpen(false); loadEvents();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Cancel failed';

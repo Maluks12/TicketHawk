@@ -939,6 +939,9 @@ func main() {
 		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
 		admin.GET("/events/:id",     handlers.AdminGetEventByIDHandler(pool, eventCache))
 		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool,eventCache))
+		// Unscoped cancel. The organiser route filters on organizer_id, so an
+		// admin cancelling another organiser's event there matches no rows.
+		admin.POST("/events/:id/cancel", handlers.AdminCancelEventHandler(pool, eventCache, refundService))
 		admin.GET("/events",         handlers.GetAdminEventsHandler(pool))
 		admin.GET("/stats",          handlers.GetAdminStatsHandler(pool))
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))

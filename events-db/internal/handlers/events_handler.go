@@ -110,6 +110,52 @@ func CreateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache, emailService *
 }
 
 
+// AdminCancelEventHandler cancels any event, not only the caller's own.
+func AdminCancelEventHandler(pool *pgxpool.Pool, ec *cache.EventCache, refundService *services.RefundService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventID := c.Param("id")
+
+		var input struct {
+			Reason string `json:"reason" binding:"required,min=10"`
+		}
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Cancellation reason required (min 10 characters)"})
+			return
+		}
+
+		if err := repository.AdminCancelEvent(pool, eventID, input.Reason); err != nil {
+			if errors.Is(err, repository.ErrEventNotCancellable) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "Only published events can be cancelled. Drafts, completed and already-cancelled events cannot.",
+				})
+				return
+			}
+			utils.InternalError(c, err, "failed to cancel event")
+			return
+		}
+
+		if ec != nil {
+			ec.BustOnPublish(context.Background())
+		}
+
+		if refundService != nil {
+			refundCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if _, refundErr := refundService.RefundEventCancellation(refundCtx, eventID, input.Reason); refundErr != nil {
+				log.Error().Err(refundErr).Str("event_id", eventID).
+					Msg("admin cancel: event cancelled but refunds failed")
+				c.JSON(http.StatusOK, gin.H{
+					"message": "Event cancelled, but refunds could not be processed automatically.",
+					"refunds": "failed",
+				})
+				return
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Event cancelled and refunds issued"})
+	}
+}
+
 func DeleteEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		eventID := c.Param("id")
