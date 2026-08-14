@@ -28,6 +28,7 @@ interface OrgEvent {
   end_time: string;
   city: string;
   venue_name: string;
+  address: string;
   price: number;
   currency: string;
   tickets_sold?: number;   // optional — backend may omit
@@ -351,10 +352,15 @@ export default function EventsPage() {
                       </div>
                     </td>
                     <td style={{ color: 'var(--text-2)' }}>
-                      {e.venue_name || e.city ? (
+                      {e.venue_name || e.address || e.city ? (
                         <>
-                          <div>{e.venue_name || '—'}</div>
-                          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{e.city}</div>
+                          {/* Venue name, else the street address, else the city
+                              on its own — an event with an address but no venue
+                              name is located, just unnamed. */}
+                          <div>{e.venue_name || e.address || e.city}</div>
+                          {(e.venue_name || e.address) && e.city && (
+                            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{e.city}</div>
+                          )}
                         </>
                       ) : (
                         <Link href={`/event/${e.id}`} style={{
