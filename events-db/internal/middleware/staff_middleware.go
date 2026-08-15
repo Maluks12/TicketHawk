@@ -201,3 +201,66 @@ func AuditAllowed(pool *pgxpool.Pool, c *gin.Context, action, targetType string,
 		}
 	}()
 }
+
+// RequireStaffWrite gates mutating requests on the whole admin group.
+//
+// Registered once, after AdminOnlyMiddleware:
+//
+//	admin.Use(middleware.RequireStaffWrite(pool))
+//
+// Applied as a group middleware rather than per route so a destructive endpoint
+// added later is gated by default instead of relying on someone remembering.
+//
+// Two paths, and the split matters for not breaking existing accounts:
+//
+//   - staff_role IS NULL: a pre-existing platform admin. Allowed through
+//     unchanged, because these accounts predate the staff model and locking
+//     them out of their own console would be a regression.
+//   - staff_role set: an invited console user. Writes require CapApproveEvent,
+//     so read_only and access staff can read the console but cannot change
+//     anything — including by calling the API directly, which is the hole a
+//     UI-only check would leave open.
+func RequireStaffWrite(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+
+		userID, ok := c.Get("user_id")
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+
+		var roleStr *string
+		var email string
+		if err := pool.QueryRow(ctx,
+			`SELECT staff_role::text, email FROM users WHERE id = $1`, userID,
+		).Scan(&roleStr, &email); err != nil {
+			log.Error().Err(err).Msg("staff write gate: lookup failed")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
+			return
+		}
+
+		if roleStr == nil || *roleStr == "" {
+			c.Next()
+			return
+		}
+
+		role, err := models.ParseStaffRole(*roleStr)
+		if err != nil || !models.Can(&role, models.CapApproveEvent) {
+			auditDenied(pool, c, email, nil, "admin.write", "write attempted without permission")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":     "your access level is read-only",
+				"your_role": *roleStr,
+			})
+			return
+		}
+		c.Next()
+	}
+}

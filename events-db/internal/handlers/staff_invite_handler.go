@@ -364,8 +364,13 @@ func CompleteStaffInviteHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		var userID string
 		err = tx.QueryRow(ctx, `
 			INSERT INTO users (email, password, first_name, last_name, role, staff_role, email_verified)
-			VALUES ($1, $2, $3, $4, 'attendee', $5::console_role, TRUE)
+			VALUES ($1, $2, $3, $4, 'admin', $5::console_role, TRUE)
 			ON CONFLICT (email) DO UPDATE SET
+				-- role must become 'admin': AdminOnlyMiddleware and the console's
+				-- own auth check both gate on it, so an invitee left as
+				-- 'attendee' can sign up and then cannot sign in. staff_role is
+				-- what actually limits them once inside.
+				role = 'admin',
 				staff_role = EXCLUDED.staff_role,
 				first_name = COALESCE(NULLIF(users.first_name, ''), EXCLUDED.first_name),
 				last_name  = COALESCE(NULLIF(users.last_name, ''), EXCLUDED.last_name)

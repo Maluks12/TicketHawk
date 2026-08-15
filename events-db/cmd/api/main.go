@@ -740,6 +740,10 @@ func main() {
 	// ==========================================
 	admin := v1.Group("/admin")
 	admin.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
+	// Invited staff hold role='admin' so they can sign in; staff_role is what
+	// limits them. Without this, a read_only invitee could call any legacy
+	// admin write endpoint directly. Accounts with no staff_role are untouched.
+	admin.Use(middleware.RequireStaffWrite(pool))
 	if rateLimitManager != nil {
 		admin.Use(middleware.CompositeRateLimit(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 100, RefillRate: 5.0, TTL: 1 * time.Hour},
