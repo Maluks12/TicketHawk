@@ -198,6 +198,13 @@ export default function EventsPage() {
   const [viewingId, setViewingId] = useState<string | null>(null);
   // Editors and admins edit; access and read_only read the record.
   const canEdit = useStaff((st) => st.can('event.edit'));
+  // Deleting an event and cancelling one both need request.act, which only an
+  // admin holds — cancelling triggers refunds and deleting strands ticket
+  // holders. Publishing is an approval. Previously all three drew buttons for
+  // every role and produced a 403 on click, which reads as a broken console
+  // rather than a permission boundary.
+  const canApprove = useStaff((st) => st.can('event.approve'));
+  const canAct = useStaff((st) => st.can('request.act'));
   const loadStaffCaps = useStaff((st) => st.load);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [activeTab, setActiveTab] = useState(0);
@@ -447,7 +454,7 @@ export default function EventsPage() {
           <div className="page-title">Events</div>
           <div className="page-sub">Create and manage all platform events</div>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}>+ New Event</button>
+        {canEdit && <button className="btn btn-primary" onClick={openCreate}>+ New Event</button>}
       </div>
 
       {/* ── Local Drafts ── */}
@@ -525,11 +532,13 @@ export default function EventsPage() {
                       {canEdit && (
                         <button className="btn-icon" onClick={() => openEdit(e.id)} title="Edit">✎</button>
                       )}
-                      {(e.status === 'draft' || e.status === 'pending_review') && (
+                      {canApprove && (e.status === 'draft' || e.status === 'pending_review') && (
                         <button className="btn btn-success btn-sm" onClick={() => publishEvent(e.id)}>Publish</button>
                       )}
-                      {e.status === 'published' && <button className="btn btn-sm" onClick={() => openCancel(e.id)} style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}>Cancel</button>}
-                      <button className="btn-icon" onClick={() => deleteEvent(e.id, e.title)} style={{ color: 'var(--danger)' }} title="Delete">✕</button>
+                      {canAct && e.status === 'published' && <button className="btn btn-sm" onClick={() => openCancel(e.id)} style={{ borderColor: 'var(--warning)', color: 'var(--warning)' }}>Cancel</button>}
+                      {canAct && (
+                        <button className="btn-icon" onClick={() => deleteEvent(e.id, e.title)} style={{ color: 'var(--danger)' }} title="Delete">✕</button>
+                      )}
                     </div>
                   </td>
                 </tr>

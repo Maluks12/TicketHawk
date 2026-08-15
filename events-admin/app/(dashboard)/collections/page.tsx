@@ -4,6 +4,7 @@ import { api } from '../../../lib/api';
 import { fmtDate, fmtMoney } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
+import { useStaff, AccessDenied } from '../../../lib/permissions';
 
 interface Collection {
   id: string; name: string; description?: string; display_order: number;
@@ -19,6 +20,18 @@ const EMPTY_FORM = { name: '', description: '', display_order: '0' };
 export default function CollectionsPage() {
   const toast = useToast();
   const confirm = useConfirm();
+
+  // Merch and collections are read at event.view and written at event.edit.
+  // This screen used to render its full editing UI to every role, so a
+  // read_only or access user saw Create, Edit, Approve and Deactivate buttons
+  // that each produced a 403 — which reads as a broken console rather than a
+  // permission boundary.
+  const capsLoaded = useStaff((st) => st.loaded);
+  const can = useStaff((st) => st.can);
+  const loadCaps = useStaff((st) => st.load);
+  useEffect(() => { loadCaps(); }, [loadCaps]);
+  const canEdit = can('event.edit');
+  const canApprove = can('event.approve');
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,6 +150,11 @@ export default function CollectionsPage() {
   });
   const activeCount = collections.filter(c => c.is_active).length;
 
+  if (!capsLoaded) {
+    return <div className="page-loader"><div className="spinner spinner-lg" /></div>;
+  }
+  if (!can('event.view')) return <AccessDenied need="event.view" />;
+
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1200px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
@@ -144,7 +162,7 @@ export default function CollectionsPage() {
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 600 }}>Collections</div>
           <div style={{ fontSize: '.8rem', color: 'var(--text-2)', marginTop: '.15rem' }}>Curated groups of merchandise</div>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={openCreate}>+ New Collection</button>
+        {canEdit && <button className="btn btn-primary btn-sm" onClick={openCreate}>+ New Collection</button>}
       </div>
 
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
@@ -206,8 +224,8 @@ export default function CollectionsPage() {
                   <td>
                     <div style={{ display: 'flex', gap: '.35rem', justifyContent: 'flex-end' }}>
                       <button className="btn btn-sm" onClick={() => openManage(c)}>⬡ Manage Items</button>
-                      <button className="btn btn-sm" onClick={() => openEdit(c)}>✎ Edit</button>
-                      {c.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivate(c)}>Deactivate</button>}
+                      {canEdit && <button className="btn btn-sm" onClick={() => openEdit(c)}>✎ Edit</button>}
+                      {canEdit && c.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivate(c)}>Deactivate</button>}
                     </div>
                   </td>
                 </tr>
