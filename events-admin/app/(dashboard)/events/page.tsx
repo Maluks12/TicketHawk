@@ -196,9 +196,8 @@ export default function EventsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingId, setViewingId] = useState<string | null>(null);
-  // Editing a live event changes what buyers already paid for, so it stays with
-  // admins; everyone else reads the record.
-  const canEdit = useStaff((st) => st.can('event.approve'));
+  // Editors and admins edit; access and read_only read the record.
+  const canEdit = useStaff((st) => st.can('event.edit'));
   const loadStaffCaps = useStaff((st) => st.load);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [activeTab, setActiveTab] = useState(0);
@@ -421,7 +420,7 @@ export default function EventsPage() {
   async function submitCancel() {
     if (cancelReason.length < 10) { toast('Reason must be at least 10 characters', 'error'); return; }
     try {
-      await api.post(`/organiser/events/${cancelId}/cancel`, { reason: cancelReason });
+      await api.post(`/admin/events/${cancelId}/cancel`, { reason: cancelReason });
       toast('Event cancelled', 'success'); setCancelModalOpen(false); loadEvents();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Cancel failed';
