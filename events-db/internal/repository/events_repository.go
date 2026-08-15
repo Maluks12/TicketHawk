@@ -575,6 +575,69 @@ func CancelEvent(pool *pgxpool.Pool, eventID string, reason string, organizerID 
 	return nil
 }
 
+// AdminCancelEvent cancels regardless of who owns the event. The organiser
+// route scopes on organizer_id, so an admin cancelling someone else's event
+// there matches zero rows and reports "not cancellable".
+func AdminCancelEvent(pool *pgxpool.Pool, eventID string, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+ 
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+ 
+	cmd, err := tx.Exec(ctx, `
+		UPDATE events
+		SET status = $1, cancelled_at = CURRENT_TIMESTAMP, cancellation_reason = $2
+		WHERE id = $3 AND status = ANY($4::event_status[])
+	`, models.EventCancelled, reason, eventID,
+		[]string{string(models.EventPublished), string(models.EventPublishedPrivate)})
+	if err != nil {
+		return fmt.Errorf("failed to cancel event: %w", err)
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrEventNotCancellable
+	}
+ 
+	if _, err = tx.Exec(ctx, `
+		UPDATE bookings
+		SET booking_status = $1, refund_requested_at = CURRENT_TIMESTAMP, refund_reason = $2
+		WHERE event_id = $3 AND booking_status = $4
+	`, models.BookingRefunded, "Event cancelled by TicketHawk", eventID, models.BookingConfirmed); err != nil {
+		return fmt.Errorf("failed to update bookings: %w", err)
+	}
+ 
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit cancellation: %w", err)
+	}
+ 
+	// Notify attendees — runs outside the transaction so a notification failure
+	// never rolls back the cancellation.
+	notifRows, notifErr := pool.Query(ctx, `
+		SELECT DISTINCT user_id FROM bookings WHERE event_id = $1 AND user_id IS NOT NULL
+	`, eventID)
+	if notifErr == nil {
+		defer notifRows.Close()
+		for notifRows.Next() {
+			var uid string
+			if err := notifRows.Scan(&uid); err != nil {
+				continue
+			}
+			_ = CreateNotification(
+				pool, ctx, uid,
+				models.NotifEventCancelled,
+				"Event Cancelled",
+				"An event you booked has been cancelled. Your refund is being processed.",
+				&eventID,
+			)
+		}
+	}
+ 
+	return nil
+}
+
 func TrendingEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

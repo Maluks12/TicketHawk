@@ -729,13 +729,21 @@ func main() {
 	// ==========================================
 	// Staff invite acceptance — token-authenticated, no session yet.
 	v1.GET("/staff/invite",           handlers.GetStaffInviteHandler(pool))
-	v1.POST("/staff/invite/start",    handlers.StartStaffInviteHandler(pool, nil))
+	// The code goes to the master admins, never to the invitee.
+	v1.POST("/staff/invite/start", handlers.StartStaffInviteHandler(pool,
+		func(adminEmail, code, invitee string) error {
+			return emailService.SendStaffInviteCode(adminEmail, code, invitee)
+		}))
 	v1.POST("/staff/invite/complete", handlers.CompleteStaffInviteHandler(pool))
 
 	// Admin Routes
 	// ==========================================
 	admin := v1.Group("/admin")
 	admin.Use(middleware.AuthMiddleware(cfg), middleware.AdminOnlyMiddleware())
+	// Invited staff hold role='admin' so they can sign in; staff_role is what
+	// limits them. Without this, a read_only invitee could call any legacy
+	// admin write endpoint directly. Accounts with no staff_role are untouched.
+	admin.Use(middleware.RequireStaffWrite(pool))
 	if rateLimitManager != nil {
 		admin.Use(middleware.CompositeRateLimit(rateLimitManager,
 			ratelimit.BucketConfig{Capacity: 100, RefillRate: 5.0, TTL: 1 * time.Hour},
@@ -791,7 +799,10 @@ func main() {
 			// the organiser and is never returned in the response.
 			staffAPI.POST("/requests/:id/send-code",
 				middleware.RequireCapability(pool, models.CapRequestDangerous),
-				handlers.SendConfirmationCodeHandler(pool, nil))
+				handlers.SendConfirmationCodeHandler(pool,
+					func(to, code string) error {
+						return emailService.SendStaffConfirmationCode(to, code)
+					}))
 			staffAPI.POST("/requests/:id/confirm",
 				handlers.ConfirmStaffRequestHandler(pool))
 
@@ -815,7 +826,10 @@ func main() {
 			// that goes to the master admin, who passes it on out of band.
 			staffAPI.POST("/staff/invites",
 				middleware.RequireCapability(pool, models.CapManageStaff),
-				handlers.CreateStaffInviteHandler(pool, nil))
+				handlers.CreateStaffInviteHandler(pool,
+					func(to, link, role string) error {
+						return emailService.SendStaffInvite(to, link, role)
+					}))
 			staffAPI.GET("/staff/invites",
 				middleware.RequireCapability(pool, models.CapManageStaff),
 				handlers.ListStaffInvitesHandler(pool))
@@ -929,6 +943,9 @@ func main() {
 		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
 		admin.GET("/events/:id",     handlers.AdminGetEventByIDHandler(pool, eventCache))
 		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool,eventCache))
+		// Unscoped cancel. The organiser route filters on organizer_id, so an
+		// admin cancelling another organiser's event there matches no rows.
+		admin.POST("/events/:id/cancel", handlers.AdminCancelEventHandler(pool, eventCache, refundService))
 		admin.GET("/events",         handlers.GetAdminEventsHandler(pool))
 		admin.GET("/stats",          handlers.GetAdminStatsHandler(pool))
 		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))

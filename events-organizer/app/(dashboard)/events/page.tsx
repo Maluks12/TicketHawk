@@ -123,12 +123,32 @@ export default function EventsPage() {
   };
 
   // ── Actions ─────────────────────────────────────────────────────────────────
-  async function cancelEvent(id: string) {
-    confirm('Cancel event', 'This will cancel the event. Attendees will be notified.', async () => {
-      await api.post(`/organiser/events/${id}/cancel`);
-      toast('Event cancelled', 'success');
+  // The API requires a reason of at least 10 characters and rejects the request
+  // without one, so this prompts rather than posting an empty body.
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelBusy, setCancelBusy] = useState(false);
+
+  async function submitCancel() {
+    if (!cancelId || cancelReason.trim().length < 10) return;
+    setCancelBusy(true);
+    try {
+      await api.post(`/organiser/events/${cancelId}/cancel`, { reason: cancelReason.trim() });
+      toast('Event cancelled — attendees are being refunded', 'success');
+      setCancelId(null);
+      setCancelReason('');
       fetchEvents();
-    });
+    } catch (e) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast(msg ?? 'Could not cancel the event', 'error');
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
+  function cancelEvent(id: string) {
+    setCancelReason('');
+    setCancelId(id);
   }
 
   // Publishing requires the rights declaration. The backend
@@ -420,6 +440,55 @@ export default function EventsPage() {
           </table>
         )}
       </div>
+
+      {cancelId && (
+        <div className="modal-overlay" onMouseDown={(e) => {
+          if (e.target === e.currentTarget) setCancelId(null);
+        }}>
+          <div className="modal modal-sm" role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <div className="modal-title">Cancel this event</div>
+            </div>
+            <div className="modal-body">
+              <div className="alert alert-warning" style={{ fontSize: 13 }}>
+                <span>
+                  Every confirmed ticket is refunded in full and attendees are
+                  notified. This cannot be undone.
+                </span>
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Why are you cancelling?</label>
+                <textarea
+                  rows={3}
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Attendees see this in their refund email."
+                  style={{
+                    width: '100%', padding: '10px 12px', resize: 'vertical',
+                    border: '1px solid var(--border-2)', borderRadius: 'var(--r)',
+                    background: 'var(--surface-alpha)', color: 'var(--text)',
+                    fontSize: 14, fontFamily: 'inherit', outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div className="field-hint">
+                  {cancelReason.trim().length < 10
+                    ? `${10 - cancelReason.trim().length} more characters needed`
+                    : 'Attendees will see this'}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setCancelId(null)}>Keep event</button>
+              <button className="btn btn-danger"
+                disabled={cancelBusy || cancelReason.trim().length < 10}
+                onClick={submitCancel}>
+                {cancelBusy ? 'Cancelling…' : 'Cancel event'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

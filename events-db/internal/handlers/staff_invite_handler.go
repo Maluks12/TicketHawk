@@ -229,25 +229,63 @@ func StartStaffInviteHandler(pool *pgxpool.Pool, notifyAdmin func(to, code, invi
 		// Master admins are the recipients. If none exists yet the invite
 		// cannot be completed, which is the correct failure — nobody should be
 		// able to self-grant console access.
+		// Collect first, then send. Calling the mail provider inside an open
+		// rows loop holds a pool connection for the duration of every SMTP
+		// round trip.
 		rows, err := pool.Query(ctx,
-			`SELECT email FROM users WHERE is_master_admin = TRUE`)
+			`SELECT email FROM users WHERE is_master_admin = TRUE AND email <> ''`)
 		if err != nil {
 			utils.InternalError(c, err, "could not notify")
 			return
 		}
-		defer rows.Close()
-		sent := 0
+		admins := []string{}
 		for rows.Next() {
 			var to string
-			if err := rows.Scan(&to); err == nil && notifyAdmin != nil {
-				if notifyAdmin(to, code, inv.email) == nil {
-					sent++
-				}
+			if err := rows.Scan(&to); err == nil {
+				admins = append(admins, to)
 			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			utils.InternalError(c, err, "could not notify")
+			return
+		}
+
+		// No master admin means nobody can receive the code, so the invite can
+		// never be completed. Failing loudly here beats a 200 that leaves the
+		// invitee waiting for an email that was never addressed to anyone.
+		if len(admins) == 0 {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "no master admin is configured, so the confirmation code cannot be delivered",
+				"hint":  "Set users.is_master_admin = TRUE for at least one account.",
+			})
+			return
+		}
+
+		sent, failed := 0, 0
+		var lastErr error
+		for _, to := range admins {
+			if notifyAdmin == nil {
+				break
+			}
+			if err := notifyAdmin(to, code, inv.email); err != nil {
+				failed++
+				lastErr = err
+				continue
+			}
+			sent++
+		}
+
+		// The code is already stored, so a total send failure leaves an invite
+		// nobody can finish. Report it rather than returning success.
+		if sent == 0 {
+			utils.InternalError(c, lastErr, "the confirmation code could not be emailed to any administrator")
+			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"sent_to_admins": sent,
+			"failed":         failed,
 			"note":           "Ask the administrator who invited you for the 6-digit code.",
 		})
 	}
@@ -326,8 +364,13 @@ func CompleteStaffInviteHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		var userID string
 		err = tx.QueryRow(ctx, `
 			INSERT INTO users (email, password, first_name, last_name, role, staff_role, email_verified)
-			VALUES ($1, $2, $3, $4, 'attendee', $5::console_role, TRUE)
+			VALUES ($1, $2, $3, $4, 'admin', $5::console_role, TRUE)
 			ON CONFLICT (email) DO UPDATE SET
+				-- role must become 'admin': AdminOnlyMiddleware and the console's
+				-- own auth check both gate on it, so an invitee left as
+				-- 'attendee' can sign up and then cannot sign in. staff_role is
+				-- what actually limits them once inside.
+				role = 'admin',
 				staff_role = EXCLUDED.staff_role,
 				first_name = COALESCE(NULLIF(users.first_name, ''), EXCLUDED.first_name),
 				last_name  = COALESCE(NULLIF(users.last_name, ''), EXCLUDED.last_name)
