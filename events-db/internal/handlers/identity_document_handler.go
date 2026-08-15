@@ -96,30 +96,51 @@ func RequireDocumentAccess(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		verified := kycStatus != nil && *kycStatus == "verified"
-		if verified {
-			logDocAccess(pool, c, &organizerID, email, "view_denied",
-				"Post-verification read attempted without master admin rights", nil)
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "this organiser is already verified — documents can only be " +
-					"viewed by a master admin after approval",
-				"phase": "post_verification",
-			})
-			return
-		}
+		_ = kycStatus // status no longer decides access; the grant does
 
-		// Pre-verification: any staff role holding the capability may look.
+		// Everyone else needs an approved, unexpired, unrevoked grant for THIS
+		// organiser. Scoping per organiser matters: a grant to investigate one
+		// dispute should not open every other organiser's document.
 		if staffRole == nil {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "staff access required"})
 			return
 		}
 		role, err := models.ParseStaffRole(*staffRole)
-		if err != nil || !models.Can(&role, models.CapViewKYCDocument) {
+		if err != nil || (role != models.StaffAdmin && role != models.StaffEditor) {
 			logDocAccess(pool, c, &organizerID, email, "view_denied",
-				"Pre-verification read attempted without the required capability", nil)
+				"Identity document requested by a role that cannot hold a grant", nil)
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "you cannot view identity documents"})
 			return
 		}
+
+		var grantID string
+		var expires time.Time
+		err = pool.QueryRow(ctx, `
+			SELECT id::text, expires_at
+			FROM kyc_document_grants
+			WHERE granted_to = $1 AND organizer_id = $2
+			  AND approved_at IS NOT NULL AND revoked_at IS NULL
+			  AND expires_at > now()
+			ORDER BY expires_at DESC
+			LIMIT 1
+		`, userID, organizerID).Scan(&grantID, &expires)
+		if errors.Is(err, pgx.ErrNoRows) {
+			logDocAccess(pool, c, &organizerID, email, "view_denied",
+				"Identity document requested without an approved grant", nil)
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "viewing an ID document needs approval from a master admin",
+				"hint":  "Request access for this organiser, then ask a master admin to approve it.",
+			})
+			return
+		}
+		if err != nil {
+			log.Error().Err(err).Msg("grant lookup failed")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
+			return
+		}
+
+		c.Set("grant_id", grantID)
+		c.Set("grant_expires", expires)
 		c.Next()
 	}
 }
