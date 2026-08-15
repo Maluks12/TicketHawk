@@ -167,7 +167,16 @@ func CreateRefreshToken(pool *pgxpool.Pool, userID string, tokenHash string, exp
 // Genuine replays (long after rotation, or of tokens revoked by logout,
 // password reset, or a previous reuse detection) still nuke the family.
 // Industry-standard leeway (Auth0 et al. use similar reuse intervals).
-const rotationGraceWindow = 60 * time.Second
+// 60s was too tight for a phone. The app can start a refresh, get
+// backgrounded by the OS mid-flight, and only finish (or retry) minutes later
+// — and a retry after a lost response necessarily re-presents the SAME token
+// the server already rotated. At 60s that was read as theft and revoked every
+// session the user had, on every device. Five minutes covers a backgrounded
+// retry, a tunnel hiccup and a slow mobile connection without meaningfully
+// helping an attacker: a stolen token is still only usable inside a five
+// minute window that the legitimate client is actively rotating out from
+// under it.
+const rotationGraceWindow = 5 * time.Minute
 
 func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID string, role string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

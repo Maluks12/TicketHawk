@@ -59,7 +59,7 @@ function PriceLine({ label, value, bold, accent }: { label: string; value: strin
 
 export default function BookingDetailPage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, authReady } = useAuthStore();
   const { colors, isDark } = useAppTheme();
   const { id } = useParams<{ id: string }>();
   // Guest mode: ?bn=<booking_number>&email=... from the ticket-lookup page.
@@ -101,6 +101,12 @@ export default function BookingDetailPage() {
 
   useEffect(() => {
     const load = async () => {
+      // WAIT FOR THE SESSION TO SETTLE. On a cold load from the confirmation
+      // email's link, loadUser() is still in flight and `user` is null — which
+      // this used to read as "not signed in", flashing "Booking not found"
+      // before the session finished restoring. Guests skip the wait: they
+      // authenticate with booking number + email, not with a session.
+      if (!isGuest && !authReady) return;
       if (!user && !isGuest) { setLoading(false); return; }
       try {
         const [bRes, aRes] = isGuest
@@ -117,7 +123,7 @@ export default function BookingDetailPage() {
       } catch {} finally { setLoading(false); }
     };
     load();
-  }, [id, user, isGuest, guestBn, guestEmail]);
+  }, [id, user, authReady, isGuest, guestBn, guestEmail]);
 
   // Fetch the live quote once we know the booking exists. Deliberately
   // separate from the booking load: a failed quote must degrade to "no
@@ -171,8 +177,13 @@ export default function BookingDetailPage() {
   const border = isDark ? '#222' : '#e5e5e5';
   const inputStyle = { background: isDark ? '#1c1c1c' : '#f5f5f5', color: colors.text, border: `1px solid ${border}`, borderRadius: 10, padding: '11px 14px', fontSize: 14, width: '100%', boxSizing: 'border-box' as const, outline: 'none' };
 
-  if (loading) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ width: 32, height: 32, border: '3px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /></div>;
+  if (loading || (!isGuest && !authReady)) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ width: 32, height: 32, border: '3px solid #ff2d55', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /></div>;
   if (!user) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><h2 style={{ color: colors.text }}>Sign in to view your booking</h2><button onClick={() => router.push('/auth/login')} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Log in</button></div>;
+  // Session settled and nobody is signed in. The ticket exists, we just can't
+  // prove it belongs to whoever opened the link — so ask, rather than claiming
+  // the booking doesn't exist.
+  if (!booking && !user && !isGuest) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><WarningCircle size={40} weight="regular" color={colors.subText} /><h2 style={{ color: colors.text, textAlign: 'center' }}>Sign in to view this ticket</h2><button onClick={() => router.push(`/auth/login?next=${encodeURIComponent(typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/')}`)} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Sign in</button></div>;
+
   if (!booking) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><WarningCircle size={40} weight="regular" color={colors.subText} /><h2 style={{ color: colors.text }}>Booking not found</h2><button onClick={() => router.back()} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Go back</button></div>;
 
   const status = refunded ? 'refunded' : booking.booking_status;

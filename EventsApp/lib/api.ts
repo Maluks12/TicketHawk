@@ -22,62 +22,336 @@ export const API_BASE_URL = getApiBaseUrl();
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  // 10s was too tight for SA mobile data. A timeout is indistinguishable from
+  // a failure to the code above it, and the old refresh path treated a failure
+  // as "your session is invalid" — so a slow tunnel logged people out.
+  timeout: 20000,
   headers: { 'Content-Type': 'application/json' },
 });
 
-api.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync('access_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+// ─── Token store ────────────────────────────────────────────────────────────
+// SecureStore is the durable home for the tokens, but it is NOT read on every
+// request any more. Two reasons:
+//
+//   1. Speed. A Keychain/Keystore round-trip per request is measurable, and the
+//      app fires several in parallel on most screens.
+//   2. Correctness. On iOS a Keychain item written with the default
+//      accessibility (kSecAttrAccessibleWhenUnlocked) cannot be read or written
+//      while the device is locked. Anything that touched the API from the
+//      background — a push arriving, a foreground refresh racing the lock
+//      screen — got `null` back and looked exactly like "signed out". Worse, a
+//      failed WRITE during token rotation threw away the new refresh token
+//      while the server had already revoked the old one, which is a guaranteed
+//      logout on the next call.
+//
+// So: memory is the working copy, SecureStore is the backing store, writes are
+// retried, and the Keychain item is created with AFTER_FIRST_UNLOCK so it stays
+// readable whenever the device has been unlocked once since boot.
+const ACCESS_KEY  = 'access_token';
+const REFRESH_KEY = 'refresh_token';
 
-// ── Single-flight token refresh ────────────────────────────────────────────
-// The backend ROTATES refresh tokens: every /v1/auth/refresh call revokes the
-// presented token and issues a new one. A screen firing several requests with
-// an expired access token used to launch one refresh call PER failed request —
-// the first one won and rotated the token, and the rest presented the
-// just-rotated (now revoked) token. All concurrent 401s now share ONE
-// in-flight refresh promise, so the app makes exactly one refresh call,
-// performs one SecureStore write, and creates one new session.
+const SECURE_OPTS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+};
+
+let memAccess:  string | null | undefined = undefined; // undefined = not yet loaded
+let memRefresh: string | null | undefined = undefined;
+
+// Bumped every time a new access token lands. A request that was already in
+// flight when a refresh completed will come back 401 through no fault of the
+// session; comparing generations tells us to simply retry it with the new
+// token instead of kicking off a second (token-rotating) refresh.
+let tokenGeneration = 0;
+
+async function secureGet(key: string): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(key, SECURE_OPTS);
+  } catch {
+    // Fall back to the default accessibility in case the item predates
+    // SECURE_OPTS — a read failure must never be read as "signed out".
+    try { return await SecureStore.getItemAsync(key); } catch { return null; }
+  }
+}
+
+async function secureSet(key: string, value: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await SecureStore.setItemAsync(key, value, SECURE_OPTS);
+      return true;
+    } catch {
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
+  }
+  return false;
+}
+
+async function secureDelete(key: string): Promise<void> {
+  try { await SecureStore.deleteItemAsync(key, SECURE_OPTS); } catch { /* ignore */ }
+  try { await SecureStore.deleteItemAsync(key); } catch { /* ignore */ }
+}
+
+export async function getAccessToken(): Promise<string | null> {
+  if (memAccess === undefined) memAccess = await secureGet(ACCESS_KEY);
+  return memAccess;
+}
+
+export async function getRefreshToken(): Promise<string | null> {
+  if (memRefresh === undefined) memRefresh = await secureGet(REFRESH_KEY);
+  return memRefresh;
+}
+
+/**
+ * Commits a freshly-issued token pair.
+ *
+ * Memory is updated FIRST and synchronously. If the Keychain write then fails,
+ * the session still works for the rest of this app run (and the write is
+ * retried on the next rotation) instead of being destroyed — which is what used
+ * to happen, because the server had already revoked the token we just dropped.
+ */
+export async function saveTokens(access: string, refresh: string): Promise<void> {
+  memAccess  = access;
+  memRefresh = refresh;
+  tokenGeneration++;
+  // Refresh token first: it is the one that cannot be re-derived.
+  await secureSet(REFRESH_KEY, refresh);
+  await secureSet(ACCESS_KEY, access);
+}
+
+export async function clearTokens(): Promise<void> {
+  memAccess  = null;
+  memRefresh = null;
+  tokenGeneration++;
+  await secureDelete(ACCESS_KEY);
+  await secureDelete(REFRESH_KEY);
+}
+
+// ─── Session-ended notification ─────────────────────────────────────────────
+// Only ever fired for a DEFINITIVE rejection (see below). authStore subscribes
+// so the UI drops to signed-out in the one case where that is genuinely true.
+type SessionEndedListener = () => void;
+const sessionEndedListeners = new Set<SessionEndedListener>();
+
+export function onSessionEnded(fn: SessionEndedListener): () => void {
+  sessionEndedListeners.add(fn);
+  return () => { sessionEndedListeners.delete(fn); };
+}
+
+async function endSession(): Promise<void> {
+  await clearTokens();
+  sessionEndedListeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+}
+
+// ─── Refresh ────────────────────────────────────────────────────────────────
+//
+// THE RULE THIS FILE EXISTS TO ENFORCE: a session is ended by the SERVER
+// saying so, or by the user tapping Log out. Nothing else.
+//
+// The previous version cleared the tokens in a bare `catch` around the refresh
+// call, so every one of these ended with the user signed out:
+//   • request timed out on a slow connection
+//   • phone was offline / switching between wifi and LTE
+//   • Cloudflare Tunnel returned 502 for a few seconds
+//   • a Keychain write failed
+// None of those mean the session is invalid. They are now retried, and if they
+// still fail the tokens are left exactly where they are so the very next
+// request can succeed.
+
+/** Thrown when the server has definitively rejected the refresh token. */
+class SessionExpiredError extends Error {
+  constructor(msg = 'session expired') { super(msg); this.name = 'SessionExpiredError'; }
+}
+
+// A refresh gets a longer budget than a normal request: it is the one call we
+// really do not want to give up on.
+const REFRESH_TIMEOUT_MS  = 30000;
+const REFRESH_MAX_ATTEMPTS = 4;
+
+/**
+ * A response that means "this refresh token will never work again".
+ *
+ * 401/403 — the server looked it up and rejected it (expired, revoked, reused).
+ * 400     — malformed body; retrying sends the identical body, so it is final.
+ *
+ * Everything else (no response at all, 408, 429, 5xx, 502/503/504 from the
+ * tunnel) is transient by definition and must not cost the user their session.
+ */
+function isDefinitiveAuthRejection(err: any): boolean {
+  const status = err?.response?.status;
+  return status === 400 || status === 401 || status === 403;
+}
+
 let refreshInFlight: Promise<string> | null = null;
+
+async function doRefresh(): Promise<string> {
+  const refresh = await getRefreshToken();
+  if (!refresh) throw new SessionExpiredError('no refresh token');
+
+  let lastErr: any = null;
+
+  for (let attempt = 0; attempt < REFRESH_MAX_ATTEMPTS; attempt++) {
+    try {
+      const { data } = await axios.post(
+        `${API_BASE_URL}/v1/auth/refresh`,
+        { refresh_token: refresh },
+        { timeout: REFRESH_TIMEOUT_MS, headers: { 'Content-Type': 'application/json' } },
+      );
+      if (!data?.access_token || !data?.refresh_token) {
+        throw new Error('malformed refresh response');
+      }
+      await saveTokens(data.access_token, data.refresh_token);
+      return data.access_token as string;
+    } catch (err: any) {
+      lastErr = err;
+      if (isDefinitiveAuthRejection(err)) {
+        throw new SessionExpiredError('refresh token rejected by server');
+      }
+      // Transient. Back off and present the SAME token again — the server's
+      // rotation grace window exists precisely so that a retry after a lost
+      // response is treated as a race, not as a replay.
+      if (attempt < REFRESH_MAX_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, 600 * Math.pow(2, attempt)));
+      }
+    }
+  }
+
+  // Out of attempts, still nothing definitive. Keep the tokens.
+  throw lastErr ?? new Error('refresh failed');
+}
 
 function refreshAccessToken(): Promise<string> {
   if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      const refresh = await SecureStore.getItemAsync('refresh_token');
-      if (!refresh) throw new Error('no refresh token');
-      const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, {
-        refresh_token: refresh,
-      });
-      await SecureStore.setItemAsync('access_token', data.access_token);
-      await SecureStore.setItemAsync('refresh_token', data.refresh_token);
-      return data.access_token as string;
-    })().finally(() => {
-      refreshInFlight = null;
-    });
+    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
   }
   return refreshInFlight;
 }
 
+// ─── Proactive refresh ──────────────────────────────────────────────────────
+// Access tokens live 15 minutes, so an app left open (or backgrounded and
+// reopened) is nearly always holding an expired one. Renewing it BEFORE it is
+// used turns the common case into a single quiet call instead of a burst of
+// 401s from whatever screen happened to mount first.
+
+// Minimal base64 decoder. Hermes exposes a global atob on current RN versions,
+// but not on every engine/config this app can be built with, and Buffer is a
+// Node global that only exists in React Native if something has polyfilled it.
+// Neither is worth a hard dependency for reading one integer claim, and a
+// throw here would surface as a spurious "session expired".
+const B64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function decodeBase64(input: string): string {
+  if (typeof atob === 'function') return atob(input);
+  const clean = input.replace(/=+$/, '');
+  let out = '';
+  let bits = 0;
+  let acc = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const idx = B64_ALPHABET.indexOf(clean[i]);
+    if (idx === -1) continue;
+    acc = (acc << 6) | idx;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += String.fromCharCode((acc >> bits) & 0xff);
+    }
+  }
+  return out;
+}
+
+function jwtExpiryMs(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const claims = JSON.parse(decodeBase64(padded));
+    return typeof claims?.exp === 'number' ? claims.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+const EXPIRY_SKEW_MS = 120000; // renew when under 2 minutes remain
+
+/**
+ * Renews the access token if it is expired or close to it. Safe to call often
+ * and from anywhere — it shares the single-flight promise, so ten callers cause
+ * at most one network call and one token rotation.
+ *
+ * Never throws and never signs anyone out. Returns true if there is a usable
+ * session afterwards.
+ */
+export async function ensureFreshSession(): Promise<boolean> {
+  try {
+    const refresh = await getRefreshToken();
+    if (!refresh) return false;
+
+    const access = await getAccessToken();
+    if (access) {
+      const exp = jwtExpiryMs(access);
+      if (exp != null && exp - Date.now() > EXPIRY_SKEW_MS) return true;
+    }
+
+    await refreshAccessToken();
+    return true;
+  } catch (err) {
+    if (err instanceof SessionExpiredError) {
+      await endSession();
+      return false;
+    }
+    // Transient — we still have tokens, so the session is not over.
+    return true;
+  }
+}
+
+// ─── Interceptors ───────────────────────────────────────────────────────────
+
+api.interceptors.request.use(async (config) => {
+  const token = await getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  (config as any)._tokenGen = tokenGeneration;
+  return config;
+});
+
+const MAX_AUTH_RETRIES = 2;
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true;
-      try {
-        const newToken = await refreshAccessToken();
-        original.headers.Authorization = `Bearer ${newToken}`;
+    const original: any = error.config;
+
+    if (error.response?.status !== 401 || !original) throw error;
+
+    original._authRetries = (original._authRetries ?? 0) + 1;
+    if (original._authRetries > MAX_AUTH_RETRIES) throw error;
+
+    // Raced a refresh that has already finished — the token in the header was
+    // simply stale by the time the server saw it. Retry, don't rotate.
+    if (original._tokenGen !== undefined && original._tokenGen !== tokenGeneration) {
+      original._tokenGen = tokenGeneration;
+      const current = await getAccessToken();
+      if (current) {
+        original.headers = original.headers ?? {};
+        original.headers.Authorization = `Bearer ${current}`;
         return api(original);
-      } catch {
-        await SecureStore.deleteItemAsync('access_token');
-        await SecureStore.deleteItemAsync('refresh_token');
-        throw error;
       }
     }
-    throw error;
-  }
+
+    try {
+      const newToken = await refreshAccessToken();
+      original.headers = original.headers ?? {};
+      original.headers.Authorization = `Bearer ${newToken}`;
+      return api(original);
+    } catch (refreshErr) {
+      if (refreshErr instanceof SessionExpiredError) {
+        // The ONLY path that signs someone out.
+        await endSession();
+      }
+      // Transient failure: tokens are untouched, the user stays signed in, and
+      // the caller gets the original error to handle (screens fall back to
+      // their offline cache).
+      throw error;
+    }
+  },
 );
 
 // ── Session ID cache ───────────────────────────────────────────────────────
@@ -343,7 +617,7 @@ export const authRegister = (dto: RegisterDTO) =>
 // Older backend builds ignore the body, so this is backwards-compatible.
 export const authLogout = async () =>
   api.post('/v1/auth/logout', {
-    refresh_token: (await SecureStore.getItemAsync('refresh_token')) ?? '',
+    refresh_token: (await getRefreshToken()) ?? '',
   });
 
 export const getMe = () =>

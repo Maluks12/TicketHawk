@@ -41,50 +41,130 @@ export function makeSessionHeaders(sid: string | null): Record<string, string> {
   return sid ? { 'X-Session-ID': sid } : {};
 }
 
-// ── Request interceptor ───────────────────────────────────────────────────────
-api.interceptors.request.use((config) => {
-  const token = getAccessToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
 // ── Response interceptor ──────────────────────────────────────────────────────
-// SINGLE-FLIGHT REFRESH: the backend rotates refresh tokens and treats a
-// replayed (already-rotated) token as theft, revoking EVERY session for that
-// user. A page like home fires several requests in parallel; if the access
-// token has expired they all 401 together, and the old interceptor launched
-// one refresh call PER request. The first one won and rotated the token — the
-// rest then presented the just-rotated token and tripped reuse detection,
-// nuking the user's brand-new session and leaving the page unable to load.
-// Now all concurrent 401s share ONE in-flight refresh promise.
+//
+// THE RULE: a session ends when the SERVER rejects the refresh token, or when
+// the user clicks Log out. Nothing else.
+//
+// The previous version wrapped the refresh in a bare `catch` that called
+// clearTokens() and bounced to /auth/login. That fired on a dropped
+// connection, a request timeout, a 502 from the Cloudflare Tunnel, any 5xx —
+// none of which mean the session is invalid. Transient failures are now
+// retried, and if they still fail the tokens are left alone so the next
+// request can succeed.
+//
+// SINGLE-FLIGHT REFRESH is retained: the backend rotates refresh tokens and
+// treats a replayed one as theft. A page like home fires several requests in
+// parallel; if the access token has expired they all 401 together, and one
+// refresh call per request meant the losers presented the just-rotated token
+// and tripped reuse detection, nuking every session the user had.
+
+/** Thrown only when the server has definitively rejected the refresh token. */
+class SessionExpiredError extends Error {
+  constructor(msg = 'session expired') { super(msg); this.name = 'SessionExpiredError'; }
+}
+
+const REFRESH_TIMEOUT_MS   = 30000;
+const REFRESH_MAX_ATTEMPTS = 4;
+
+/**
+ * 401/403 — the server looked the token up and rejected it (expired, revoked,
+ *           reused). Final.
+ * 400     — malformed body; a retry sends the identical body. Final.
+ * Anything else — no response at all, 408, 429, 5xx, tunnel 502/503/504 — is
+ * transient and must not cost the user their session.
+ */
+function isDefinitiveAuthRejection(err: any): boolean {
+  const status = err?.response?.status;
+  return status === 400 || status === 401 || status === 403;
+}
+
+// Bumped whenever a new access token lands, so a request that was already in
+// flight when a refresh completed can just be retried with the current token
+// instead of kicking off a second (token-rotating) refresh.
+let tokenGeneration = 0;
+
 let refreshInFlight: Promise<string> | null = null;
+
+async function doRefresh(): Promise<string> {
+  const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+  if (!refresh) throw new SessionExpiredError('no refresh token');
+
+  let lastErr: any = null;
+
+  for (let attempt = 0; attempt < REFRESH_MAX_ATTEMPTS; attempt++) {
+    try {
+      const { data } = await axios.post(
+        `${API_BASE_URL}/v1/auth/refresh`,
+        { refresh_token: refresh },
+        { timeout: REFRESH_TIMEOUT_MS },
+      );
+      if (!data?.access_token || !data?.refresh_token) throw new Error('malformed refresh response');
+      saveTokens(data.access_token, data.refresh_token);
+      tokenGeneration++;
+      return data.access_token as string;
+    } catch (err: any) {
+      lastErr = err;
+      if (isDefinitiveAuthRejection(err)) {
+        throw new SessionExpiredError('refresh token rejected by server');
+      }
+      // Transient. Back off and present the SAME token again — the server's
+      // rotation grace window exists precisely so a retry after a lost
+      // response reads as a race, not a replay.
+      if (attempt < REFRESH_MAX_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, 600 * Math.pow(2, attempt)));
+      }
+    }
+  }
+
+  throw lastErr ?? new Error('refresh failed');
+}
 
 function refreshAccessToken(): Promise<string> {
   if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-      if (!refresh) throw new Error('no refresh token');
-      const { data } = await axios.post(`${API_BASE_URL}/v1/auth/refresh`, { refresh_token: refresh });
-      saveTokens(data.access_token, data.refresh_token);
-      return data.access_token as string;
-    })().finally(() => {
-      refreshInFlight = null;
-    });
+    refreshInFlight = doRefresh().finally(() => { refreshInFlight = null; });
   }
   return refreshInFlight;
 }
 
+api.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  (config as any)._tokenGen = tokenGeneration;
+  return config;
+});
+
+const MAX_AUTH_RETRIES = 2;
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
-    const original = error.config;
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true;
-      try {
-        const accessToken = await refreshAccessToken();
-        original.headers.Authorization = `Bearer ${accessToken}`;
+    const original: any = error.config;
+    if (error.response?.status !== 401 || !original) return Promise.reject(error);
+
+    original._authRetries = (original._authRetries ?? 0) + 1;
+    if (original._authRetries > MAX_AUTH_RETRIES) return Promise.reject(error);
+
+    // Raced a refresh that has already finished — the header was simply stale
+    // by the time the server saw it. Retry, don't rotate.
+    if (original._tokenGen !== undefined && original._tokenGen !== tokenGeneration) {
+      original._tokenGen = tokenGeneration;
+      const current = getAccessToken();
+      if (current) {
+        original.headers = original.headers ?? {};
+        original.headers.Authorization = `Bearer ${current}`;
         return api(original);
-      } catch {
+      }
+    }
+
+    try {
+      const accessToken = await refreshAccessToken();
+      original.headers = original.headers ?? {};
+      original.headers.Authorization = `Bearer ${accessToken}`;
+      return api(original);
+    } catch (refreshErr) {
+      if (refreshErr instanceof SessionExpiredError) {
+        // The ONLY path that signs someone out.
         clearTokens();
         // Don't hard-redirect from public pages — anonymous browsing (home,
         // event pages) works without a session. Only bounce to login if the
@@ -94,12 +174,54 @@ api.interceptors.response.use(
           const needsAuth = p.startsWith('/profile') || p.startsWith('/tickets') || p.startsWith('/booking');
           if (needsAuth) window.location.href = '/auth/login';
         }
-        return Promise.reject(error);
       }
+      // Transient failure: tokens untouched, user stays signed in, caller gets
+      // the original error to handle.
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
   }
 );
+
+/**
+ * Renews the access token if it is expired or nearly so. Safe to call often —
+ * callers share the single-flight promise, so N callers cause at most one
+ * network call and one rotation. Never throws. Returns true if a usable
+ * session remains afterwards.
+ */
+function jwtExpiryMs(token: string): number | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+    const claims = JSON.parse(json);
+    return typeof claims?.exp === 'number' ? claims.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+const EXPIRY_SKEW_MS = 120000;
+
+export async function ensureFreshSession(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (!localStorage.getItem('refresh_token')) return false;
+    const access = getAccessToken();
+    if (access) {
+      const exp = jwtExpiryMs(access);
+      if (exp != null && exp - Date.now() > EXPIRY_SKEW_MS) return true;
+    }
+    await refreshAccessToken();
+    return true;
+  } catch (err) {
+    if (err instanceof SessionExpiredError) {
+      clearTokens();
+      return false;
+    }
+    return true; // transient — tokens intact, session not over
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
