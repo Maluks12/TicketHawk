@@ -24,11 +24,11 @@ import { api } from './api';
 export type StaffRole = 'read_only' | 'access' | 'editor' | 'admin';
 
 export type Capability =
-  | 'user.list' | 'user.contact' | 'bank.view_tail' | 'kyc.status'
-  | 'kyc.document' | 'audit.view'
+  | 'event.view' | 'user.list' | 'user.contact' | 'bank.view_tail'
+  | 'kyc.status' | 'kyc.document' | 'audit.view'
+  | 'event.edit' | 'event.approve' | 'event.feature' | 'kyc.verify'
   | 'user.edit_contact' | 'user.request_otp' | 'user.reset_credentials'
-  | 'event.approve' | 'event.feature' | 'kyc.verify'
-  | 'request.create' | 'request.approve'
+  | 'request.create' | 'request.act' | 'request.approve'
   | 'staff.view' | 'staff.manage';
 
 /** Human labels for roles, used in badges and the staff table. */
@@ -41,10 +41,10 @@ export const ROLE_LABEL: Record<StaffRole, string> = {
 
 /** What each role is FOR — shown when granting a role, so the choice is informed. */
 export const ROLE_DESCRIPTION: Record<StaffRole, string> = {
-  read_only: 'Can see that accounts and events exist. No personal details, no changes.',
-  access: 'Can see contact details, KYC status and the last 4 digits of bank accounts. Cannot change anything.',
-  editor: 'Can act on accounts and log requests for dangerous actions — but cannot approve them.',
-  admin: 'Can approve requests and manage staff. Cannot view ID documents or full bank numbers.',
+  read_only: 'View events and the user list. No personal details, no changes.',
+  access: 'Everything above, plus emails, KYC status and the last 4 digits of bank accounts. Can approve initial KYC. Cannot edit anything.',
+  editor: 'Everything above, plus editing events and acting on accounts. Dangerous actions — bank details, takedowns — are logged as requests for an admin to approve.',
+  admin: 'Everything an editor can do, without needing approval, plus approving other people\u2019s requests and managing staff.',
 };
 
 interface StaffState {

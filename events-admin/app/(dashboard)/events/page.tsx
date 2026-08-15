@@ -196,9 +196,8 @@ export default function EventsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [viewingId, setViewingId] = useState<string | null>(null);
-  // Editing a live event changes what buyers already paid for, so it stays with
-  // admins; everyone else reads the record.
-  const canEdit = useStaff((st) => st.can('event.approve'));
+  // Editors and admins edit; access and read_only read the record.
+  const canEdit = useStaff((st) => st.can('event.edit'));
   const loadStaffCaps = useStaff((st) => st.load);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [activeTab, setActiveTab] = useState(0);
