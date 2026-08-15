@@ -60,140 +60,103 @@ type Capability string
 
 const (
 	// ── Reading ──────────────────────────────────────────────────────────────
+	CapViewEvents       Capability = "event.view"         // event list + full detail
 	CapViewUserList     Capability = "user.list"          // names + roles only
 	CapViewUserContact  Capability = "user.contact"       // email, phone
 	CapViewBankTail     Capability = "bank.view_tail"     // last 4 digits only
 	CapViewKYCStatus    Capability = "kyc.status"         // verified / pending
-	// CapViewKYCDocument gates the ID image DURING first-time review only.
-	//
-	// The rule is two-phase, and the phase — not the role — decides:
-	//
-	//   before verification  any staff role may look, because you cannot verify
-	//                        an identity you are not allowed to see
-	//   after verification   master admin only, because the document has done
-	//                        its job and every later read is a regulatory or
-	//                        dispute matter rather than routine work
-	//
-	// So this capability is necessary but not sufficient: the handler also
-	// checks the organiser's KYC status, and refuses post-verification reads to
-	// everyone here regardless of role.
-	CapViewKYCDocument  Capability = "kyc.document"       // ID image, PRE-verification only
 	CapViewAuditLog     Capability = "audit.view"
 
+	// CapViewKYCDocument is held by NO role, including master admin.
+	//
+	// Master admin reaches documents through is_master_admin, and admin/editor
+	// through a time-boxed grant a master admin approves. Neither is a standing
+	// capability, so it cannot be acquired by being promoted.
+	CapViewKYCDocument Capability = "kyc.document"
+
 	// ── Acting ───────────────────────────────────────────────────────────────
+	CapEditEvents       Capability = "event.edit"
+	CapApproveEvent     Capability = "event.approve"
+	CapFeatureEvent     Capability = "event.feature"
+	CapVerifyKYC        Capability = "kyc.verify"         // initial approval, on status
 	CapEditUserContact  Capability = "user.edit_contact"
 	CapRequestOTP       Capability = "user.request_otp"
 	CapResetCredentials Capability = "user.reset_credentials"
-	CapApproveEvent     Capability = "event.approve"
-	CapFeatureEvent     Capability = "event.feature"
-	CapVerifyKYC        Capability = "kyc.verify"
 
-	// ── Requesting (log a request; cannot execute) ───────────────────────────
+	// ── Requesting vs doing ──────────────────────────────────────────────────
+	// Editors LOG dangerous actions; admins perform them outright.
 	CapRequestDangerous Capability = "request.create"
-	// ── Approving (second person on someone else's request) ──────────────────
+	CapActDangerous     Capability = "request.act"
 	CapApproveRequests  Capability = "request.approve"
 
 	// ── Staff management ─────────────────────────────────────────────────────
-	CapViewStaff        Capability = "staff.view"
-	CapManageStaff      Capability = "staff.manage"
+	CapViewStaff   Capability = "staff.view"
+	CapManageStaff Capability = "staff.manage"
 )
 
 // capabilities is the whole permission model, in one readable place.
 //
-// Anything not listed for a role is denied. That default matters: a new
-// capability added below is automatically unavailable to every role until
-// someone grants it deliberately, rather than leaking to whoever happens to sit
-// above a numeric threshold.
+// Anything not listed for a role is denied, so a capability added below is
+// unavailable until granted deliberately rather than leaking to whoever happens
+// to sit above a numeric threshold.
 var capabilities = map[StaffRole]map[Capability]bool{
+	// Sees that events and accounts exist. Nothing personal, no writes.
 	StaffReadOnly: {
+		CapViewEvents:   true,
 		CapViewUserList: true,
-		// Read-only staff do first-line KYC review, so they need the document
-		// while a submission is still pending. The handler blocks them the
-		// moment it is verified.
-		CapViewKYCDocument: true,
 	},
+
+	// Adds contact details, KYC status and the bank tail, plus initial KYC
+	// approval. Still cannot edit events or touch accounts.
 	StaffAccess: {
+		CapViewEvents:      true,
 		CapViewUserList:    true,
 		CapViewUserContact: true,
 		CapViewBankTail:    true,
 		CapViewKYCStatus:   true,
-		CapViewKYCDocument: true, // pre-verification only
+		CapVerifyKYC:       true,
 	},
+
+	// Acts on events and accounts, and LOGS dangerous actions for an admin to
+	// approve. Never carries one out — that split is the whole point.
 	StaffEditor: {
+		CapViewEvents:       true,
 		CapViewUserList:     true,
 		CapViewUserContact:  true,
 		CapViewBankTail:     true,
 		CapViewKYCStatus:    true,
+		CapVerifyKYC:        true,
+		CapEditEvents:       true,
+		CapApproveEvent:     true,
+		CapFeatureEvent:     true,
 		CapEditUserContact:  true,
 		CapRequestOTP:       true,
 		CapResetCredentials: true,
-		CapApproveEvent:     true,
-		CapFeatureEvent:     true,
-		CapViewKYCDocument:  true, // pre-verification only
-		// Editors may ASK for a takedown or a bank deletion. They may never
-		// carry one out — that is the entire point of the split.
 		CapRequestDangerous: true,
 	},
+
+	// Everything an editor can do, without needing approval, plus approving
+	// other people's requests and managing staff.
 	StaffAdmin: {
+		CapViewEvents:       true,
 		CapViewUserList:     true,
 		CapViewUserContact:  true,
 		CapViewBankTail:     true,
 		CapViewKYCStatus:    true,
 		CapViewAuditLog:     true,
+		CapVerifyKYC:        true,
+		CapEditEvents:       true,
+		CapApproveEvent:     true,
+		CapFeatureEvent:     true,
 		CapEditUserContact:  true,
 		CapRequestOTP:       true,
 		CapResetCredentials: true,
-		CapApproveEvent:     true,
-		CapFeatureEvent:     true,
-		CapVerifyKYC:        true,
-		CapViewKYCDocument:  true, // pre-verification only
 		CapRequestDangerous: true,
+		CapActDangerous:     true,
 		CapApproveRequests:  true,
 		CapViewStaff:        true,
 		CapManageStaff:      true,
-		// Note that holding CapViewKYCDocument does NOT let an admin read a
-		// VERIFIED organiser's document. Once verification is done the
-		// document's job is done, and every later read — a dispute, a regulator
-		// request, a retention audit — goes through the master-admin path with
-		// a stated reason. The phase gate lives in the handler, not here,
-		// because it depends on the subject's state rather than the caller's
-		// role.
 	},
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Master admin
-//
-// A SEPARATE AXIS FROM StaffRole, not its top rung.
-//
-// The distinction is deliberate. Console admin is an operational role held by
-// several people who use it daily — approving events, managing staff, handling
-// support. Master admin is a break-glass role that reads identity documents,
-// used rarely and by one or two people.
-//
-// Making it StaffAdmin+1 would mean everyone who needs to approve an event day
-// to day also carries the ability to read every organiser's ID, because roles
-// on a ladder accumulate. Keeping it orthogonal means the daily role stays
-// boring, and the dangerous one is held by whoever actually needs it.
-//
-// Enforced by users.is_master_admin (migration 000071) — NOT by staff_role —
-// so granting console admin can never accidentally grant document access.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// MasterAdminCapability is not in the StaffRole matrix on purpose: no value of
-// staff_role can produce it.
-const CapReadIdentityDocument Capability = "identity.document.read"
-
-// DocumentAccessRequest is what a master admin must supply to read a document.
-// Every field is mandatory, and the reason is length-checked in the database —
-// a read with no stated purpose is precisely the read worth asking about later.
-type DocumentAccessRequest struct {
-	OrganizerID string `json:"organizer_id"`
-	Reason      string `json:"reason"`
-	// One of: 'dispute', 'regulator_request', 'fraud_investigation', 'other'.
-	// Free text alone drifts into "checking"; a category makes the access log
-	// aggregatable, so "how many regulator requests this quarter" is answerable.
-	Category string `json:"category"`
 }
 
 // Can reports whether a role holds a capability.

@@ -398,12 +398,23 @@ export default function BookingDetailScreen() {
   setBookingTheme(isDark);
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id, bookingNumber, email } = useLocalSearchParams<{ id: string; bookingNumber?: string; email?: string }>();
+  // `bn` is the parameter name used by the confirmation email's link
+  // (…/booking/<id>?bn=<number>&email=<addr>, see events-db email_service.go),
+  // `bookingNumber` is what the Tickets tab passes when it pushes this route
+  // internally. Both mean the same thing and both have to be accepted — the
+  // screen only read `bookingNumber`, so a guest arriving from their own
+  // confirmation email had no way to authenticate and got "Booking not found".
+  const params = useLocalSearchParams<{
+    id: string; bookingNumber?: string; bn?: string; email?: string;
+  }>();
+  const { id, email } = params;
+  const bookingNumber = params.bookingNumber ?? params.bn;
 
-  // A guest reaches this screen from the Tickets-tab lookup. With no auth token
-  // their booking is addressed by booking number + email via the /guest/ routes.
+  // A guest reaches this screen from the Tickets-tab lookup or from the link in
+  // their confirmation email. With no auth token their booking is addressed by
+  // booking number + email via the /guest/ routes.
   const guest = bookingNumber && email ? { bookingNumber, email } : undefined;
-  const { user } = useAuthStore();
+  const { user, authReady } = useAuthStore();
   const [booking, setBooking]               = useState<BookingDetail | null>(null);
   const [assignments, setAssignments]       = useState<TicketAssignment[]>([]);
   const [loading, setLoading]               = useState(true);
@@ -452,6 +463,20 @@ export default function BookingDetailScreen() {
 
   useEffect(() => {
     const load = async () => {
+      // WAIT FOR THE SESSION TO SETTLE.
+      //
+      // This screen is a universal-link landing pad: tapping "View My Tickets"
+      // in the confirmation email cold-starts the app straight onto this route.
+      // At that moment loadUser() is still in flight, so `user` is null — and
+      // the old code took that to mean "not signed in", set loading=false and
+      // rendered "Booking not found". `user` was not in the dependency array
+      // either, so when the session finished restoring a moment later this
+      // effect never re-ran. The ticket was permanently unreachable from the
+      // email even though opening it from the Tickets tab worked fine.
+      //
+      // Guests skip the wait: they authenticate with booking number + email,
+      // not with a session.
+      if (!guest && !authReady) return;
       if (!user && !guest) { setLoading(false); return; }
       try {
         // Retry transient failures (esp. 429 rate-limit / network blips) with
@@ -504,7 +529,7 @@ export default function BookingDetailScreen() {
       } finally { setLoading(false); }
     };
     load();
-  }, [id, bookingNumber, email]);
+  }, [id, bookingNumber, email, authReady, user?.id]);
 
   // ── Refund quote ──────────────────────────────────────────────────────────
   // Fetched separately from the booking, and deliberately AFTER it: the quote is
@@ -547,9 +572,29 @@ export default function BookingDetailScreen() {
     extrapolate: 'clamp',
   });
 
-  if (loading) return (
+  // Still restoring the session (cold start from the email link) — a spinner,
+  // never an error. `loading` starts true and the load effect returns early
+  // without touching it until auth settles, so this covers that window too.
+  if (loading || (!guest && !authReady)) return (
     <View className={s.root} style={{ alignItems: 'center', justifyContent: 'center' }}>
       <ActivityIndicator color={t.spinner} />
+    </View>
+  );
+
+  // Session settled and there genuinely is nobody signed in. The ticket exists,
+  // we just can't prove it belongs to whoever is holding the phone — so ask,
+  // rather than claiming the booking doesn't exist. The login screen is a modal
+  // that pops back here on success, and the load effect re-runs on `user`.
+  if (!booking && !user && !guest) return (
+    <View className={s.root} style={{ alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40 }}>
+      <Ionicons name="lock-closed-outline" size={40} color={t.iconFaint} />
+      <Text className={s.errTitle}>Sign in to view this ticket</Text>
+      <TouchableOpacity className={s.backBtnFull} onPress={() => router.push('/auth/login' as any)}>
+        <Text className={s.backBtnFullText}>Sign in</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.replace('/(tabs)' as any)}>
+        <Text className={s.qrHint}>Go to home</Text>
+      </TouchableOpacity>
     </View>
   );
 

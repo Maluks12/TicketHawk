@@ -936,6 +936,20 @@ func main() {
 			kycDocs.GET("/access-log",
 				handlers.RequireMasterAdmin(pool),
 				handlers.GetDocumentAccessLogHandler(pool))
+
+			// Editors and admins ask; a master admin approves. Each grant is
+			// scoped to one organiser and expires, so it never becomes standing
+			// access and revoking it does not mean demoting anyone.
+			kycDocs.POST("/:id/request-access", handlers.RequestDocumentAccessHandler(pool))
+			kycDocs.GET("/grants",
+				handlers.RequireMasterAdmin(pool),
+				handlers.ListDocumentGrantsHandler(pool))
+			kycDocs.POST("/grants/:id/approve",
+				handlers.RequireMasterAdmin(pool),
+				handlers.ApproveDocumentGrantHandler(pool))
+			kycDocs.POST("/grants/:id/deny",
+				handlers.RequireMasterAdmin(pool),
+				handlers.DenyDocumentGrantHandler(pool))
 		}
 
 		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))

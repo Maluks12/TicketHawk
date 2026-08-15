@@ -163,7 +163,7 @@ func LoginHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
 			return
 		}
-		expiresAt := time.Now().Add(7 * 24 * time.Hour)
+		expiresAt := time.Now().Add(refreshTokenTTL)
 
 		if err := repository.CreateRefreshToken(pool, user.ID, hashedRefresh, expiresAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
@@ -286,6 +286,19 @@ func TestProtectedHandler() gin.HandlerFunc {
 	}
 }
 
+// refreshTokenTTL is how long a session survives WITHOUT being used.
+//
+// It was 7 days. Because the TTL is reset on every rotation, that is fine for
+// somebody who opens the app daily — and a guaranteed logout for everyone who
+// buys a ticket and then doesn't open the app again until the event three
+// weeks later. Which is the normal way people use a ticketing app.
+//
+// 90 days, still sliding: every refresh pushes the deadline out again, so an
+// active user is never signed out at all, and an abandoned session still ages
+// out on its own. Revocation is unaffected — logout, password reset and reuse
+// detection all revoke immediately regardless of the TTL.
+const refreshTokenTTL = 90 * 24 * time.Hour
+
 func RefreshTokenHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {
@@ -330,7 +343,7 @@ func RefreshTokenHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
 			return
 		}
-		expiresAt := time.Now().Add(7 * 24 * time.Hour)
+		expiresAt := time.Now().Add(refreshTokenTTL)
 
 		if err := repository.CreateRefreshToken(pool, userID, hashedRefresh, expiresAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})

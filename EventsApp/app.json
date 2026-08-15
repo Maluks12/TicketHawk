@@ -43,8 +43,18 @@
             },
             {
               "scheme": "https",
+              "host": "ticket-hawk.com",
+              "pathPrefix": "/booking"
+            },
+            {
+              "scheme": "https",
               "host": "www.ticket-hawk.com",
               "pathPrefix": "/events"
+            },
+            {
+              "scheme": "https",
+              "host": "www.ticket-hawk.com",
+              "pathPrefix": "/booking"
             }
           ],
           "category": [
