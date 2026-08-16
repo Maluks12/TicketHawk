@@ -91,10 +91,17 @@ func AdminDecideKYC(pool *pgxpool.Pool, ctx context.Context, organizerID, adminI
 	var query string
 	args := []interface{}{adminID, organizerID}
 	if approve {
+		// kyc_first_verified_at is COALESCEd, never overwritten. It is the
+		// latch that closes the identity document to everyone but a master
+		// admin (migration 000074), so it must record the FIRST review and be
+		// immune to every subsequent one — a re-verification that reset it
+		// would silently reopen the document to every editor on the team.
 		query = `
 			UPDATE organizers
 			SET kyc_status = 'verified', kyc_method = COALESCE(kyc_method, 'manual'),
-			    kyc_verified_at = CURRENT_TIMESTAMP, kyc_reviewed_by = $1,
+			    kyc_verified_at = CURRENT_TIMESTAMP,
+			    kyc_first_verified_at = COALESCE(kyc_first_verified_at, CURRENT_TIMESTAMP),
+			    kyc_reviewed_by = $1,
 			    kyc_rejection_reason = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE id = $2 AND kyc_status = 'pending_review'`
 	} else {
@@ -118,12 +125,21 @@ func AdminDecideKYC(pool *pgxpool.Pool, ctx context.Context, organizerID, adminI
 // SaveRegistryResult stores a re-run provider check; auto-verifies a pending
 // submission on a full match.
 func SaveRegistryResult(pool *pgxpool.Pool, ctx context.Context, organizerID string, raw []byte, fullMatch bool) error {
+	// The auto-verify branch closes the document latch exactly as the manual
+	// approval does. Missing it here was the easy mistake to make: a full DHA
+	// match verifies WITHOUT anyone opening the review screen, so every
+	// auto-verified organiser would have kept a permanently readable ID
+	// photograph while manually-reviewed ones were locked.
 	_, err := pool.Exec(ctx, `
 		UPDATE organizers
 		SET registry_check = $1, registry_checked_at = CURRENT_TIMESTAMP,
 		    kyc_status = CASE WHEN $2 AND kyc_status = 'pending_review' THEN 'verified' ELSE kyc_status END,
 		    kyc_method = CASE WHEN $2 AND kyc_status = 'pending_review' THEN 'didit' ELSE kyc_method END,
 		    kyc_verified_at = CASE WHEN $2 AND kyc_status = 'pending_review' THEN CURRENT_TIMESTAMP ELSE kyc_verified_at END,
+		    kyc_first_verified_at = CASE
+		        WHEN $2 AND kyc_status = 'pending_review'
+		        THEN COALESCE(kyc_first_verified_at, CURRENT_TIMESTAMP)
+		        ELSE kyc_first_verified_at END,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = $3
 	`, raw, fullMatch, organizerID)
@@ -250,14 +266,16 @@ func GetAdminKYCDetail(pool *pgxpool.Pool, ctx context.Context, organizerID stri
 	err := pool.QueryRow(ctx, `
 		SELECT id, business_name, business_email, kyc_status, kyc_method,
 		       legal_first_name, legal_last_name, sa_id_encrypted, sa_id_dob,
-		       kyc_submitted_at, kyc_verified_at, kyc_rejection_reason,
+		       kyc_submitted_at, kyc_verified_at, kyc_first_verified_at,
+		       kyc_rejection_reason,
 		       id_document IS NOT NULL, proof_of_address IS NOT NULL,
 		       bank_account_name, registry_check, registry_checked_at
 		FROM organizers WHERE id = $1
 	`, organizerID).Scan(
 		&r.Detail.OrganizerID, &r.Detail.BusinessName, &r.Detail.BusinessEmail, &status, &r.Detail.Method,
 		&r.Detail.LegalFirstName, &r.Detail.LegalLastName, &r.IDEncrypted, &dob,
-		&r.Detail.SubmittedAt, &r.Detail.VerifiedAt, &r.Detail.RejectionReason,
+		&r.Detail.SubmittedAt, &r.Detail.VerifiedAt, &r.Detail.FirstVerifiedAt,
+		&r.Detail.RejectionReason,
 		&hasDoc, &hasProof,
 		&r.Detail.BankAccountName, &r.RegistryRaw, &r.Detail.RegistryAt)
 	if err != nil {
@@ -290,6 +308,20 @@ func GetAdminKYCDetail(pool *pgxpool.Pool, ctx context.Context, organizerID stri
 }
 
 // GetKYCDocument streams one of the two stored documents.
+//
+// DEPRECATED — DO NOT WIRE THIS TO A ROUTE.
+//
+// It has no callers, and that is the point. This function was the body of the
+// ungated GET /admin/kyc/:id/document endpoint: it returns raw identity
+// document bytes with no capability check, no master-admin rule, no reason and
+// no entry in kyc_document_access_log. Registering it again reopens the exact
+// hole that migration 000074 and identity_document_handler.go were written to
+// close.
+//
+// Documents leave through POST /admin/kyc/:id/document, behind
+// RequireDocumentAccess. Kept here only so an out-of-band export or retention
+// job has a reader that does not pretend to be an access-controlled one — and
+// any such job must write its own kyc_document_access_log entry.
 func GetKYCDocument(pool *pgxpool.Pool, ctx context.Context, organizerID, kind string) (data []byte, mime string, err error) {
 	col, mimeCol := "id_document", "id_document_mime"
 	if kind == "proof-of-address" {

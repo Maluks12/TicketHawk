@@ -64,10 +64,38 @@ func GetMyCapabilitiesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		email, _ := c.Get("actor_email")
 		emailStr, _ := email.(string)
 
+		// is_master_admin is NOT a capability and never appears in the list
+		// above — it lives on a different column and answers a different
+		// question (see migration 000071). It is reported separately so the
+		// console can show the grant queue, the document access log and the
+		// unlock form to the one or two people who can actually use them,
+		// instead of drawing dead buttons for everyone else.
+		//
+		// Presentational only. Every endpoint it reveals re-checks the flag
+		// server-side through RequireMasterAdmin.
+		var isMaster bool
+		if userID, ok := c.Get("user_id"); ok {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+			defer cancel()
+			if err := pool.QueryRow(ctx,
+				`SELECT COALESCE(is_master_admin, FALSE) FROM users WHERE id = $1`, userID,
+			).Scan(&isMaster); err != nil {
+				// Fail closed on the DISPLAY: hide the break-glass UI rather
+				// than showing buttons the server will refuse.
+				isMaster = false
+			}
+		}
+
 		c.JSON(http.StatusOK, gin.H{
-			"staff_role":   string(role),
-			"capabilities": out,
-			"email":        emailStr,
+			"staff_role":      string(role),
+			"capabilities":    out,
+			"email":           emailStr,
+			"is_master_admin": isMaster,
+			// True when this account predates the staff model and holds no
+			// staff_role. The console surfaces it so an owner can see they are
+			// running on the compatibility path and assign themselves a real
+			// role.
+			"legacy_admin": middleware.IsLegacyAdmin(c),
 		})
 	}
 }

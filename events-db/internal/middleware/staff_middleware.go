@@ -35,6 +35,10 @@ import (
 const (
 	ctxStaffRole = "staff_role"
 	ctxStaffCaps = "staff_caps"
+	// ctxStaffLegacy marks a platform admin who predates the staff model and
+	// holds no staff_role. Treated as admin for CONSOLE capabilities, and never
+	// for identity documents.
+	ctxStaffLegacy = "staff_legacy_admin"
 )
 
 // RequireStaff loads the caller's staff role and rejects non-staff.
@@ -72,8 +76,33 @@ func RequireStaff(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		if roleStr == nil || *roleStr == "" {
-			auditDenied(pool, c, email, nil, "staff.access", "not staff")
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "staff access required"})
+			// LEGACY PLATFORM ADMIN — allowed through with the admin
+			// capability set.
+			//
+			// This branch exists because refusing here locked the console's own
+			// key inside. 000068 left staff_role NULL for every existing
+			// account, and /admin/me/capabilities sits behind this middleware,
+			// so a platform admin got a 403, the console's capability store
+			// failed closed on an empty list, and Analytics, Approvals, Staff
+			// Requests and People all rendered "Access denied" — including for
+			// whoever needed to log in and grant the first staff_role.
+			//
+			// It escalates nothing. AdminOnlyMiddleware has already established
+			// users.role='admin', and such an account can call every legacy
+			// admin endpoint today with no restriction at all. Handing it the
+			// admin capability set narrows what it can do; it does not widen
+			// it. Master admin is a different column and is NOT implied here,
+			// so this cannot hand anyone an identity document.
+			//
+			// 000074 backfills these accounts, so in practice this is a safety
+			// net for rows created between deploy and migration rather than the
+			// normal path.
+			legacy := models.StaffAdmin
+			c.Set(ctxStaffRole, legacy)
+			c.Set(ctxStaffCaps, models.Capabilities(&legacy))
+			c.Set(ctxStaffLegacy, true)
+			c.Set("actor_email", email)
+			c.Next()
 			return
 		}
 
@@ -132,6 +161,107 @@ func StaffRoleFrom(c *gin.Context) (models.StaffRole, bool) {
 	}
 	role, ok := v.(models.StaffRole)
 	return role, ok
+}
+
+// IsLegacyAdmin reports whether the caller is a pre-staff-model platform admin.
+//
+// Used where "admin" is not a strong enough answer — identity documents, in
+// particular, must never be reachable by an account that simply never had a
+// role assigned.
+func IsLegacyAdmin(c *gin.Context) bool {
+	v, ok := c.Get(ctxStaffLegacy)
+	if !ok {
+		return false
+	}
+	b, _ := v.(bool)
+	return b
+}
+
+// RequireCapabilityOn gates a route that is NOT mounted under RequireStaff.
+//
+// The legacy admin endpoints — events, merch, collections, users, organisers,
+// payouts — were registered before the staff model existed and are still on the
+// bare admin group. RequireStaffWrite gates their mutating verbs at a single
+// coarse level (CapApproveEvent), which produces two wrong answers at once:
+//
+//	an `access` invitee can GET every organiser's payout profile, because
+//	reads are not gated at all
+//
+//	an `editor` can DELETE a user and rewrite payout bank details, because
+//	one capability covers every write
+//
+// This middleware gives those routes a real capability each, while preserving
+// the property that makes RequireStaffWrite safe to have deployed: an account
+// with NO staff_role is a pre-existing platform admin and passes through
+// untouched. Locking those accounts out is a regression, not a fix.
+//
+// The role is read from the database per request, for the same reason
+// RequireStaff does: revoking access during an incident has to take effect now,
+// not when a JWT expires.
+func RequireCapabilityOn(pool *pgxpool.Pool, cap models.Capability) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Already resolved by RequireStaff further up the chain? Use that
+		// rather than issuing a second identical query.
+		if role, ok := StaffRoleFrom(c); ok {
+			if models.Can(&role, cap) {
+				c.Next()
+				return
+			}
+			email, _ := c.Get("actor_email")
+			emailStr, _ := email.(string)
+			auditDenied(pool, c, emailStr, &role, string(cap), "capability not held")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":               "you do not have permission for this action",
+				"required_capability": string(cap),
+				"your_role":           string(role),
+			})
+			return
+		}
+
+		userID, ok := c.Get("user_id")
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+
+		var roleStr *string
+		var email string
+		if err := pool.QueryRow(ctx,
+			`SELECT staff_role::text, email FROM users WHERE id = $1`, userID,
+		).Scan(&roleStr, &email); err != nil {
+			log.Error().Err(err).Msg("capability gate: lookup failed")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
+			return
+		}
+		c.Set("actor_email", email)
+
+		// Pre-existing platform admin: unchanged behaviour, deliberately.
+		if roleStr == nil || *roleStr == "" {
+			c.Next()
+			return
+		}
+
+		role, err := models.ParseStaffRole(*roleStr)
+		if err != nil {
+			log.Error().Str("role", *roleStr).Msg("capability gate: unknown staff role")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "staff access required"})
+			return
+		}
+		if !models.Can(&role, cap) {
+			auditDenied(pool, c, email, &role, string(cap), "capability not held")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":               "you do not have permission for this action",
+				"required_capability": string(cap),
+				"your_role":           string(role),
+			})
+			return
+		}
+		c.Set(ctxStaffRole, role)
+		c.Next()
+	}
 }
 
 // auditDenied records a refused attempt.
@@ -211,16 +341,46 @@ func AuditAllowed(pool *pgxpool.Pool, c *gin.Context, action, targetType string,
 // Applied as a group middleware rather than per route so a destructive endpoint
 // added later is gated by default instead of relying on someone remembering.
 //
+// WHAT THIS IS NOW: a read-only backstop, not the write policy.
+//
+// It used to gate every write on CapApproveEvent, which had a consequence
+// nobody intended. The `access` role is described to the person granting it as
+// "can approve initial KYC" and holds CapVerifyKYC — and could never use it,
+// because this middleware refused the POST before the capability check ran. The
+// role's headline permission was dead on arrival, and the only visible symptom
+// was a 403 saying "your access level is read-only" to someone whose access
+// level was not read-only.
+//
+// Per-route capabilities now do the real work (see RequireCapabilityOn). This
+// stays as the floor: a staff member who holds NO write capability at all
+// cannot mutate anything, including by calling the API directly with curl,
+// which is the hole a UI-only check would leave open. It also still guards any
+// write endpoint added later that someone forgets to gate.
+//
 // Two paths, and the split matters for not breaking existing accounts:
 //
 //   - staff_role IS NULL: a pre-existing platform admin. Allowed through
 //     unchanged, because these accounts predate the staff model and locking
 //     them out of their own console would be a regression.
-//   - staff_role set: an invited console user. Writes require CapApproveEvent,
-//     so read_only and access staff can read the console but cannot change
-//     anything — including by calling the API directly, which is the hole a
-//     UI-only check would leave open.
+//   - staff_role set: an invited console user. Refused only if the role holds
+//     none of the write capabilities — which is exactly read_only.
 func RequireStaffWrite(pool *pgxpool.Pool) gin.HandlerFunc {
+	// Every capability that authorises a mutation. A role holding at least one
+	// gets past this floor; which mutation it may actually perform is settled
+	// per route.
+	writeCaps := []models.Capability{
+		models.CapVerifyKYC,
+		models.CapEditEvents,
+		models.CapApproveEvent,
+		models.CapFeatureEvent,
+		models.CapEditUserContact,
+		models.CapRequestOTP,
+		models.CapResetCredentials,
+		models.CapRequestDangerous,
+		models.CapActDangerous,
+		models.CapApproveRequests,
+		models.CapManageStaff,
+	}
 	return func(c *gin.Context) {
 		switch c.Request.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -253,8 +413,26 @@ func RequireStaffWrite(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		role, err := models.ParseStaffRole(*roleStr)
-		if err != nil || !models.Can(&role, models.CapApproveEvent) {
-			auditDenied(pool, c, email, nil, "admin.write", "write attempted without permission")
+		if err != nil {
+			// Unrecognised value: the enum grew and this binary is older than
+			// the database. Denying is the only safe reading.
+			auditDenied(pool, c, email, nil, "admin.write", "unknown staff role")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":     "your access level is read-only",
+				"your_role": *roleStr,
+			})
+			return
+		}
+
+		canWriteSomething := false
+		for _, wc := range writeCaps {
+			if models.Can(&role, wc) {
+				canWriteSomething = true
+				break
+			}
+		}
+		if !canWriteSomething {
+			auditDenied(pool, c, email, &role, "admin.write", "write attempted without permission")
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error":     "your access level is read-only",
 				"your_role": *roleStr,

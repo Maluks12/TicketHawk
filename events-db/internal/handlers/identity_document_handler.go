@@ -16,136 +16,225 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Identity document access — master admin only
+// Identity document access
 //
-// This is the answer to "where do I find the ID images". Nowhere in the ordinary
-// console: no staff role can reach them, including admin. They come out here,
-// and only here.
+// This is the ONLY path to an organiser's ID photograph or proof of address.
+// There is no GET route, no CDN URL, no signed link that outlives the request.
 //
-// The three conditions, all mandatory:
+// THE RULE, in one sentence: a document is visible to the staff member doing
+// the first KYC review, and after that review completes it belongs to the
+// master admin alone.
 //
-//   1. users.is_master_admin — a flag set by hand in the database, orthogonal to
-//      console_role, so growing the admin team never grants document access.
-//   2. A stated reason, at least 10 characters, enforced by a CHECK on
-//      kyc_document_access_log. A read with no purpose is precisely the read
-//      worth asking about later.
-//   3. A category, so the log is aggregatable — "how many regulator requests
-//      last quarter" should be answerable without reading free text.
+// Expressed as the two phases the gate below implements:
 //
-// The access is logged BEFORE the bytes are returned. If the log write fails,
-// the read does not happen. That ordering is the whole point: an unlogged look
-// at someone's identity document is the thing this exists to prevent, so the
-// log is a precondition rather than a side effect.
+//	kyc_first_verified_at IS NULL      the review window. Any staff role holding
+//	                                   kyc.verify (access, editor, admin) may
+//	                                   look — refusing here would mean approving
+//	                                   an identity on faith
+//
+//	kyc_first_verified_at IS NOT NULL  closed. MASTER ADMIN ONLY. The document
+//	                                   has done its job; every later read is a
+//	                                   dispute, a regulator request or a
+//	                                   retention audit, not routine work
+//
+// The break-glass exception, and the only one: an editor or admin with an
+// approved, unexpired, organiser-scoped grant (migration 000073) may read a
+// closed document. A master admin approves each grant individually and it
+// expires on its own, so it never becomes standing access.
+//
+// THE GATE KEYS ON THE SUBJECT'S STATE, NOT THE CALLER'S RANK. That is why it
+// cannot live in the capability matrix — no value of console_role answers
+// "has this organiser been through review yet".
+//
+// Every read is written to kyc_document_access_log BEFORE the bytes leave. If
+// the log write fails, the read does not happen. An unlogged look at someone's
+// identity document is the exact thing this file exists to prevent, so the log
+// is a precondition, not a side effect.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// RequireDocumentAccess implements the two-phase rule.
+const (
+	ctxDocIsMaster  = "doc_is_master"
+	ctxDocInReview  = "doc_in_review_window"
+	ctxDocOrganizer = "doc_organizer_id"
+)
+
+// DocumentAccessState is the per-organiser answer the KYC screen renders from.
 //
-//	kyc_status pending    any staff role with CapViewKYCDocument may look —
-//	                      you cannot verify an identity you are not allowed to
-//	                      see, and refusing here would mean approving on faith
-//	kyc_status verified   MASTER ADMIN ONLY — the document has done its job;
-//	                      every later read is a dispute, a regulator request or
-//	                      a retention audit, not routine work
+// Computed server-side and sent down, so the console never derives policy from
+// a role — the same reason capabilities are fetched rather than inferred.
+type DocumentAccessState struct {
+	// Locked is true once the first review completed. Informational: it
+	// explains WHY a document is not shown, so a reviewer who expects a photo
+	// does not conclude the upload failed and reject a valid submission.
+	Locked bool `json:"document_locked"`
+	// CanView is the actual answer for THIS caller and THIS organiser.
+	CanView bool `json:"can_view_document"`
+	// ViaGrant means access came from an approved grant rather than from being
+	// a master admin or being inside the review window. Worth surfacing,
+	// because it expires.
+	ViaGrant bool `json:"document_access_via_grant"`
+	// GrantExpiresAt, when ViaGrant.
+	GrantExpiresAt *time.Time `json:"document_grant_expires_at,omitempty"`
+	// Reason is shown to staff who cannot view, in plain words.
+	Reason string `json:"document_lock_reason,omitempty"`
+}
+
+// EvaluateDocumentAccess answers "may this caller see this organiser's
+// documents right now" without serving anything.
 //
-// The gate is on the SUBJECT'S STATE, not the caller's role, which is why it
-// cannot live in the capability matrix. Both branches log.
+// Shared by the gate and by the KYC detail endpoint, so the panel the console
+// draws and the answer the server gives can never disagree — one function, two
+// callers.
+func EvaluateDocumentAccess(
+	ctx context.Context, pool *pgxpool.Pool, userID, organizerID string,
+) (DocumentAccessState, error) {
+	var st DocumentAccessState
+
+	var isMaster bool
+	var staffRole *string
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(is_master_admin, FALSE), staff_role::text
+		FROM users WHERE id = $1
+	`, userID).Scan(&isMaster, &staffRole); err != nil {
+		return st, err
+	}
+
+	var firstVerified *time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT kyc_first_verified_at FROM organizers WHERE id = $1
+	`, organizerID).Scan(&firstVerified); err != nil {
+		return st, err
+	}
+	st.Locked = firstVerified != nil
+
+	// Master admin passes in both phases. Checked first so everything below is
+	// only ever reasoning about everyone else.
+	if isMaster {
+		st.CanView = true
+		return st, nil
+	}
+
+	// A legacy platform admin with no staff_role gets the admin capability set
+	// everywhere else (see RequireStaff). Not here. Document access is the one
+	// place where "nobody got round to assigning you a role" must not read as
+	// "you may see identity documents".
+	var role models.StaffRole
+	if staffRole != nil {
+		if parsed, err := models.ParseStaffRole(*staffRole); err == nil {
+			role = parsed
+		}
+	}
+
+	// ── Phase 1: the review window ──────────────────────────────────────────
+	if !st.Locked {
+		if models.Can(&role, models.CapVerifyKYC) {
+			st.CanView = true
+			return st, nil
+		}
+		st.Reason = "Your role cannot review identity submissions."
+		return st, nil
+	}
+
+	// ── Phase 2: closed ─────────────────────────────────────────────────────
+	// read_only and access can hold no grant, so they are done here. Saying so
+	// beats a generic refusal: it tells them not to bother asking.
+	if role != models.StaffAdmin && role != models.StaffEditor {
+		st.Reason = "This organiser has completed KYC. Identity documents are " +
+			"readable by a master admin only."
+		return st, nil
+	}
+
+	var grantID string
+	var expires time.Time
+	err := pool.QueryRow(ctx, `
+		SELECT id::text, expires_at
+		FROM kyc_document_grants
+		WHERE granted_to = $1 AND organizer_id = $2
+		  AND approved_at IS NOT NULL AND revoked_at IS NULL
+		  AND expires_at > now()
+		ORDER BY expires_at DESC
+		LIMIT 1
+	`, userID, organizerID).Scan(&grantID, &expires)
+
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		st.Reason = "This organiser has completed KYC. Viewing their identity " +
+			"document now needs a master admin to approve a time-limited grant."
+		return st, nil
+	case err != nil:
+		return st, err
+	}
+
+	st.CanView = true
+	st.ViaGrant = true
+	st.GrantExpiresAt = &expires
+	return st, nil
+}
+
+// RequireDocumentAccess enforces the rule above.
+//
+// Fails CLOSED on every error path. A database hiccup must never be the reason
+// an identity document is served.
 func RequireDocumentAccess(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID := c.Param("id")
 
-		userID, ok := c.Get("user_id")
+		userIDVal, ok := c.Get("user_id")
 		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
 			return
 		}
+		userID, _ := userIDVal.(string)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		var isMaster bool
+		// Email is needed for the log whether this succeeds or fails, so it is
+		// fetched before the decision rather than inside the happy path.
 		var email string
-		var staffRole *string
-		if err := pool.QueryRow(ctx, `
-			SELECT COALESCE(is_master_admin, FALSE), email, staff_role::text
-			FROM users WHERE id = $1
-		`, userID).Scan(&isMaster, &email, &staffRole); err != nil {
-			log.Error().Err(err).Msg("document access check failed")
+		var isMaster bool
+		if err := pool.QueryRow(ctx,
+			`SELECT email, COALESCE(is_master_admin, FALSE) FROM users WHERE id = $1`, userID,
+		).Scan(&email, &isMaster); err != nil {
+			log.Error().Err(err).Msg("document access: actor lookup failed")
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
 			return
 		}
 		c.Set("actor_email", email)
-		c.Set("is_master_admin", isMaster)
+		c.Set(ctxDocIsMaster, isMaster)
+		c.Set(ctxDocOrganizer, organizerID)
 
-		// Master admin passes in both phases, so the verification state is only
-		// consulted for everyone else.
-		if isMaster {
-			c.Next()
-			return
-		}
-
-		var kycStatus *string
-		if err := pool.QueryRow(ctx,
-			`SELECT kyc_status::text FROM organizers WHERE id = $1`, organizerID,
-		).Scan(&kycStatus); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "organiser not found"})
-				return
-			}
-			log.Error().Err(err).Msg("kyc status lookup failed")
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
-			return
-		}
-
-		_ = kycStatus // status no longer decides access; the grant does
-
-		// Everyone else needs an approved, unexpired, unrevoked grant for THIS
-		// organiser. Scoping per organiser matters: a grant to investigate one
-		// dispute should not open every other organiser's document.
-		if staffRole == nil {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "staff access required"})
-			return
-		}
-		role, err := models.ParseStaffRole(*staffRole)
-		if err != nil || (role != models.StaffAdmin && role != models.StaffEditor) {
-			logDocAccess(pool, c, &organizerID, email, "view_denied",
-				"Identity document requested by a role that cannot hold a grant", nil)
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "you cannot view identity documents"})
-			return
-		}
-
-		var grantID string
-		var expires time.Time
-		err = pool.QueryRow(ctx, `
-			SELECT id::text, expires_at
-			FROM kyc_document_grants
-			WHERE granted_to = $1 AND organizer_id = $2
-			  AND approved_at IS NOT NULL AND revoked_at IS NULL
-			  AND expires_at > now()
-			ORDER BY expires_at DESC
-			LIMIT 1
-		`, userID, organizerID).Scan(&grantID, &expires)
+		st, err := EvaluateDocumentAccess(ctx, pool, userID, organizerID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			logDocAccess(pool, c, &organizerID, email, "view_denied",
-				"Identity document requested without an approved grant", nil)
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error": "viewing an ID document needs approval from a master admin",
-				"hint":  "Request access for this organiser, then ask a master admin to approve it.",
-			})
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "organiser not found"})
 			return
 		}
 		if err != nil {
-			log.Error().Err(err).Msg("grant lookup failed")
+			log.Error().Err(err).Msg("document access: evaluation failed")
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "could not verify access"})
 			return
 		}
 
-		c.Set("grant_id", grantID)
-		c.Set("grant_expires", expires)
+		if !st.CanView {
+			// A refused attempt on an identity document belongs in the record a
+			// regulator would read, not only in the console's own audit table.
+			logDocAccess(pool, c, &organizerID, email, "view_denied",
+				"Identity document requested without the right to see it", nil)
+			resp := gin.H{"error": st.Reason}
+			if st.Locked {
+				resp["locked"] = true
+				resp["hint"] = "Request access for this organiser, then ask a master admin to approve it."
+			}
+			c.AbortWithStatusJSON(http.StatusForbidden, resp)
+			return
+		}
+
+		c.Set(ctxDocInReview, !st.Locked)
 		c.Next()
 	}
 }
 
-// RequireMasterAdmin gates the routes below.
+// RequireMasterAdmin gates the grant queue and the access log.
 //
 // Separate from the staff middleware on purpose — it reads a different column
 // and answers a different question. A master admin who is not console staff
@@ -175,9 +264,6 @@ func RequireMasterAdmin(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 		if !isMaster {
-			// Logged as a denial in the document access log, not just the staff
-			// log: an attempt to reach identity documents belongs in the record
-			// that a regulator would read.
 			logDocAccess(pool, c, nil, email, "view_denied",
 				"Attempted access without master admin rights", nil)
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
@@ -187,48 +273,73 @@ func RequireMasterAdmin(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		c.Set("actor_email", email)
+		c.Set(ctxDocIsMaster, true)
 		c.Next()
 	}
 }
 
-// POST /admin/kyc/:id/document
+// GetIdentityDocumentHandler serves one document, once, to a caller the gate
+// has already cleared.
 //
-//	{ "reason": "…", "category": "regulator_request" }
+//	POST /admin/kyc/:id/document          { "reason": "…", "category": "…" }
+//	POST /admin/kyc/:id/proof-of-address  { "reason": "…", "category": "…" }
 //
-// A POST, not a GET, deliberately: the reason is required, and a body carries it
-// better than a query string that would end up in access logs and browser
-// history alongside the document id.
-func GetIdentityDocumentHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+// A POST, not a GET, deliberately: the reason is mandatory for a closed
+// document, and a body carries it better than a query string that would end up
+// in nginx logs and browser history next to the organiser's id.
+//
+// kind is "document" (the ID photo) or "proof-of-address". Both go through the
+// same gate. Splitting them would mean two rules to keep in step, and the
+// weaker one would quietly become the way in.
+func GetIdentityDocumentHandler(pool *pgxpool.Pool, kind string) gin.HandlerFunc {
 	validCategories := map[string]bool{
 		"dispute":             true,
 		"regulator_request":   true,
 		"fraud_investigation": true,
+		"retention_audit":     true,
 		"other":               true,
 	}
 
+	// Column pair per kind, chosen from this fixed map rather than built from
+	// the request — the caller never names a column.
+	type columns struct{ blob, mime, key, store string }
+	cols := map[string]columns{
+		"document":         {"id_document", "id_document_mime", "id_document_key", "id_document_store"},
+		"proof-of-address": {"proof_of_address", "proof_of_address_mime", "", ""},
+	}
+
 	return func(c *gin.Context) {
+		col, known := cols[kind]
+		if !known {
+			utils.InternalError(c, errors.New("unknown document kind "+kind), "unknown document type")
+			return
+		}
+
 		organizerID := c.Param("id")
 		email, _ := c.Get("actor_email")
 		emailStr, _ := email.(string)
+
+		inReviewVal, _ := c.Get(ctxDocInReview)
+		inReview, _ := inReviewVal.(bool)
 
 		var body struct {
 			Reason   string `json:"reason"`
 			Category string `json:"category"`
 		}
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-			return
-		}
-		isMasterVal, _ := c.Get("is_master_admin")
-		isMaster, _ := isMasterVal.(bool)
+		// An empty body is fine inside the review window, where a reason is
+		// supplied rather than demanded. Outside it, the check below rejects.
+		_ = c.ShouldBindJSON(&body)
 
-		// A first-time reviewer looking at a pending submission is doing the
-		// job the document was uploaded for, so a default reason is supplied
-		// rather than demanded — friction there just produces "checking"
-		// typed a hundred times. Post-verification reads are the ones that
-		// need justifying, and those only reach here as master admin.
+		// A first-time reviewer looking at a submission still in its review
+		// window is doing the job the document was uploaded for, so a default
+		// reason is supplied rather than demanded — friction there just
+		// produces "checking" typed a hundred times, which is a worse record
+		// than an honest generated one.
+		//
+		// Reads AFTER the window are the ones that need justifying, and those
+		// only reach here as a master admin or on an approved grant.
 		if len(trimmed(body.Reason)) < 10 {
-			if isMaster {
+			if !inReview {
 				c.JSON(http.StatusBadRequest, gin.H{
 					"error": "a reason of at least 10 characters is required and is recorded permanently",
 				})
@@ -237,11 +348,12 @@ func GetIdentityDocumentHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			body.Reason = "First-time KYC review of a pending submission"
 			body.Category = "kyc_review"
 		}
-		if body.Category == "kyc_review" {
-			// allowed for the pre-verification path
-		} else if !validCategories[body.Category] {
+		if inReview && body.Category == "" {
+			body.Category = "kyc_review"
+		}
+		if body.Category != "kyc_review" && !validCategories[body.Category] {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "category must be dispute, regulator_request, fraud_investigation or other",
+				"error": "category must be dispute, regulator_request, fraud_investigation, retention_audit or other",
 			})
 			return
 		}
@@ -251,42 +363,61 @@ func GetIdentityDocumentHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		// Where the document lives depends on whether the export has run.
 		// id_document_key is set once it is in the external store; until then
-		// the bytes are still in id_document (see migration 000070).
+		// the bytes are still inline (migration 000070). Proof of address was
+		// never part of that offload, so it is always inline.
 		var docKey, docStore, mime *string
 		var hasInline bool
-		err := pool.QueryRow(ctx, `
-			SELECT id_document_key, id_document_store, id_document_mime,
-			       (id_document IS NOT NULL)
-			FROM organizers
-			WHERE id = $1
-		`, organizerID).Scan(&docKey, &docStore, &mime, &hasInline)
-		if errors.Is(err, pgx.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "organiser not found"})
-			return
+
+		if col.key != "" {
+			err := pool.QueryRow(ctx, `
+				SELECT `+col.key+`, `+col.store+`, `+col.mime+`,
+				       (`+col.blob+` IS NOT NULL)
+				FROM organizers WHERE id = $1
+			`, organizerID).Scan(&docKey, &docStore, &mime, &hasInline)
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "organiser not found"})
+				return
+			}
+			if err != nil {
+				utils.InternalError(c, err, "could not locate document")
+				return
+			}
+		} else {
+			err := pool.QueryRow(ctx, `
+				SELECT `+col.mime+`, (`+col.blob+` IS NOT NULL)
+				FROM organizers WHERE id = $1
+			`, organizerID).Scan(&mime, &hasInline)
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "organiser not found"})
+				return
+			}
+			if err != nil {
+				utils.InternalError(c, err, "could not locate document")
+				return
+			}
 		}
-		if err != nil {
-			utils.InternalError(c, err, "could not locate document")
-			return
-		}
+
 		if docKey == nil && !hasInline {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no identity document on file"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "no document of this type on file"})
 			return
 		}
 
-		// LOG FIRST. If this fails, the read does not happen — an unlogged look
-		// at an identity document is the exact thing this endpoint exists to
-		// prevent, so the log is a precondition, not a side effect.
+		// LOG FIRST. If this fails, the read does not happen.
+		action := "view"
+		if kind == "proof-of-address" {
+			action = "view_proof_of_address"
+		}
 		if err := logDocAccessSync(ctx, pool, c, &organizerID, emailStr,
-			"view", body.Reason, body.Category, docKey); err != nil {
+			action, body.Reason, body.Category, docKey); err != nil {
 			utils.InternalError(c, err, "could not record access — read refused")
 			return
 		}
 
 		if docKey != nil {
-			// Exported: the console never proxies the bytes. It returns a
-			// short-lived signed URL so the object store applies its own access
-			// policy and writes its own log, independently of this application.
-			// A store-side log survives a compromise of this one.
+			// Exported: the console never proxies the bytes. It returns the key
+			// so a short-lived signed URL can be minted against the object
+			// store, which applies its own access policy and writes its own
+			// log — a store-side log survives a compromise of this one.
 			c.JSON(http.StatusOK, gin.H{
 				"location":   "external",
 				"store":      docStore,
@@ -297,12 +428,9 @@ func GetIdentityDocumentHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		// Not yet exported. The bytes are still in the operational database —
-		// which is the situation migration 000070 exists to end. Served, with
-		// the state made explicit so it is visible rather than silent.
 		var data []byte
 		if err := pool.QueryRow(ctx,
-			`SELECT id_document FROM organizers WHERE id = $1`, organizerID,
+			`SELECT `+col.blob+` FROM organizers WHERE id = $1`, organizerID,
 		).Scan(&data); err != nil {
 			utils.InternalError(c, err, "could not read document")
 			return
@@ -330,9 +458,11 @@ func GetDocumentAccessLogHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		defer cancel()
 
 		rows, err := pool.Query(ctx, `
-			SELECT at, actor_email, action, reason, organizer_id::text, document_key, ip::text
-			FROM kyc_document_access_log
-			ORDER BY at DESC
+			SELECT l.at, l.actor_email, l.action, l.reason,
+			       l.organizer_id::text, o.business_name, l.document_key, l.ip::text
+			FROM kyc_document_access_log l
+			LEFT JOIN organizers o ON o.id = l.organizer_id
+			ORDER BY l.at DESC
 			LIMIT 200
 		`)
 		if err != nil {
@@ -342,19 +472,20 @@ func GetDocumentAccessLogHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		defer rows.Close()
 
 		type entry struct {
-			At          time.Time `json:"at"`
-			ActorEmail  string    `json:"actor_email"`
-			Action      string    `json:"action"`
-			Reason      string    `json:"reason"`
-			OrganizerID *string   `json:"organizer_id"`
-			DocumentKey *string   `json:"document_key"`
-			IP          *string   `json:"ip"`
+			At           time.Time `json:"at"`
+			ActorEmail   string    `json:"actor_email"`
+			Action       string    `json:"action"`
+			Reason       string    `json:"reason"`
+			OrganizerID  *string   `json:"organizer_id"`
+			BusinessName *string   `json:"business_name"`
+			DocumentKey  *string   `json:"document_key"`
+			IP           *string   `json:"ip"`
 		}
 		out := []entry{}
 		for rows.Next() {
 			var e entry
 			if err := rows.Scan(&e.At, &e.ActorEmail, &e.Action, &e.Reason,
-				&e.OrganizerID, &e.DocumentKey, &e.IP); err != nil {
+				&e.OrganizerID, &e.BusinessName, &e.DocumentKey, &e.IP); err != nil {
 				utils.InternalError(c, err, "could not read access log")
 				return
 			}
@@ -391,6 +522,12 @@ func logDocAccess(
 	pool *pgxpool.Pool, c *gin.Context,
 	organizerID *string, email, action, reason string, key *string,
 ) {
+	// kyc_document_access_log CHECKs reason at 10+ characters, so a short
+	// denial reason would silently fail to write. Padded here rather than at
+	// each call site.
+	if len(trimmed(reason)) < 10 {
+		reason = "Access denied: " + reason
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
