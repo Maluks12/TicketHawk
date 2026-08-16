@@ -36,6 +36,11 @@ interface StaffRequest {
   approved_by_email: string | null;
   target_user_id: string | null;
   target_event_id: string | null;
+  payload?: { changes?: Record<string, unknown> } | null;
+  /** Server-computed: whose move it is, in words. */
+  waiting_on?: string;
+  /** Bank kinds — a plain admin may file but not approve. */
+  needs_master_admin?: boolean;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -45,6 +50,7 @@ const KIND_LABEL: Record<string, string> = {
   role_change: 'Change platform role',
   credential_reset: 'Force credential reset',
   account_delete: 'Delete account',
+  event_edit: 'Change event details',
 };
 
 /** What each action actually does, shown to the approver at the decision. */
@@ -55,6 +61,7 @@ const KIND_EFFECT: Record<string, string> = {
   role_change: 'Changes what this account can do on the platform.',
   credential_reset: 'Signs the account out everywhere. Use when an account is compromised.',
   account_delete: 'Permanently anonymises the account. Cannot be undone.',
+  event_edit: 'Rewrites a live event\u2019s details. Ticket holders have already bought against the current terms.',
 };
 
 const STATUS_TONE: Record<string, string> = {
@@ -72,6 +79,7 @@ export default function RequestsPage() {
   const capsLoaded = useStaff((s) => s.loaded);
   const can = useStaff((s) => s.can);
   const loadCaps = useStaff((s) => s.load);
+  const masterAdmin = useStaff((s) => s.isMasterAdmin);
 
   const [requests, setRequests] = useState<StaffRequest[]>([]);
   const [filter, setFilter] = useState<string>('pending_approval');
@@ -140,6 +148,7 @@ export default function RequestsPage() {
   if (!can('request.create')) return <AccessDenied need="request.create" />;
 
   const canApprove = can('request.approve');
+  const isMasterAdmin = masterAdmin;
 
   return (
     <div style={{ padding: '24px 28px 48px', maxWidth: 1440, margin: '0 auto' }}>
@@ -220,6 +229,53 @@ export default function RequestsPage() {
                     </div>
                   </div>
 
+                  {/* Whose move it is. A queue that only shows a status leaves
+                      everyone assuming someone else has it — which is how a
+                      filed request sits untouched and the system looks broken. */}
+                  {r.waiting_on && (
+                    <div style={{
+                      fontSize: 13, fontWeight: 700,
+                      color: r.needs_master_admin && !isMasterAdmin
+                        ? 'var(--warning-fg)' : 'var(--text)',
+                    }}>
+                      {r.waiting_on}
+                    </div>
+                  )}
+
+                  {/* The field diff, for an event edit. An approver reading only
+                      a kind name is approving a label, not a change. */}
+                  {r.kind === 'event_edit' && r.payload?.changes && (
+                    <div>
+                      <div style={{
+                        fontSize: 10.5, fontWeight: 800, letterSpacing: '.08em',
+                        textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: 6,
+                      }}>
+                        Proposed changes
+                      </div>
+                      <div style={{
+                        border: '1px solid var(--border)', borderRadius: 8,
+                        overflow: 'hidden', fontSize: 12.5,
+                      }}>
+                        {Object.entries(r.payload.changes).map(([field, val], i) => (
+                          <div key={field} style={{
+                            display: 'flex', gap: 12, padding: '7px 11px',
+                            borderTop: i === 0 ? 'none' : '1px solid var(--border)',
+                          }}>
+                            <span style={{
+                              width: 130, flexShrink: 0, color: 'var(--text-3)',
+                              fontWeight: 600,
+                            }}>{field.replace(/_/g, ' ')}</span>
+                            <span style={{ color: 'var(--text)', wordBreak: 'break-word' }}>
+                              {typeof val === 'string' || typeof val === 'number'
+                                ? String(val)
+                                : JSON.stringify(val)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Gate checklist — what has happened and what has not. */}
                   <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
                     <Gate done label="Requested" detail={r.requested_by_email} />
@@ -250,14 +306,22 @@ export default function RequestsPage() {
                         <>
                           <button
                             className="btn btn-primary"
-                            disabled={mine || busy === r.id}
+                            disabled={mine || busy === r.id
+                              || (!!r.needs_master_admin && !isMasterAdmin)}
                             // Disabled with the reason ON the button, not
                             // hidden: this is about who is looking, not about
                             // what they're allowed to do.
-                            title={mine ? 'You cannot approve your own request' : undefined}
+                            title={
+                              mine ? 'You cannot approve your own request'
+                                : r.needs_master_admin && !isMasterAdmin
+                                  ? 'Bank detail changes must be approved by a master admin'
+                                  : undefined
+                            }
                             onClick={() => act(r, 'approve', 'Approved')}
                           >
-                            {mine ? 'Your own request' : 'Approve'}
+                            {mine ? 'Your own request'
+                              : r.needs_master_admin && !isMasterAdmin ? 'Needs master admin'
+                              : 'Approve'}
                           </button>
                           <button className="btn btn-danger" disabled={busy === r.id}
                             onClick={() => setRejectFor(r)}>
