@@ -186,6 +186,9 @@ function DraftCard({ draft, onResume, onDelete }: { draft: LocalDraft; onResume:
 }
 
 // ── Page component ───────────────────────────────────────────────────────────
+/** Local datetime-input value -> ISO, or null when blank. */
+const toISO = (v: string) => (v ? new Date(v).toISOString() : null);
+
 export default function EventsPage() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -205,6 +208,16 @@ export default function EventsPage() {
   // rather than a permission boundary.
   const canApprove = useStaff((st) => st.can('event.approve'));
   const canAct = useStaff((st) => st.can('request.act'));
+  // An editor holds request.create but NOT event.edit: they propose a change
+  // and an admin approves it with the field diff on screen. Editing a live
+  // event silently rewrites the terms of a sale buyers have already paid
+  // against, so the second pair of eyes is the point.
+  const canRequestEdit = useStaff((st) => st.can('request.create'));
+  const editViaRequest = !canEdit && canRequestEdit;
+  const [requestReason, setRequestReason] = useState('');
+  // Snapshot taken when the edit modal opens, so the request carries a real
+  // diff rather than the whole form.
+  const originalForm = useRef<typeof form | null>(null);
   const loadStaffCaps = useStaff((st) => st.load);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
   const [activeTab, setActiveTab] = useState(0);
@@ -358,6 +371,23 @@ export default function EventsPage() {
         tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
         teams: (e.teams as string[]) || [], ticket_types: [],
       });
+      // Snapshot for the diff. setForm is async, so the loaded values are
+      // captured directly rather than read back from state on the next render.
+      originalForm.current = {
+        title: String(e.title || ''), description: String(e.description || ''),
+        category_id: String(e.category_id || ''), timezone: String(e.timezone || 'Africa/Johannesburg'),
+        start_time: toLocalInput(e.start_time as string), end_time: toLocalInput(e.end_time as string),
+        expires_at: toLocalInput(e.expires_at as string),
+        price: String(e.price ?? ''), currency: String(e.currency || 'ZAR'),
+        max_capacity: String(e.max_capacity || ''), allow_waitlist: Boolean(e.allow_waitlist),
+        max_tickets_per_user: String(e.max_tickets_per_user || ''),
+        venue_name: String(e.venue_name || ''), address: String(e.address || ''),
+        city: String(e.city || ''),
+        venue_type: (['stadium','auditorium','none'].includes(e.venue_type as string) ? e.venue_type as 'stadium'|'auditorium'|'none' : 'auto'),
+        refund_policy: String(e.refund_policy || ''), terms_and_conditions: String(e.terms_and_conditions || ''),
+        tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
+        teams: (e.teams as string[]) || [], ticket_types: [],
+      };
       setCoverImageUrl(e.cover_image_url ? String(e.cover_image_url) : null);
       setBannerImageUrl(e.banner_image_url ? String(e.banner_image_url) : null);
     } catch { toast('Failed to load event', 'error'); }
@@ -370,7 +400,7 @@ export default function EventsPage() {
     if (!form.venue_name || !form.address || !form.city) { toast('Venue name, address and city are required', 'error'); setActiveTab(1); return; }
     setSubmitting(true);
     try {
-      const toISO = (v: string) => v ? new Date(v).toISOString() : null;
+
       const body: Record<string, unknown> = {
         title: form.title.trim(), description: form.description.trim(),
         category_id: form.category_id ? parseInt(form.category_id) : null,
@@ -394,6 +424,55 @@ export default function EventsPage() {
           ...(t.capacity ? { capacity: parseInt(t.capacity) } : {}),
           ...(t.description ? { description: t.description } : {}),
         }));
+      }
+      if (editingId && editViaRequest) {
+        // Only the fields that actually MOVED are sent. Posting the whole form
+        // would make every request look like a total rewrite, and an approver
+        // faced with forty unchanged fields stops reading the diff — which is
+        // the one thing that makes this approval meaningful.
+        const before = originalForm.current;
+        const changed: Record<string, unknown> = {};
+        if (before) {
+          const watch: Array<[string, unknown, unknown]> = [
+            ['title', form.title, before.title],
+            ['description', form.description, before.description],
+            ['venue_name', form.venue_name, before.venue_name],
+            ['venue_address', form.address, before.address],
+            ['city', form.city, before.city],
+            ['start_time', toISO(form.start_time), toISO(before.start_time)],
+            ['end_time', toISO(form.end_time), toISO(before.end_time)],
+            ['timezone', form.timezone, before.timezone],
+            ['max_capacity', form.max_capacity, before.max_capacity],
+            ['max_tickets_user', form.max_tickets_per_user, before.max_tickets_per_user],
+            ['allow_waitlist', form.allow_waitlist, before.allow_waitlist],
+          ];
+          for (const [key, now, was] of watch) {
+            if (JSON.stringify(now) !== JSON.stringify(was)) changed[key] = now;
+          }
+        }
+        if (Object.keys(changed).length === 0) {
+          toast('Nothing changed — there is nothing to request', 'error');
+          setSubmitting(false);
+          return;
+        }
+        if (requestReason.trim().length < 10) {
+          toast('Give a reason of at least 10 characters — an admin has to judge this', 'error');
+          setSubmitting(false);
+          return;
+        }
+        await api.post('/admin/requests', {
+          kind: 'event_edit',
+          target_event_id: editingId,
+          reason: requestReason.trim(),
+          // Nested under "changes" so the approver can be shown the before
+          // values too without those being mistaken for values to write.
+          payload: { changes: changed },
+        });
+        toast('Change requested — an admin must approve it', 'success');
+        setRequestReason('');
+        closeModal(true);
+        loadEvents();
+        return;
       }
       if (editingId) { await api.put(`/admin/events/${editingId}`, body); toast('Event updated', 'success'); }
       else { await api.post('/admin/events', body); toast('Event created — pending review', 'success'); }
@@ -529,8 +608,9 @@ export default function EventsPage() {
                   <td style={{ padding: '10px 12px', overflow: 'visible', whiteSpace: 'nowrap' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '.3rem' }}>
                       <button className="btn-icon" onClick={() => setViewingId(e.id)} title="View details">👁</button>
-                      {canEdit && (
-                        <button className="btn-icon" onClick={() => openEdit(e.id)} title="Edit">✎</button>
+                      {(canEdit || editViaRequest) && (
+                        <button className="btn-icon" onClick={() => openEdit(e.id)}
+                          title={editViaRequest ? 'Propose changes (needs admin approval)' : 'Edit'}>✎</button>
                       )}
                       {canApprove && (e.status === 'draft' || e.status === 'pending_review') && (
                         <button className="btn btn-success btn-sm" onClick={() => publishEvent(e.id)}>Publish</button>
@@ -691,9 +771,40 @@ export default function EventsPage() {
                 </>
               )}
             </div>
+            {editingId && editViaRequest && (
+              <div style={{
+                padding: '12px 16px', borderTop: '1px solid var(--border)',
+                background: 'var(--surface-2)',
+              }}>
+                <div style={{
+                  fontSize: 12.5, color: 'var(--text-2)', marginBottom: 8, lineHeight: 1.6,
+                }}>
+                  Your role proposes changes rather than saving them. An admin
+                  reviews the diff and approves it — ticket holders have already
+                  bought against the current details.
+                </div>
+                <textarea
+                  value={requestReason}
+                  onChange={(ev) => setRequestReason(ev.target.value)}
+                  placeholder="Why is this change needed? (min 10 characters — the approver reads this)"
+                  style={{
+                    width: '100%', minHeight: 58, borderRadius: 8,
+                    border: '1px solid var(--border)', padding: 9, fontSize: 13,
+                    resize: 'vertical', boxSizing: 'border-box',
+                    background: 'var(--surface)', color: 'var(--text)',
+                  }}
+                />
+              </div>
+            )}
             <div className="modal-footer">
               <button className="btn" onClick={() => closeModal()}>Cancel</button>
-              <button className="btn btn-primary" onClick={submitForm} disabled={submitting}>{submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Create Event'}</button>
+              <button className="btn btn-primary" onClick={submitForm} disabled={submitting}>
+                {submitting
+                  ? (editingId && editViaRequest ? 'Requesting…' : 'Saving…')
+                  : editingId
+                    ? (editViaRequest ? 'Request changes' : 'Save Changes')
+                    : 'Create Event'}
+              </button>
             </div>
           </div>
         </div>
