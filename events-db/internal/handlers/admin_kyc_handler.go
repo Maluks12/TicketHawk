@@ -53,6 +53,36 @@ func AdminGetKYCDetailHandler(pool *pgxpool.Pool, kycService *services.KYCServic
 					Msg("kyc admin: stored ID failed to decrypt — was the encryption key rotated?")
 			}
 		}
+
+		// Whether THIS caller may open THIS organiser's documents, decided by
+		// the same function the document endpoint's gate uses.
+		//
+		// Sent with the detail so the console renders the right panel on the
+		// first paint, rather than optimistically requesting the photo and
+		// discovering a 403. Two copies of a rule drift; one function called
+		// twice cannot.
+		if userID, ok := c.Get("user_id"); ok {
+			if uid, _ := userID.(string); uid != "" {
+				st, aErr := EvaluateDocumentAccess(c.Request.Context(), pool, uid, c.Param("id"))
+				if aErr != nil {
+					// Fail closed on the DISPLAY too. A panel that renders as
+					// "you may look" when the server would refuse produces a
+					// confusing dead button; locked is the honest default.
+					log.Warn().Err(aErr).Str("organizer_id", c.Param("id")).
+						Msg("kyc admin: document access evaluation failed — rendering as locked")
+					detail.DocumentLocked = true
+					detail.CanViewDocument = false
+					detail.DocumentLockReason = "Access could not be verified. Try again shortly."
+				} else {
+					detail.DocumentLocked = st.Locked
+					detail.CanViewDocument = st.CanView
+					detail.DocumentViaGrant = st.ViaGrant
+					detail.DocumentGrantExpiresAt = st.GrantExpiresAt
+					detail.DocumentLockReason = st.Reason
+				}
+			}
+		}
+
 		if len(raw.RegistryRaw) > 0 {
 			// Pass the stored provider response through as-is for the UI.
 			detail.RegistryCheck = gin.H{}
@@ -63,23 +93,25 @@ func AdminGetKYCDetailHandler(pool *pgxpool.Pool, kycService *services.KYCServic
 	}
 }
 
-// AdminGetKYCDocumentHandler streams a stored identity document. This is the
-// ONLY way the documents leave the database — authenticated admin access,
-// no CDN, no public URL.
+// AdminGetKYCDocumentHandler is GONE. It used to be registered as
 //
-//	GET /v1/admin/kyc/:id/document           (ID photo)
+//	GET /v1/admin/kyc/:id/document
 //	GET /v1/admin/kyc/:id/proof-of-address
-func AdminGetKYCDocumentHandler(pool *pgxpool.Pool, kind string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		data, mime, err := repository.GetKYCDocument(pool, c.Request.Context(), c.Param("id"), kind)
-		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		c.Header("Cache-Control", "private, no-store")
-		c.Data(http.StatusOK, mime, data)
-	}
-}
+//
+// on the plain admin group, with no capability check and no access log. Because
+// RequireStaffWrite only gates mutating verbs, a read_only invitee could fetch
+// any organiser's ID photograph with a single GET — and so could anyone else
+// holding users.role='admin', at any point in the organiser's lifecycle, long
+// after verification, leaving no trace.
+//
+// That route was the entire two-phase rule's back door: RequireDocumentAccess,
+// the master-admin lock, the grant system and kyc_document_access_log all sat
+// beside it doing nothing, because the console fetched the bytes from here.
+//
+// Documents now leave only through POST /admin/kyc/:id/document — see
+// identity_document_handler.go. Deleting the handler rather than gating it is
+// deliberate: a gated GET is one careless route registration away from being
+// ungated again, and there is nothing this handler did that the POST does not.
 
 // AdminDecideKYCHandler approves or rejects a pending submission.
 //

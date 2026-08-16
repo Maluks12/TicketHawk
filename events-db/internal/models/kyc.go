@@ -325,6 +325,30 @@ type AdminKYCDetail struct {
 	NameMatch       NameMatchResult `json:"name_match"`
 	RegistryCheck   interface{}     `json:"registry_check,omitempty"`
 	RegistryAt      *time.Time      `json:"registry_checked_at,omitempty"`
+
+	// ── Document visibility, computed per caller ─────────────────────────────
+	//
+	// Not a property of the submission — a property of the submission AND the
+	// person asking. Two reviewers open the same organiser and get different
+	// values here, which is the point: the console draws what the server would
+	// actually allow instead of guessing from a role.
+
+	// FirstVerifiedAt is when KYC completed for the FIRST time. Once set, the
+	// ID photograph is master-admin-only. Surfaced so the screen can say
+	// "locked since 3 June" rather than just "locked".
+	FirstVerifiedAt *time.Time `json:"kyc_first_verified_at,omitempty"`
+	// DocumentLocked mirrors FirstVerifiedAt != nil.
+	DocumentLocked bool `json:"document_locked"`
+	// CanViewDocument is the answer for this caller, this organiser, right now.
+	CanViewDocument bool `json:"can_view_document"`
+	// DocumentViaGrant means the access is borrowed and expiring.
+	DocumentViaGrant bool `json:"document_access_via_grant"`
+	// DocumentGrantExpiresAt, when DocumentViaGrant.
+	DocumentGrantExpiresAt *time.Time `json:"document_grant_expires_at,omitempty"`
+	// DocumentLockReason is shown verbatim when CanViewDocument is false. A
+	// reviewer who sees an empty panel assumes the upload failed and rejects a
+	// valid submission — the reason is what stops that.
+	DocumentLockReason string `json:"document_lock_reason,omitempty"`
 }
 
 // AdminKYCDecisionDTO — approve or reject a pending submission.

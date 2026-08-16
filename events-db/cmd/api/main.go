@@ -928,7 +928,14 @@ func main() {
 			//              job and later reads are regulatory, not routine
 			kycDocs.POST("/:id/document",
 				handlers.RequireDocumentAccess(pool),
-				handlers.GetIdentityDocumentHandler(pool))
+				handlers.GetIdentityDocumentHandler(pool, "document"))
+
+			// Proof of address goes through the SAME gate. It used to have an
+			// ungated GET beside the ID photo's, which meant the weaker of the
+			// two documents was the way in. One rule, both documents.
+			kycDocs.POST("/:id/proof-of-address",
+				handlers.RequireDocumentAccess(pool),
+				handlers.GetIdentityDocumentHandler(pool, "proof-of-address"))
 
 			// The log itself stays master-admin only: it names who looked at
 			// whose identity document, which is more sensitive than any single
@@ -940,7 +947,12 @@ func main() {
 			// Editors and admins ask; a master admin approves. Each grant is
 			// scoped to one organiser and expires, so it never becomes standing
 			// access and revoking it does not mean demoting anyone.
-			kycDocs.POST("/:id/request-access", handlers.RequestDocumentAccessHandler(pool))
+			// Only editor and admin can HOLD a grant, so only they may ask for
+			// one. Letting read_only file a request that can never be approved
+			// just fills the master admin's queue with noise.
+			kycDocs.POST("/:id/request-access",
+				middleware.RequireCapabilityOn(pool, models.CapRequestDangerous),
+				handlers.RequestDocumentAccessHandler(pool))
 			kycDocs.GET("/grants",
 				handlers.RequireMasterAdmin(pool),
 				handlers.ListDocumentGrantsHandler(pool))
@@ -952,66 +964,208 @@ func main() {
 				handlers.DenyDocumentGrantHandler(pool))
 		}
 
-		admin.POST("/events",        handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
-		admin.PUT("/events/:id/organizer", handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
-		admin.PUT("/events/:id",     handlers.AdminUpdateEventHandler(pool, eventCache))
-		admin.GET("/events/:id",     handlers.AdminGetEventByIDHandler(pool, eventCache))
-		admin.DELETE("/events/:id",  handlers.DeleteEventHandler(pool,eventCache))
+		// ── Legacy admin endpoints, now capability-gated ──────────────────
+		//
+		// These predate the staff model. RequireStaffWrite gates their WRITES at
+		// one coarse level (CapApproveEvent) and their READS not at all, which
+		// gets two things wrong at once: an `access` invitee could GET every
+		// organiser's payout profile, and an `editor` could delete a user account.
+		//
+		// RequireCapabilityOn gives each route a real capability while keeping the
+		// property that made RequireStaffWrite safe to deploy: an account with NO
+		// staff_role is a pre-existing platform admin and passes through
+		// unchanged. See the middleware for why that branch has to exist.
+		admin.POST("/events",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.CreateEventHandler(pool, eventCache, emailService, cfg))
+		// Moving an event to a different organiser moves its MONEY. Admin only.
+		admin.PUT("/events/:id/organizer",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
+		admin.PUT("/events/:id",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminUpdateEventHandler(pool, eventCache))
+		admin.GET("/events/:id",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.AdminGetEventByIDHandler(pool, eventCache))
+		// Deleting an event is not recoverable and strands ticket holders. It is
+		// the action a takedown REQUEST exists to avoid, so it sits at admin.
+		admin.DELETE("/events/:id",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.DeleteEventHandler(pool, eventCache))
 		// Unscoped cancel. The organiser route filters on organizer_id, so an
 		// admin cancelling another organiser's event there matches no rows.
-		admin.POST("/events/:id/cancel", handlers.AdminCancelEventHandler(pool, eventCache, refundService))
-		admin.GET("/events",         handlers.GetAdminEventsHandler(pool))
-		admin.GET("/stats",          handlers.GetAdminStatsHandler(pool))
-		admin.GET("/merch/oversold", handlers.GetOversoldMerchOrdersHandler(pool))
-		admin.GET("/merch",          handlers.GetAllMerchHandler(pool))
-		admin.PUT("/merch/:id",      handlers.AdminUpdateMerchHandler(pool, eventCache))
-		admin.POST("/merch",                  handlers.AdminCreateMerchHandler(pool, eventCache))
-		admin.POST("/events/:id/merch",       handlers.AdminCreateEventMerchHandler(pool, eventCache))
-		admin.PUT("/merch/variants/:id",      handlers.AdminUpdateVariantHandler(pool))
-		admin.POST("/upload",                 handlers.UploadAdminImageHandler(imgService))
-		admin.PUT("/merch/:id/collection",    handlers.AdminAssignMerchToCollectionHandler(pool))
-		admin.POST("/collections",            handlers.AdminCreateCollectionHandler(pool))
-		admin.GET("/collections",             handlers.AdminGetCollectionsHandler(pool))
-		admin.PUT("/collections/:id",         handlers.AdminUpdateCollectionHandler(pool))
-		admin.DELETE("/collections/:id",      handlers.AdminDeactivateCollectionHandler(pool))
-		admin.POST("/collections/:id/image",  handlers.UploadCollectionCoverImageHandler(pool, imgService, true))
-		admin.GET("/users",                   controllers.GetAllUsersHandler(pool))
-		admin.PUT("/users/promote/:id",       controllers.PromoteUserHandler(pool))
-		admin.PUT("/users/demote/:id",        controllers.DemoteUserHandler(pool))
-		admin.DELETE("/users/delete/:id",     handlers.DeleteUserHandler(pool))
+		// Cancelling triggers refunds, so it is admin-level too.
+		admin.POST("/events/:id/cancel",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.AdminCancelEventHandler(pool, eventCache, refundService))
+		admin.GET("/events",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.GetAdminEventsHandler(pool))
+		admin.GET("/stats",
+			middleware.RequireCapabilityOn(pool, models.CapViewUserList),
+			handlers.GetAdminStatsHandler(pool))
+		admin.GET("/merch/oversold",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.GetOversoldMerchOrdersHandler(pool))
+		admin.GET("/merch",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.GetAllMerchHandler(pool))
+		admin.PUT("/merch/:id",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminUpdateMerchHandler(pool, eventCache))
+		admin.POST("/merch",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminCreateMerchHandler(pool, eventCache))
+		admin.POST("/events/:id/merch",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminCreateEventMerchHandler(pool, eventCache))
+		admin.PUT("/merch/variants/:id",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminUpdateVariantHandler(pool))
+		admin.POST("/upload",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.UploadAdminImageHandler(imgService))
+		admin.PUT("/merch/:id/collection",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminAssignMerchToCollectionHandler(pool))
+		admin.POST("/collections",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminCreateCollectionHandler(pool))
+		admin.GET("/collections",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.AdminGetCollectionsHandler(pool))
+		admin.PUT("/collections/:id",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminUpdateCollectionHandler(pool))
+		admin.DELETE("/collections/:id",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminDeactivateCollectionHandler(pool))
+		admin.POST("/collections/:id/image",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.UploadCollectionCoverImageHandler(pool, imgService, true))
+		// /admin/users returns every field to every caller and is superseded by
+		// /admin/people, which shapes its response by capability. Left registered
+		// for other tooling, but no longer readable by staff who cannot see
+		// contact details — which is the whole reason /admin/people exists.
+		admin.GET("/users",
+			middleware.RequireCapabilityOn(pool, models.CapViewUserContact),
+			controllers.GetAllUsersHandler(pool))
+		// Changing what an account can do on the platform is a four-eyes action
+		// (ReqRoleChange). Admin only.
+		admin.PUT("/users/promote/:id",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			controllers.PromoteUserHandler(pool))
+		admin.PUT("/users/demote/:id",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			controllers.DemoteUserHandler(pool))
+		admin.DELETE("/users/delete/:id",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.DeleteUserHandler(pool))
 		// admin.GET("/campaigns", handlers.AdminGetCampaignsHandler(pool)) // ads disabled for launch
 
 		// Event approval queue
-		admin.GET("/events/pending",     handlers.AdminGetPendingEventsHandler(pool))
-		admin.PUT("/events/:id/approve", handlers.AdminApproveEventHandler(pool, eventCache))
-		admin.PUT("/events/:id/reject",  handlers.AdminRejectEventHandler(pool))
-		admin.PUT("/events/:id/promote",   handlers.AdminPromoteEventHandler(pool, eventCache))
-		admin.PUT("/events/:id/unpromote", handlers.AdminUnpromoteEventHandler(pool, eventCache))
+		admin.GET("/events/pending",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.AdminGetPendingEventsHandler(pool))
+		admin.PUT("/events/:id/approve",
+			middleware.RequireCapabilityOn(pool, models.CapApproveEvent),
+			handlers.AdminApproveEventHandler(pool, eventCache))
+		admin.PUT("/events/:id/reject",
+			middleware.RequireCapabilityOn(pool, models.CapApproveEvent),
+			handlers.AdminRejectEventHandler(pool))
+		admin.PUT("/events/:id/promote",
+			middleware.RequireCapabilityOn(pool, models.CapFeatureEvent),
+			handlers.AdminPromoteEventHandler(pool, eventCache))
+		admin.PUT("/events/:id/unpromote",
+			middleware.RequireCapabilityOn(pool, models.CapFeatureEvent),
+			handlers.AdminUnpromoteEventHandler(pool, eventCache))
 
 		// Merch approval queue
-		admin.GET("/merch/pending",    handlers.AdminGetPendingMerchHandler(pool))
-		admin.PUT("/merch/:id/approve", handlers.AdminApproveMerchHandler(pool))
-		admin.PUT("/merch/:id/reject",  handlers.AdminRejectMerchHandler(pool))
+		admin.GET("/merch/pending",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.AdminGetPendingMerchHandler(pool))
+		admin.PUT("/merch/:id/approve",
+			middleware.RequireCapabilityOn(pool, models.CapApproveEvent),
+			handlers.AdminApproveMerchHandler(pool))
+		admin.PUT("/merch/:id/reject",
+			middleware.RequireCapabilityOn(pool, models.CapApproveEvent),
+			handlers.AdminRejectMerchHandler(pool))
 
 		// Organiser account management
-		admin.GET("/organizers",            handlers.AdminGetOrganizersHandler(pool))
-		admin.PUT("/organizers/:id/status", handlers.AdminUpdateOrganizerStatusHandler(pool))
+		admin.GET("/organizers",
+			middleware.RequireCapabilityOn(pool, models.CapViewUserContact),
+			handlers.AdminGetOrganizersHandler(pool))
+		admin.PUT("/organizers/:id/status",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.AdminUpdateOrganizerStatusHandler(pool))
 
 		// KYC review queue
-		admin.GET("/kyc",                        handlers.AdminListKYCHandler(pool))
-		admin.GET("/kyc/:id",                    handlers.AdminGetKYCDetailHandler(pool, kycService))
-		admin.GET("/kyc/:id/document",           handlers.AdminGetKYCDocumentHandler(pool, "document"))
-		admin.GET("/kyc/:id/proof-of-address",   handlers.AdminGetKYCDocumentHandler(pool, "proof-of-address"))
-		admin.POST("/kyc/:id/decision",          handlers.AdminDecideKYCHandler(pool))
-		admin.POST("/kyc/:id/registry-check",    handlers.AdminRunRegistryCheckHandler(kycService))
+		//
+		// ⚠️  THE TWO GET DOCUMENT ROUTES THAT USED TO LIVE HERE ARE DELETED.
+		//
+		//	admin.GET("/kyc/:id/document")
+		//	admin.GET("/kyc/:id/proof-of-address")
+		//
+		// They streamed raw ID photographs to any caller holding users.role =
+		// 'admin', with no capability check, no reason, and no entry in
+		// kyc_document_access_log. RequireStaffWrite did not touch them because it
+		// only gates mutating verbs, so a read_only invitee could fetch any
+		// organiser's identity document with one GET — at any point in that
+		// organiser's life, years after verification.
+		//
+		// That route was the back door around every other control in this file:
+		// RequireDocumentAccess, the master-admin lock, the grant system and the
+		// access log were all in place and all bypassed, because the console
+		// fetched the bytes from here instead.
+		//
+		// Documents now leave through POST /admin/kyc/:id/document only, registered
+		// above behind RequireDocumentAccess.
+		admin.GET("/kyc",
+			middleware.RequireCapabilityOn(pool, models.CapViewKYCStatus),
+			handlers.AdminListKYCHandler(pool))
+		// The detail response carries the DECRYPTED SA ID number, so it needs the
+		// KYC capability rather than sitting open to any staff role.
+		admin.GET("/kyc/:id",
+			middleware.RequireCapabilityOn(pool, models.CapViewKYCStatus),
+			handlers.AdminGetKYCDetailHandler(pool, kycService))
+		admin.POST("/kyc/:id/decision",
+			middleware.RequireCapabilityOn(pool, models.CapVerifyKYC),
+			handlers.AdminDecideKYCHandler(pool))
+		admin.POST("/kyc/:id/registry-check",
+			middleware.RequireCapabilityOn(pool, models.CapVerifyKYC),
+			handlers.AdminRunRegistryCheckHandler(kycService))
 
 		// ── Payouts ───────────────────────────────────────────────────────
-		admin.GET("/organizers/payouts",             handlers.AdminListOrganizerPayoutProfilesHandler(pool))
-		admin.PUT("/organizers/:id/tier", handlers.AdminSetOrganizerTierHandler(pool, payoutService))
-		admin.POST("/organizers/:id/payout-details", handlers.AdminSetOrganizerPayoutDetailsHandler(payoutService))
-		admin.GET("/payouts",                        handlers.AdminListPayoutsHandler(pool))
-		admin.GET("/payouts/banks",                  handlers.GetPayoutBanksHandler(payoutService))
-		admin.POST("/payouts/:id/retry",             handlers.AdminRetryPayoutHandler(pool, payoutService))
+		//
+		// The payout profile list carries bank account names and tails, so it
+		// needs bank.view_tail rather than being open to any staff role.
+		admin.GET("/organizers/payouts",
+			middleware.RequireCapabilityOn(pool, models.CapViewBankTail),
+			handlers.AdminListOrganizerPayoutProfilesHandler(pool))
+		// Tier decides whether money settles instantly or is held. Admin only.
+		admin.PUT("/organizers/:id/tier",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.AdminSetOrganizerTierHandler(pool, payoutService))
+		// Writing payout bank details is THE most dangerous action in the product
+		// — it is how ticket money gets redirected, and it is why ReqBankAdd
+		// carries subject confirmation, a cooling-off period and a 48h payout
+		// hold. This direct route bypasses all of that, so it is restricted to
+		// request.act, the capability only an admin holds. Editors must go through
+		// the staff request flow.
+		admin.POST("/organizers/:id/payout-details",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.AdminSetOrganizerPayoutDetailsHandler(payoutService))
+		admin.GET("/payouts",
+			middleware.RequireCapabilityOn(pool, models.CapViewBankTail),
+			handlers.AdminListPayoutsHandler(pool))
+		admin.GET("/payouts/banks",
+			middleware.RequireCapabilityOn(pool, models.CapViewBankTail),
+			handlers.GetPayoutBanksHandler(payoutService))
+		// Retrying moves money. Admin only.
+		admin.POST("/payouts/:id/retry",
+			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.AdminRetryPayoutHandler(pool, payoutService))
 	}
 
 	// ==========================================
