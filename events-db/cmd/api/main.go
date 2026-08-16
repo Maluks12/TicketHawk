@@ -877,8 +877,15 @@ func main() {
 			// The old approvals screen showed a summary, which meant nobody
 			// ever saw the tiers — where the actual mistakes are (a VIP tier
 			// priced at R0, unlimited capacity at a 200-seat venue).
+			// event.view, NOT event.approve.
+			//
+			// This is what the eye icon on the events list opens. Gating it on
+			// event.approve meant read_only and access — the two roles whose
+			// entire job is looking at things — clicked "view details" and got a
+			// 403. Every staff level can now open an event; only the roles that
+			// hold event.approve see the approve/reject controls on it.
 			staffAPI.GET("/events/:id/review",
-				middleware.RequireCapability(pool, models.CapApproveEvent),
+				middleware.RequireCapability(pool, models.CapViewEvents),
 				handlers.GetEventReviewHandler(pool))
 
 			// Approve, optionally with a BOUNDED featuring window. Replaces the
@@ -982,6 +989,9 @@ func main() {
 		admin.PUT("/events/:id/organizer",
 			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
 			handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
+		// CapEditEvents is now held by admin only. An editor changes a live event
+		// by filing an event_edit request carrying the field diff, which an admin
+		// approves and executes — see models.ReqEventEdit.
 		admin.PUT("/events/:id",
 			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
 			handlers.AdminUpdateEventHandler(pool, eventCache))
@@ -1149,12 +1159,20 @@ func main() {
 			handlers.AdminSetOrganizerTierHandler(pool, payoutService))
 		// Writing payout bank details is THE most dangerous action in the product
 		// — it is how ticket money gets redirected, and it is why ReqBankAdd
-		// carries subject confirmation, a cooling-off period and a 48h payout
-		// hold. This direct route bypasses all of that, so it is restricted to
-		// request.act, the capability only an admin holds. Editors must go through
-		// the staff request flow.
+		// carries subject confirmation, a 60-minute cooling-off and a 48h payout
+		// hold.
+		//
+		// This direct route bypasses every one of those, so it is now MASTER ADMIN
+		// ONLY. An admin who needs a bank change files a bank_details_add request;
+		// a master admin approves it. Leaving this open to request.act meant an
+		// admin could simply call the endpoint instead of filing the request, and
+		// the approval chain would be a formality anyone could step around.
+		//
+		// It survives at all as the break-glass path for the case the request flow
+		// cannot serve: ReqBankAdd cannot be executed from a payload, because the
+		// account number never enters one (see request_execute_handler.go).
 		admin.POST("/organizers/:id/payout-details",
-			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.RequireMasterAdmin(pool),
 			handlers.AdminSetOrganizerPayoutDetailsHandler(payoutService))
 		admin.GET("/payouts",
 			middleware.RequireCapabilityOn(pool, models.CapViewBankTail),

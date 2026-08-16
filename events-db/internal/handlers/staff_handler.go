@@ -233,7 +233,41 @@ func ApproveStaffRequestHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
-		policy := models.RequestPolicies[models.StaffRequestKind(kindStr)]
+		kind := models.StaffRequestKind(kindStr)
+
+		// ── Bank changes need a MASTER admin, not just another admin ─────────
+		//
+		// Bank details are the one thing in the product that redirects money to
+		// an account of the requester's choosing. If the same rank can both
+		// file and approve that change, four-eyes is decorative: a single admin
+		// account — or anyone who steals one — walks the whole chain alone.
+		//
+		// Checked here rather than at the route, because it depends on the KIND
+		// of the request being approved, which is not known until the row is
+		// read. RequireCapability on the route cannot see it.
+		if models.RequiresMasterApproval(kind) {
+			var isMaster bool
+			if mErr := pool.QueryRow(ctx,
+				`SELECT COALESCE(is_master_admin, FALSE) FROM users WHERE id = $1`, actorID,
+			).Scan(&isMaster); mErr != nil {
+				// Fail closed. A lookup failure must not approve a payout
+				// redirect.
+				utils.InternalError(c, mErr, "could not verify approval rights")
+				return
+			}
+			if !isMaster {
+				middleware.AuditAllowed(pool, c, "request.approve_denied", "staff_request", reqID,
+					map[string]any{"kind": kindStr, "why": "not master admin"})
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "bank detail changes must be approved by a master admin",
+					"kind":  kindStr,
+					"hint":  "This request is filed and waiting — a master admin has to sign it off.",
+				})
+				return
+			}
+		}
+
+		policy := models.RequestPolicies[kind]
 		// Cooling-off starts at APPROVAL, not at creation: the clock should run
 		// from when the action became real, not from when it was typed.
 		notBefore := time.Now().Add(time.Duration(policy.CoolingOffMinutes) * time.Minute)
@@ -504,6 +538,14 @@ func ListStaffRequestsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			TargetUserID       *string    `json:"target_user_id"`
 			TargetEventID      *string    `json:"target_event_id"`
 			Payload            any        `json:"payload"`
+			// WaitingOn names WHO has to act next, in words the console shows
+			// verbatim. A queue that only shows a status leaves everyone
+			// assuming someone else is handling it — which is how a filed
+			// request sits untouched and the system "does not work".
+			WaitingOn string `json:"waiting_on"`
+			// NeedsMasterAdmin is true for bank kinds, which a plain admin may
+			// file but not approve.
+			NeedsMasterAdmin bool `json:"needs_master_admin"`
 		}
 
 		out := []item{}
@@ -517,6 +559,9 @@ func ListStaffRequestsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				utils.InternalError(c, err, "could not read requests")
 				return
 			}
+			it.NeedsMasterAdmin = models.RequiresMasterApproval(models.StaffRequestKind(it.Kind))
+			it.WaitingOn = waitingOn(it.Status, it.SubjectRequired,
+				it.SubjectConfirmedAt != nil, it.ExecuteNotBefore, it.NeedsMasterAdmin)
 			out = append(out, it)
 		}
 		if err := rows.Err(); err != nil {
@@ -529,6 +574,43 @@ func ListStaffRequestsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+// waitingOn turns a request's gate state into the one sentence that matters:
+// who has to do something next.
+//
+// Derived on the SERVER so every surface agrees. The console had been showing
+// a raw status like "pending_approval", which says what state the row is in but
+// not whose move it is — and a queue where nobody knows it is their turn is a
+// queue that does not move.
+func waitingOn(status string, subjectRequired, subjectConfirmed bool,
+	notBefore *time.Time, needsMaster bool) string {
+	switch status {
+	case "pending_approval":
+		if needsMaster {
+			return "A master admin must approve this"
+		}
+		return "A second admin must approve this"
+	case "awaiting_subject":
+		if subjectRequired && !subjectConfirmed {
+			return "Waiting for the organiser to confirm by OTP"
+		}
+		return "Waiting on the organiser"
+	case "ready":
+		if notBefore != nil && time.Now().Before(*notBefore) {
+			return "Approved — cooling-off until " + notBefore.Format("15:04 on 2 Jan")
+		}
+		return "Ready — an admin can run it now"
+	case "executed":
+		return "Done"
+	case "rejected":
+		return "Rejected"
+	case "expired":
+		return "Expired without being actioned"
+	case "cancelled":
+		return "Cancelled"
+	}
+	return ""
+}
 
 // secureCode returns an n-digit numeric code from crypto/rand.
 //

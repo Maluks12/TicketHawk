@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"events-db/internal/cache"
@@ -64,10 +66,16 @@ func ExecuteStaffRequestHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Ha
 		var subjectRequired bool
 		var subjectConfirmed *time.Time
 		var notBefore *time.Time
+		// payload carries the approved field diff for event_edit. Read inside
+		// the same locked SELECT as everything else, so the values applied are
+		// exactly the values that were on screen when the admin approved —
+		// a second read could pick up an edit made in between.
+		var payload []byte
 
 		err = tx.QueryRow(ctx, `
 			SELECT kind::text, target_user_id::text, target_event_id::text,
-			       subject_required, subject_confirmed_at, execute_not_before
+			       subject_required, subject_confirmed_at, execute_not_before,
+			       payload
 			FROM staff_requests
 			WHERE id = $1
 			  AND status = 'ready'
@@ -75,7 +83,7 @@ func ExecuteStaffRequestHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Ha
 			  AND expires_at > now()
 			FOR UPDATE
 		`, reqID).Scan(&kindStr, &targetUser, &targetEvent,
-			&subjectRequired, &subjectConfirmed, &notBefore)
+			&subjectRequired, &subjectConfirmed, &notBefore, &payload)
 
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusConflict, gin.H{
@@ -103,7 +111,7 @@ func ExecuteStaffRequestHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Ha
 		policy := models.RequestPolicies[kind]
 
 		// ── Perform the action ───────────────────────────────────────────────
-		if err := executeAction(ctx, tx, kind, targetUser, targetEvent, policy); err != nil {
+		if err := executeAction(ctx, tx, kind, targetUser, targetEvent, policy, payload); err != nil {
 			utils.InternalError(c, err, "could not perform the requested action")
 			return
 		}
@@ -147,8 +155,15 @@ func executeAction(
 	kind models.StaffRequestKind,
 	targetUser, targetEvent *string,
 	policy models.RequestPolicy,
+	payload []byte,
 ) error {
 	switch kind {
+
+	case models.ReqEventEdit:
+		if targetEvent == nil {
+			return fmt.Errorf("event edit needs a target event")
+		}
+		return applyEventEdit(ctx, tx, *targetEvent, payload)
 
 	case models.ReqBankDelete:
 		if targetUser == nil {
@@ -289,4 +304,95 @@ func RequestEventTakedownHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			"note":       "A different admin must approve this before the event comes down.",
 		})
 	}
+}
+
+// ── Applying an approved event edit ──────────────────────────────────────────
+
+// editableEventFields is an ALLOW-LIST, and the reason this is a map rather
+// than "apply whatever the payload contains".
+//
+// The payload arrives from the console and sits in a row for as long as the
+// request is open. Building an UPDATE from its keys would let anyone who can
+// file a request write to any column on events — status, organizer_id,
+// is_featured — by naming it. Approving a request is meant to authorise a
+// change to the event's DETAILS, not to hand out arbitrary column access.
+//
+// Money and lifecycle fields are deliberately absent:
+//
+//	status, organizer_id  moving an event or publishing it are their own
+//	                      actions with their own gates (takedown, transfer)
+//	is_featured           CapFeatureEvent covers it directly
+//	base_price            changing what a live event costs after people have
+//	                      paid is a refund question, not an edit
+var editableEventFields = map[string]string{
+	"title":             "title",
+	"description":       "description",
+	"venue_name":        "venue_name",
+	"venue_address":     "venue_address",
+	"city":              "city",
+	"start_time":        "start_time",
+	"end_time":          "end_time",
+	"sale_start":        "sale_start",
+	"sale_end":          "sale_end",
+	"max_capacity":      "max_capacity",
+	"max_tickets_user":  "max_tickets_user",
+	"allow_waitlist":    "allow_waitlist",
+	"category":          "category",
+	"timezone":          "timezone",
+	"image_url":         "image_url",
+}
+
+// applyEventEdit writes ONLY the allow-listed fields present in the payload.
+//
+// Built as a parameterised UPDATE with column names taken from the allow-list
+// map's VALUES — never from the payload's keys — so a key like
+// "title = 'x', status" cannot reach the SQL text.
+func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []byte) error {
+	if len(payload) == 0 {
+		return fmt.Errorf("event edit has no payload — nothing to apply")
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return fmt.Errorf("event edit payload is not readable: %w", err)
+	}
+
+	// The console stores the diff under "changes" so the payload can also carry
+	// context (the "before" values) for the approver to read without those
+	// being mistaken for values to write.
+	if nested, ok := fields["changes"].(map[string]any); ok {
+		fields = nested
+	}
+
+	sets := make([]string, 0, len(fields))
+	args := make([]any, 0, len(fields)+1)
+	args = append(args, eventID)
+
+	for key, val := range fields {
+		col, allowed := editableEventFields[key]
+		if !allowed {
+			// Skipped, not fatal. A payload written by an older console
+			// version should not strand an approved request in 'ready'
+			// forever — but the field is not written either.
+			continue
+		}
+		args = append(args, val)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+
+	if len(sets) == 0 {
+		return fmt.Errorf("event edit contained no editable fields")
+	}
+
+	sql := "UPDATE events SET " + strings.Join(sets, ", ") +
+		", updated_at = now() WHERE id = $1"
+
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("event not found")
+	}
+	return nil
 }

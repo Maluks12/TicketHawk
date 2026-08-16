@@ -1,0 +1,39 @@
+-- ============================================================================
+-- 000075: event_edit request kind, and master-admin approval for bank changes.
+--
+-- WHY EDITORS LOSE DIRECT EVENT EDITING
+--
+-- Editing a LIVE event silently changes the terms of a sale that buyers have
+-- already paid against — the date, the venue, the price, the capacity. Nobody
+-- is notified and nothing records what the event used to say. An editor now
+-- proposes a change and an admin approves it with the field diff on screen.
+--
+-- Approving a NEW event stays direct: nobody has bought a ticket yet, so there
+-- are no terms to change out from under anyone.
+--
+-- WHY BANK CHANGES MOVE UP TO MASTER ADMIN
+--
+-- Bank details are the one thing in the product that redirects money to an
+-- account of the requester's choosing. If an admin can both file and approve
+-- that change, the four-eyes rule is decorative — a single admin account, or
+-- anyone who steals one, walks the whole chain alone. Approval for the two bank
+-- kinds now needs is_master_admin, so redirecting payouts takes two people at
+-- different tiers.
+--
+-- That rule is enforced in the handler, not here, because it depends on the
+-- APPROVER rather than on the row. This migration only adds the enum value the
+-- new kind needs.
+-- ============================================================================
+
+-- ADD VALUE cannot run inside a transaction block in older Postgres, and
+-- golang-migrate wraps each file in one. Postgres 12+ allows it as long as the
+-- new value is not USED in the same transaction — it is not; the first insert
+-- happens later, from the API.
+ALTER TYPE staff_request_kind ADD VALUE IF NOT EXISTS 'event_edit';
+
+-- ── Enum-value visibility note ──────────────────────────────────────────────
+--
+-- A value added by ALTER TYPE is not visible to other sessions until this
+-- transaction commits. The API must therefore be restarted (or simply not be
+-- mid-insert) after this migration lands — which is the normal deploy order
+-- anyway: migrate, then roll the containers.
