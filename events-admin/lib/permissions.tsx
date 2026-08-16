@@ -50,36 +50,85 @@ export const ROLE_DESCRIPTION: Record<StaffRole, string> = {
 interface StaffState {
   role: StaffRole | null;
   capabilities: Capability[];
+  email: string | null;
+  /**
+   * Break-glass right to read identity documents. NOT a capability — it lives
+   * on its own column (migration 000071) and is reported separately, because
+   * console rank and document access are deliberately different axes. Being
+   * promoted to admin never grants it.
+   *
+   * Presentational only. Every endpoint it reveals re-checks it server-side.
+   */
+  isMasterAdmin: boolean;
+  /**
+   * True when this account predates the staff model and holds no staff_role.
+   * The server treats it as admin for console purposes so the owner is not
+   * locked out of their own dashboard, and the console says so plainly rather
+   * than letting it look like a granted role.
+   */
+  legacyAdmin: boolean;
   loaded: boolean;
   failed: boolean;
-  load: () => Promise<void>;
+  load: (force?: boolean) => Promise<void>;
   can: (c: Capability) => boolean;
 }
+
+/**
+ * Shared in-flight promise.
+ *
+ * Every gated page calls load() in an effect, so navigating fired one identical
+ * request per screen — and on a cold load, several at once. The store is a
+ * singleton, so one fetch is enough; concurrent callers await the same promise
+ * and later ones return immediately from cache.
+ */
+let inFlight: Promise<void> | null = null;
 
 export const useStaff = create<StaffState>((set, get) => ({
   role: null,
   capabilities: [],
+  email: null,
+  isMasterAdmin: false,
+  legacyAdmin: false,
   loaded: false,
   failed: false,
 
-  load: async () => {
-    try {
-      const { data } = await api.get('/admin/me/capabilities');
-      set({
-        role: data?.staff_role ?? null,
-        capabilities: data?.capabilities ?? [],
-        loaded: true,
-        failed: false,
-      });
-    } catch {
-      // FAIL CLOSED — the opposite of the organiser's legal gate.
-      //
-      // There, a failed check cost a prompt. Here it would decide whether to
-      // render bank details and approval buttons, so an unreachable endpoint
-      // must mean "no permissions", never "assume the best". An empty
-      // capability list hides everything gated, which is the safe shape.
-      set({ role: null, capabilities: [], loaded: true, failed: true });
-    }
+  load: async (force = false) => {
+    if (!force && get().loaded && !get().failed) return;
+    if (inFlight) return inFlight;
+
+    inFlight = (async () => {
+      try {
+        const { data } = await api.get('/admin/me/capabilities');
+        set({
+          role: data?.staff_role ?? null,
+          capabilities: data?.capabilities ?? [],
+          email: data?.email ?? null,
+          isMasterAdmin: data?.is_master_admin === true,
+          legacyAdmin: data?.legacy_admin === true,
+          loaded: true,
+          failed: false,
+        });
+      } catch {
+        // FAIL CLOSED — the opposite of the organiser's legal gate.
+        //
+        // There, a failed check cost a prompt. Here it would decide whether to
+        // render bank details and approval buttons, so an unreachable endpoint
+        // must mean "no permissions", never "assume the best". An empty
+        // capability list hides everything gated, which is the safe shape.
+        //
+        // isMasterAdmin false is part of that: a failed check must never draw
+        // the identity-document unlock form.
+        set({
+          role: null, capabilities: [], email: null,
+          isMasterAdmin: false, legacyAdmin: false,
+          loaded: true, failed: true,
+        });
+      } finally {
+        inFlight = null;
+      }
+    })();
+
+    return inFlight;
   },
 
   can: (c) => get().capabilities.includes(c),

@@ -4,6 +4,7 @@ import { api } from '../../../lib/api';
 import { fmtMoney, fmtDate, toLocalInput, Badge, formatAttrs } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
+import { useStaff, AccessDenied } from '../../../lib/permissions';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface EventOption  { id: string; title: string; status: string; }
@@ -46,6 +47,18 @@ const placementCard = (active: boolean): React.CSSProperties => ({
 export default function MerchPage() {
   const toast   = useToast();
   const confirm = useConfirm();
+
+  // Merch and collections are read at event.view and written at event.edit.
+  // This screen used to render its full editing UI to every role, so a
+  // read_only or access user saw Create, Edit, Approve and Deactivate buttons
+  // that each produced a 403 — which reads as a broken console rather than a
+  // permission boundary.
+  const capsLoaded = useStaff((st) => st.loaded);
+  const can = useStaff((st) => st.can);
+  const loadCaps = useStaff((st) => st.load);
+  useEffect(() => { loadCaps(); }, [loadCaps]);
+  const canEdit = can('event.edit');
+  const canApprove = can('event.approve');
 
   // ── Tab ──────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>('merch');
@@ -516,6 +529,11 @@ export default function MerchPage() {
   const showPickup = mForm.fulfillment_mode !== 'delivery';
 
   // ─────────────────────────────────────────────────────────────────────────
+  if (!capsLoaded) {
+    return <div className="page-loader"><div className="spinner spinner-lg" /></div>;
+  }
+  if (!can('event.view')) return <AccessDenied need="event.view" />;
+
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1400px' }}>
 
@@ -526,8 +544,8 @@ export default function MerchPage() {
           <div style={{ fontSize: '.8rem', color: 'var(--text-2)', marginTop: '.15rem' }}>Manage merchandise and curated collections in one place</div>
         </div>
         {activeTab === 'merch'
-          ? <button className="btn btn-primary btn-sm" onClick={openCreateMerch}>+ Add Merch</button>
-          : <button className="btn btn-primary btn-sm" onClick={openCreateCollection}>+ New Collection</button>
+          ? (canEdit && <button className="btn btn-primary btn-sm" onClick={openCreateMerch}>+ Add Merch</button>)
+          : (canEdit && <button className="btn btn-primary btn-sm" onClick={openCreateCollection}>+ New Collection</button>)
         }
       </div>
 
@@ -618,12 +636,12 @@ export default function MerchPage() {
                     )}
                   </div>
                   <div style={{ padding: '.65rem 1rem', borderTop: '1px solid var(--border)', display: 'flex', gap: '.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button className="btn btn-sm" onClick={() => openEditMerch(m)}>✎ Edit</button>
-                    <button className="btn btn-sm" onClick={() => openVariant(m)}>+ Variant</button>
+                    {canEdit && <button className="btn btn-sm" onClick={() => openEditMerch(m)}>✎ Edit</button>}
+                    {canEdit && <button className="btn btn-sm" onClick={() => openVariant(m)}>+ Variant</button>}
                     {m.approval_status && m.approval_status !== 'approved' && (
-                      <button className="btn btn-sm" style={{ color: 'var(--warning)', borderColor: 'rgba(255,165,0,.4)' }} onClick={() => approveMerch(m.id, m.name)}>✓ Approve</button>
+                      canApprove && <button className="btn btn-sm" style={{ color: 'var(--warning)', borderColor: 'rgba(255,165,0,.4)' }} onClick={() => approveMerch(m.id, m.name)}>✓ Approve</button>
                     )}
-                    {m.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivateMerch(m.id, m.name)}>Deactivate</button>}
+                    {canEdit && m.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivateMerch(m.id, m.name)}>Deactivate</button>}
                     <span style={{ fontSize: '.74rem', color: 'var(--text-3)', marginLeft: 'auto' }}>{m.variants?.length || 0} variants</span>
                   </div>
                 </div>
@@ -713,8 +731,8 @@ export default function MerchPage() {
                       <td>
                         <div style={{ display: 'flex', gap: '.35rem', justifyContent: 'flex-end' }}>
                           <button className="btn btn-sm" onClick={() => openManage(c)}>⬡ Items</button>
-                          <button className="btn btn-sm" onClick={() => openEditCollection(c)}>✎ Edit</button>
-                          {c.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivateCollection(c)}>Deactivate</button>}
+                          {canEdit && <button className="btn btn-sm" onClick={() => openEditCollection(c)}>✎ Edit</button>}
+                          {canEdit && c.is_active && <button className="btn btn-sm btn-danger" onClick={() => deactivateCollection(c)}>Deactivate</button>}
                         </div>
                       </td>
                     </tr>

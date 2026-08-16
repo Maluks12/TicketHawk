@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 import { fmtMoney, fmtDateTime, Badge } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
+import { useStaff, AccessDenied } from '../../../lib/permissions';
 
 interface OversoldOrder { id: string; merch_name?: string; quantity: number; total_amount?: number; amount?: number; variant_sku?: string; fulfillment_status: string; created_at: string; }
 
@@ -10,6 +11,13 @@ export default function OversoldPage() {
   const toast = useToast();
   const [orders, setOrders] = useState<OversoldOrder[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Oversold orders are customer purchase records — amounts, SKUs, order ids.
+  // event.view is the floor, matching the endpoint's own gate.
+  const capsLoaded = useStaff((st) => st.loaded);
+  const can = useStaff((st) => st.can);
+  const loadCaps = useStaff((st) => st.load);
+  useEffect(() => { loadCaps(); }, [loadCaps]);
 
   async function load() {
     setLoading(true);
@@ -21,6 +29,11 @@ export default function OversoldPage() {
   }
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!capsLoaded) {
+    return <div className="page-loader"><div className="spinner spinner-lg" /></div>;
+  }
+  if (!can('event.view')) return <AccessDenied need="event.view" />;
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1400px' }}>

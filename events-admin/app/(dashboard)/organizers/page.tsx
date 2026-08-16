@@ -4,6 +4,7 @@ import { api } from '../../../lib/api';
 import { fmtMoney, fmtDateTime } from '../../../lib/utils';
 import { useToast } from '../../../lib/toast';
 import { useConfirm } from '../../../lib/confirm';
+import { useStaff, AccessDenied } from '../../../lib/permissions';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface Eligibility {
@@ -92,6 +93,21 @@ function Check({ ok, children }: { ok: boolean; children: React.ReactNode }) {
 export default function OrganizersPage() {
   const toast = useToast();
   const confirm = useConfirm();
+
+  // This screen shows bank account names and tails, so bank.view_tail is the
+  // floor for seeing it at all — read_only has no business here.
+  //
+  // Everything that WRITES on this screen moves money: adding payout details
+  // redirects where ticket revenue lands, tier decides whether it settles
+  // instantly, and a retry pushes a transfer. All three sit at request.act,
+  // which only an admin holds. An editor who needs one files a staff request
+  // and a second admin approves it — that four-eyes path exists precisely
+  // because these actions are the dangerous ones.
+  const capsLoaded = useStaff((st) => st.loaded);
+  const can = useStaff((st) => st.can);
+  const loadCaps = useStaff((st) => st.load);
+  useEffect(() => { loadCaps(); }, [loadCaps]);
+  const canAct = can('request.act');
 
   const [tab, setTab] = useState<'organizers' | 'payouts'>('organizers');
   const [organizers, setOrganizers] = useState<OrganizerRow[]>([]);
@@ -241,6 +257,11 @@ export default function OrganizersPage() {
     borderColor: 'var(--accent-deep)', color: '#fff',
   };
 
+  if (!capsLoaded) {
+    return <div className="page-loader"><div className="spinner spinner-lg" /></div>;
+  }
+  if (!can('bank.view_tail')) return <AccessDenied need="bank.view_tail" />;
+
   return (
     <div style={{ padding: '24px 28px 48px', maxWidth: 1600, margin: '0 auto' }}>
       <div style={{
@@ -334,19 +355,30 @@ export default function OrganizersPage() {
                     </td>
                     <td style={{ ...td, whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                        <button style={btn} onClick={() => openBankForm(org)}>
-                          {org.has_subaccount ? 'Edit bank details' : 'Add bank details'}
-                        </button>
-                        {org.payout_tier === 'held' ? (
-                          <button
-                            style={org.has_subaccount ? btnPrimary : { ...btn, opacity: 0.5, cursor: 'not-allowed' }}
-                            disabled={!org.has_subaccount}
-                            title={org.has_subaccount ? '' : 'Bank details required first'}
-                            onClick={() => setTier(org, 'instant')}>
-                            Promote to Instant
-                          </button>
+                        {canAct ? (
+                          <>
+                            <button style={btn} onClick={() => openBankForm(org)}>
+                              {org.has_subaccount ? 'Edit bank details' : 'Add bank details'}
+                            </button>
+                            {org.payout_tier === 'held' ? (
+                              <button
+                                style={org.has_subaccount ? btnPrimary : { ...btn, opacity: 0.5, cursor: 'not-allowed' }}
+                                disabled={!org.has_subaccount}
+                                title={org.has_subaccount ? '' : 'Bank details required first'}
+                                onClick={() => setTier(org, 'instant')}>
+                                Promote to Instant
+                              </button>
+                            ) : (
+                              <button style={btn} onClick={() => setTier(org, 'held')}>Demote to Held</button>
+                            )}
+                          </>
                         ) : (
-                          <button style={btn} onClick={() => setTier(org, 'held')}>Demote to Held</button>
+                          // Hidden rather than disabled: a permanently greyed
+                          // row of buttons is noise. The line says what to do
+                          // instead, which is the useful part.
+                          <span style={{ fontSize: 11.5, color: 'var(--text-3)', textAlign: 'right', maxWidth: 150 }}>
+                            Payout changes need an admin
+                          </span>
                         )}
                       </div>
                     </td>
@@ -407,7 +439,7 @@ export default function OrganizersPage() {
                       {p.paid_at && <div style={{ fontSize: 11, color: 'var(--success-fg)' }}>paid {fmtDateTime(p.paid_at)}</div>}
                     </td>
                     <td style={{ ...td, textAlign: 'right' }}>
-                      {(p.status === 'failed' || p.status === 'pending' || p.status === 'processing') && (
+                      {canAct && (p.status === 'failed' || p.status === 'pending' || p.status === 'processing') && (
                         <button style={btn} disabled={retrying === p.id} onClick={() => retryPayout(p)}>
                           {retrying === p.id ? 'Retrying…' : p.status === 'failed' ? 'Retry' : 'Run now'}
                         </button>
