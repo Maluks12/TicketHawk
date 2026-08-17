@@ -187,6 +187,18 @@ export default function BookingDetailPage() {
   if (!booking) return <div style={{ minHeight: '100vh', background: bg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}><WarningCircle size={40} weight="regular" color={colors.subText} /><h2 style={{ color: colors.text }}>Booking not found</h2><button onClick={() => router.back()} style={{ background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '13px 28px', fontWeight: 800, cursor: 'pointer', fontSize: 15 }}>Go back</button></div>;
 
   const status = refunded ? 'refunded' : booking.booking_status;
+
+  // ── Free bookings are cancellations, not refunds ──────────────────────────
+  //
+  // A R0 ticket still holds a seat, so the action must exist — the organiser's
+  // headcount stays wrong until it goes back. But every word of refund language
+  // is false for it: no money returns, "R0 back" is meaningless, and the
+  // sliding-scale line is computed entirely from zero.
+  //
+  // The SAME endpoint and the same seat-release path are reused; only the
+  // wording changes. A separate cancel flow would be a second place for seat
+  // release to drift out of sync with refunds.
+  const isFreeBooking = (booking.total_amount ?? 0) <= 0;
   const statusCol = STATUS_COLOR[status] ?? '#888';
   // Eligibility is the SERVER's decision, never ours. The old test here was
   // `status === 'confirmed' && !refunded && !!user`, which showed a refund
@@ -379,7 +391,11 @@ export default function BookingDetailPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,229,160,0.1)', borderRadius: 8, padding: '10px 12px', marginTop: 8 }}>
               <Check size={14} weight="bold" color="#00e5a0" />
               <span style={{ fontSize: 13, color: '#00e5a0', fontWeight: 600 }}>
-                {booking.refunded_amount != null ? `Refund of ${fmtMoney(booking.refunded_amount)} is being processed` : 'Refund request submitted — processing in 3–5 business days'}
+                {isFreeBooking
+                  ? 'Booking cancelled — your seat has been released'
+                  : booking.refunded_amount != null
+                  ? `Refund of ${fmtMoney(booking.refunded_amount)} is being processed`
+                  : 'Refund request submitted — processing in 3–5 business days'}
               </span>
             </div>
           )}
@@ -390,12 +406,17 @@ export default function BookingDetailPage() {
             {/* The amount is on the button face on purpose: the buyer should
                 never have to open a sheet to find out what they get back. */}
             <button onClick={() => setRefundOpen(true)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 12, padding: '13px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-              <ArrowBendUpLeft size={16} weight="regular" /> Request a refund · {fmtRand(quote.refund_amount)} back
+              <ArrowBendUpLeft size={16} weight="regular" />{' '}
+              {isFreeBooking ? 'Cancel booking' : `Request a refund · ${fmtRand(quote.refund_amount)} back`}
             </button>
             <p style={{ margin: '8px 0 0', fontSize: 12, color: colors.subText, textAlign: 'center' }}>
-              {refundWindowLabel(quote.days_until_event)} · {fmtRate(quote.rate)} of your ticket price
-              {daysLeftInBand(quote.days_until_event) !== null &&
-                ` · rate drops in ${daysLeftInBand(quote.days_until_event)} days`}
+              {isFreeBooking
+                ? 'Releases your seat so someone else can book it.'
+                : `${refundWindowLabel(quote.days_until_event)} · ${fmtRate(quote.rate)} of your ticket price${
+                    daysLeftInBand(quote.days_until_event) !== null
+                      ? ` · rate drops in ${daysLeftInBand(quote.days_until_event)} days`
+                      : ''
+                  }`}
             </p>
           </div>
         )}
@@ -412,15 +433,21 @@ export default function BookingDetailPage() {
       {refundOpen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setRefundOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
-            <h3 style={{ margin: '0 0 8px', color: colors.text }}>Request a refund</h3>
+            <h3 style={{ margin: '0 0 8px', color: colors.text }}>
+              {isFreeBooking ? 'Cancel booking' : 'Request a refund'}
+            </h3>
             <p style={{ margin: '0 0 16px', fontSize: 13, color: colors.subText }}>
-              {quote ? `${fmtRand(quote.refund_amount)} back — ${fmtRate(quote.rate)} of your ticket price. The ${fmtRand(quote.service_fee_kept)} service fee is not refunded. Processed within 3–5 business days.` : 'Tell us why you\u2019d like a refund. Processed within 3\u20135 business days.'}
+              {isFreeBooking
+                ? 'Tell us why you\u2019re cancelling. Your seat is released straight away so someone else can take it.'
+                : quote
+                ? `${fmtRand(quote.refund_amount)} back — ${fmtRate(quote.rate)} of your ticket price. The ${fmtRand(quote.service_fee_kept)} service fee is not refunded. Processed within 3–5 business days.`
+                : 'Tell us why you\u2019d like a refund. Processed within 3\u20135 business days.'}
             </p>
             <textarea value={refundReason} onChange={(e) => { setRefundReason(e.target.value); setRefundErr(''); }} placeholder="e.g. I can no longer attend this event due to..." rows={4} style={{ width: '100%', background: isDark ? '#111' : '#f5f5f5', color: colors.text, border: `1px solid ${refundErr ? '#ff3c6e' : border}`, borderRadius: 10, padding: '12px', fontSize: 14, boxSizing: 'border-box', outline: 'none', resize: 'vertical' }} />
             <p style={{ margin: '4px 0 12px', fontSize: 12, color: colors.subText, textAlign: 'right' }}>{refundReason.length}/500</p>
             {refundErr && <p style={{ color: '#ff3c6e', fontSize: 13, margin: '0 0 12px' }}>{refundErr}</p>}
             <button onClick={handleRefund} disabled={refundLoading} style={{ width: '100%', background: '#ff2d55', color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 15, fontWeight: 800, cursor: 'pointer', opacity: refundLoading ? 0.6 : 1 }}>
-              {refundLoading ? 'Submitting…' : 'Submit refund request'}
+              {refundLoading ? 'Submitting…' : isFreeBooking ? 'Cancel booking' : 'Submit refund request'}
             </button>
             <button onClick={() => setRefundOpen(false)} style={{ width: '100%', background: 'none', border: 'none', color: colors.subText, padding: '12px', fontSize: 14, cursor: 'pointer', marginTop: 8 }}>Cancel</button>
           </div>

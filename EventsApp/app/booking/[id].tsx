@@ -118,6 +118,18 @@ const PriceLine = ({ label, value, bold, accent }: { label: string; value: strin
 // Shows the buyer what they will actually be paid BEFORE they commit, then
 // submits. The amount is never computed here — see lib/refunds.ts for why.
 
+// ── Free bookings are cancellations, not refunds ─────────────────────────────
+//
+// A R0 ticket still holds a seat, so the action has to exist — the organiser's
+// headcount is wrong until the seat goes back. But every word of refund
+// language is false for it: there is no money to return, "R0 back" is
+// meaningless, and the sliding-scale line ("25% of your ticket price") is noise
+// computed from zero.
+//
+// So the SAME endpoint and the same seat-release path (seats_released_at) are
+// reused, and only the wording changes. This is deliberately a presentation
+// switch rather than a second code path: a separate cancel flow would be a
+// second place for seat release to drift out of sync with refunds.
 const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onSuccess }: {
   visible: boolean;
   bookingId: string;
@@ -127,6 +139,7 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
   onClose: () => void;
   onSuccess: (amount: number) => void;
 }) => {
+  const isFree = totalPaid <= 0;
   const [reason, setReason]   = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
@@ -170,7 +183,7 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={sheet.modalSheet}>
           <View className={s.modalHandle} />
-          <Text className={s.modalTitle}>Request a refund</Text>
+          <Text className={s.modalTitle}>{isFree ? 'Cancel booking' : 'Request a refund'}</Text>
 
           {/* ── What you get back ────────────────────────────────────────── */}
           {quote ? (
@@ -219,7 +232,9 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
           )}
 
           <Text className={s.modalSub}>
-            Tell us why you&apos;d like a refund. Once approved, the money is returned to your
+            {isFree
+              ? 'Tell us why you\u2019re cancelling. Your seat is released straight away so someone else can take it.'
+              : 'Tell us why you\u2019d like a refund. Once approved, the money is returned to your'}
             original payment method within 3–5 business days.
           </Text>
           <Text className={s.modalFieldLabel}>REASON FOR REFUND</Text>
@@ -246,7 +261,9 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
             {loading
               ? <ActivityIndicator color="#fff" size="small" />
               : <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>
-                  {quote ? `Refund ${fmtRand(quote.refund_amount)}` : 'Submit refund request'}
+                  {isFree
+                    ? 'Cancel booking'
+                    : quote ? `Refund ${fmtRand(quote.refund_amount)}` : 'Submit refund request'}
                 </Text>}
           </TouchableOpacity>
           <TouchableOpacity className={s.modalCancel} onPress={onClose}>
@@ -546,6 +563,11 @@ export default function BookingDetailScreen() {
     booking.booking_status === 'confirmed' &&
     !eventStarted;
 
+  // Nothing was paid, so there is nothing to refund — but the seat is still
+  // held and still needs releasing. Drives the wording only; the action and the
+  // endpoint behind it are identical.
+  const isFreeBooking = (booking?.total_amount ?? 0) <= 0;
+
   useEffect(() => {
     if (!refundPossible || !booking) { setRefundQuote(null); return; }
     let cancelled = false;
@@ -717,7 +739,9 @@ export default function BookingDetailScreen() {
             <View style={[sheet.qrCard, { opacity: 0.4 }]}>
               <Ionicons name="close-circle-outline" size={64} color={t.chevron} />
               <Text className={s.qrNumber}>#{booking.booking_number}</Text>
-              <Text className={s.qrHint}>This ticket has been refunded</Text>
+              <Text className={s.qrHint}>
+                {isFreeBooking ? 'This booking has been cancelled' : 'This ticket has been refunded'}
+              </Text>
             </View>
           ) : hasAssignments ? (
             <>
@@ -929,7 +953,9 @@ export default function BookingDetailScreen() {
                       earlier one. Prefer the fresh figure so the buyer sees the
                       exact amount they just agreed to, not a stale field that the
                       cached booking may not carry at all. */}
-                  {(refundedAmount ?? booking.refunded_amount) != null
+                  {isFreeBooking
+                    ? 'Booking cancelled — your seat has been released'
+                    : (refundedAmount ?? booking.refunded_amount) != null
                     ? `Refund of ${fmtMoney((refundedAmount ?? booking.refunded_amount) as number)} is being processed — 3–5 business days`
                     : 'Refund request submitted — processing in 3–5 business days'}
                 </Text>
@@ -973,20 +999,29 @@ export default function BookingDetailScreen() {
                   onPress={() => setRefundOpen(true)}
                   activeOpacity={0.85}
                 >
-                  <Ionicons name="arrow-undo-outline" size={16} color="#ff4d4d" />
+                  <Ionicons
+                    name={isFreeBooking ? 'close-circle-outline' : 'arrow-undo-outline'}
+                    size={16}
+                    color="#ff4d4d"
+                  />
                   <Text className={s.refundBtnText}>
-                    Request a refund · {fmtRand(refundQuote.quote!.refund_amount)} back
+                    {isFreeBooking
+                      ? 'Cancel booking'
+                      : `Request a refund · ${fmtRand(refundQuote.quote!.refund_amount)} back`}
                   </Text>
                 </TouchableOpacity>
+                {/* The sliding-scale line is refund pricing. On a free ticket
+                    every number in it is zero, so it says nothing true — the
+                    seat still gets released, which is the part that matters. */}
                 <Text className={s.refundBtnSub}>
-                  {refundWindowLabel(refundQuote.quote!.days_until_event)} ·{' '}
-                  {fmtRate(refundQuote.quote!.rate)} of your ticket price
-                  {(() => {
-                    const left = daysLeftInBand(refundQuote.quote!.days_until_event);
-                    return left != null
-                      ? ` · rate drops in ${left} day${left === 1 ? '' : 's'}`
-                      : '';
-                  })()}
+                  {isFreeBooking
+                    ? 'Releases your seat so someone else can book it.'
+                    : `${refundWindowLabel(refundQuote.quote!.days_until_event)} · ${fmtRate(refundQuote.quote!.rate)} of your ticket price${(() => {
+                        const left = daysLeftInBand(refundQuote.quote!.days_until_event);
+                        return left != null
+                          ? ` · rate drops in ${left} day${left === 1 ? '' : 's'}`
+                          : '';
+                      })()}`}
                 </Text>
               </>
             ) : refundQuote?.quote ? (
