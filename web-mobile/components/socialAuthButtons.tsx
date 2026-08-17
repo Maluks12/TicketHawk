@@ -12,13 +12,10 @@ import { useAuthStore } from '@/store/authStore';
 // server does the verifying. No secret is present on this page, and none may be
 // added — anything in a client bundle is public.
 //
-// ── Why the SDKs are loaded lazily ───────────────────────────────────────────
-//
-// Google Identity Services and Apple's AppleID JS are third-party scripts on
-// third-party domains. Putting them in the root layout means every page load —
-// including the event pages carrying the SEO — blocks on two external requests
-// that only this page needs. They are injected on mount here instead, so a
-// script outage degrades the sign-in buttons rather than the whole site.
+// The SDKs are injected on mount rather than in the root layout: they are
+// third-party scripts on third-party domains, and only this page needs them.
+// Loading them globally would make every page — including the event pages
+// carrying the SEO — block on two external requests.
 
 declare global {
   interface Window {
@@ -29,6 +26,12 @@ declare global {
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
 const APPLE_CLIENT_ID  = process.env.NEXT_PUBLIC_APPLE_SERVICES_ID ?? '';
+
+// Both buttons are constrained to this width so they share a column and a
+// centre line. Google's rendered button takes a pixel number (it ignores
+// percentages and caps at 400), so the value has to be shared explicitly
+// rather than expressed as a style.
+const BUTTON_WIDTH = 320;
 
 function loadScript(src: string, id: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -101,16 +104,15 @@ export default function SocialAuthButtons({
 
   // ── Error surfacing ────────────────────────────────────────────────────────
   //
-  // Every failure is logged to the console as well as shown. The first version
-  // only set state, which meant a provider-side config error produced a
-  // misleading "check your connection" on screen and NOTHING in devtools — the
-  // one place a developer would look. An unexplained failure with an empty
-  // console is worse than a noisy one.
+  // Every failure is logged to the console as well as shown on screen. An
+  // earlier version only set state, which meant a provider-side config error
+  // produced a misleading "check your connection" in the UI and NOTHING in
+  // devtools — the one place a developer looks. An unexplained failure with an
+  // empty console is worse than a noisy one.
   //
   // Provider SDK rejections don't look like axios errors: Apple rejects with
-  // { error: 'popup_closed_by_user' }, Google with { type, ... }. Neither has a
-  // `.response`, so collapsing "no .response" into a network message hid them
-  // both.
+  // { error: 'popup_blocked_by_browser' }, Google with its own shape. Neither
+  // has a `.response`, so treating "no .response" as a network problem hid both.
   const handleError = useCallback((where: string, err: any) => {
     // eslint-disable-next-line no-console
     console.error(`[social-auth] ${where} failed`, err);
@@ -124,8 +126,9 @@ export default function SocialAuthButtons({
       setError('That sign-in method isn\u2019t available right now.');
     } else if (status) {
       setError(serverMsg ?? 'Sign-in failed. Please try again.');
+    } else if (err?.error === 'popup_blocked_by_browser') {
+      setError('Your browser blocked the sign-in window. Allow pop-ups for this site and try again.');
     } else if (err?.error) {
-      // Provider SDK rejection — surface the provider's own code.
       setError(`${where}: ${err.error}`);
     } else if (err?.message) {
       setError(err.message);
@@ -181,20 +184,20 @@ export default function SocialAuthButtons({
     return () => { cancelled = true; };
   }, [exchange, handleError]);
 
-  // Google renders its own button into this node. Using their rendered button
-  // rather than a custom one keeps us inside their branding terms — which also
-  // means it CANNOT be freely restyled to match the Apple button exactly.
-  // `shape: 'pill'` and a matching max width get it as close as their terms
-  // allow; the wrapper below constrains it so both buttons share a width and
-  // centre line instead of the Google one sitting at its own fixed 320px.
+  // Google renders its OWN artwork into this node, and their branding terms
+  // require it — which is also why it cannot be made to match the Apple button
+  // exactly. `shape: 'pill'` plus a shared width gets it as close as the terms
+  // allow. Restyling it properly would mean abandoning the rendered button, and
+  // GIS only returns an ID TOKEN via the rendered button or One Tap;
+  // initTokenClient hands back an access token, which is not what the server
+  // verifies. Not worth changing the auth flow over button radius.
   const googleButtonRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!googleReady || !googleButtonRef.current || !window.google?.accounts?.id) return;
     window.google.accounts.id.renderButton(googleButtonRef.current, {
       theme: isDark ? 'filled_black' : 'outline',
       size: 'large',
-      // Google caps this at 400 and ignores percentages — a number is required.
-      width: 320,
+      width: BUTTON_WIDTH,
       text: 'continue_with',
       shape: 'pill',
       logo_alignment: 'center',
@@ -247,10 +250,27 @@ export default function SocialAuthButtons({
       handleError('Apple', new Error('Apple sign-in is still loading. Try again in a moment.'));
       return;
     }
+
+    // ── signIn() is called FIRST, synchronously inside the click handler ─────
+    //
+    // Browsers only permit a popup opened within a user gesture. Calling
+    // setBusy()/setError() before this triggers a React re-render, which breaks
+    // the synchronous chain from the click — the browser then treats the popup
+    // as unsolicited and blocks it, surfacing as Apple's
+    // popup_blocked_by_browser. So no state is touched until the popup exists.
+    let res: any;
+    try {
+      res = await window.AppleID.auth.signIn();
+    } catch (err: any) {
+      // A cancel is a normal outcome, not an error.
+      if (err?.error === 'popup_closed_by_user' || err?.error === 'user_cancelled_authorize') return;
+      handleError('Apple', err);
+      return;
+    }
+
     setBusy('apple');
     setError(null);
     try {
-      const res = await window.AppleID.auth.signIn();
       const idToken = res?.authorization?.id_token;
       if (!idToken) throw new Error('Apple returned no identity token');
       // Apple returns the name only on FIRST authorisation, and on web it
@@ -263,11 +283,6 @@ export default function SocialAuthButtons({
         last_name: res?.user?.name?.lastName,
       });
     } catch (err: any) {
-      // A cancel is a normal outcome, not an error.
-      if (err?.error === 'popup_closed_by_user' || err?.error === 'user_cancelled_authorize') {
-        setBusy(null);
-        return;
-      }
       handleError('Apple', err);
     } finally {
       setBusy(null);
@@ -293,8 +308,6 @@ export default function SocialAuthButtons({
         </div>
       )}
 
-      {/* Both buttons share one column with a single max width, so they line up
-          regardless of Google rendering its own artwork at a fixed pixel size. */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
         {appleReady && (
           <button
@@ -302,7 +315,7 @@ export default function SocialAuthButtons({
             onClick={signInWithApple}
             disabled={!!busy}
             style={{
-              width: '100%', maxWidth: 320, height: 44, borderRadius: 22, border: 'none',
+              width: '100%', maxWidth: BUTTON_WIDTH, height: 44, borderRadius: 22, border: 'none',
               background: isDark ? '#ffffff' : '#000000',
               color: isDark ? '#000000' : '#ffffff',
               fontSize: 15, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
@@ -318,13 +331,13 @@ export default function SocialAuthButtons({
           </button>
         )}
 
-        {/* Google renders into this node. Constrained to the same max width as
-            the Apple button above so the two align. */}
+        {/* Google renders into this node, constrained to the same width as the
+            Apple button above so the two align. */}
         <div
           ref={googleButtonRef}
           style={{
             width: '100%',
-            maxWidth: 320,
+            maxWidth: BUTTON_WIDTH,
             minHeight: googleReady ? 44 : 0,
             display: 'flex',
             justifyContent: 'center',
