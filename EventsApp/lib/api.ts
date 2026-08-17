@@ -601,7 +601,6 @@ export interface RegisterDTO {
   first_name: string;
   last_name: string;
   phone_number: string;
-  date_of_birth: string;
 }
 
 // ── Auth API calls ─────────────────────────────────────────────────────────
@@ -615,6 +614,42 @@ export const authRegister = (dto: RegisterDTO) =>
 // Send our refresh token so the server revokes ONLY this device's session —
 // logging out of the app no longer logs you out of the web (and vice versa).
 // Older backend builds ignore the body, so this is backwards-compatible.
+export interface SocialSignInBody {
+  provider: 'google' | 'apple';
+  id_token: string;
+  nonce?: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+export interface SocialSignInResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  created: boolean;   // brand-new account provisioned
+  linked: boolean;    // provider attached to an existing password account
+  needs_info: boolean; // phone / DOB still blank — checkout will ask
+  user: { id: string; email: string; first_name?: string; last_name?: string; role: string };
+}
+
+/**
+ * Exchanges a provider ID token for a TicketHawk session.
+ *
+ * One endpoint covers signup AND login: only the server can know which it is,
+ * because only the server can see whether that provider identity (or email)
+ * already maps to an account.
+ */
+export const authSocial = (body: SocialSignInBody) =>
+  api.post<SocialSignInResponse>('/v1/auth/social', body);
+
+export const getLinkedIdentities = () =>
+  api.get<{ data: Array<{ provider: string; email?: string; created_at: string; last_login_at?: string }> }>(
+    '/v1/auth/identities',
+  );
+
+export const unlinkIdentity = (provider: 'google' | 'apple') =>
+  api.delete(`/v1/auth/identities/${provider}`);
+
 export const authLogout = async () =>
   api.post('/v1/auth/logout', {
     refresh_token: (await getRefreshToken()) ?? '',

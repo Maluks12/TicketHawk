@@ -12,24 +12,9 @@ import { s, sheet, fieldSheet } from '../../styles/auth';
 import { useAppTheme } from '../../theme/colors';
 import BrandLogo from '../../components/BrandLogo';        // ADD
 import { openLegal } from '../../lib/legalLinks';
+import SocialAuthButtons from '../../components/socialAuthButtons';
 
 type Mode = 'login' | 'register';
-
-// ─── DOB helpers (module scope so they never change identity) ────────────────
-
-const formatDob = (raw: string) => {
-  const d = raw.replace(/\D/g, '').slice(0, 8);
-  if (d.length > 4) return `${d.slice(0,2)}/${d.slice(2,4)}/${d.slice(4)}`;
-  if (d.length > 2) return `${d.slice(0,2)}/${d.slice(2)}`;
-  return d;
-};
-
-const parseDobToISO = (f: string) => {
-  const [dd, mm, yyyy] = f.split('/');
-  if (!dd || !mm || !yyyy || yyyy.length < 4) return null;
-  const d = new Date(`${yyyy}-${mm}-${dd}`);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-};
 
 // ─── Field ────────────────────────────────────────────────────────────────────
 
@@ -175,7 +160,6 @@ export default function AuthScreen() {
   const [lastName,      setLastName]      = useState('');
   const [regEmail,      setRegEmail]      = useState('');
   const [phone,         setPhone]         = useState('');
-  const [dob,           setDob]           = useState('');
   const [regPassword,   setRegPassword]   = useState('');
   const [confirmPass,   setConfirmPass]   = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -184,7 +168,6 @@ export default function AuthScreen() {
   const lastNameRef  = useRef<TextInput>(null);
   const emailRef     = useRef<TextInput>(null);
   const phoneRef     = useRef<TextInput>(null);
-  const dobRef       = useRef<TextInput>(null);
   const passRef      = useRef<TextInput>(null);
   const confirmRef   = useRef<TextInput>(null);
 
@@ -222,13 +205,11 @@ export default function AuthScreen() {
   const focusLastName  = useCallback(() => lastNameRef.current?.focus(),  []);
   const focusEmail     = useCallback(() => emailRef.current?.focus(),     []);
   const focusPhone     = useCallback(() => phoneRef.current?.focus(),     []);
-  const focusDob       = useCallback(() => dobRef.current?.focus(),       []);
   const focusPass      = useCallback(() => passRef.current?.focus(),      []);
   const focusConfirm   = useCallback(() => confirmRef.current?.focus(),   []);
 
   const toggleAgreed = useCallback(() => { setAgreed(a => !a); clearErr('agreed'); }, [clearErr]);
 
-  const onDob = useCallback((v: string) => { setDob(formatDob(v)); clearErr('dob'); }, [clearErr]);
 
   // Live password requirements shown under the Password field.
   const passChecks = [
@@ -248,7 +229,6 @@ export default function AuthScreen() {
     lastName.trim().length > 0 &&
     /\S+@\S+\.\S+/.test(regEmail) &&
     phoneIsValid(phone) &&
-    !!parseDobToISO(dob) &&
     passAllOk &&
     confirmPass === regPassword &&
     agreed;
@@ -268,6 +248,18 @@ export default function AuthScreen() {
     } finally { setLoading(false); }
   }, [loginEmail, loginPassword, login, router]);
 
+  // Social sign-in lands here. Same destination as a password login —
+  // router.back() returns the user to whatever sent them to the login screen,
+  // which is what makes the booking deep-link -> sign in -> ticket path work.
+  //
+  // `needsInfo` is not acted on here by design: phone number and date of birth
+  // are collected at checkout, so a new social user goes straight into the app
+  // and is only asked once they actually try to buy something.
+  const onSocialSuccess = useCallback((_info: { created: boolean; needsInfo: boolean }) => {
+    setGlobalErr(null);
+    router.back();
+  }, [router]);
+
   const handleRegister = useCallback(async () => {
     const errs: Record<string, string> = {};
     if (!firstName.trim()) errs.firstName = 'Required';
@@ -276,8 +268,6 @@ export default function AuthScreen() {
     else if (!/\S+@\S+\.\S+/.test(regEmail)) errs.regEmail = 'Enter a valid email';
     if (!phone.trim())     errs.phone     = 'Required';
     else if (!phoneIsValid(phone)) errs.phone = 'Enter a valid number';
-    if (!dob)              errs.dob       = 'Required';
-    else if (!parseDobToISO(dob)) errs.dob = 'Use DD/MM/YYYY';
     if (!regPassword)      errs.regPassword = 'Required';
     else if (!passAllOk)   errs.regPassword = 'Password does not meet all requirements';
     if (confirmPass !== regPassword) errs.confirmPass = "Passwords don't match";
@@ -288,14 +278,14 @@ export default function AuthScreen() {
       await register({
         email: regEmail.trim().toLowerCase(), password: regPassword,
         first_name: firstName.trim(), last_name: lastName.trim(),
-        phone_number: phoneToLocal(phone), date_of_birth: parseDobToISO(dob)!,
+        phone_number: phoneToLocal(phone),
       });
       router.back();
     } catch (e: any) {
       const msg = e?.response?.data?.error ?? '';
       setGlobalErr(msg.toLowerCase().includes('email') ? 'An account with this email already exists.' : msg || 'Something went wrong.');
     } finally { setLoading(false); }
-  }, [firstName, lastName, regEmail, phone, dob, regPassword, confirmPass, agreed, passAllOk, register, router]);
+  }, [firstName, lastName, regEmail, phone, regPassword, confirmPass, agreed, passAllOk, register, router]);
 
 
   // Tab indicator: measured once on layout, then moved with a native-driver
@@ -404,6 +394,14 @@ export default function AuthScreen() {
                   : <Text className={s.ctaText} style={{ color: loginFormValid ? (isDark ? '#0a0a0a' : '#ffffff') : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)') }}>Log in</Text>}
               </TouchableOpacity>
 
+              {/* Google + Apple. Signing in and signing up are the same tap —
+                  the server decides which it is — so these render identically
+                  on both tabs and simply say "continue with". */}
+              <SocialAuthButtons
+                dividerLabel="or continue with"
+                disabled={loading}
+                onSuccess={onSocialSuccess}
+              />
 
               <TouchableOpacity className={s.switchRow} onPress={goRegister}>
                 <Text className={s.switchText} style={{ color: colors.subText }}>Don't have an account?{'  '}<Text className={s.switchLink}>Sign up</Text></Text>
@@ -444,15 +442,11 @@ export default function AuthScreen() {
                   <Field placeholder="Phone number" value={phone}
                   onChange={onPhone}
                   keyboardType="phone-pad" inputRef={phoneRef} error={errors.phone}
-                  returnKeyType="next" onSubmit={focusDob} isDark={isDark} />
+                  returnKeyType="next" onSubmit={focusPass} isDark={isDark} />
 
                 </View>
               </View>
 
-              <Field placeholder="Date of birth (DD/MM/YYYY)" value={dob}
-                onChange={onDob}
-                keyboardType="numeric" inputRef={dobRef} error={errors.dob}
-                returnKeyType="next" onSubmit={focusPass} isDark={isDark} />
 
               <Field placeholder="Password" value={regPassword}
               onChange={onRegPassword}
@@ -526,6 +520,11 @@ export default function AuthScreen() {
                   : <Text className={s.ctaText} style={{ color: regFormValid ? (isDark ? '#0a0a0a' : '#ffffff') : (isDark ? 'rgba(255,255,255,0.35)' : 'rgba(10,10,10,0.35)') }}>Sign up</Text>}
               </TouchableOpacity>
 
+              <SocialAuthButtons
+                dividerLabel="or continue with"
+                disabled={loading}
+                onSuccess={onSocialSuccess}
+              />
 
               <TouchableOpacity className={s.switchRow} onPress={goLogin}>
                 <Text className={s.switchText} style={{ color: colors.subText }}>Already have an account?{'  '}<Text className={s.switchLink}>Log in</Text></Text>

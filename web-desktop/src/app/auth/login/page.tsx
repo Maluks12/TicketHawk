@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { CheckCircle2, Calendar, ChevronLeft, ChevronRight, AlertCircle, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
+import SocialAuthButtons from '@/components/socialAuthButtons';
 import { useAppTheme } from '@/themes/colors';
 import { resolveReturnPath, clearReturnPath } from '@/lib/returnPath';
 
@@ -14,7 +15,7 @@ type Mode = 'login' | 'register';
 const FIELD_LABELS: Record<string, string> = {
   loginEmail: 'Email', loginPassword: 'Password',
   firstName: 'First name', lastName: 'Last name',
-  regEmail: 'Email', phone: 'Phone number', dob: 'Date of birth',
+  regEmail: 'Email', phone: 'Phone number',
   regPassword: 'Password', confirmPass: 'Confirm password', agreed: 'Terms',
 };
 
@@ -61,17 +62,6 @@ function Field({ placeholder, value, onChange, type = 'text', error, autoComplet
 // As the person types digits, slashes get inserted automatically after the
 // day and month groups (DD/MM/YYYY). Deleting a slash also removes the digit
 // right before it, so backspace feels natural instead of getting "stuck".
-function formatDobInput(raw: string, prev: string): string {
-  let digits = raw.replace(/\D/g, '').slice(0, 8);
-  const prevDigits = prev.replace(/\D/g, '');
-  if (raw.length < prev.length && digits.length === prevDigits.length) {
-    digits = digits.slice(0, -1);
-  }
-  let out = digits.slice(0, 2);
-  if (digits.length > 2) out += '/' + digits.slice(2, 4);
-  if (digits.length > 4) out += '/' + digits.slice(4, 8);
-  return out;
-}
 
 const DOB_WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const DOB_MONTH_NAMES = [
@@ -79,176 +69,7 @@ const DOB_MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-function DobCalendarPopover({
-  value, isDark, onSelect,
-}: {
-  value: string; isDark: boolean;
-  onSelect: (day: number, month: number, year: number) => void;
-}) {
-  const [dd, mm, yyyy] = value.split('/');
-  const parsedDay   = /^\d{1,2}$/.test(dd ?? '')   ? parseInt(dd, 10)   : null;
-  const parsedMonth = /^\d{1,2}$/.test(mm ?? '')   ? parseInt(mm, 10) - 1 : null;
-  const parsedYear  = /^\d{4}$/.test(yyyy ?? '')   ? parseInt(yyyy, 10) : null;
 
-  const now = new Date();
-  const [viewMonth, setViewMonth] = useState(parsedMonth ?? now.getMonth());
-  const [viewYear,  setViewYear]  = useState(parsedYear  ?? now.getFullYear() - 18);
-
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-  const goPrev = () => { if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); } else setViewMonth((m) => m - 1); };
-  const goNext = () => { if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); } else setViewMonth((m) => m + 1); };
-
-  const daysInMonth     = new Date(viewYear, viewMonth + 1, 0).getDate();
-  const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
-  const cells: (number | null)[] = Array(firstDayOfMonth).fill(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-
-  const currentYear = now.getFullYear();
-  const years = Array.from({ length: 101 }, (_, i) => currentYear - i);
-
-  const selectStyle = {
-    flex: 1, fontSize: 12.5, fontWeight: 700, borderRadius: 8, padding: '6px 6px',
-    background: isDark ? '#1c1c1c' : '#f5f5f5', color: isDark ? '#fff' : '#0a0a0a',
-    border: `1px solid ${isDark ? '#333' : '#e0e0e0'}`, outline: 'none', cursor: 'pointer',
-  };
-
-  return (
-    <div
-      style={{
-        position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, zIndex: 50,
-        background: isDark ? '#161616' : '#fff', border: `1px solid ${isDark ? '#2a2a2a' : '#e5e5e5'}`,
-        borderRadius: 14, padding: 14, boxShadow: '0 12px 32px rgba(0,0,0,0.35)',
-      }}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* Quick month / year jump — a plain month-by-month calendar would take
-          forever to reach a birth year decades back. */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <select value={viewMonth} onChange={(e) => setViewMonth(Number(e.target.value))} style={selectStyle}>
-          {DOB_MONTH_NAMES.map((m, i) => <option key={m} value={i}>{m}</option>)}
-        </select>
-        <select value={viewYear} onChange={(e) => setViewYear(Number(e.target.value))} style={selectStyle}>
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <button type="button" onClick={goPrev} style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: isDark ? '#999' : '#666' }}>
-          <ChevronLeft size={14} />
-        </button>
-        <span style={{ fontSize: 13, fontWeight: 700, color: isDark ? '#fff' : '#0a0a0a' }}>{DOB_MONTH_NAMES[viewMonth]} {viewYear}</span>
-        <button type="button" onClick={goNext} style={{ width: 26, height: 26, borderRadius: '50%', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: isDark ? '#999' : '#666' }}>
-          <ChevronRight size={14} />
-        </button>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: 2 }}>
-        {DOB_WEEKDAY_LABELS.map((d) => (
-          <div key={d} style={{ textAlign: 'center', fontSize: 9, fontWeight: 900, letterSpacing: 0.4, color: isDark ? '#777' : '#999', padding: '2px 0' }}>{d}</div>
-        ))}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
-        {cells.map((day, idx) => {
-          if (!day) return <div key={`pad-${idx}`} style={{ height: 30 }} />;
-          const dateStr    = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const isFuture   = dateStr > todayStr;
-          const isSelected = parsedDay === day && parsedMonth === viewMonth && parsedYear === viewYear;
-          return (
-            <div key={day} style={{ height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <button
-                type="button"
-                disabled={isFuture}
-                onClick={() => onSelect(day, viewMonth, viewYear)}
-                style={{
-                  width: 26, height: 26, borderRadius: '50%', fontSize: 12, border: 'none',
-                  cursor: isFuture ? 'not-allowed' : 'pointer',
-                  background: isSelected ? '#ff2d55' : 'transparent',
-                  color: isFuture ? (isDark ? '#3a3a3a' : '#d5d5d5') : isSelected ? '#fff' : (isDark ? '#fff' : '#0a0a0a'),
-                  fontWeight: isSelected ? 700 : 400,
-                }}
-              >
-                {day}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function DobField({ value, onChange, error }: { value: string; onChange: (v: string) => void; error?: string }) {
-  const [focused, setFocused]           = useState(false);
-  const [calendarOpen, setCalendarOpen] = useState(false);
-  const { isDark } = useAppTheme();
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!calendarOpen) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setCalendarOpen(false);
-    };
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [calendarOpen]);
-
-  return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ position: 'relative' }}>
-          <input
-            type="text"
-            inputMode="numeric"
-            value={value}
-            onChange={(e) => onChange(formatDobInput(e.target.value, value))}
-            placeholder="Date of birth (DD/MM/YYYY)"
-            autoComplete="bday"
-            maxLength={10}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            style={{
-              background: isDark ? '#1c1c1c' : '#f5f5f5',
-              color: isDark ? '#fff' : '#0a0a0a',
-              border: `1.5px solid ${error ? '#ff3c6e' : focused ? (isDark ? '#555' : '#0a0a0a') : (isDark ? '#333' : '#e0e0e0')}`,
-              borderRadius: 10,
-              padding: '12px 44px 12px 14px',
-              fontSize: 15,
-              outline: 'none',
-              width: '100%',
-              boxSizing: 'border-box' as const,
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => setCalendarOpen((o) => !o)}
-            aria-label="Choose date from calendar"
-            style={{
-              position: 'absolute', right: 7, top: '50%', transform: 'translateY(-50%)',
-              width: 30, height: 30, borderRadius: 8, border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: calendarOpen ? '#ff2d55' : 'transparent',
-            }}
-          >
-            <Calendar size={17} color={calendarOpen ? '#fff' : (isDark ? '#999' : '#666')} />
-          </button>
-        </div>
-        {error && <span style={{ color: '#ff3c6e', fontSize: 12, fontWeight: 600 }}>{error}</span>}
-      </div>
-      {calendarOpen && (
-        <DobCalendarPopover
-          value={value}
-          isDark={isDark}
-          onSelect={(day, month, year) => {
-            onChange(`${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`);
-            setCalendarOpen(false);
-          }}
-        />
-      )}
-    </div>
-  );
-}
 
 export default function AuthPage() {
   const router = useRouter();
@@ -280,7 +101,6 @@ export default function AuthPage() {
   const [lastName, setLastName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [dob, setDob] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
 
@@ -288,12 +108,6 @@ export default function AuthPage() {
 
   const switchMode = (m: Mode) => { setMode(m); setGlobalErr(null); setErrors({}); setShowErrorToast(false); };
 
-  const parseDobToISO = (f: string) => {
-    const [dd, mm, yyyy] = f.split('/');
-    if (!dd || !mm || !yyyy || yyyy.length < 4) return null;
-    const d = new Date(`${yyyy}-${mm}-${dd}`);
-    return isNaN(d.getTime()) ? null : d.toISOString();
-  };
 
   // South African national numbers are 10 digits (0XX XXX XXXX) — the +27
   // box next to this field is just the country code display, so cap the
@@ -352,8 +166,6 @@ export default function AuthPage() {
     else if (!/\S+@\S+\.\S+/.test(regEmail)) errs.regEmail = 'Enter a valid email';
     if (!phone.trim()) errs.phone = 'Required';
     else if (!isValidSaPhone(phone)) errs.phone = 'Enter a valid number';
-    if (!dob) errs.dob = 'Required';
-    else if (!parseDobToISO(dob)) errs.dob = 'Use DD/MM/YYYY';
     if (!regPassword) errs.regPassword = 'Required';
     else if (!(regPassword.length >= 8 && /[A-Z]/.test(regPassword) && /[0-9]/.test(regPassword) && /[^A-Za-z0-9\s]/.test(regPassword))) errs.regPassword = 'Password does not meet all requirements';
     if (confirmPass !== regPassword) errs.confirmPass = "Passwords don't match";
@@ -364,14 +176,14 @@ export default function AuthPage() {
       await register({
         email: regEmail.trim().toLowerCase(), password: regPassword,
         first_name: firstName.trim(), last_name: lastName.trim(),
-        phone_number: phone.trim(), date_of_birth: parseDobToISO(dob)!,
+        phone_number: phone.trim(),
       });
       goAfterAuth();
     } catch (e: any) {
       const msg = e?.response?.data?.error ?? '';
       setGlobalErr(msg.toLowerCase().includes('email') ? 'An account with this email already exists.' : msg || 'Something went wrong.');
     } finally { setLoading(false); }
-  }, [firstName, lastName, regEmail, phone, dob, regPassword, confirmPass, agreed, register, router]);
+  }, [firstName, lastName, regEmail, phone, regPassword, confirmPass, agreed, register, router]);
 
   const bg = isDark ? '#0a0a0a' : '#f5f5f7';
   const cardBg = isDark ? '#111' : '#fff';
@@ -470,6 +282,11 @@ export default function AuthPage() {
             <p style={{ textAlign: 'center', fontSize: 13, color: colors.subText, margin: 0 }}>
               <span onClick={() => router.push('/reset-password')} style={{ color: '#ff2d55', fontWeight: 700, cursor: 'pointer' }}>Forgot password?</span>
             </p>
+
+            {/* Google + Apple. One tap covers both signup and login — the
+                server decides which, since only it can see whether this
+                provider identity already maps to an account. */}
+            <SocialAuthButtons isDark={isDark} onAuthed={goAfterAuth} />
             <p style={{ textAlign: 'center', fontSize: 13, color: colors.subText, margin: 0 }}>
               Don&apos;t have an account?{' '}
               <span onClick={() => switchMode('register')} style={{ color: '#ff2d55', fontWeight: 700, cursor: 'pointer' }}>Sign up</span>
@@ -508,7 +325,6 @@ export default function AuthPage() {
                 <Field placeholder="Phone number" value={phone} onChange={(v) => { setPhone(formatPhoneInput(v)); clearErr('phone'); }} type="tel" error={errors.phone} autoComplete="tel" />
               </div>
             </div>
-            <DobField value={dob} onChange={(v) => { setDob(v); clearErr('dob'); }} error={errors.dob} />
             {/* Terms */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 4 }}>
               <div onClick={() => { setAgreed((a) => !a); clearErr('agreed'); }} style={{
