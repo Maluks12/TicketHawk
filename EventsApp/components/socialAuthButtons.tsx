@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/authStore';
 import {
   isAppleAvailable, signInWithApple, useGoogleSignIn,
   SocialAuthCancelled, type SocialCredential,
+  SocialAuthProviderError,
 } from '../lib/socialAuth';
 import { useAppTheme } from '../theme/colors';
 
@@ -73,10 +74,10 @@ export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or contin
         Alert.alert('Account unavailable', serverMessage);
       } else if (status === 501) {
         Alert.alert('Unavailable', 'That sign-in method isn\u2019t available right now. Please use your email and password.');
+      } else if (err instanceof SocialAuthProviderError) {
+        Alert.alert('Sign-in failed', err.message);
       } else if (!err?.response) {
         Alert.alert('No connection', 'Check your connection and try again.');
-      } else {
-        Alert.alert('Sign-in failed', serverMessage ?? 'Something went wrong. Please try again.');
       }
     } finally {
       setBusy(null);

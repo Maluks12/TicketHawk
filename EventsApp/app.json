@@ -15,7 +15,14 @@
         "applinks:www.ticket-hawk.com"
       ],
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+    {
+      "CFBundleURLSchemes": [
+        "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
+      ]
+    }
+  ]
       },
       "usesAppleSignIn": true
     },
