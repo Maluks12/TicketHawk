@@ -27,6 +27,26 @@ type User struct {
 	EmailVerificationExpires *time.Time `json:"-" db:"email_verification_expires"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+
+	// ── Sign-in method, for the client's benefit ─────────────────────────────
+	//
+	// Since 000075 an account can exist with password IS NULL (created through
+	// Google or Apple). The client cannot infer that from anything else it
+	// receives, and it needs to know two things:
+	//
+	//   • Whether to demand a current password before an email change, or run
+	//     the provider flow instead. Demanding a password the account has never
+	//     had is an unclearable form error.
+	//   • Whether to offer "Set a password" on the profile screen.
+	//
+	// Password itself stays `json:"-"` — this is a boolean ABOUT the password,
+	// never the hash.
+	HasPassword bool `json:"has_password" db:"-"`
+
+	// Providers linked to this account ("google", "apple"). Empty for a
+	// password-only account. Lets the client name the right button — "Confirm
+	// with Apple" rather than a generic prompt.
+	LinkedProviders []string `json:"linked_providers" db:"-"`
 }
 
 type UserProfile struct {

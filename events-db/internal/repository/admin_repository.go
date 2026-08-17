@@ -227,15 +227,39 @@ func GetUserProfile(pool *pgxpool.Pool, userID string) (*models.User, error) {
 	defer cancel()
 
 	var u models.User
+
+	// has_password and the linked provider list are computed here rather than
+	// in a second round trip: the profile screen needs all three to decide what
+	// to render (whether to demand a current password for an email change,
+	// whether to offer "Set a password", which provider button to show), and
+	// splitting them means the screen can render in a state that contradicts
+	// itself while the second call is still in flight.
+	//
+	// password IS NOT NULL is a boolean ABOUT the hash — the hash itself never
+	// leaves this query.
+	var providers []string
 	err := pool.QueryRow(ctx, `
-		SELECT id, email, first_name, last_name, phone_number, role, created_at
-		FROM users WHERE id = $1
+		SELECT u.id, u.email, u.first_name, u.last_name, u.phone_number, u.role, u.created_at,
+		       (u.password IS NOT NULL AND u.password <> '') AS has_password,
+		       COALESCE(
+		           ARRAY(
+		               SELECT ui.provider FROM user_identities ui
+		               WHERE ui.user_id = u.id ORDER BY ui.created_at
+		           ),
+		           '{}'
+		       ) AS linked_providers
+		FROM users u WHERE u.id = $1
 	`, userID).Scan(
 		&u.ID, &u.Email, &u.FirstName, &u.LastName,
 		&u.PhoneNumber, &u.Role, &u.CreatedAt,
+		&u.HasPassword, &providers,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetUserProfile: %w", err)
 	}
+	if providers == nil {
+		providers = []string{}
+	}
+	u.LinkedProviders = providers
 	return &u, nil
 }

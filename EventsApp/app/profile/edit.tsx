@@ -9,6 +9,11 @@ import { useRouter } from 'expo-router';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useAppTheme } from '../../theme/colors';
+import {
+  signInWithApple, signInWithGoogle,
+  SocialAuthCancelled, SocialAuthProviderError,
+  type SocialCredential,
+} from '../../lib/socialAuth';
 
 // ── Edit profile ─────────────────────────────────────────────────────────────
 //
@@ -64,6 +69,31 @@ export default function EditProfileScreen() {
   const [saving,    setSaving]    = useState(false);
   const [errors,    setErrors]    = useState<Record<string, string>>({});
 
+  // ── Password vs social accounts ────────────────────────────────────────────
+  //
+  // Since migration 000075 an account can exist with no password at all — one
+  // created through Google or Apple. Two things on this screen assumed every
+  // account had one, and both were unclearable dead ends for those users:
+  //
+  //   • Phone validation ran unconditionally. A social account starts with
+  //     phone_number NULL, so the field initialised blank, failed validation,
+  //     and blocked EVERY save — including simply correcting a first name —
+  //     with "Enter a valid number" on a field the user was never asked to
+  //     fill and had no idea was required.
+  //
+  //   • An email change demanded the current password. There isn't one. The
+  //     server now accepts a fresh provider token as equivalent proof (see
+  //     handlers/reauth.go); this screen has to offer that instead of a field
+  //     the user can never satisfy.
+  //
+  // has_password and linked_providers come from GET /v1/user/me.
+  const hasPassword = (user as any)?.has_password !== false;
+  const linkedProviders: string[] = (user as any)?.linked_providers ?? [];
+  const socialProvider: 'apple' | 'google' | null =
+    linkedProviders.includes('apple') ? 'apple'
+    : linkedProviders.includes('google') ? 'google'
+    : null;
+
   // Only changed fields are sent. Comparing against the loaded user also means
   // an untouched form submits nothing and the server replies "No changes".
   const patch = useMemo(() => {
@@ -82,19 +112,51 @@ export default function EditProfileScreen() {
     const e: Record<string, string> = {};
     if (!firstName.trim()) e.first_name = 'Required';
     if (!lastName.trim())  e.last_name  = 'Required';
-    if (!phoneIsValid(phone)) e.phone_number = 'Enter a valid number';
+    // Validate the phone number only if there IS one, or the user is entering
+    // one now. A blank field on an account that never had a number is not an
+    // error — it is the normal state of a social account, and treating it as
+    // one prevented those users from saving anything at all.
+    if (phone.trim() && !phoneIsValid(phone)) e.phone_number = 'Enter a valid number';
     if (!emailIsValid(email)) e.email = 'Enter a valid email address';
-    // Only demanded when the identifier itself is moving.
-    if (emailChanging && !password) e.current_password = 'Enter your current password';
+    // Only demanded when the identifier itself is moving, AND only from
+    // accounts that actually have a password. Social accounts confirm with
+    // their provider instead — see confirmWithProvider below.
+    if (emailChanging && hasPassword && !password) e.current_password = 'Enter your current password';
     setErrors(e);
     return Object.keys(e).length === 0;
-  }, [firstName, lastName, phone, email, emailChanging, password]);
+  }, [firstName, lastName, phone, email, emailChanging, password, hasPassword]);
+
+  // Re-runs the linked provider's sign-in sheet to prove the person at the
+  // device still controls the account. This is the social equivalent of typing
+  // your password, and the server rejects the token unless its subject is
+  // already linked to this account.
+  const confirmWithProvider = useCallback(async (): Promise<SocialCredential> => {
+    if (socialProvider === 'apple') return signInWithApple();
+    if (socialProvider === 'google') return signInWithGoogle();
+    throw new SocialAuthProviderError(
+      'This account has no password and no connected sign-in method. Use "Forgot password" to set one.',
+    );
+  }, [socialProvider]);
 
   const save = useCallback(async () => {
     if (!validate() || !dirty) return;
     setSaving(true);
     try {
-      const body = emailChanging ? { ...patch, current_password: password } : patch;
+      // Build the step-up credential for an email change. Password accounts
+      // send current_password; social accounts re-run their provider flow and
+      // send the fresh ID token, which the server checks is linked to THIS
+      // account before accepting it.
+      let body: Record<string, unknown> = { ...patch };
+      if (emailChanging) {
+        if (hasPassword) {
+          body.current_password = password;
+        } else {
+          const cred = await confirmWithProvider();
+          body.provider = cred.provider;
+          body.id_token = cred.idToken;
+          if (cred.nonce) body.nonce = cred.nonce;
+        }
+      }
       const { data } = await api.patch('/v1/user/me', body);
       if (data?.user) applyUser(data.user);
       setPassword('');
@@ -109,6 +171,14 @@ export default function EditProfileScreen() {
         router.back();
       }
     } catch (err: any) {
+      // The user backed out of the Apple/Google sheet. Not an error, and an
+      // alert here would be noise.
+      if (err instanceof SocialAuthCancelled) { setSaving(false); return; }
+      if (err instanceof SocialAuthProviderError) {
+        Alert.alert('Could not confirm', err.message);
+        setSaving(false);
+        return;
+      }
       const msg = err?.response?.data?.error ?? 'Could not save your changes. Please try again.';
       // 409 is the "email already in use" case and belongs on the field rather
       // than in an alert the user has to dismiss before they can fix it.
@@ -118,11 +188,15 @@ export default function EditProfileScreen() {
         // Belongs on the field, not in an alert the user must dismiss before
         // they can retype it.
         setErrors((p) => ({ ...p, current_password: msg }));
+      } else if (code === 'reauth_wrong_account') {
+        // Verified token, wrong person — they signed in with a different
+        // Google/Apple account than the one linked here.
+        Alert.alert('Wrong account', msg);
       } else Alert.alert('Something went wrong', msg);
     } finally {
       setSaving(false);
     }
-  }, [validate, dirty, patch, emailChanging, password, applyUser, router]);
+  }, [validate, dirty, patch, emailChanging, password, hasPassword, confirmWithProvider, applyUser, router]);
 
   const onSavePress = useCallback(() => {
     if (!emailChanging) { save(); return; }
@@ -208,10 +282,31 @@ export default function EditProfileScreen() {
           autoCorrect: false, textContentType: 'emailAddress',
         }, emailChanging ? 'You\u2019ll need to confirm this new address' : 'You sign in with this address')}
 
-        {emailChanging && field('Current password', password, setPassword, 'current_password', {
+        {/* Password accounts confirm here. Social accounts have no password to
+            type, so they get an explanation instead and confirm through their
+            provider's sheet when they hit Save. Rendering an unfillable
+            password box for them is the dead end this replaces. */}
+        {emailChanging && hasPassword && field('Current password', password, setPassword, 'current_password', {
           secureTextEntry: true, autoCapitalize: 'none', autoCorrect: false,
           textContentType: 'password',
         }, 'Required to change the address you sign in with')}
+
+        {emailChanging && !hasPassword && (
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 10,
+            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+            borderRadius: 12, padding: 14, marginBottom: 16,
+          }}>
+            <Feather name="shield" size={17} color={colors.subText} />
+            <Text style={{ color: colors.subText, fontSize: 13, flex: 1, lineHeight: 18 }}>
+              {socialProvider === 'apple'
+                ? 'You\u2019ll confirm with Apple when you save.'
+                : socialProvider === 'google'
+                ? 'You\u2019ll confirm with Google when you save.'
+                : 'This account has no password set. Use \u201cForgot password\u201d to set one first.'}
+            </Text>
+          </View>
+        )}
 
         <TouchableOpacity
           onPress={onSavePress}
