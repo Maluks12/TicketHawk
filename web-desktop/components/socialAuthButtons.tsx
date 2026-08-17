@@ -7,19 +7,18 @@ import { useAuthStore } from '@/store/authStore';
 
 // ─── Web social sign-in ──────────────────────────────────────────────────────
 //
-// Both providers work the same way here: their JS SDK runs the interactive
-// flow in a popup and hands back an ID token, which goes to POST
-// /v1/auth/social. The server does the verifying. No secret is present on this
-// page, and none may be added — anything in a client bundle is public.
+// Both providers work the same way: their JS SDK runs the interactive flow in a
+// popup and hands back an ID token, which goes to POST /v1/auth/social. The
+// server does the verifying. No secret is present on this page, and none may be
+// added — anything in a client bundle is public.
 //
 // ── Why the SDKs are loaded lazily ───────────────────────────────────────────
 //
 // Google Identity Services and Apple's AppleID JS are third-party scripts on
 // third-party domains. Putting them in the root layout means every page load —
-// including the event pages that carry the SEO — blocks on two external
-// requests that only the auth page needs. They are injected on mount here
-// instead, so a script outage degrades the sign-in buttons rather than the
-// whole site.
+// including the event pages carrying the SEO — blocks on two external requests
+// that only this page needs. They are injected on mount here instead, so a
+// script outage degrades the sign-in buttons rather than the whole site.
 
 declare global {
   interface Window {
@@ -52,8 +51,7 @@ function loadScript(src: string, id: string): Promise<void> {
   });
 }
 
-/** Random nonce, hex. The raw value goes to our API; Apple gets it too (it
- *  hashes internally on web, unlike the native SDK where WE must hash). */
+/** Random nonce, hex. Google's GIS hashes it internally and compares. */
 function makeNonce(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
@@ -63,15 +61,19 @@ function makeNonce(): string {
 interface Props {
   /**
    * Called after a successful sign-in. The login page passes its own
-   * goAfterAuth, so social and password sign-in land in exactly the same
-   * place — including honouring the ?next= that the booking deep link sets.
+   * goAfterAuth, so social and password sign-in land in exactly the same place
+   * — including honouring the ?next= that the booking deep link sets.
    */
   onAuthed?: () => void;
   dividerLabel?: string;
   isDark?: boolean;
 }
 
-export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continue with', isDark = true }: Props) {
+export default function SocialAuthButtons({
+  onAuthed,
+  dividerLabel = 'or continue with',
+  isDark = true,
+}: Props) {
   const router = useRouter();
   const applyUser = useAuthStore((s) => s.applyUser);
 
@@ -97,18 +99,49 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
     else router.back();
   }, [applyUser, onAuthed, router]);
 
-  const handleError = useCallback((err: any) => {
+  // ── Error surfacing ────────────────────────────────────────────────────────
+  //
+  // Every failure is logged to the console as well as shown. The first version
+  // only set state, which meant a provider-side config error produced a
+  // misleading "check your connection" on screen and NOTHING in devtools — the
+  // one place a developer would look. An unexplained failure with an empty
+  // console is worse than a noisy one.
+  //
+  // Provider SDK rejections don't look like axios errors: Apple rejects with
+  // { error: 'popup_closed_by_user' }, Google with { type, ... }. Neither has a
+  // `.response`, so collapsing "no .response" into a network message hid them
+  // both.
+  const handleError = useCallback((where: string, err: any) => {
+    // eslint-disable-next-line no-console
+    console.error(`[social-auth] ${where} failed`, err);
+
     const status = err?.response?.status;
-    const msg = err?.response?.data?.error;
-    if (status === 403 && msg) setError(msg);
-    else if (status === 501) setError('That sign-in method isn\u2019t available right now.');
-    else if (!err?.response) setError('Check your connection and try again.');
-    else setError(msg ?? 'Sign-in failed. Please try again.');
+    const serverMsg = err?.response?.data?.error;
+
+    if (status === 403 && serverMsg) {
+      setError(serverMsg);                       // deleted account
+    } else if (status === 501) {
+      setError('That sign-in method isn\u2019t available right now.');
+    } else if (status) {
+      setError(serverMsg ?? 'Sign-in failed. Please try again.');
+    } else if (err?.error) {
+      // Provider SDK rejection — surface the provider's own code.
+      setError(`${where}: ${err.error}`);
+    } else if (err?.message) {
+      setError(err.message);
+    } else {
+      setError('Sign-in failed. Please try again.');
+    }
   }, []);
 
   // ── Google Identity Services ───────────────────────────────────────────────
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
+    if (!GOOGLE_CLIENT_ID) {
+      // eslint-disable-next-line no-console
+      console.error('[social-auth] NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set. ' +
+        'NEXT_PUBLIC_* is inlined at BUILD time — setting it after `next build` has no effect.');
+      return;
+    }
     let cancelled = false;
 
     loadScript('https://accounts.google.com/gsi/client', 'gsi-client')
@@ -118,15 +151,21 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
         window.google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           nonce: nonceRef.current,
-          // We want an ID token, not a code — there is no server-side exchange.
           callback: async (resp: { credential?: string }) => {
-            if (!resp?.credential) return;
+            if (!resp?.credential) {
+              handleError('Google', new Error('Google returned no credential'));
+              return;
+            }
             setBusy('google');
             setError(null);
             try {
-              await exchange({ provider: 'google', id_token: resp.credential, nonce: nonceRef.current });
+              await exchange({
+                provider: 'google',
+                id_token: resp.credential,
+                nonce: nonceRef.current,
+              });
             } catch (err) {
-              handleError(err);
+              handleError('Google', err);
             } finally {
               setBusy(null);
             }
@@ -134,20 +173,27 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
         });
         setGoogleReady(true);
       })
-      .catch(() => setGoogleReady(false));
+      .catch((err) => {
+        handleError('Google script', err);
+        setGoogleReady(false);
+      });
 
     return () => { cancelled = true; };
   }, [exchange, handleError]);
 
-  // Renders Google's own button into the div below. Using their rendered button
-  // rather than a custom one keeps us inside their branding terms and gets One
-  // Tap behaviour for free.
+  // Google renders its own button into this node. Using their rendered button
+  // rather than a custom one keeps us inside their branding terms — which also
+  // means it CANNOT be freely restyled to match the Apple button exactly.
+  // `shape: 'pill'` and a matching max width get it as close as their terms
+  // allow; the wrapper below constrains it so both buttons share a width and
+  // centre line instead of the Google one sitting at its own fixed 320px.
   const googleButtonRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!googleReady || !googleButtonRef.current || !window.google?.accounts?.id) return;
     window.google.accounts.id.renderButton(googleButtonRef.current, {
       theme: isDark ? 'filled_black' : 'outline',
       size: 'large',
+      // Google caps this at 400 and ignores percentages — a number is required.
       width: 320,
       text: 'continue_with',
       shape: 'pill',
@@ -156,8 +202,19 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
   }, [googleReady, isDark]);
 
   // ── Apple JS ───────────────────────────────────────────────────────────────
+  //
+  // Deliberately NOT hidden on non-Apple devices. Sign in with Apple on the web
+  // is a popup to appleid.apple.com and works in any browser, and an account
+  // created through Apple on an iPhone has password IS NULL — so hiding this
+  // button on a Windows laptop would leave that user with no way into their
+  // account at all: email/password cannot work, and "forgot password" on an
+  // account that never had one is a dead end. The button stays.
   useEffect(() => {
-    if (!APPLE_CLIENT_ID) return;
+    if (!APPLE_CLIENT_ID) {
+      // eslint-disable-next-line no-console
+      console.error('[social-auth] NEXT_PUBLIC_APPLE_SERVICES_ID is not set.');
+      return;
+    }
     let cancelled = false;
 
     loadScript(
@@ -167,28 +224,38 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
       .then(() => {
         if (cancelled || !window.AppleID?.auth) return;
         window.AppleID.auth.init({
-          clientId: APPLE_CLIENT_ID, // Services ID, NOT the bundle ID
+          clientId: APPLE_CLIENT_ID,           // Services ID, NOT the bundle ID
           scope: 'name email',
+          // Must EXACTLY match a Return URL registered on the Services ID. If
+          // the user is on www. and only the apex is registered (or vice
+          // versa), Apple rejects with invalid_client before showing anything.
           redirectURI: `${window.location.origin}/auth/login`,
           usePopup: true,
         });
         setAppleReady(true);
       })
-      .catch(() => setAppleReady(false));
+      .catch((err) => {
+        handleError('Apple script', err);
+        setAppleReady(false);
+      });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [handleError]);
 
   const signInWithApple = useCallback(async () => {
-    if (!window.AppleID?.auth) return;
+    if (!window.AppleID?.auth) {
+      handleError('Apple', new Error('Apple sign-in is still loading. Try again in a moment.'));
+      return;
+    }
     setBusy('apple');
     setError(null);
     try {
       const res = await window.AppleID.auth.signIn();
       const idToken = res?.authorization?.id_token;
-      if (!idToken) throw new Error('no id token');
+      if (!idToken) throw new Error('Apple returned no identity token');
       // Apple returns the name only on FIRST authorisation, and on web it
-      // arrives in `res.user`, not in the token. Forward it or it is lost.
+      // arrives in res.user rather than in the token. Forward it or it is lost
+      // for good.
       await exchange({
         provider: 'apple',
         id_token: idToken,
@@ -196,12 +263,12 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
         last_name: res?.user?.name?.lastName,
       });
     } catch (err: any) {
-      // popup_closed_by_user is a cancel, not a failure.
+      // A cancel is a normal outcome, not an error.
       if (err?.error === 'popup_closed_by_user' || err?.error === 'user_cancelled_authorize') {
         setBusy(null);
         return;
       }
-      handleError(err);
+      handleError('Apple', err);
     } finally {
       setBusy(null);
     }
@@ -226,6 +293,8 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
         </div>
       )}
 
+      {/* Both buttons share one column with a single max width, so they line up
+          regardless of Google rendering its own artwork at a fixed pixel size. */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
         {appleReady && (
           <button
@@ -239,6 +308,7 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
               fontSize: 15, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               opacity: busy ? 0.6 : 1,
+              boxSizing: 'border-box',
             }}
           >
             <svg width="16" height="19" viewBox="0 0 17 20" fill="currentColor" aria-hidden="true">
@@ -248,8 +318,18 @@ export default function SocialAuthButtons({ onAuthed, dividerLabel = 'or continu
           </button>
         )}
 
-        {/* Google renders its own button into this node. */}
-        <div ref={googleButtonRef} style={{ minHeight: googleReady ? 44 : 0 }} />
+        {/* Google renders into this node. Constrained to the same max width as
+            the Apple button above so the two align. */}
+        <div
+          ref={googleButtonRef}
+          style={{
+            width: '100%',
+            maxWidth: 320,
+            minHeight: googleReady ? 44 : 0,
+            display: 'flex',
+            justifyContent: 'center',
+          }}
+        />
       </div>
     </div>
   );
