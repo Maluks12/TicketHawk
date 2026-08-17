@@ -60,6 +60,26 @@ export default function EditProfilePage() {
   const [firstName, setFirstName] = useState(user?.first_name ?? '');
   const [lastName, setLastName] = useState(user?.last_name ?? '');
   const [phone, setPhone] = useState(user?.phone_number ?? '');
+
+  // ── Password vs social accounts ────────────────────────────────────────────
+  //
+  // Since migration 000075 an account can exist with no password — one created
+  // through Google or Apple. Two things on this screen assumed otherwise, and
+  // both were unclearable dead ends for those users:
+  //
+  //   • Phone validation ran unconditionally. A social account starts with
+  //     phone_number NULL, so the field initialised blank, failed validation,
+  //     and blocked EVERY save — including simply correcting a first name —
+  //     with "Enter a valid number" on a field they were never asked to fill.
+  //
+  //   • An email change demanded the current password. There isn't one.
+  //
+  // On the web the provider flow lives on the login page, so rather than
+  // re-running it inline here, an account with no password is told to set one
+  // first via password reset — which works fine, because a NULL password does
+  // not block a reset link. Fewer moving parts than embedding Apple's JS SDK
+  // on the profile screen for a rare action.
+  const hasPassword = (user as any)?.has_password !== false;
   const [email, setEmail] = useState(user?.email ?? '');
   const [password, setPassword] = useState('');
   const [saving, setSaving] = useState(false);
@@ -85,19 +105,29 @@ export default function EditProfilePage() {
     const e: Record<string, string> = {};
     if (!firstName.trim()) e.first_name = 'Required';
     if (!lastName.trim()) e.last_name = 'Required';
-    if (!phoneIsValid(phone)) e.phone_number = 'Enter a valid number';
+    // Only validate a phone number if there IS one, or the user is entering one
+    // now. A blank field on an account that never had a number is the normal
+    // state of a social account, not an error.
+    if (phone.trim() && !phoneIsValid(phone)) e.phone_number = 'Enter a valid number';
     if (!emailIsValid(email)) e.email = 'Enter a valid email address';
     // Only demanded when the identifier itself is moving.
-    if (emailChanging && !password) e.current_password = 'Enter your current password';
+    // Only demanded from accounts that actually have a password.
+    if (emailChanging && hasPassword && !password) e.current_password = 'Enter your current password';
+    if (emailChanging && !hasPassword) {
+      e.current_password =
+        'Set a password before changing your email address \u2014 use "Forgot password" on the sign-in page.';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
-  }, [firstName, lastName, phone, email, emailChanging, password]);
+  }, [firstName, lastName, phone, email, emailChanging, password, hasPassword]);
 
   const save = useCallback(async () => {
     if (!validate() || !dirty) return;
     setSaving(true);
     try {
-      const body = emailChanging ? { ...patch, current_password: password } : patch;
+      const body = emailChanging && hasPassword
+        ? { ...patch, current_password: password }
+        : patch;
       const { data } = await updateMyProfile(body);
       if (data?.user) applyUser(data.user);
       setPassword('');
@@ -130,13 +160,14 @@ export default function EditProfilePage() {
       // 409 is the "email already in use" case and belongs on the field
       // rather than in a banner the user has to parse.
       if (status === 409) setErrors((p) => ({ ...p, email: msg }));
-      else if (code === 'password_incorrect' || code === 'password_required') {
+      else if (code === 'password_incorrect' || code === 'password_required'
+               || code === 'reauth_social_required') {
         setErrors((p) => ({ ...p, current_password: msg }));
       } else setErrors((p) => ({ ...p, form: msg }));
     } finally {
       setSaving(false);
     }
-  }, [validate, dirty, patch, emailChanging, password, applyUser, router]);
+  }, [validate, dirty, patch, emailChanging, password, hasPassword, applyUser, router]);
 
   const onSavePress = useCallback(() => {
     if (!emailChanging) { void save(); return; }
@@ -228,7 +259,11 @@ export default function EditProfilePage() {
           type: 'email', autoComplete: 'email',
         }, emailChanging ? "You'll need to confirm this new address" : 'You sign in with this address')}
 
-        {emailChanging && field('Current password', password, setPassword, 'current_password', {
+        {/* Only rendered for accounts that have a password. A social account
+            gets the validation message instead, which points at password reset
+            — rendering an unfillable box for them was the dead end this
+            replaces. */}
+        {emailChanging && hasPassword && field('Current password', password, setPassword, 'current_password', {
           type: 'password', autoComplete: 'current-password',
         }, 'Required to change the address you sign in with')}
 
