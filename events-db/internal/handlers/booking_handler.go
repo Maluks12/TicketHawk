@@ -261,9 +261,34 @@ func RequestRefundHandler(
 			return
 		}
 
-		if err := paymentService.ProcessRefund(bookingID, quote.RefundAmount); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process payment refund"})
-			return
+		// ── Free bookings never reach the payment gateway ────────────────────
+		//
+		// A R0 ticket may have no payments row at all, and even where one
+		// exists the refund rounds to zero minor units. ProcessRefund fails on
+		// any of its first three guards, and because this handler returned on
+		// that error, RequestRefundWithCascade had ALREADY marked the booking
+		// refunded while ReleaseRefundedSeats below never ran — so the seat
+		// stayed consumed forever and the event drifted towards a false
+		// sold-out. The user saw "Failed to process payment refund" on a
+		// booking that had, from the database's point of view, been cancelled.
+		//
+		// There is genuinely nothing to refund here, so the gateway call is
+		// skipped rather than attempted and forgiven. Everything after this
+		// point — seat release, invalidation emails, the response — is
+		// identical, because releasing the seat is the whole point of the
+		// action on a free ticket.
+		if quote.RefundAmount > 0 {
+			if err := paymentService.ProcessRefund(bookingID, quote.RefundAmount); err != nil {
+				log.Error().Err(err).
+					Str("booking_id", bookingID).
+					Float64("amount", quote.RefundAmount).
+					Msg("refund: gateway call failed after booking was already marked refunded")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process payment refund"})
+				return
+			}
+		} else {
+			log.Info().Str("booking_id", bookingID).
+				Msg("cancellation: zero-value booking, no gateway refund needed")
 		}
 
 		// Put the seats back on sale. Nothing decremented tickets_sold on a

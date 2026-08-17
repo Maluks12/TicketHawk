@@ -434,9 +434,17 @@ func GuestRefundHandler(
 		// Gateway first, database second. If the refund fails the booking stays
 		// confirmed and the guest keeps a valid ticket — the safe direction to
 		// fail in. The reverse order would void their ticket without paying them.
-		if err := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); err != nil {
-			utils.InternalError(c, err, "guest refund: gateway refund failed")
-			return
+		//
+		// A zero-value booking skips the gateway entirely: there may be no
+		// payments row at all, and the amount rounds to zero minor units, so
+		// ProcessRefund fails on its own guards. Attempting it would block the
+		// cancellation of a free ticket and leave the seat held — see the same
+		// case in booking_handler.go.
+		if quote.RefundAmount > 0 {
+			if err := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); err != nil {
+				utils.InternalError(c, err, "guest refund: gateway refund failed")
+				return
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

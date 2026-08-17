@@ -166,10 +166,16 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
       // qualifies — almost always because the buyer sat on the sheet across a
       // band boundary. Surface the server's reason verbatim rather than the
       // now-stale figure this sheet was showing.
+      // The server's message is refund-shaped ("Failed to process payment
+      // refund"), which is meaningless on a booking that cost nothing. For a
+      // free booking the server error is suppressed in favour of language that
+      // matches what the user was actually trying to do.
       setError(
-        e?.response?.data?.error ??
-        e?.response?.data?.quote?.reason ??
-        'Failed to submit. Please try again.',
+        isFree
+          ? 'Couldn\u2019t cancel your booking. Please try again.'
+          : e?.response?.data?.error ??
+            e?.response?.data?.quote?.reason ??
+            'Failed to submit. Please try again.',
       );
     } finally { setLoading(false); }
   };

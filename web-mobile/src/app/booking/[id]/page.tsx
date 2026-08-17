@@ -141,7 +141,13 @@ export default function BookingDetailPage() {
     setRefundLoading(true); setRefundErr('');
     try { await submitRefund(String(id), refundReason.trim()); setRefunded(true); setRefundOpen(false); }
     catch (e: any) {
-      setRefundErr(e?.response?.data?.error ?? 'Failed to submit. Please try again.');
+      // The server's message is refund-shaped ("Failed to process payment
+      // refund"), which is meaningless on a booking that cost nothing.
+      setRefundErr(
+        isFreeBooking
+          ? 'Couldn\u2019t cancel your booking. Please try again.'
+          : e?.response?.data?.error ?? 'Failed to submit. Please try again.',
+      );
       // A rejection usually means the window moved under us — e.g. the
       // booking crossed the 7-day cutoff while this page sat open. Re-fetch
       // so the button reflects reality instead of repeating the failure.
