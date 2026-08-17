@@ -41,7 +41,6 @@ type RegisterUserDTO struct {
 	Password string `json:"password" binding:"required,min=8,max=128"`
 	FirstName string `json:"first_name" binding:"required,min=1,max=100"`
 	LastName string `json:"last_name" binding:"required,min=1,max=100"`
-	DateOfBirth time.Time `json:"date_of_birth" binding:"required"`
 	PhoneNumber string `json:"phone_number" binding:"required,min=10,max=20"`
 }
 
@@ -56,4 +55,30 @@ func (u *User)GetFullName() string {
 		return strings.TrimSpace(*u.FirstName + " " + *u.LastName)
 	}
 	return u.Email
+}
+
+// UserIdentity is a linked social sign-in provider, surfaced on the profile
+// screen so a user can see (and remove) what is connected to their account.
+type UserIdentity struct {
+	Provider    string     `json:"provider"`
+	Email       *string    `json:"email,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+}
+
+// SocialSignInDTO is the request body for POST /v1/auth/social.
+//
+// The client does the interactive OAuth dance and sends the resulting ID token.
+// There is no client_secret and no authorization code on this path — the server
+// only ever verifies a signed assertion.
+type SocialSignInDTO struct {
+	Provider string `json:"provider" binding:"required,oneof=google apple"`
+	IDToken  string `json:"id_token" binding:"required,max=8192"`
+	// Nonce the client generated before starting the flow. Replay defence.
+	Nonce string `json:"nonce" binding:"max=256"`
+	// Apple sends the display name ONCE, in the authorization response rather
+	// than in the ID token, and never again. The client forwards it on first
+	// sign-in; it is treated as a hint, never as identity.
+	FirstName string `json:"first_name" binding:"max=100"`
+	LastName  string `json:"last_name"  binding:"max=100"`
 }

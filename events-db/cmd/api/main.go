@@ -327,6 +327,11 @@ func main() {
 	// token bucket when Redis is down (fail-safe, never open). /login also
 	// gets a per-account (email) bucket so one account can't be brute-forced
 	// from many rotating IPs.
+
+	// Verifies Google / Apple ID tokens. Constructed once: it owns a JWKS cache
+	// so provider signing keys aren't refetched on every sign-in.
+	oidcVerifier := services.NewOIDCVerifier(cfg.GoogleClientIDs, cfg.AppleClientIDs)
+
 	auth := v1.Group("/auth")
 
 	// ── /login ── two stacked buckets: per-IP and per-target-account ──────
@@ -352,6 +357,18 @@ func main() {
 		"register"))
 	registerGroup.POST("/register", handlers.CreateUserhandler(pool))
 
+	// ── social sign-in (Google / Apple) ────────────────────────────────────
+	// Rate limited by IP only: there is no target email to key on until the
+	// token is verified, and the provider has already done the expensive part.
+	// Looser than /login because there is nothing to brute-force here — a
+	// forged token fails signature verification, it does not fail "slowly
+	// enough to guess". This is abuse protection, not credential protection.
+	socialGroup := auth.Group("")
+	socialGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
+		ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 30.0, TTL: 2 * time.Hour},
+		"social-auth"))
+	socialGroup.POST("/social", handlers.SocialSignInHandler(pool, cfg, oidcVerifier))
+
 	// ── password reset ─────────────────────────────────────────────────────
 	passwordResetGroup := auth.Group("")
 	passwordResetGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
@@ -370,6 +387,12 @@ func main() {
 
 	// ── /logout ────────────────────────────────────────────────────────────
 	auth.POST("/logout", middleware.AuthMiddleware(cfg), handlers.LogoutHandler(pool))
+
+	// Connected-accounts management on the profile screen. Unlinking is guarded
+	// server-side: an account with no password cannot remove its last identity,
+	// or nothing could ever sign into it again.
+	auth.GET("/identities", middleware.AuthMiddleware(cfg), handlers.ListLinkedIdentitiesHandler(pool))
+	auth.DELETE("/identities/:provider", middleware.AuthMiddleware(cfg), handlers.UnlinkIdentityHandler(pool))
 
 	// ==========================================
 	// Public Event Routes
@@ -629,11 +652,20 @@ func main() {
 		user.GET("/me",           handlers.GetMyProfileHandler(pool))
 		// PATCH, not PUT: the edit-profile form submits only changed fields, and
 		// a sparse patch means an omitted field is left alone rather than cleared.
-		user.PATCH("/me",         handlers.UpdateMyProfileHandler(pool, emailService))
+		//
+		// Takes oidcVerifier because changing the EMAIL address requires step-up
+		// re-authentication, and a Google/Apple account has no password to check.
+		// It proves identity with a fresh provider token instead — see
+		// handlers/reauth.go.
+		user.PATCH("/me",         handlers.UpdateMyProfileHandler(pool, emailService, oidcVerifier))
 		// Account deletion (Apple Guideline 5.1.1(v)). The preview drives the
 		// confirmation screen; the DELETE re-authenticates and anonymises.
+		//
+		// Same reason for oidcVerifier: without it a social-only account could
+		// never satisfy the password check and therefore could never delete
+		// itself, which is the exact thing 5.1.1(v) requires.
 		user.GET("/me/deletion-preview", handlers.GetAccountDeletionPreviewHandler(pool))
-		user.DELETE("/me",               handlers.DeleteMyAccountHandler(pool))
+		user.DELETE("/me",               handlers.DeleteMyAccountHandler(pool, oidcVerifier))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
 	}

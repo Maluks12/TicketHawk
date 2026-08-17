@@ -46,6 +46,22 @@ type Config struct {
 
 	FrontendURLs []string
 
+	// ── Social sign-in ───────────────────────────────────────────────────────
+	// Comma-separated ACCEPTED AUDIENCES, not secrets. Each client platform has
+	// its own OAuth client ID, and the ID token's `aud` claim carries whichever
+	// one minted it — so the server has to accept all of them. Getting this
+	// list wrong is the difference between "any app's Google token works" and
+	// a correctly scoped check, which is why it is validated at boot rather
+	// than defaulted.
+	//
+	//   GOOGLE_CLIENT_IDS=<web>.apps.googleusercontent.com,<ios>...,<android>...
+	//   APPLE_CLIENT_IDS=com.tickethawk.app,com.tickethawk.web
+	//
+	// Apple is the subtle one: on iOS the audience is the BUNDLE ID, on web it
+	// is the Services ID, and they are different strings.
+	GoogleClientIDs []string
+	AppleClientIDs  []string
+
 	// OrganizerDashboardURL is where handover/invite emails point organisers
 	// to sign in and set their password. Falls back to FrontendURLs[0] until
 	// a dedicated dashboard domain exists.
@@ -142,6 +158,9 @@ func Load() (*Config, error) {
 		R2PublicURL: os.Getenv("R2_PUBLIC_URL"),
 
 		FrontendURLs: strings.Split(os.Getenv("FRONTEND_URLS"), ","),
+
+		GoogleClientIDs: splitAndTrim(os.Getenv("GOOGLE_CLIENT_IDS")),
+		AppleClientIDs:  splitAndTrim(os.Getenv("APPLE_CLIENT_IDS")),
 
 		EnableEmailVerification: os.Getenv("ENABLE_EMAIL_VERIFICATION") == "true",
 		EnableWaitlist:          os.Getenv("ENABLE_WAITLIST") == "true",
@@ -275,4 +294,17 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// splitAndTrim parses a comma-separated env var, dropping blanks. Returns an
+// empty slice (not a one-element slice containing "") for an unset variable,
+// which is what lets Enabled() distinguish "not configured" from "misconfigured".
+func splitAndTrim(raw string) []string {
+	out := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

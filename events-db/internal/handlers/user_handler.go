@@ -45,7 +45,18 @@ type RegisterRequest struct {
 	FirstName   string  `json:"first_name"   binding:"required,max=100"`
 	LastName    string  `json:"last_name"    binding:"required,max=100"`
 	PhoneNumber string  `json:"phone_number" binding:"required,max=20"`
-	DateOfBirth *string `json:"date_of_birth"`
+
+	// DateOfBirth is deliberately absent.
+	//
+	// It used to be here as an optional *string, and it was never read: neither
+	// this handler nor repository.CreateUser ever touched it, so every signup
+	// since launch has collected a date of birth and thrown it away. Removing
+	// the field makes the API honest about that.
+	//
+	// Age now belongs where it is actually load-bearing — at checkout for
+	// age-restricted events, alongside the phone number — rather than as a
+	// seventh field on a signup form. users.date_of_birth stays nullable and
+	// keeps working for the accounts that set it via profile edit.
 }
 
 type LoginRequest struct {
@@ -134,6 +145,20 @@ func LoginHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		// A social-only account has password IS NULL (migration 000075). Guard
+		// BEFORE bcrypt: an empty hash makes CompareHashAndPassword return an
+		// error today, so this is defence in depth rather than a live bug — but
+		// "the comparison happens to fail" is not something to rely on for an
+		// authentication decision. Burn the dummy compare so the timing still
+		// matches every other failure path.
+		if user.Password == "" {
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(loginRequest.Password))
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "This account uses Google or Apple sign-in. Use that button, or reset your password to set one.",
+			})
+			return
+		}
+
 		err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(loginRequest.Password))
 
 		if err != nil {
@@ -141,41 +166,65 @@ func LoginHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		claims := jwt.MapClaims{
-			"user_id": user.ID,
-			"email":   user.Email,
-			"role":    user.Role,
-			"iat":     time.Now().Unix(),
-			"exp":     time.Now().Add(15 * time.Minute).Unix(),
-		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-		accessToken, err := token.SignedString([]byte(cfg.JWTSecret))
-
+		session, err := issueSession(pool, cfg, user)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
-			return
-		}
-
-		rawRefresh, hashedRefresh, err := utils.GenerateResetToken()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
-			return
-		}
-		expiresAt := time.Now().Add(refreshTokenTTL)
-
-		if err := repository.CreateRefreshToken(pool, user.ID, hashedRefresh, expiresAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"access_token":  accessToken,
-			"refresh_token": rawRefresh,
-			"expires_in":    900,
+			"access_token":  session.AccessToken,
+			"refresh_token": session.RefreshToken,
+			"expires_in":    session.ExpiresIn,
 		})
 	}
+}
+
+// ─── Shared session issuance ────────────────────────────────────────────────
+//
+// Password login and social sign-in both land here, so there is exactly one
+// place where an access token is minted and a refresh token is persisted.
+// Before this existed the logic was inline in LoginHandler, and adding a second
+// entry point would have meant a second copy — which is how a refresh-token TTL
+// or a claim set silently drifts between two ways of signing in.
+
+type issuedSession struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresIn    int
+}
+
+const accessTokenTTL = 15 * time.Minute
+
+func issueSession(pool *pgxpool.Pool, cfg *config.Config, user *models.User) (*issuedSession, error) {
+	claims := jwt.MapClaims{
+		"user_id": user.ID,
+		"email":   user.Email,
+		"role":    user.Role,
+		"iat":     time.Now().Unix(),
+		"exp":     time.Now().Add(accessTokenTTL).Unix(),
+	}
+
+	accessToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).
+		SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		return nil, fmt.Errorf("issueSession/sign: %w", err)
+	}
+
+	rawRefresh, hashedRefresh, err := utils.GenerateResetToken()
+	if err != nil {
+		return nil, fmt.Errorf("issueSession/generate: %w", err)
+	}
+
+	if err := repository.CreateRefreshToken(pool, user.ID, hashedRefresh, time.Now().Add(refreshTokenTTL)); err != nil {
+		return nil, fmt.Errorf("issueSession/persist: %w", err)
+	}
+
+	return &issuedSession{
+		AccessToken:  accessToken,
+		RefreshToken: rawRefresh,
+		ExpiresIn:    int(accessTokenTTL.Seconds()),
+	}, nil
 }
 
 func RequestPasswordResetHandler(pool *pgxpool.Pool, emailService *services.EmailService, cfg *config.Config) gin.HandlerFunc {
