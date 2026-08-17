@@ -17,12 +17,12 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleURLTypes": [
-    {
-      "CFBundleURLSchemes": [
-        "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
-      ]
-    }
-  ]
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
+            ]
+          }
+        ]
       },
       "usesAppleSignIn": true
     },
@@ -111,7 +111,13 @@
           "enableBackgroundRemoteNotifications": false
         }
       ],
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+        [
+          "@react-native-google-signin/google-signin",
+          {
+            "iosUrlScheme": "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
+          }
+        ]
     ],
     "extra": {
       "router": {},

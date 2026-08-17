@@ -4,9 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useAuthStore } from '../store/authStore';
 import {
-  isAppleAvailable, signInWithApple, useGoogleSignIn,
-  SocialAuthCancelled, type SocialCredential,
-  SocialAuthProviderError,
+  isAppleAvailable, signInWithApple, signInWithGoogle,
+  SocialAuthCancelled, SocialAuthProviderError, type SocialCredential,
 } from '../lib/socialAuth';
 import { useAppTheme } from '../theme/colors';
 
@@ -26,22 +25,23 @@ interface Props {
  * Apple's Human Interface Guidelines require the Sign in with Apple button to
  * be at least as prominent as other sign-in options, which in practice means
  * showing it first on iOS and not making it visually smaller. Reviewers do
- * check this. `AppleAuthentication.AppleAuthenticationButton` is used rather
- * than a hand-rolled button because it renders Apple's exact approved artwork
- * and localises the label automatically — a custom Apple button is a rejection
- * risk for no benefit.
+ * check this. AppleAuthenticationButton is used rather than a hand-rolled
+ * button because it renders Apple's exact approved artwork and localises the
+ * label automatically — a custom Apple button is a rejection risk for no gain.
  *
  * Apple is hidden entirely on Android (the native module doesn't exist there);
  * Google shows on both.
  */
-export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or continue with', disabled }: Props) {
+export default function SocialAuthButtons({
+  onSuccess,
+  dividerLabel = 'or continue with',
+  disabled,
+}: Props) {
   const { isDark, colors } = useAppTheme();
   const socialLogin = useAuthStore((s) => s.socialLogin);
 
   const [appleReady, setAppleReady] = useState(false);
   const [busy, setBusy] = useState<null | 'google' | 'apple'>(null);
-
-  const { signIn: googleSignIn, ready: googleReady } = useGoogleSignIn();
 
   useEffect(() => { isAppleAvailable().then(setAppleReady); }, []);
 
@@ -62,9 +62,19 @@ export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or contin
       });
       onSuccess?.(result);
     } catch (err: any) {
-      // A cancel is a normal outcome, not an error. Showing an alert for it is
-      // the single most irritating thing a social login can do.
+      // A cancel is a normal outcome, not an error. Alerting on it is the
+      // single most irritating thing a social login can do.
       if (err instanceof SocialAuthCancelled) return;
+
+      // A provider-side failure that never reached our API. Its message is the
+      // provider's own, and on a production build this alert is the only place
+      // it will ever be visible — so it must NOT be collapsed into the generic
+      // "no connection" case below, which is what hid a Google config error
+      // behind a misleading "check your connection".
+      if (err instanceof SocialAuthProviderError) {
+        Alert.alert('Sign-in failed', err.message);
+        return;
+      }
 
       const status = err?.response?.status;
       const serverMessage = err?.response?.data?.error;
@@ -73,11 +83,14 @@ export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or contin
         // Deleted account — the message is specific and actionable.
         Alert.alert('Account unavailable', serverMessage);
       } else if (status === 501) {
-        Alert.alert('Unavailable', 'That sign-in method isn\u2019t available right now. Please use your email and password.');
-      } else if (err instanceof SocialAuthProviderError) {
-        Alert.alert('Sign-in failed', err.message);
+        Alert.alert(
+          'Unavailable',
+          'That sign-in method isn\u2019t available right now. Please use your email and password.',
+        );
       } else if (!err?.response) {
         Alert.alert('No connection', 'Check your connection and try again.');
+      } else {
+        Alert.alert('Sign-in failed', serverMessage ?? 'Something went wrong. Please try again.');
       }
     } finally {
       setBusy(null);
@@ -122,8 +135,8 @@ export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or contin
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Continue with Google"
-        disabled={isDisabled || !googleReady}
-        onPress={() => void run('google', googleSignIn)}
+        disabled={isDisabled}
+        onPress={() => void run('google', signInWithGoogle)}
         style={{
           height: 50,
           borderRadius: 12,
@@ -134,7 +147,7 @@ export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or contin
           backgroundColor: colors.cardBg,
           borderWidth: 1,
           borderColor: colors.dividerColor,
-          opacity: isDisabled || !googleReady ? 0.6 : 1,
+          opacity: isDisabled ? 0.6 : 1,
         }}
       >
         {busy === 'google' ? (
@@ -142,7 +155,9 @@ export default function SocialAuthButtons({ onSuccess, dividerLabel = 'or contin
         ) : (
           <>
             <Ionicons name="logo-google" size={19} color={colors.text} />
-            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>Continue with Google</Text>
+            <Text style={{ color: colors.text, fontSize: 16, fontWeight: '600' }}>
+              Continue with Google
+            </Text>
           </>
         )}
       </TouchableOpacity>
