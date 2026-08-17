@@ -151,12 +151,15 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
   }, [visible]);
 
   const submit = async () => {
-    if (!quote?.eligible) { setError('This booking is no longer refundable.'); return; }
+    // A free booking still needs releasing even though there is no refund quote
+    // to be "eligible" — gating on the quote would leave the button permanently
+    // dead for exactly the bookings this sheet now exists to cancel.
+    if (!isFree && !quote?.eligible) { setError('This booking is no longer refundable.'); return; }
     if (reason.trim().length < 10) { setError('Please provide at least 10 characters.'); return; }
     setLoading(true); setError('');
     try {
       await submitRefund(bookingId, reason.trim(), guest);
-      onSuccess(quote.refund_amount);
+      onSuccess(quote?.refund_amount ?? 0);
       onClose();
     } catch (e: any) {
       // A 400 here means the server re-priced the refund and it no longer
@@ -179,14 +182,44 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
 
   return (
     <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* ── Keyboard handling ────────────────────────────────────────────────
+          The sheet used to be a fixed-height View, so once the keyboard opened
+          over the reason field there was no way to reach the submit button:
+          the content could not scroll and the sheet could not move. The user
+          could type and then had no way to finish.
+
+          Three things fix it together, and all three are needed:
+            • maxHeight caps the sheet so it can never exceed the space left
+              above the keyboard,
+            • the ScrollView lets the content move within that space,
+            • keyboardShouldPersistTaps="handled" means the FIRST tap on the
+              submit button submits, instead of being swallowed as a
+              dismiss-the-keyboard tap — which on its own looks like a dead
+              button and is exactly as frustrating as not scrolling.
+
+          behavior differs by platform: iOS pads the container, Android resizes
+          the window itself and double-handling it makes the sheet jump. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
-        <View style={sheet.modalSheet}>
+        <View style={[sheet.modalSheet, { maxHeight: '85%', paddingBottom: 0 }]}>
           <View className={s.modalHandle} />
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ gap: 14, paddingBottom: 40 }}
+          >
           <Text className={s.modalTitle}>{isFree ? 'Cancel booking' : 'Request a refund'}</Text>
 
-          {/* ── What you get back ────────────────────────────────────────── */}
-          {quote ? (
+          {/* ── What you get back ──────────────────────────────────────────
+              Suppressed entirely for a free booking. Every row in it is a
+              refund figure derived from zero — "You'll get back R0",
+              "Refunded at 25% of the ticket price R0", and a 7-day refund
+              policy that has nothing to do with releasing a free seat. Showing
+              a card whose every line reads R0 is worse than showing none. */}
+          {isFree ? null : quote ? (
             <View style={sheet.quoteCard}>
               <View style={sheet.quoteHeadRow}>
                 <Text style={sheet.quoteHeadLabel}>You&apos;ll get back</Text>
@@ -231,13 +264,19 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
             </View>
           )}
 
+          {/* The trailing "original payment method within 3-5 business days"
+              is part of the PAID sentence and has to live inside that branch —
+              left outside, it appended itself to the cancellation copy and
+              produced "...so someone else can take it.original payment method
+              within 3-5 business days." */}
           <Text className={s.modalSub}>
             {isFree
               ? 'Tell us why you\u2019re cancelling. Your seat is released straight away so someone else can take it.'
-              : 'Tell us why you\u2019d like a refund. Once approved, the money is returned to your'}
-            original payment method within 3–5 business days.
+              : 'Tell us why you\u2019d like a refund. Once approved, the money is returned to your original payment method within 3\u20135 business days.'}
           </Text>
-          <Text className={s.modalFieldLabel}>REASON FOR REFUND</Text>
+          <Text className={s.modalFieldLabel}>
+            {isFree ? 'REASON FOR CANCELLING' : 'REASON FOR REFUND'}
+          </Text>
           <TextInput
             style={[sheet.modalInput, error ? sheet.modalInputError : undefined]}
             value={reason} onChangeText={v => { setReason(v); setError(''); }}
@@ -253,9 +292,9 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
             </View>
           ) : null}
           <TouchableOpacity
-            style={[sheet.modalBtn, (loading || !quote?.eligible) && { opacity: 0.6 }]}
+            style={[sheet.modalBtn, (loading || (!isFree && !quote?.eligible)) && { opacity: 0.6 }]}
             onPress={submit}
-            disabled={loading || !quote?.eligible}
+            disabled={loading || (!isFree && !quote?.eligible)}
             activeOpacity={0.85}
           >
             {loading
@@ -269,6 +308,7 @@ const RefundModal = ({ visible, bookingId, guest, quote, totalPaid, onClose, onS
           <TouchableOpacity className={s.modalCancel} onPress={onClose}>
             <Text className={s.modalCancelText}>Cancel</Text>
           </TouchableOpacity>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>

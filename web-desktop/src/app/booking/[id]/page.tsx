@@ -432,7 +432,12 @@ export default function BookingDetailPage() {
       {/* Refund modal */}
       {refundOpen && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setRefundOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520 }}>
+          {/* maxHeight + overflowY: on a phone the on-screen keyboard shrinks
+              the viewport, and a fixed-height bottom sheet then hides its own
+              submit button with no way to reach it. Capping the height and
+              allowing scroll keeps the button reachable however tall the
+              keyboard is. */}
+          <div onClick={(e) => e.stopPropagation()} style={{ background: isDark ? '#1a1a1a' : '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 40px', width: '100%', maxWidth: 520, maxHeight: '85dvh', overflowY: 'auto', boxSizing: 'border-box' }}>
             <h3 style={{ margin: '0 0 8px', color: colors.text }}>
               {isFreeBooking ? 'Cancel booking' : 'Request a refund'}
             </h3>
