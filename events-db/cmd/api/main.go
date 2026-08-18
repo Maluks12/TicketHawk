@@ -516,10 +516,11 @@ func main() {
 			ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 			"guest-bookings"))
 	}
+		guest.Use(middleware.GuestBookingGuard(rdb))
 	{
 		guest.POST("/bookings",                              handlers.CreateGuestBookingHandler(pool, paymentService))
-		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool, rdb))
-		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool))
+		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool))
 		guest.GET("/bookings/:bookingNumber/assignments/:assignmentId/qr", handlers.GetGuestRotatingQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/pool-qr",                      handlers.GetGuestPoolQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/offline",                     handlers.GetGuestOfflineTicketsHandler(pool, rotatingQRService))
