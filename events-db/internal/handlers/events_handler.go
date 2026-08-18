@@ -776,6 +776,13 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.SearchEvents(pool, query, limit, cursor)
 		if err != nil {
+			// A term that normalizes to nothing ("!!", "??", "---") is a client
+			// mistake, not a server fault. It used to reach to_tsquery as ":*"
+			// and 500 the endpoint.
+			if errors.Is(err, repository.ErrEmptySearchQuery) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "search query must contain letters or numbers"})
+				return
+			}
 			utils.InternalError(c, err, "failed to search events")
 			return
 		}
