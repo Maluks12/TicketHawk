@@ -543,6 +543,16 @@ export default function CreateEventPage() {
   const lowestTierPrice = visibleTierPrices.length
     ? String(Math.min(...visibleTierPrices))
     : price;
+
+  // The price the event is ACTUALLY sold at, and the single source of truth for
+  // the payload, the checklist and the locked field alike.
+  //
+  // Locking the base-price input stopped `price` being typed into, but the
+  // submit payload and the readiness checklist both still read that raw state.
+  // The result was an event that displayed R110 on screen and was created at
+  // R0, with "Set ticket pricing" stuck unticked because nothing had been typed
+  // into a field the organiser was no longer allowed to type into.
+  const effectivePrice = ticketTypes.length > 0 ? lowestTierPrice : price;
   const [refundPolicy,        setRefundPolicy]        = useState('');
   const [termsAndConditions,  setTermsAndConditions]  = useState('');
 
@@ -817,7 +827,7 @@ export default function CreateEventPage() {
         start_time:   new Date(startTime).toISOString(),
         end_time:     new Date(endTime).toISOString(),
         expires_at:   new Date(expiresAt).toISOString(),
-        price:        isFree ? 0 : parseFloat(price) || 0,
+        price:        isFree ? 0 : parseFloat(effectivePrice) || 0,
         currency,
         allow_waitlist:       allowWaitlist,
         tags,
@@ -905,7 +915,7 @@ export default function CreateEventPage() {
     { done: !!venueName && !!address && !!city,  label: 'Set venue and city' },
     { done: !!startTime && !!endTime,        label: 'Set start and end times' },
     { done: !!expiresAt,                     label: 'Set a booking deadline' },
-    { done: isFree || parseFloat(price) > 0, label: 'Set ticket pricing' },
+    { done: isFree || parseFloat(effectivePrice) > 0, label: 'Set ticket pricing' },
     { done: !!coverImageUrl,                 label: 'Upload a cover image' },
   ];
 
@@ -1224,7 +1234,7 @@ export default function CreateEventPage() {
                               color: 'var(--text-3)', fontWeight: 700, fontSize: 14, pointerEvents: 'none',
                             }}>R</span>
                             <input type="number" min="0" step="0.01"
-                              value={ticketTypes.length > 0 ? lowestTierPrice : price}
+                              value={effectivePrice}
                               onChange={e => setPrice(e.target.value)}
                               style={{ ...inp, paddingLeft: 30 }} />
                           </div>
