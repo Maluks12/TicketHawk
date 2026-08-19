@@ -51,6 +51,30 @@ export default function Footer() {
     { href: '/support', label: 'Support' },
   ];
 
+  // ── Organiser dashboard link ───────────────────────────────────────────────
+  //
+  // A real <a href>, and that is the entire point.
+  //
+  // The only other route from this site to the organiser dashboard is a
+  // window.open() inside a click handler on the authenticated profile page.
+  // Crawlers do not run click handlers and never reach an authed page, so
+  // organiser.ticket-hawk.com had NO crawlable inbound link from anywhere —
+  // which is why site:organiser.ticket-hawk.com returned nothing at all.
+  //
+  // Being in the footer means it appears on every public page here, so it is
+  // both a crawl path onto the subdomain and a way for this domain's authority
+  // to reach it.
+  //
+  // Deliberately NOT rel="nofollow" and NOT target="_blank" with
+  // rel="noopener noreferrer" alone: nofollow would withhold the very signal
+  // this link exists to pass. It is a property we own, not untrusted content.
+  //
+  // Uses <a>, not next/link: next/link is for in-app routes and prefetches
+  // them. This is a different origin, so a plain anchor is both correct and
+  // what a crawler reads most directly.
+  const ORGANISER_URL =
+    process.env.NEXT_PUBLIC_ORGANISER_URL ?? 'https://organiser.ticket-hawk.com';
+
   return (
     <footer
       className="px-6 py-8 border-t"
@@ -76,6 +100,13 @@ export default function Footer() {
           style={{ color: colors.text, opacity: 0.65 }}
         >
           Contact
+        </a>
+        <a
+          href={ORGANISER_URL}
+          className="text-[12.5px] no-underline transition-opacity hover:opacity-100"
+          style={{ color: colors.text, opacity: 0.65 }}
+        >
+          Sell tickets
         </a>
       </nav>
 
