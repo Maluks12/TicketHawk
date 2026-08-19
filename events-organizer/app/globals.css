@@ -71,10 +71,18 @@
   --accent-border:   rgba(242,241,238,.28);
   --accent-ring:     rgba(242,241,238,.22);
 
-  /* Brand red. Reserved for the wordmark and genuine alerts — never for
-     ordinary UI. A colour that means "attention" stops meaning anything if
-     it is also the Save button. */
+  /* Brand red, and the MARK colour.
+     --mark is the editorial accent: it does the job red does on the landing
+     page — the 01/02 section numbers, the wordmark, the sold-tickets bar.
+     Small, deliberate marks against a neutral ground.
+     It is NOT the primary button. Ink stays the primary action so the two
+     never compete, which is exactly the landing page's own split. */
   --brand:           #FF2D55;
+  --mark:            #FF476B;
+  --mark-h:          #FF6B85;
+  --mark-soft:       rgba(255,71,107,.14);
+  --mark-border:     rgba(255,71,107,.34);
+  --mark-ring:       rgba(255,71,107,.26);
 
   --success:         #4ADE80;
   --success-fg:      #4ADE80;
@@ -145,7 +153,16 @@
   --accent-border:   rgba(17,17,16,.22);
   --accent-ring:     rgba(17,17,16,.18);
 
+  /* Mark red. Slightly deeper than the landing page's #FF2D55 so it holds up
+     as small text on paper — the landing uses it at 10px+ on large fills,
+     the dashboard uses it at 9px on micro-labels, where the brighter tone
+     vibrates against the off-white. */
   --brand:           #FF2D55;
+  --mark:            #E01B41;
+  --mark-h:          #C21536;
+  --mark-soft:       rgba(224,27,65,.08);
+  --mark-border:     rgba(224,27,65,.26);
+  --mark-ring:       rgba(224,27,65,.20);
 
   --success:         #0E7C5A;
   --success-fg:      #0A5F45;
@@ -180,10 +197,10 @@
    Pages written against the old Meta palette keep working: --blue and friends
    now simply point at the Studio accent. */
 :root, [data-theme='dark'], [data-theme='light'] {
-  --blue:        var(--accent);
-  --blue-h:      var(--accent-h);
-  --blue-d:      var(--accent-ring);
-  --blue-light:  var(--accent-soft);
+  --blue:        var(--mark);
+  --blue-h:      var(--mark-h);
+  --blue-d:      var(--mark-ring);
+  --blue-light:  var(--mark-soft);
 
   --sidebar-w:   260px;
   --topbar-h:    58px;
@@ -225,7 +242,10 @@ body, .card, .stat-card, .modal, .toolbar, .page-header, aside, main {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-a { color: var(--accent); text-decoration: none; }
+/* Links carry the mark. With an ink accent they were black-on-paper and
+   indistinguishable from body copy — the one place the all-ink scheme
+   actually removed information rather than noise. */
+a { color: var(--mark); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* A link styled as a button is a button. The global a:hover underline was
@@ -285,7 +305,7 @@ select option:disabled { color: var(--text-faint); }
 ::selection { background: var(--accent-soft); color: var(--text); }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--mark);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -367,7 +387,7 @@ select option:disabled { color: var(--text-faint); }
 .field input::placeholder, .field textarea::placeholder { color: var(--text-faint); }
 .field input:hover, .field select:hover, .field textarea:hover { border-color: var(--border-strong); }
 .field input:focus, .field select:focus, .field textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--mark);
   background: var(--surface-2);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
@@ -444,7 +464,7 @@ select option:disabled { color: var(--text-faint); }
 }
 .stat-sub { font-size: 12px; color: var(--text-3); margin-top: 6px; }
 /* The old top-border accent becomes a left rail — reads better on charcoal. */
-.stat-card.blue   { box-shadow: inset 3px 0 0 var(--accent); }
+.stat-card.blue   { box-shadow: inset 3px 0 0 var(--mark); }
 .stat-card.green  { box-shadow: inset 3px 0 0 var(--success); }
 .stat-card.orange { box-shadow: inset 3px 0 0 var(--warning); }
 .stat-card.red    { box-shadow: inset 3px 0 0 var(--danger); }
@@ -462,7 +482,7 @@ select option:disabled { color: var(--text-faint); }
   background: radial-gradient(circle, var(--accent-soft) 0%, transparent 68%);
   pointer-events: none;
 }
-.hero-label { color: var(--accent); font-size: 10.5px; font-weight: 800; letter-spacing: .16em; }
+.hero-label { color: var(--mark); font-size: 10.5px; font-weight: 800; letter-spacing: .16em; }
 .hero-value {
   font-family: var(--font-display);
   color: var(--text); font-size: 48px; font-weight: 800;
@@ -517,7 +537,7 @@ select option:disabled { color: var(--text-faint); }
   transition: color .15s ease, border-color .15s ease;
 }
 .tab-item:hover { color: var(--text); }
-.tab-item.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-item.active { color: var(--mark); border-bottom-color: var(--mark); }
 
 /* Pill-style segmented control (Studio filter pills) */
 .pill {
@@ -527,7 +547,7 @@ select option:disabled { color: var(--text-faint); }
   transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
 .pill:hover { color: var(--text); border-color: var(--border-2); }
-.pill.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+.pill.active { background: var(--mark-soft); border-color: var(--mark-border); color: var(--mark); }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 .toolbar {
@@ -543,7 +563,7 @@ select option:disabled { color: var(--text-faint); }
   border-radius: var(--r); padding: 8px 12px; min-width: 240px;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-.search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.search-box:focus-within { border-color: var(--mark); box-shadow: 0 0 0 3px var(--mark-ring); }
 .search-box input {
   border: none; background: transparent; outline: none;
   font-size: 13.5px; color: var(--text); width: 100%;
@@ -556,7 +576,7 @@ select option:disabled { color: var(--text-faint); }
   transition: border-color .15s ease, color .15s ease;
 }
 .filter-select:hover { color: var(--text); border-color: var(--border-2); }
-.filter-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.filter-select:focus { border-color: var(--mark); box-shadow: 0 0 0 3px var(--mark-ring); }
 .filter-select option { background: var(--surface); color: var(--text); }
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
@@ -629,7 +649,7 @@ select option:disabled { color: var(--text-faint); }
 /* ── Spinner ─────────────────────────────────────────────────────────────── */
 .spinner {
   width: 20px; height: 20px;
-  border: 2px solid var(--border-2); border-top-color: var(--accent);
+  border: 2px solid var(--border-2); border-top-color: var(--mark);
   border-radius: 50%; animation: spin .65s linear infinite; flex-shrink: 0;
 }
 .spinner-lg { width: 34px; height: 34px; border-width: 3px; }
@@ -656,10 +676,10 @@ select option:disabled { color: var(--text-faint); }
 .toast::before { content: ''; position: absolute; }
 .toast.success { border-color: var(--success-border); box-shadow: var(--shadow-pop), inset 3px 0 0 var(--success); }
 .toast.error   { border-color: var(--danger-border);  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--danger); }
-.toast.info    { border-color: var(--accent-border);  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--accent); }
+.toast.info    { border-color: var(--info-border);  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--info); }
 .toast.success > span:first-child { color: var(--success); }
 .toast.error   > span:first-child { color: var(--danger); }
-.toast.info    > span:first-child { color: var(--accent); }
+.toast.info    > span:first-child { color: var(--info); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
@@ -676,9 +696,9 @@ select option:disabled { color: var(--text-faint); }
   border-radius: var(--r); padding: 7px 9px; min-height: 42px; cursor: text;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-.tag-input-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.tag-input-wrap:focus-within { border-color: var(--mark); box-shadow: 0 0 0 3px var(--mark-ring); }
 .tag-pill {
-  background: var(--accent-soft); border: 1px solid var(--accent-border); color: var(--accent);
+  background: var(--mark-soft); border: 1px solid var(--mark-border); color: var(--mark);
   padding: 3px 9px; border-radius: var(--r-pill); font-size: 12.5px; font-weight: 600;
   display: flex; align-items: center; gap: 5px;
 }
@@ -728,14 +748,14 @@ select option:disabled { color: var(--text-faint); }
   transition: border-color .15s ease, background .15s ease;
 }
 .objective-card:hover { border-color: var(--accent-border); background: var(--accent-softer); }
-.objective-card.selected { border-color: var(--accent); background: var(--accent-soft); }
-.objective-icon { font-size: 22px; flex-shrink: 0; color: var(--accent); }
+.objective-card.selected { border-color: var(--mark); background: var(--mark-soft); }
+.objective-icon { font-size: 22px; flex-shrink: 0; color: var(--mark); }
 .objective-label { font-size: 14px; font-weight: 700; color: var(--text); }
 .objective-desc { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 
 /* ── Progress bar ────────────────────────────────────────────────────────── */
 .progress-bar { height: 6px; background: var(--surface-strong); border-radius: 99px; overflow: hidden; }
-.progress-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+.progress-fill { height: 100%; background: var(--mark); border-radius: 99px; transition: width .3s ease; }
 
 /* ── Responsive table wrapper ────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }
@@ -761,8 +781,8 @@ select option:disabled { color: var(--text-faint); }
 .brand-word { font-size: 15px; font-weight: 900; letter-spacing: -.02em; color: var(--text); line-height: 1.15; }
 .brand-tag {
   display: inline-flex; align-items: center;
-  background: var(--accent-soft); border: 1px solid var(--accent-border);
-  color: var(--accent); border-radius: 5px;
+  background: var(--mark-soft); border: 1px solid var(--mark-border);
+  color: var(--mark); border-radius: var(--r);
   padding: 1px 5px; font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
 }
 
@@ -782,11 +802,11 @@ select option:disabled { color: var(--text-faint); }
 .nav-item:hover { background: var(--surface-strong); color: var(--text); text-decoration: none; }
 .nav-item .nav-icon { flex-shrink: 0; display: inline-flex; color: var(--text-3); transition: color .14s ease; }
 .nav-item:hover .nav-icon { color: var(--text-2); }
-.nav-item.active { background: var(--accent-soft); color: var(--accent); }
-.nav-item.active .nav-icon { color: var(--accent); }
+.nav-item.active { background: var(--mark-soft); color: var(--mark); }
+.nav-item.active .nav-icon { color: var(--mark); }
 .nav-item.active::before {
   content: ''; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--accent);
+  width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--mark);
 }
 .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
 
@@ -825,7 +845,7 @@ select option:disabled { color: var(--text-faint); }
   transition: background .15s ease, color .15s ease;
 }
 .theme-toggle button:hover { color: var(--text); }
-.theme-toggle button.on { background: var(--accent-soft); color: var(--accent); }
+.theme-toggle button.on { background: var(--mark-soft); color: var(--mark); }
 
 /* ── Narrow viewports ────────────────────────────────────────────────────── */
 @media (max-width: 1180px) {
