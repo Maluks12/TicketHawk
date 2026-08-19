@@ -164,10 +164,16 @@ const css = `
 
 .thl-btn{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:14px;
   padding:11px 20px;border-radius:2px;transition:all .15s;border:1px solid transparent;cursor:pointer;}
-.thl-btn-pink{background:var(--ink);color:var(--paper);}
-.thl-btn-pink:hover{background:var(--pink);}
-.thl-btn-ghost{border-color:var(--rule);color:var(--ink);}
-.thl-btn-ghost:hover{border-color:var(--ink);}
+/* a.thl-btn-*, not .thl-btn-*: the reset above is ".thl a" (class + element =
+   specificity 0,1,1), which outranks a bare class (0,1,0). color:inherit
+   therefore won and the dark button rendered dark text on a dark fill —
+   invisible. Qualifying with the element tag takes these to 0,2,1. */
+.thl a.thl-btn-pink,.thl button.thl-btn-pink{background:var(--ink);color:var(--paper);}
+.thl a.thl-btn-pink:hover,.thl button.thl-btn-pink:hover{background:var(--pink);color:var(--paper);}
+.thl a.thl-btn-ghost,.thl button.thl-btn-ghost{border-color:var(--rule);color:var(--ink);}
+.thl a.thl-btn-ghost:hover,.thl button.thl-btn-ghost:hover{border-color:var(--ink);color:var(--ink);}
+.thl a.thl-inline{color:var(--ink);}
+.thl a.thl-inline:hover{color:var(--pink);}
 
 .thl-hero{padding:64px 0 0;}
 .thl-hero-top{display:flex;justify-content:space-between;gap:40px;margin-bottom:34px;}
