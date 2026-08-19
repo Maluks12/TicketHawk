@@ -73,10 +73,23 @@ interface EventStats {
   total_refunded?: number;
 }
 
+// Mirrors repository.OrganizerBookingRow in the backend. The previous shape
+// (`user` object + `total_amount`) never existed on the wire, so every row
+// fell through to "Guest" with a blank amount.
+//
+// Attendee email is deliberately absent: the backend tags it `json:"-"`
+// because it is attendee PII that organisers are not given access to.
 interface Booking {
   id: string; booking_number: string; booking_status: string;
-  created_at: string; total_amount: number; currency: string;
-  user?: { email: string; first_name: string; last_name: string };
+  created_at: string;
+  ticket_quantity: number;
+  unit_price: number;
+  subtotal: number;
+  platform_fee: number;
+  net_earning: number;
+  currency: string;
+  is_guest: boolean;
+  attendee_name: string;
 }
 
 interface MerchItem {
@@ -577,19 +590,30 @@ export default function EventDetailPage() {
                     <tr key={b.id}>
                       <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{b.booking_number}</td>
                       <td>
-                        {b.user ? (
+                        {b.attendee_name && b.attendee_name !== 'Guest' ? (
                           <div>
-                            <div style={{ fontWeight: 600 }}>{b.user.first_name} {b.user.last_name}</div>
-                            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{b.user.email}</div>
+                            <div style={{ fontWeight: 600 }}>{b.attendee_name}</div>
+                            {b.is_guest && (
+                              <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Guest checkout</div>
+                            )}
                           </div>
-                        ) : <span style={{ color: 'var(--text-3)' }}>Guest</span>}
+                        ) : (
+                          <span style={{ color: 'var(--text-3)' }}>Guest</span>
+                        )}
                       </td>
                       <td>
                         <span className={`badge badge-${b.booking_status === 'confirmed' ? 'active' : b.booking_status === 'cancelled' ? 'cancelled' : 'pending'}`}>
                           {b.booking_status.charAt(0).toUpperCase() + b.booking_status.slice(1)}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 600 }}>{fmtMoney(b.total_amount, b.currency)}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        {fmtMoney(b.subtotal, b.currency)}
+                        {b.ticket_quantity > 1 && (
+                          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-3)' }}>
+                            {b.ticket_quantity} x {fmtMoney(b.unit_price, b.currency)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ color: 'var(--text-2)', fontSize: 13 }}>{fmtDateTime(b.created_at)}</td>
                     </tr>
                   ))}

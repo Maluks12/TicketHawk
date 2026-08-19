@@ -80,8 +80,15 @@ export default function EventsPage() {
   const filtered = events
     .filter(e => {
       if (statusFilter !== 'all' && e.status !== statusFilter) return false;
-      if (search && !e.title.toLowerCase().includes(search.toLowerCase()) &&
-          !e.city.toLowerCase().includes(search.toLowerCase())) return false;
+      // Guarded: city was absent from the API payload entirely, so typing in
+      // the search box called .toLowerCase() on undefined and blew up the
+      // whole list. The backend now sends it, but the guard stays — one
+      // missing optional field should not take the page down.
+      if (search) {
+        const q = search.toLowerCase();
+        const hay = `${e.title ?? ''} ${e.city ?? ''} ${e.venue_name ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     })
     .sort((a, b) => {

@@ -41,6 +41,17 @@ type OrganizerEventSummary struct {
 	Price       float64   `json:"price"`
 	Currency    string    `json:"currency"`
 	CreatedAt   time.Time `json:"created_at"`
+
+	// Location and reach. These were absent from both the struct and the
+	// SELECT, so the organiser events table had nothing to render and every
+	// row fell through to its "Not set — add" placeholder even when the
+	// event had a full address. EndTime and Views were missing for the same
+	// reason (the list showed "ends —" and 0 views on every row).
+	EndTime    *time.Time `json:"end_time,omitempty"`
+	VenueName  string     `json:"venue_name"`
+	Address    string     `json:"address"`
+	City       string     `json:"city"`
+	Views      int        `json:"views"`
 }
 
 // CreateEvent inserts a new event in draft status and returns the created row.
@@ -1792,7 +1803,12 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 
 	const baseQuery = `
 		SELECT id, COALESCE(slug, '') AS slug, title, description, start_time, status, tickets_sold,
-       		max_capacity, price, currency, created_at
+       		max_capacity, price, currency, created_at,
+			end_time,
+			COALESCE(venue_name, '') AS venue_name,
+			COALESCE(address, '')    AS address,
+			COALESCE(city, '')       AS city,
+			COALESCE(views, 0)       AS views
 		FROM events
 		WHERE organizer_id = $1
 	`
@@ -1823,6 +1839,7 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 			&e.ID, &e.Slug, &e.Title, &e.Description, &e.StartTime,
 			&e.Status, &e.TicketsSold, &e.MaxCapacity,
 			&e.Price, &e.Currency, &e.CreatedAt,
+			&e.EndTime, &e.VenueName, &e.Address, &e.City, &e.Views,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan organizer event row: %w", err)
 		}

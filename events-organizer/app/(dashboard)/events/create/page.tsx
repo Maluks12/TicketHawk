@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Article, CalendarBlank, MapPin, Ticket, Tag, ImageSquare,
-  MagicWand, Vault, MaskHappy, Confetti,
+  Confetti,
   Trash, Plus, X, Check, CheckCircle, Circle, PencilSimple,
   FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck, EyeSlash,
   type Icon as PhosphorIcon,
@@ -451,7 +451,9 @@ export default function CreateEventPage() {
   const [latitude,            setLatitude]            = useState<number | null>(null);
   const [longitude,           setLongitude]           = useState<number | null>(null);
   const [placeLabel,          setPlaceLabel]          = useState('');
-  const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('auto');
+  // Fixed at 'none' while seating maps are disabled; see the note in the
+  // Location card where the picker used to be.
+  const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('none');
   const [tags,                setTags]                = useState<string[]>([]);
   const [performers,          setPerformers]          = useState<string[]>([]);
   const [teams,               setTeams]               = useState<string[]>([]);
@@ -528,7 +530,7 @@ export default function CreateEventPage() {
     setLatitude(typeof d.latitude === 'number' ? d.latitude : null);
     setLongitude(typeof d.longitude === 'number' ? d.longitude : null);
     setPlaceLabel(d.placeLabel ?? '');
-    setVenueType(d.venueType ?? 'auto');
+    setVenueType(d.venueType ?? 'none');
     setTags(d.tags ?? []);
     setPerformers(d.performers ?? []);
     setTeams(d.teams ?? []);
@@ -907,45 +909,13 @@ export default function CreateEventPage() {
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 22 }}>
-                    <label style={{
-                      display: 'block', fontSize: 11, fontWeight: 700,
-                      letterSpacing: '.07em', textTransform: 'uppercase',
-                      color: 'var(--text-3)', marginBottom: 4,
-                    }}>
-                      Venue type
-                    </label>
-                    <div className="field-hint" style={{ marginTop: 0, marginBottom: 10 }}>
-                      Controls which seating map the app shows at checkout
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
-                      {([
-                        { value: 'auto',       Ico: MagicWand, label: 'Auto',          hint: 'Guess from category & name' },
-                        { value: 'stadium',    Ico: Vault,     label: 'Stadium',       hint: 'Stadium section map' },
-                        { value: 'auditorium', Ico: MaskHappy, label: 'Hall / Theatre', hint: 'Auditorium seating map' },
-                        { value: 'none',       Ico: Ticket,    label: 'None',          hint: 'Straight to checkout' },
-                      ] as const).map(o => {
-                        const on = venueType === o.value;
-                        return (
-                          <button key={o.value} type="button" title={o.hint}
-                            onClick={() => setVenueType(o.value)}
-                            style={{
-                              display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-                              gap: 7, padding: '13px 14px', borderRadius: 'var(--r-lg)',
-                              cursor: 'pointer', textAlign: 'left',
-                              border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
-                              background: on ? 'var(--accent-soft)' : 'var(--surface-alpha)',
-                              color: on ? 'var(--accent)' : 'var(--text-2)',
-                              transition: 'all .15s ease',
-                            }}>
-                            <o.Ico size={19} weight={on ? 'fill' : 'regular'} />
-                            <span style={{ fontSize: 13, fontWeight: on ? 700 : 600 }}>{o.label}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.35 }}>{o.hint}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  {/* Venue type picker removed — every event uses 'none'
+                      (straight to checkout) until the stadium / auditorium
+                      seating SVGs are reactivated. `venueType` state stays
+                      'none' and is omitted from the create payload, so the
+                      backend default applies. Restore the picker here to
+                      re-enable seat maps. */}
+
                 </FormCard>
 
                 {/* Tickets & pricing */}
@@ -999,8 +969,8 @@ export default function CreateEventPage() {
                   </div>
 
                   {!isFree && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 18 }}>
-                      <div className="field" style={{ marginBottom: 0 }}>
+                    <div style={{ marginTop: 18 }}>
+                      <div className="field" style={{ marginBottom: 0, maxWidth: 320 }}>
                         <label>Base price <Required /></label>
                         <div style={{ position: 'relative' }}>
                           <span style={{
@@ -1011,22 +981,11 @@ export default function CreateEventPage() {
                             onChange={e => setPrice(e.target.value)}
                             style={{ ...inp, paddingLeft: 30 }} />
                         </div>
-                      </div>
-                      <div className="field" style={{ marginBottom: 0 }}>
-                        <label>Currency</label>
-                        <Select
-                          ariaLabel="Currency"
-                          value={currency}
-                          onChange={setCurrency}
-                          options={[
-                            { value: 'ZAR', label: 'ZAR — South African Rand' },
-                            { value: 'USD', label: 'USD — US Dollar' },
-                            { value: 'EUR', label: 'EUR — Euro' },
-                            { value: 'GBP', label: 'GBP — British Pound' },
-                            { value: 'KES', label: 'KES — Kenyan Shilling' },
-                            { value: 'NGN', label: 'NGN — Nigerian Naira' },
-                          ]}
-                        />
+                        {/* Currency selector removed — ZAR only for launch. The
+                            `currency` state below stays fixed at 'ZAR' and is
+                            still sent in the create payload, so re-adding a
+                            picker later needs no backend change. */}
+                        <div className="field-hint">Priced in ZAR (South African Rand)</div>
                       </div>
                     </div>
                   )}
