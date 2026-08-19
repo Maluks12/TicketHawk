@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "1095131355111-sm7epntca8otsh2na7o37hodftqso934.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tickethawk.app",
+            "certificate_hash": "78021d097ef8852ef5db1ed450c911558ad98554"
+          }
+        },
+        {
           "client_id": "1095131355111-qp85blgedorjjtkbu5qqdc89bii8qsr3.apps.googleusercontent.com",
           "client_type": 3
         }
