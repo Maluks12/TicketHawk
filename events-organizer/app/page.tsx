@@ -4,14 +4,23 @@
 // never surfaced in search. This page carries real headings, metadata and
 // JSON-LD; every CTA leads to /login (which itself sends already-signed-in
 // organisers straight to /dashboard). NOTE: the login page lives at
-// app/(auth)/login/page.tsx, but "(auth)" is a Next.js ROUTE GROUP — parenthesised
-// folders organise files without adding a URL segment, so the real path is
-// /login, NOT /auth/login. Linking to the latter 404s.
+// app/(auth)/login/page.tsx, but "(auth)" is a Next.js ROUTE GROUP —
+// parenthesised folders organise files without adding a URL segment, so the
+// real path is /login, NOT /auth/login. Linking to the latter 404s.
 //
-// Visual language is intentionally NOT the light Meta-style dashboard theme —
-// it's a dark marketing splash in TicketHawk's own palette (brand pink #FF2D55 +
-// the eagle's gold), with the ticket-stub as the recurring motif. All styles are
-// namespaced under `.thl` so they can't collide with globals.css (.btn, .field…).
+// VISUAL LANGUAGE — rewritten from the dark splash to a light Swiss-editorial
+// layout: off-white canvas, hairline rules that divide the page into a visible
+// grid, oversized tight-tracked uppercase headlines, and ONE accent colour used
+// sparingly. The restraint is the point — a dark page with a glow reads as a
+// template; a light page with a real grid reads as a product.
+//
+// The inverted ticket stub in the hero is the only dark element on the page, so
+// it becomes the focal point without needing a glow to earn attention. It is
+// built as an actual stub — notched on both sides, perforated down the middle,
+// logo on the left panel — rather than a rounded rectangle standing in for one.
+//
+// All styles stay namespaced under `.thl` so they cannot collide with
+// globals.css (.btn, .field, .metric…).
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { SITE_URL } from './site';
@@ -20,7 +29,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: 'Sell tickets in South Africa | TicketHawk for Organisers',
   description:
-    'TicketHawk is the South African platform for event organisers: sell tickets, scan at the door offline, and get paid within 48 hours. Instant EFT and card payments, tiered ticketing, and a real-time dashboard.',
+    'TicketHawk is the South African platform for event organisers: sell tickets, scan at the door offline, and get paid after your event. Instant EFT, card and Apple Pay, tiered ticketing, and a real-time dashboard.',
   keywords: [
     'sell event tickets South Africa', 'event ticketing platform', 'organiser dashboard',
     'ticketing software', 'door scanning', 'Paystack ticketing', 'instant EFT tickets',
@@ -31,7 +40,7 @@ export const metadata: Metadata = {
     siteName: 'TicketHawk',
     title: 'Sell tickets in South Africa | TicketHawk for Organisers',
     description:
-      'Sell tickets, scan at the door offline, and get paid within 48 hours. Built for South African event organisers.',
+      'Sell tickets, scan at the door offline, and get paid after your event. Built for South African event organisers.',
     url: SITE_URL,
     images: ['/brand-logo.png'],
   },
@@ -51,7 +60,7 @@ const jsonLd = {
   operatingSystem: 'Web',
   url: SITE_URL,
   description:
-    'South African event ticketing platform for organisers: sell tickets, scan at the door offline, and get paid within 48 hours.',
+    'South African event ticketing platform for organisers: sell tickets, scan at the door offline, and get paid after your event.',
   offers: {
     '@type': 'Offer',
     price: '0',
@@ -61,197 +70,206 @@ const jsonLd = {
   publisher: { '@type': 'Organization', name: 'TicketHawk', url: 'https://ticket-hawk.com' },
 };
 
+// Merch is deliberately absent. It exists in the product, but it is not why an
+// organiser chooses a ticketing platform, and listing it alongside payments and
+// door scanning made the grid read as a feature dump rather than a case.
 const FEATURES = [
   {
+    n: '01',
     tag: 'Ticketing',
     title: 'Tiered tickets, sold your way',
-    body: 'Early bird, GA, VIP and group tickets with per-tier pricing and caps. Publish a public event or share a private link — you stay in control of who sees it.',
+    body: 'Early bird, general, VIP and group tiers, each with its own price and cap. Publish publicly or share a private link — you decide who ever sees the event.',
   },
   {
+    n: '02',
     tag: 'Payments',
-    title: 'Instant EFT and card, paid out fast',
-    body: 'Buyers pay by card or instant EFT in rands. Money settles to your bank within 48 hours of the event — and verified organisers can unlock instant payouts.',
+    title: 'Card, instant EFT and Apple Pay',
+    body: 'Buyers pay in rands the way they already pay for everything else. No redirect to a payment page that looks like it belongs to someone else.',
   },
   {
+    n: '03',
     tag: 'At the door',
-    title: 'Offline-first door scanning',
-    body: 'Scan tickets from your phone even with no signal. Add staff and scanners with a join code, and every scan syncs the moment you are back online.',
+    title: 'Scanning that works without signal',
+    body: 'Rotating QR codes that cannot be screenshotted and reused, scanned from your phone with no reception at all. Every scan syncs the moment you reconnect.',
   },
   {
-    tag: 'Dashboard',
-    title: 'See sales as they happen',
-    body: 'Live sales, revenue and check-in numbers in one place. Know exactly how a night is tracking without waiting for a report.',
+    n: '04',
+    tag: 'Your team',
+    title: 'Staff, roles and join codes',
+    body: 'Add door staff with a join code — no accounts to create, no devices to configure. Each person only sees the event you assigned them to.',
+  },
+  {
+    n: '05',
+    tag: 'Analytics',
+    title: 'See the night as it happens',
+    body: 'Live sales, page views, conversion and door numbers in one place. Know how a night is tracking while you can still do something about it.',
+  },
+  {
+    n: '06',
+    tag: 'Trust',
+    title: 'Identity verified against Home Affairs',
+    body: 'Every organiser is checked against the DHA registry before they can take money. Buyers know the event behind the ticket is real, and so do we.',
   },
 ];
 
 const STEPS = [
-  { n: '01', title: 'Create your event', body: 'Add the details, set your ticket tiers and prices, and upload your artwork. Minutes, not days.' },
-  { n: '02', title: 'Share and sell', body: 'Publish publicly or share a private link. Buyers pay by card or instant EFT and get their tickets straight away.' },
-  { n: '03', title: 'Scan and get paid', body: 'Scan at the door from your phone, then receive your payout to your bank within 48 hours of the event.' },
+  { n: '01', title: 'Create', body: 'Add your details, set your tiers and prices, upload your artwork. Minutes, not days.' },
+  { n: '02', title: 'Sell', body: 'Publish to the feed or share a private link. Buyers get their tickets the moment they pay.' },
+  { n: '03', title: 'Get paid', body: 'Scan the door from your phone, then receive your payout to your South African bank account.' },
 ];
 
+// The fourth stat replaced a per-ticket price. A number on a landing page reads
+// as the headline term of the deal, and the fee is not the reason anyone picks a
+// ticketing platform — the offline door is. "0 bars" states the differentiator
+// as a number without pricing the product on the way past.
 const VALUES = [
-  { k: '48 hours', v: 'to your payout' },
-  { k: 'Instant EFT', v: '& card in rands' },
-  { k: 'Offline', v: 'door scanning' },
-  { k: 'No', v: 'setup or monthly fees' },
+  {
+    k: '48h',
+    v: 'to your payout',
+    note: 'After the event ends, on the standard tier. Verified organisers can be moved to instant settlement, where each sale splits to your account at checkout. Refunds run on a sliding scale and are deducted before payout.',
+  },
+  { k: '0 bars', v: 'needed at the door' },
+  { k: 'R0', v: 'setup and monthly cost' },
+  { k: 'SA', v: 'infrastructure and support' },
 ];
 
 const AUDIENCES = ['Festivals', 'Concerts', 'Club nights', 'Sports', 'Expos', 'Comedy', 'Conferences'];
 
 const css = `
-@import url('https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,600;0,700;0,800;0,900;1,800;1,900&family=Figtree:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Figtree:wght@300;400;500;600;700&display=swap');
 .thl {
-  --ink:#0a0a0c; --ink2:#121218; --ink3:#1a1a22; --line:rgba(255,255,255,.09);
-  --pink:#FF2D55; --pink-d:#d81f44; --gold:#c6a064; --gold-soft:#d8b878;
-  --tx:#f5f5f7; --mut:#a0a0aa; --mut2:#6f6f78;
+  --paper:#F2F1EE; --paper2:#EAE8E3; --ink:#111110; --ink2:#57564F; --ink3:#8A8880;
+  --rule:#D9D7D1; --pink:#FF2D55; --gold:#C6A064;
   --dsp:'Archivo','Figtree',system-ui,sans-serif;
   --bdy:'Figtree',system-ui,sans-serif;
-  background:var(--ink); color:var(--tx); font-family:var(--bdy);
-  min-height:100vh; overflow-x:hidden; line-height:1.55;
+  background:var(--paper); color:var(--ink); font-family:var(--bdy);
+  min-height:100vh; overflow-x:hidden; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
 }
 .thl *{box-sizing:border-box;}
 .thl a{color:inherit;text-decoration:none;}
-.thl-wrap{max-width:1180px;margin:0 auto;padding:0 24px;}
+.thl-wrap{max-width:1180px;margin:0 auto;padding:0 32px;}
 
-.thl-nav{position:sticky;top:0;z-index:50;background:rgba(10,10,12,.82);
-  backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--line);}
-.thl-nav-in{display:flex;align-items:center;gap:24px;height:66px;}
-/* NOTE: the wordmark is wrapped in a single <span> in the markup. A bare
-   "TICKET" text node + <span>HAWK</span> would be TWO flex items, so this
-   gap would render the brand as "TICKET HAWK" - it is one word. */
+.thl-nav{position:sticky;top:0;z-index:50;background:rgba(242,241,238,.88);
+  backdrop-filter:saturate(140%) blur(10px);border-bottom:1px solid var(--rule);}
+.thl-nav-in{display:flex;align-items:center;gap:28px;height:70px;}
 .thl-brand{display:flex;align-items:center;gap:10px;font-family:var(--dsp);
-  font-weight:900;font-size:20px;letter-spacing:.5px;}
-.thl-brand img{width:34px;height:34px;display:block;}
+  font-weight:800;font-size:17px;letter-spacing:-.02em;}
+.thl-brand img{width:32px;height:32px;display:block;}
 .thl-brand .pink{color:var(--pink);}
-.thl-navlinks{display:flex;gap:26px;margin-left:14px;}
-.thl-navlinks a{color:var(--mut);font-size:14.5px;font-weight:500;transition:color .15s;}
-.thl-navlinks a:hover{color:var(--tx);}
-.thl-navcta{margin-left:auto;display:flex;align-items:center;gap:12px;}
+.thl-navlinks{display:flex;gap:28px;margin-left:12px;}
+.thl-navlinks a{color:var(--ink2);font-size:14px;font-weight:500;transition:color .15s;}
+.thl-navlinks a:hover{color:var(--ink);}
+.thl-navcta{margin-left:auto;display:flex;align-items:center;gap:10px;}
 
-.thl-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  font-family:var(--dsp);font-weight:800;font-size:14px;letter-spacing:.3px;
-  padding:11px 20px;border-radius:11px;border:1px solid transparent;cursor:pointer;
-  transition:transform .12s ease, background .15s, border-color .15s, color .15s;white-space:nowrap;}
-.thl-btn:hover{transform:translateY(-1px);}
-.thl-btn-pink{background:var(--pink);color:#fff;box-shadow:0 8px 24px rgba(255,45,85,.28);}
-.thl-btn-pink:hover{background:var(--pink-d);}
-.thl-btn-ghost{border-color:var(--line);color:var(--tx);background:transparent;}
-.thl-btn-ghost:hover{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.04);}
-.thl-btn-lg{padding:15px 28px;font-size:16px;border-radius:13px;}
+.thl-btn{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:14px;
+  padding:11px 20px;border-radius:2px;transition:all .15s;border:1px solid transparent;cursor:pointer;}
+.thl-btn-pink{background:var(--ink);color:var(--paper);}
+.thl-btn-pink:hover{background:var(--pink);}
+.thl-btn-ghost{border-color:var(--rule);color:var(--ink);}
+.thl-btn-ghost:hover{border-color:var(--ink);}
 
-.thl-hero{position:relative;padding:76px 0 54px;}
-.thl-hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:52px;align-items:center;}
-.thl-eyebrow{display:inline-flex;align-items:center;gap:9px;font-family:var(--dsp);
-  font-weight:800;font-size:12.5px;letter-spacing:1.6px;text-transform:uppercase;
-  color:var(--gold-soft);margin-bottom:22px;}
-.thl-eyebrow::before{content:"";width:26px;height:2px;background:var(--gold);display:inline-block;}
-.thl-h1{font-family:var(--dsp);font-weight:900;font-size:clamp(40px,6.2vw,68px);
-  line-height:1.02;letter-spacing:-1.5px;margin:0 0 20px;}
-.thl-h1 em{font-style:italic;color:var(--pink);}
-.thl-sub{font-size:18px;color:var(--mut);max-width:520px;margin:0 0 30px;}
-.thl-hero-cta{display:flex;gap:14px;flex-wrap:wrap;}
-.thl-hero-note{margin-top:18px;font-size:13.5px;color:var(--mut2);}
+.thl-hero{padding:64px 0 0;}
+.thl-hero-top{display:flex;justify-content:space-between;gap:40px;margin-bottom:34px;}
+.thl-eyebrow{font-size:12.5px;color:var(--ink2);letter-spacing:.01em;}
+.thl-heroblurb{font-size:13.5px;color:var(--ink2);text-align:right;max-width:290px;line-height:1.6;}
+.thl-h1{font-family:var(--dsp);font-weight:800;font-size:clamp(46px,8.4vw,116px);
+  line-height:.9;letter-spacing:-.04em;text-transform:uppercase;margin:0;}
+.thl-heroact{display:flex;align-items:center;gap:28px;margin:34px 0 40px;flex-wrap:wrap;}
+.thl-inline{font-size:15px;font-weight:600;border-bottom:1.5px solid var(--ink);padding-bottom:3px;}
+.thl-inline:hover{color:var(--pink);border-color:var(--pink);}
+.thl-fine{font-size:13px;color:var(--ink3);}
 
-.thl-ticket{position:relative;background:linear-gradient(160deg,#1c1c26,#111118);
-  border:1px solid var(--line);border-radius:20px;padding:26px;
-  box-shadow:0 30px 80px rgba(0,0,0,.5);}
-.thl-ticket::before,.thl-ticket::after{content:"";position:absolute;width:26px;height:26px;
-  border-radius:50%;background:var(--ink);top:50%;transform:translateY(-50%);}
-.thl-ticket::before{left:-13px;} .thl-ticket::after{right:-13px;}
-.thl-tk-perf{position:absolute;top:50%;left:24px;right:24px;transform:translateY(-50%);
-  border-top:2px dashed rgba(255,255,255,.14);}
-.thl-tk-top{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:26px;}
-.thl-tk-badge{font-family:var(--dsp);font-weight:800;font-size:11px;letter-spacing:1.4px;
-  text-transform:uppercase;color:var(--gold-soft);border:1px solid rgba(198,160,100,.4);
-  border-radius:999px;padding:5px 11px;display:inline-block;margin-bottom:12px;}
-.thl-tk-price{font-family:var(--dsp);font-weight:900;font-size:26px;}
-.thl-tk-title{font-family:var(--dsp);font-weight:800;font-size:23px;margin:2px 0 4px;letter-spacing:-.4px;}
-.thl-tk-meta{font-size:13.5px;color:var(--mut);}
-.thl-tk-bottom{padding-top:26px;}
-.thl-tk-barlabel{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mut);margin-bottom:8px;}
-.thl-tk-bar{height:9px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;}
-.thl-tk-fill{height:100%;width:78%;border-radius:99px;
-  background:linear-gradient(90deg,var(--gold),var(--pink));}
-.thl-tk-sold{margin-top:10px;font-size:13px;color:var(--tx);font-weight:600;}
-.thl-tk-sold b{color:var(--pink);}
+/* ── Ticket stub ──────────────────────────────────────────────────────────
+   A real stub, not a rounded rectangle: notched on both edges where it would
+   tear, split by a perforation into a wide face and a narrow counterfoil.
+   The notches are radial-gradient cut-outs painted in the PAGE colour, so
+   they read as holes rather than as circles sitting on top. */
+.thl-ticket{position:relative;background:var(--ink);color:var(--paper);
+  border-radius:3px;display:grid;grid-template-columns:1fr 168px;overflow:hidden;}
+.thl-ticket::before,.thl-ticket::after{content:'';position:absolute;right:168px;
+  width:26px;height:26px;background:var(--paper);border-radius:50%;transform:translateX(50%);z-index:2;}
+.thl-ticket::before{top:-13px;}
+.thl-ticket::after{bottom:-13px;}
+.thl-tface{padding:34px 34px 30px;}
+.thl-tlive{display:inline-flex;align-items:center;gap:7px;font-size:11px;
+  letter-spacing:.11em;color:var(--gold);margin-bottom:20px;}
+.thl-tdot{width:6px;height:6px;border-radius:50%;background:var(--pink);display:block;}
+.thl-tname{font-family:var(--dsp);font-size:30px;font-weight:700;letter-spacing:-.025em;line-height:1.1;}
+.thl-tmeta{font-size:13.5px;color:var(--ink3);margin-top:7px;}
+.thl-tbar{margin-top:26px;height:3px;background:#332F2C;border-radius:2px;overflow:hidden;}
+.thl-tbar span{display:block;height:100%;width:78%;background:var(--pink);}
+.thl-tsold{display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink3);margin-top:9px;}
+.thl-tstub{border-left:2px dashed rgba(242,241,238,.22);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;padding:28px 18px;text-align:center;}
+.thl-tstub img{width:52px;height:52px;display:block;}
+.thl-tprice{font-family:var(--dsp);font-size:32px;font-weight:700;letter-spacing:-.03em;}
+.thl-ttier{font-size:11.5px;color:var(--ink3);letter-spacing:.06em;}
 
-.thl-values{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--ink2);}
-.thl-values-in{display:grid;grid-template-columns:repeat(4,1fr);}
-.thl-val{padding:30px 24px;text-align:center;border-right:1px dashed var(--line);}
+.thl-sec{padding:82px 0;border-top:1px solid var(--rule);}
+.thl-sechead{display:flex;justify-content:space-between;gap:44px;margin-bottom:8px;}
+.thl-h2{font-family:var(--dsp);font-weight:800;font-size:clamp(28px,4.4vw,52px);
+  line-height:1;letter-spacing:-.035em;text-transform:uppercase;margin:0;}
+.thl-lede{font-size:15px;color:var(--ink2);max-width:340px;line-height:1.65;}
+
+.thl-grid{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--rule);margin-top:44px;}
+.thl-cell{padding:32px 34px 34px;border-bottom:1px solid var(--rule);}
+.thl-cell:nth-child(odd){border-right:1px solid var(--rule);}
+.thl-cell:nth-last-child(-n+2){border-bottom:none;}
+.thl-cellhead{display:flex;gap:10px;font-size:11.5px;letter-spacing:.09em;
+  color:var(--pink);margin-bottom:14px;text-transform:uppercase;}
+.thl-cellhead b{color:var(--ink3);font-weight:500;}
+.thl-cell h3{font-family:var(--dsp);font-size:21px;font-weight:600;letter-spacing:-.02em;margin:0 0 9px;}
+.thl-cell p{font-size:14.5px;color:var(--ink2);line-height:1.65;margin:0;}
+
+.thl-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;margin-top:44px;}
+.thl-step{border-top:2px solid var(--ink);padding-top:18px;}
+.thl-step .n{font-size:12px;color:var(--ink3);margin-bottom:10px;}
+.thl-step h3{font-family:var(--dsp);font-size:19px;font-weight:600;margin:0 0 7px;letter-spacing:-.02em;}
+.thl-step p{font-size:14px;color:var(--ink2);margin:0;line-height:1.6;}
+
+.thl-values{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);}
+.thl-val{padding:32px 30px;border-right:1px solid var(--rule);}
 .thl-val:last-child{border-right:none;}
-.thl-val-k{font-family:var(--dsp);font-weight:900;font-size:27px;letter-spacing:-.6px;color:var(--tx);}
-.thl-val-k span{color:var(--pink);}
-.thl-val-v{font-size:13.5px;color:var(--mut);margin-top:4px;}
+.thl-val .k{font-family:var(--dsp);font-size:38px;font-weight:700;letter-spacing:-.035em;line-height:1;}
+.thl-val .v{font-size:13.5px;color:var(--ink2);margin-top:7px;}
+.thl-val .note{font-size:11.5px;color:var(--ink3);margin-top:12px;line-height:1.55;
+  padding-top:12px;border-top:1px solid var(--rule);}
 
-.thl-sec{padding:88px 0;}
-.thl-sec-head{max-width:620px;margin-bottom:44px;}
-.thl-kicker{font-family:var(--dsp);font-weight:800;font-size:12.5px;letter-spacing:1.6px;
-  text-transform:uppercase;color:var(--pink);margin-bottom:14px;}
-.thl-h2{font-family:var(--dsp);font-weight:900;font-size:clamp(28px,4vw,42px);
-  letter-spacing:-1px;line-height:1.08;margin:0 0 14px;}
-.thl-lead{font-size:17px;color:var(--mut);}
+.thl-auds{display:flex;flex-wrap:wrap;gap:9px;margin-top:32px;}
+.thl-aud{border:1px solid var(--rule);border-radius:2px;padding:9px 16px;
+  font-size:13.5px;color:var(--ink2);}
 
-.thl-feat{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;}
-.thl-card{background:var(--ink2);border:1px solid var(--line);border-radius:18px;padding:30px;
-  transition:transform .18s ease, border-color .18s;}
-.thl-card:hover{transform:translateY(-4px);border-color:rgba(255,45,85,.35);}
-.thl-card-tag{font-family:var(--dsp);font-weight:800;font-size:11.5px;letter-spacing:1.3px;
-  text-transform:uppercase;color:var(--gold-soft);margin-bottom:14px;}
-.thl-card h3{font-family:var(--dsp);font-weight:800;font-size:21px;letter-spacing:-.4px;margin:0 0 10px;}
-.thl-card p{font-size:15px;color:var(--mut);margin:0;}
+.thl-cta{border-top:1px solid var(--rule);padding:82px 0;}
+.thl-cta-in{display:flex;justify-content:space-between;align-items:flex-end;gap:40px;flex-wrap:wrap;}
 
-.thl-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
-.thl-step{position:relative;padding:30px;border:1px solid var(--line);border-radius:18px;
-  background:linear-gradient(180deg,var(--ink2),transparent);}
-.thl-step-n{font-family:var(--dsp);font-weight:900;font-size:44px;letter-spacing:-2px;
-  color:transparent;-webkit-text-stroke:1.5px var(--gold);opacity:.55;line-height:1;margin-bottom:16px;}
-.thl-step h3{font-family:var(--dsp);font-weight:800;font-size:20px;margin:0 0 8px;letter-spacing:-.3px;}
-.thl-step p{font-size:14.5px;color:var(--mut);margin:0;}
-
-.thl-aud{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;}
-.thl-chip{font-family:var(--dsp);font-weight:700;font-size:15px;letter-spacing:.2px;
-  padding:11px 20px;border-radius:999px;border:1px solid var(--line);color:var(--tx);background:var(--ink2);}
-.thl-chip:first-child{background:var(--pink);border-color:var(--pink);color:#fff;}
-
-.thl-cta{position:relative;overflow:hidden;border-radius:26px;
-  background:linear-gradient(135deg,#1b1b24,#101016);border:1px solid var(--line);
-  padding:64px 40px;text-align:center;}
-.thl-cta::after{content:"";position:absolute;inset:0;
-  background:radial-gradient(600px 200px at 50% -20%, rgba(255,45,85,.22), transparent 70%);}
-.thl-cta > *{position:relative;}
-.thl-cta h2{font-family:var(--dsp);font-weight:900;font-size:clamp(30px,4.4vw,46px);letter-spacing:-1px;margin:0 0 14px;}
-.thl-cta p{font-size:17px;color:var(--mut);max-width:520px;margin:0 auto 28px;}
-.thl-cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
-
-.thl-foot{border-top:1px solid var(--line);padding:40px 0;margin-top:20px;}
-.thl-foot-in{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;}
-.thl-foot-links{display:flex;gap:22px;flex-wrap:wrap;}
-.thl-foot-links a{color:var(--mut);font-size:14px;transition:color .15s;}
-.thl-foot-links a:hover{color:var(--tx);}
-.thl-foot-copy{font-size:13px;color:var(--mut2);}
-
-@media (prefers-reduced-motion:no-preference){
-  .thl-rise{animation:thlRise .7s cubic-bezier(.22,.61,.36,1) both;}
-  .thl-rise-2{animation-delay:.08s;}
-  @keyframes thlRise{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:none;}}
-}
+.thl-foot{border-top:1px solid var(--rule);padding:44px 0 56px;}
+.thl-foot-in{display:flex;justify-content:space-between;gap:44px;flex-wrap:wrap;}
+.thl-fcol{font-size:13.5px;color:var(--ink2);line-height:2;}
+.thl-fcol .h{color:var(--ink);font-weight:600;}
+.thl-fcol a:hover{color:var(--pink);}
+.thl-copy{font-size:12.5px;color:var(--ink3);margin-top:6px;}
 
 @media (max-width:900px){
-  .thl-hero-grid{grid-template-columns:1fr;gap:40px;}
-  .thl-values-in{grid-template-columns:repeat(2,1fr);}
-  .thl-val:nth-child(2){border-right:none;}
-  .thl-val:nth-child(1),.thl-val:nth-child(2){border-bottom:1px dashed var(--line);}
-  .thl-feat{grid-template-columns:1fr;}
-  .thl-steps{grid-template-columns:1fr;}
+  .thl-wrap{padding:0 20px;}
+  .thl-hero-top{flex-direction:column;gap:12px;}
+  .thl-heroblurb{text-align:left;max-width:none;}
+  .thl-sechead{flex-direction:column;gap:16px;}
+  .thl-grid{grid-template-columns:1fr;}
+  .thl-cell:nth-child(odd){border-right:none;}
+  .thl-cell:nth-last-child(2){border-bottom:1px solid var(--rule);}
+  .thl-steps{grid-template-columns:1fr;gap:22px;}
+  .thl-values{grid-template-columns:1fr 1fr;}
+  .thl-val{border-bottom:1px solid var(--rule);}
+  .thl-val:nth-child(2n){border-right:none;}
+  .thl-ticket{grid-template-columns:1fr;}
+  .thl-ticket::before,.thl-ticket::after{right:auto;left:50%;transform:translateX(-50%);}
+  .thl-ticket::before{top:auto;bottom:118px;left:-13px;transform:none;}
+  .thl-ticket::after{bottom:118px;left:auto;right:-13px;transform:none;}
+  .thl-tstub{border-left:none;border-top:2px dashed rgba(242,241,238,.22);flex-direction:row;justify-content:space-between;}
+  .thl-sec,.thl-cta{padding:56px 0;}
   .thl-navlinks{display:none;}
-}
-@media (max-width:560px){
-  .thl-values-in{grid-template-columns:1fr;}
-  .thl-val{border-right:none!important;border-bottom:1px dashed var(--line);}
-  .thl-val:last-child{border-bottom:none;}
-  .thl-sec{padding:64px 0;}
-  .thl-hero{padding:52px 0 40px;}
   .thl-hidephone{display:none;}
 }
 `;
@@ -265,7 +283,8 @@ export default function OrganiserLanding() {
       <nav className="thl-nav">
         <div className="thl-wrap thl-nav-in">
           <Link href="/" className="thl-brand" aria-label="TicketHawk home">
-            <img src="/brand-logo.png" alt="TicketHawk" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand-logo.png" alt="" />
             <span>TICKET<span className="pink">HAWK</span></span>
           </Link>
           <div className="thl-navlinks">
@@ -282,85 +301,75 @@ export default function OrganiserLanding() {
 
       <main>
         <section className="thl-hero">
-          <div className="thl-wrap thl-hero-grid">
-            <div className="thl-rise">
-              <span className="thl-eyebrow">For event organisers in South Africa</span>
-              <h1 className="thl-h1">Sell out your<br />next event, <em>faster</em>.</h1>
-              <p className="thl-sub">
-                TicketHawk is where South African organisers sell tickets, scan at
-                the door, and get paid — all from one dashboard, on the web or your phone.
+          <div className="thl-wrap">
+            <div className="thl-hero-top">
+              <span className="thl-eyebrow">Event ticketing · South Africa</span>
+              <p className="thl-heroblurb">
+                Sell tickets, scan at the door, and get paid — all from one
+                dashboard, on the web or your phone.
               </p>
-              <div className="thl-hero-cta">
-                <Link href="/login?mode=register" className="thl-btn thl-btn-pink thl-btn-lg">Start selling</Link>
-                <Link href="/login" className="thl-btn thl-btn-ghost thl-btn-lg">Log in</Link>
-              </div>
-              <p className="thl-hero-note">No setup fees. No monthly cost. You only pay a small fee per ticket sold.</p>
             </div>
 
-            <div className="thl-rise thl-rise-2" aria-hidden="true">
-              <div className="thl-ticket">
-                <div className="thl-tk-top">
-                  <div>
-                    <span className="thl-tk-badge">Live now</span>
-                    <div className="thl-tk-title">Summer Season Opener</div>
-                    <div className="thl-tk-meta">Sat 6 Dec · Cape Town</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div className="thl-tk-price">R180</div>
-                    <div className="thl-tk-meta">General</div>
-                  </div>
+            <h1 className="thl-h1">Sell out your<br />next event.</h1>
+
+            <div className="thl-heroact">
+              <Link href="/login?mode=register" className="thl-inline">Start selling ↘</Link>
+              <span className="thl-fine">No setup fees. No monthly cost.</span>
+            </div>
+
+            <div className="thl-ticket">
+              <div className="thl-tface">
+                <span className="thl-tlive"><span className="thl-tdot" />LIVE NOW</span>
+                <div className="thl-tname">Summer Season Opener</div>
+                <div className="thl-tmeta">Sat 6 Dec · Cape Town</div>
+                <div className="thl-tbar"><span /></div>
+                <div className="thl-tsold">
+                  <span>780 / 1000 sold</span>
+                  <span>R140 400 in sales</span>
                 </div>
-                <div className="thl-tk-perf" />
-                <div className="thl-tk-bottom">
-                  <div className="thl-tk-barlabel"><span>Tickets sold</span><span>780 / 1000</span></div>
-                  <div className="thl-tk-bar"><div className="thl-tk-fill" /></div>
-                  <div className="thl-tk-sold"><b>R140 400</b> in sales · settling in 48h</div>
+              </div>
+              <div className="thl-tstub">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/brand-logo.png" alt="" />
+                <div>
+                  <div className="thl-tprice">R180</div>
+                  <div className="thl-ttier">GENERAL</div>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
-
-        <section className="thl-values" aria-label="Why TicketHawk">
-          <div className="thl-wrap thl-values-in">
-            {VALUES.map((v) => (
-              <div className="thl-val" key={v.k}>
-                <div className="thl-val-k"><span>{v.k}</span></div>
-                <div className="thl-val-v">{v.v}</div>
-              </div>
-            ))}
           </div>
         </section>
 
         <section className="thl-sec" id="features">
           <div className="thl-wrap">
-            <div className="thl-sec-head">
-              <div className="thl-kicker">Everything in one place</div>
-              <h2 className="thl-h2">Run the whole event, start to payout</h2>
-              <p className="thl-lead">From the first ticket you list to the last person through the gate — and the money in your account after.</p>
+            <div className="thl-sechead">
+              <h2 className="thl-h2">Everything<br />you need.</h2>
+              <p className="thl-lede">
+                From the first ticket sold to the payout landing in your bank —
+                built for South African organisers, not adapted for them.
+              </p>
             </div>
-            <div className="thl-feat">
-              {FEATURES.map((f) => (
-                <article className="thl-card" key={f.tag}>
-                  <div className="thl-card-tag">{f.tag}</div>
+            <div className="thl-grid">
+              {FEATURES.map(f => (
+                <div className="thl-cell" key={f.n}>
+                  <div className="thl-cellhead"><b>{f.n}</b>{f.tag}</div>
                   <h3>{f.title}</h3>
                   <p>{f.body}</p>
-                </article>
+                </div>
               ))}
             </div>
           </div>
         </section>
 
-        <section className="thl-sec" id="how" style={{ background: 'var(--ink2)', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' }}>
+        <section className="thl-sec" id="how">
           <div className="thl-wrap">
-            <div className="thl-sec-head">
-              <div className="thl-kicker">How it works</div>
-              <h2 className="thl-h2">Three steps to a sold-out door</h2>
+            <div className="thl-sechead">
+              <h2 className="thl-h2">Three steps to<br />a sold-out door.</h2>
             </div>
             <div className="thl-steps">
-              {STEPS.map((s) => (
+              {STEPS.map(s => (
                 <div className="thl-step" key={s.n}>
-                  <div className="thl-step-n">{s.n}</div>
+                  <div className="n">{s.n}</div>
                   <h3>{s.title}</h3>
                   <p>{s.body}</p>
                 </div>
@@ -369,28 +378,37 @@ export default function OrganiserLanding() {
           </div>
         </section>
 
-        <section className="thl-sec" id="audiences">
+        <section className="thl-sec" style={{ paddingBottom: 0 }}>
           <div className="thl-wrap">
-            <div className="thl-sec-head">
-              <div className="thl-kicker">Built for every kind of event</div>
-              <h2 className="thl-h2">From club nights to festivals</h2>
-              <p className="thl-lead">Whatever you put on, TicketHawk handles the tickets, the door and the payout.</p>
-            </div>
-            <div className="thl-aud">
-              {AUDIENCES.map((a) => <span className="thl-chip" key={a}>{a}</span>)}
+            <div className="thl-values">
+              {VALUES.map(v => (
+                <div className="thl-val" key={v.k}>
+                  <div className="k">{v.k}</div>
+                  <div className="v">{v.v}</div>
+                  {v.note && <div className="note">{v.note}</div>}
+                </div>
+              ))}
             </div>
           </div>
         </section>
 
-        <section className="thl-sec" style={{ paddingTop: 0 }}>
+        <section className="thl-sec" id="audiences" style={{ borderTop: 'none' }}>
           <div className="thl-wrap">
-            <div className="thl-cta">
-              <h2>Your next event starts here</h2>
-              <p>Create your organiser account and list your first event in minutes. It&rsquo;s free to get started.</p>
-              <div className="thl-cta-row">
-                <Link href="/login?mode=register" className="thl-btn thl-btn-pink thl-btn-lg">Start selling</Link>
-                <Link href="/login" className="thl-btn thl-btn-ghost thl-btn-lg">Log in</Link>
-              </div>
+            <div className="thl-sechead">
+              <h2 className="thl-h2">From club nights<br />to festivals.</h2>
+            </div>
+            <div className="thl-auds">
+              {AUDIENCES.map(a => <span className="thl-aud" key={a}>{a}</span>)}
+            </div>
+          </div>
+        </section>
+
+        <section className="thl-cta">
+          <div className="thl-wrap thl-cta-in">
+            <h2 className="thl-h2">Your next event<br />starts here.</h2>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Link href="/login?mode=register" className="thl-btn thl-btn-pink">Start selling</Link>
+              <Link href="/login" className="thl-btn thl-btn-ghost">Log in</Link>
             </div>
           </div>
         </section>
@@ -398,17 +416,32 @@ export default function OrganiserLanding() {
 
       <footer className="thl-foot">
         <div className="thl-wrap thl-foot-in">
-          <Link href="/" className="thl-brand" style={{ fontSize: 17 }}>
-            <img src="/brand-logo.png" alt="TicketHawk" style={{ width: 28, height: 28 }} />
-            <span>TICKET<span className="pink">HAWK</span></span>
-          </Link>
-          <div className="thl-foot-links">
-            <a href="#features">Features</a>
-            <a href="#how">How it works</a>
-            <Link href="/login">Log in</Link>
-            <Link href="/login?mode=register">Start selling</Link>
+          <div>
+            <div className="thl-brand" style={{ marginBottom: 8 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand-logo.png" alt="" />
+              <span>TICKET<span className="pink">HAWK</span></span>
+            </div>
+            <div className="thl-copy">© {new Date().getFullYear()} Self Hawk Tech (Pty) Ltd</div>
           </div>
-          <div className="thl-foot-copy">© {new Date().getFullYear()} TicketHawk</div>
+          <div style={{ display: 'flex', gap: 56, flexWrap: 'wrap' }}>
+            <div className="thl-fcol">
+              <div className="h">Product</div>
+              <div><a href="#features">Features</a></div>
+              <div><a href="#how">How it works</a></div>
+              <div><a href="#audiences">Events</a></div>
+            </div>
+            <div className="thl-fcol">
+              <div className="h">Account</div>
+              <div><Link href="/login">Log in</Link></div>
+              <div><Link href="/login?mode=register">Start selling</Link></div>
+            </div>
+            <div className="thl-fcol">
+              <div className="h">Legal</div>
+              <div><a href="https://ticket-hawk.com/terms">Terms</a></div>
+              <div><a href="https://ticket-hawk.com/privacy">Privacy</a></div>
+            </div>
+          </div>
         </div>
       </footer>
     </div>

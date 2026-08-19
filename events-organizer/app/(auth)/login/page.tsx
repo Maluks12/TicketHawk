@@ -177,14 +177,16 @@ export default function LoginPage() {
 
       <div style={{ width: '100%', maxWidth: 400 }}>
 
-        {/* Logo */}
+        {/* Logo — the mark stands on its own.
+            It used to sit inside a 60x60 --accent-deep rounded square, which
+            put a purple tile behind a logo that already has its own gold disc,
+            reading as a second, competing container. Without the tile the mark
+            needs to carry the space itself, so it steps up from 44px to 64px. */}
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{
-            width: 60, height: 60, borderRadius: 14, background: 'var(--accent-deep)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12,
-          }}>
+          <div style={{ marginBottom: 12 }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand-logo.png" alt="TicketHawk" width={44} height={44} />
+            <img src="/brand-logo.png" alt="TicketHawk" width={64} height={64}
+              style={{ display: 'inline-block' }} />
           </div>
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5, color: 'var(--text)' }}>
             TICKET<span style={{ color: 'var(--brand)' }}>HAWK</span>
