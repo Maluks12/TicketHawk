@@ -21,7 +21,28 @@ import (
 //	GET /events/:id/ticket-types
 func GetTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		eventID := c.Param("id")
+		// The public event routes accept a SLUG or a UUID — GetEventBySlugHandler
+		// resolves either, and the buyer web apps build links from the slug
+		// (/events/new-event-2d694e55...). This handler did not: it passed the raw
+		// param into a `WHERE event_id = $1` lookup, so every slug-based request
+		// matched nothing and returned an empty list.
+		//
+		// The purchase page reads an empty list as "no tiers on this event" and
+		// substitutes a synthetic GENERAL ADMISSION row priced at events.price, so
+		// the failure was silent and looked like the tiers had been deleted: the
+		// organiser saw both tiers On sale while buyers were offered a single
+		// ticket that does not exist.
+		//
+		// ResolveVisibleEventID runs the same slug-or-UUID branch the analytics
+		// beacons use and limits to publicly visible statuses — including
+		// published_private, which is exactly what a private link is.
+		eventID, ok := repository.ResolveVisibleEventID(pool, c.Param("id"))
+		if !ok {
+			// Same shape as a genuinely empty result, so probing ids cannot
+			// distinguish a missing event from one that has no tiers.
+			c.JSON(http.StatusOK, gin.H{"ticket_types": []*models.TicketType{}, "count": 0})
+			return
+		}
 
 		types, err := repository.GetTicketTypesByEventID(pool, eventID)
 		if err != nil {
