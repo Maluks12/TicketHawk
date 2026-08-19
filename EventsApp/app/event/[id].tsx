@@ -102,6 +102,22 @@ function MetaItem({ icon: IconCmp, label, value }: { icon: PhosphorIcon; label: 
 
 export default function EventDetail() {
   const router             = useRouter();
+  // goBack, not router.back().
+  //
+  // A deep link (a private event link from an email or WhatsApp) launches the
+  // app straight onto this screen with an EMPTY navigation stack. router.back()
+  // then dispatches GO_BACK with nothing to pop, which expo-router reports as
+  // "The action 'GO_BACK' was not handled by any navigator" and, in release,
+  // simply does nothing — the button looks broken.
+  //
+  // canGoBack() is the documented way to ask. When there is no history we
+  // replace with the home tab instead, so a deep-linked visitor lands somewhere
+  // real rather than on a dead end.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)');
+  }, [router]);
+
   const { id }             = useLocalSearchParams<{ id: string }>();
   const event              = useEventStore((state) => state.selectedEvent);
   const setSelectedEvent   = useEventStore((state) => state.setSelectedEvent);
@@ -308,7 +324,7 @@ export default function EventDetail() {
         >
           <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Browse events</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 14 }} activeOpacity={0.7}>
+        <TouchableOpacity onPress={goBack} style={{ marginTop: 14 }} activeOpacity={0.7}>
           <Text style={{ color: colors.subText, fontSize: 13, fontWeight: '600' }}>Go back</Text>
         </TouchableOpacity>
       </View>
@@ -333,7 +349,7 @@ export default function EventDetail() {
         >
           <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Try again</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 14 }} activeOpacity={0.7}>
+        <TouchableOpacity onPress={goBack} style={{ marginTop: 14 }} activeOpacity={0.7}>
           <Text style={{ color: colors.subText, fontSize: 13, fontWeight: '600' }}>Go back</Text>
         </TouchableOpacity>
       </View>
@@ -347,7 +363,7 @@ export default function EventDetail() {
           EVENT NOT FOUND
         </Text>
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={goBack}
           style={{ marginTop: 16, borderWidth: 1, borderColor: colors.dividerColor,
             paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12 }}
         >
@@ -497,7 +513,7 @@ export default function EventDetail() {
 
       {/* ── Nav overlay ─────────────────────────────────────────────── */}
       <View style={sheet.navOverlay} pointerEvents="box-none">
-        <TouchableOpacity style={sheet.navBtn} onPress={() => router.back()} activeOpacity={0.8}>
+        <TouchableOpacity style={sheet.navBtn} onPress={goBack} activeOpacity={0.8}>
           <Text className={s.backIcon}>‹</Text>
         </TouchableOpacity>
         <TouchableOpacity style={sheet.navBtn} onPress={handleShare} activeOpacity={0.8}>

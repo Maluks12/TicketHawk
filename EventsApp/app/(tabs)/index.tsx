@@ -30,7 +30,7 @@ import {
   type HomeSection,
 } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
-import { Ticket } from 'phosphor-react-native';
+import { Ticket, CaretDown } from 'phosphor-react-native';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl } from '../../components/FilterModal';
@@ -1099,8 +1099,21 @@ export default function Index() {
         className={s.locationHeader}
         onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
       >
-        <TouchableOpacity onPress={() => setFilterOpen(true)}>
-          <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
+        {/* The caret is the only thing marking this as tappable. Without it the
+            location and date read as a static page title, so nobody discovered
+            the filter sheet behind them. hitSlop widens the touch target to a
+            comfortable size without changing the layout. */}
+        <TouchableOpacity
+          onPress={() => setFilterOpen(true)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Filter events. Currently ${locationLabel}, ${dateLabelText}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 16 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
+            <CaretDown size={16} weight="bold" color={colors.text} />
+          </View>
           <Text className={s.locationSub} style={{ color: colors.subText }}>{dateLabelText}</Text>
         </TouchableOpacity>
       </Animated.View>
