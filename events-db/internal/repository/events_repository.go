@@ -1303,7 +1303,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
         JOIN categories c ON e.category_id = c.id
@@ -1325,7 +1325,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1382,7 +1382,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
         JOIN categories c ON e.category_id = c.id
@@ -1403,7 +1403,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1457,7 +1457,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
 		JOIN categories c ON e.category_id = c.id
@@ -1478,7 +1478,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1545,7 +1545,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
 		JOIN categories c ON e.category_id = c.id
@@ -1566,7 +1566,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {

@@ -49,6 +49,37 @@ async function fetchEvents(): Promise<ApiEvent[]> {
   }
 }
 
+/**
+ * Returns a W3C-valid lastmod, or the fallback.
+ *
+ * Three ways the raw value goes wrong, all of which Google rejects outright
+ * as "Invalid date" and which the previous `e.updated_at ? ... : iso` guard
+ * let through, because it only tested for truthiness:
+ *
+ *   1. Go's zero time. `updated_at` is a bare time.Time on the API model, not
+ *      a pointer, so a NULL column serialises as "0001-01-01T00:00:00Z". That
+ *      string is truthy, parses fine, and yields a year-0001 date.
+ *   2. Unparseable strings. new Date("") is an Invalid Date, and calling
+ *      .toISOString() on it THROWS a RangeError — which would take the whole
+ *      sitemap down, not just one entry.
+ *   3. Future dates. lastmod means "last modified"; a timestamp ahead of now
+ *      is not a modification date and is treated as invalid.
+ *
+ * A wrong lastmod is worse than none: the tag is optional, and Google will
+ * simply crawl on its own schedule without it.
+ */
+function safeLastmod(raw: string | null | undefined, fallback: string): string {
+  if (!raw) return fallback;
+  const d = new Date(raw);
+  const t = d.getTime();
+  if (Number.isNaN(t)) return fallback;
+  // Anything before 2000 is a sentinel or zero value, not a real edit.
+  if (d.getUTCFullYear() < 2000) return fallback;
+  // Clamp anything in the future back to now.
+  if (t > Date.now()) return fallback;
+  return d.toISOString();
+}
+
 function urlTag(
   loc: string, lastmod: string, changefreq: string, priority: string,
 ): string {
@@ -96,7 +127,7 @@ export async function GET() {
       // contradictory signals about one page.
       const path = e.slug || e.id;
       const past = new Date(e.start_time) < now;
-      const lastmod = e.updated_at ? new Date(e.updated_at).toISOString() : iso;
+      const lastmod = safeLastmod(e.updated_at, iso);
       return urlTag(
         `${SITE_URL}/events/${path}`,
         lastmod,
