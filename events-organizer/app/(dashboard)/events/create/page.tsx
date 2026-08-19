@@ -528,6 +528,21 @@ export default function CreateEventPage() {
   const [performers,          setPerformers]          = useState<string[]>([]);
   const [teams,               setTeams]               = useState<string[]>([]);
   const [ticketTypes,         setTicketTypes]         = useState<TicketTypeRow[]>([]);
+
+  // Mirrors what the backend stores: events.price follows the cheapest VISIBLE
+  // tier, so the locked field shows the real number rather than the stale one
+  // typed before any tier was added.
+  //
+  // Declared here, after both `price` and `ticketTypes` — a const referencing
+  // either before its useState line is a temporal dead zone error that throws
+  // on every render, not a lint warning.
+  //
+  // The visible filter can empty the array (every tier staged hidden), and
+  // Math.min() of nothing is Infinity, so fall back to the typed price.
+  const visibleTierPrices = ticketTypes.filter(t => t.is_visible).map(t => t.price);
+  const lowestTierPrice = visibleTierPrices.length
+    ? String(Math.min(...visibleTierPrices))
+    : price;
   const [refundPolicy,        setRefundPolicy]        = useState('');
   const [termsAndConditions,  setTermsAndConditions]  = useState('');
 
@@ -1188,23 +1203,42 @@ export default function CreateEventPage() {
 
                   {!isFree && (
                     <div style={{ marginTop: 18 }}>
-                      <div className="field" style={{ marginBottom: 0, maxWidth: 320 }}>
-                        <label>Base price <Required /></label>
-                        <div style={{ position: 'relative' }}>
-                          <span style={{
-                            position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
-                            color: 'var(--text-3)', fontWeight: 700, fontSize: 14, pointerEvents: 'none',
-                          }}>R</span>
-                          <input type="number" min="0" step="0.01" value={price}
-                            onChange={e => setPrice(e.target.value)}
-                            style={{ ...inp, paddingLeft: 30 }} />
+                      {/* Base price is SUPERSEDED once a tier exists.
+                          Tiers are the alternative to flat pricing, not an
+                          addition to it: the backend sets events.price from the
+                          tiers and buyers only ever choose between tiers. The
+                          field used to stay editable, so entering R100 here and
+                          then adding a R150 tier looked like two tickets and
+                          produced one — the R100 was silently discarded.
+                          Locking it says so before it happens rather than after. */}
+                      <LockedFieldset
+                        locked={ticketTypes.length > 0}
+                        note={`Base price is set by your ticket tiers. ${ticketTypes.length === 1
+                          ? 'Remove the tier below'
+                          : 'Remove all tiers below'} to price this event with a single flat price instead.`}>
+                        <div className="field" style={{ marginBottom: 0, maxWidth: 320 }}>
+                          <label>Base price <Required /></label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{
+                              position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
+                              color: 'var(--text-3)', fontWeight: 700, fontSize: 14, pointerEvents: 'none',
+                            }}>R</span>
+                            <input type="number" min="0" step="0.01"
+                              value={ticketTypes.length > 0 ? lowestTierPrice : price}
+                              onChange={e => setPrice(e.target.value)}
+                              style={{ ...inp, paddingLeft: 30 }} />
+                          </div>
+                          {/* Currency selector removed — ZAR only for launch. The
+                              `currency` state below stays fixed at 'ZAR' and is
+                              still sent in the create payload, so re-adding a
+                              picker later needs no backend change. */}
+                          <div className="field-hint">
+                            {ticketTypes.length > 0
+                              ? `Taken from your lowest tier — buyers choose between ${ticketTypes.length} tier${ticketTypes.length === 1 ? '' : 's'} at checkout`
+                              : 'Priced in ZAR (South African Rand)'}
+                          </div>
                         </div>
-                        {/* Currency selector removed — ZAR only for launch. The
-                            `currency` state below stays fixed at 'ZAR' and is
-                            still sent in the create payload, so re-adding a
-                            picker later needs no backend change. */}
-                        <div className="field-hint">Priced in ZAR (South African Rand)</div>
-                      </div>
+                      </LockedFieldset>
                     </div>
                   )}
 

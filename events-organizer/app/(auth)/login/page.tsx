@@ -11,7 +11,6 @@ import {
   firstError,
 } from '../../../lib/validation';
 import { ThemeToggle } from '../../../lib/theme';
-import DateTimePicker from '@/components/dateTimePicker';
 import { ORGANISER_LEGAL_DOCS, legalLinkProps, CURRENT_LEGAL_VERSION } from '../../../lib/legalLinks';
 
 type Mode = 'login' | 'register';
@@ -33,7 +32,6 @@ export default function LoginPage() {
   const [regPassword,      setRegPassword]       = useState('');
   const [confirmPassword,  setConfirmPassword]   = useState('');
   const [phoneNumber,      setPhoneNumber]       = useState('');
-  const [dob,              setDob]               = useState('');
   const [showRegPass,      setShowRegPass]       = useState(false);
   const [showConfirmPass,  setShowConfirmPass]   = useState(false);
   // Explicit, unticked by default. A pre-ticked box is not consent in any
@@ -102,7 +100,6 @@ export default function LoginPage() {
       lastName:  validateRequired(lastName, 'Last name'),
       email:     validateEmail(regEmail),
       phone:     validateRequired(phoneNumber, 'Phone number'),
-      dob:       validateRequired(dob, 'Date of birth'),
       password:  validatePassword(regPassword),
       confirm:   validatePasswordMatch(regPassword, confirmPassword),
     });
@@ -118,7 +115,6 @@ export default function LoginPage() {
         first_name: firstName, last_name: lastName,
         email: regEmail, password: regPassword,
         phone_number: phoneNumber.trim(),
-        date_of_birth: new Date(dob).toISOString(),
         // Recorded at the moment of consent, with the version accepted. The
         // version is what lets a later material change re-prompt: without it,
         // "accepted" is permanent and a new fee model could never be
@@ -287,35 +283,21 @@ export default function LoginPage() {
                     onChange={e => setRegEmail(e.target.value)}
                     placeholder="you@example.com" />
                 </Field>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <Field label="Phone number">
-                    <input className="org-input" type="tel" value={phoneNumber}
-                      autoComplete="tel"
-                      onChange={e => setPhoneNumber(e.target.value)}
-                      placeholder="+27 82 123 4567" />
-                  </Field>
-                  <Field label="Date of birth">
-                    {/* Was <input type="date">, the last un-themed control in
-                        the product — it rendered Chrome's own light calendar on
-                        a dark page. Same picker the event form uses, in
-                        date-only mode, with month/year dropdowns because paging
-                        back to a birth year one month at a time is ~400
-                        clicks. */}
-                    <DateTimePicker
-                      value={dob}
-                      onChange={setDob}
-                      dateOnly
-                      max={new Date().toISOString().split('T')[0]}
-                      placeholder="Select your date of birth"
-                      style={{
-                        width: '100%', padding: '11px 13px',
-                        border: '1px solid var(--border-2)', borderRadius: 'var(--r)',
-                        background: 'var(--surface-alpha)', color: 'var(--text)',
-                        fontSize: 15, fontFamily: 'inherit', boxSizing: 'border-box',
-                      }}
-                    />
-                  </Field>
-                </div>
+                {/* Date of birth removed. The backend dropped it from
+                    CreateUserRequest deliberately — it was never read by the
+                    handler or the repository, so every signup since launch
+                    collected a birth date and discarded it. Age belongs at
+                    checkout for age-restricted events, where it is actually
+                    load-bearing, not as a seventh field on a signup form.
+                    users.date_of_birth stays nullable and still works for
+                    accounts that set it via profile edit. Phone now spans
+                    the row on its own. */}
+                <Field label="Phone number">
+                  <input className="org-input" type="tel" value={phoneNumber}
+                    autoComplete="tel"
+                    onChange={e => setPhoneNumber(e.target.value)}
+                    placeholder="+27 82 123 4567" />
+                </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field label="Password">
                     <div className="pass-wrap">
@@ -453,9 +435,13 @@ function SubmitBtn({ loading, label, loadingLabel, disabled = false }: {
   const off = loading || disabled;
   return (
     <button type="submit" disabled={off} style={{
-      width: '100%', padding: '11px', borderRadius: 6, marginTop: 4,
+      width: '100%', padding: '11px', borderRadius: 'var(--r)', marginTop: 4,
       background: off ? 'var(--accent-border)' : 'var(--accent)',
-      border: 'none', color: '#fff', fontSize: 15, fontWeight: 700,
+      // --on-accent, NOT '#fff'. The accent is near-black in the light theme
+      // and near-white in dark, so a hardcoded white label rendered white on
+      // a near-white button — the label vanished entirely in dark mode.
+      // The token flips with the theme; the literal could not.
+      border: 'none', color: 'var(--on-accent)', fontSize: 15, fontWeight: 700,
       cursor: off ? 'not-allowed' : 'pointer',
       opacity: disabled && !loading ? 0.7 : 1,
       fontFamily: 'inherit', transition: 'background .15s, opacity .15s',
@@ -468,7 +454,7 @@ function SubmitBtn({ loading, label, loadingLabel, disabled = false }: {
 function InlineLink({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button type="button" onClick={onClick} style={{
-      background: 'none', border: 'none', color: 'var(--accent)', fontWeight: 700,
+      background: 'none', border: 'none', color: 'var(--mark)', fontWeight: 700,
       cursor: 'pointer', fontSize: 13, padding: 0, fontFamily: 'inherit',
     }}>
       {label}
