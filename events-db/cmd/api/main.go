@@ -516,7 +516,16 @@ func main() {
 			ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 			"guest-bookings"))
 	}
-		guest.Use(middleware.GuestBookingGuard(rdb))
+
+	// Brute-force / enumeration guard for every bookingNumber + email route.
+	//
+	// Replaces the per-handler lockout that only covered two endpoints while
+	// /payment, /refund-quote, /offline, /pool-qr and POST /refund accepted the
+	// same credential with none. Keyed on booking+email AND on IP, so a
+	// stranger guessing an address cannot lock the real owner out of their own
+	// ticket. Safe with a nil client: returns a pass-through handler and logs a
+	// warning, which is what happens when Redis is down at startup.
+	guest.Use(middleware.GuestBookingGuard(rdb))
 	{
 		guest.POST("/bookings",                              handlers.CreateGuestBookingHandler(pool, paymentService))
 		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool))
@@ -1249,6 +1258,25 @@ func main() {
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
+
+		// ── Editing an existing event ──────────────────────────────────────
+		//
+		// Split by lifecycle, not by convenience:
+		//
+		//   DELETE /events/:id           draft only, hard delete
+		//   PUT    /events/:id           draft only, saves straight through
+		//   GET    /events/:id/edit      full row + tiers, hydrates the form
+		//   POST   /events/:id/edit-request
+		//                                published only, files an event_edit
+		//                                staff_request for admin approval
+		//
+		// A draft has no buyers and is not discoverable, so the organiser owns it
+		// outright. A published event has people who paid against its current
+		// terms, so changes go through review while it stays live and on sale.
+		orgRoutes.DELETE("/events/:id",            handlers.DeleteDraftEventHandler(pool, eventCache))
+		orgRoutes.PUT("/events/:id",               handlers.UpdateDraftEventHandler(pool, eventCache))
+		orgRoutes.GET("/events/:id/edit",          handlers.GetOrganiserEventForEditHandler(pool))
+		orgRoutes.POST("/events/:id/edit-request", handlers.SubmitOrganiserEventEditHandler(pool))
 		orgRoutes.POST("/upload",         middleware.ExtendWriteTimeout(5*time.Minute), handlers.UploadOrganiserImageHandler(imgService))
 		// Listing fee — required for events with 20+ ticket capacity
 		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))

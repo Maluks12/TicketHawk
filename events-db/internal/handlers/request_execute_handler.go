@@ -324,22 +324,42 @@ func RequestEventTakedownHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	is_featured           CapFeatureEvent covers it directly
 //	base_price            changing what a live event costs after people have
 //	                      paid is a refund question, not an edit
+// Four of these keys previously mapped to columns that do not exist on
+// `events`, so any approved edit touching them died at execution with
+// 42703 (undefined_column) and stranded the request:
+//
+//	venue_address    -> the column is `address`
+//	max_tickets_user -> the column is `max_tickets_per_user` (migration 000043)
+//	category         -> the column is `category_id`
+//	image_url        -> that column belongs to `categories`/`organizers`;
+//	                    events carry `cover_image_url` and `banner_image_url`
+//
+// The map KEY is the wire name the console/organiser sends; the VALUE is the
+// real column. Keys are kept stable so existing pending payloads still apply.
 var editableEventFields = map[string]string{
-	"title":             "title",
-	"description":       "description",
-	"venue_name":        "venue_name",
-	"venue_address":     "venue_address",
-	"city":              "city",
-	"start_time":        "start_time",
-	"end_time":          "end_time",
-	"sale_start":        "sale_start",
-	"sale_end":          "sale_end",
-	"max_capacity":      "max_capacity",
-	"max_tickets_user":  "max_tickets_user",
-	"allow_waitlist":    "allow_waitlist",
-	"category":          "category",
-	"timezone":          "timezone",
-	"image_url":         "image_url",
+	"title":            "title",
+	"description":      "description",
+	"venue_name":       "venue_name",
+	"venue_address":    "address",
+	"address":          "address",
+	"city":             "city",
+	"start_time":       "start_time",
+	"end_time":         "end_time",
+	"sale_start":       "sale_start",
+	"sale_end":         "sale_end",
+	"max_capacity":     "max_capacity",
+	"max_tickets_user": "max_tickets_per_user",
+	"allow_waitlist":   "allow_waitlist",
+	"category":         "category_id",
+	"category_id":      "category_id",
+	"timezone":         "timezone",
+
+	// Media and tags — organisers may edit these on a live event.
+	// `tags` is TEXT[]; pgx encodes a []string / []any of strings directly.
+	"image_url":        "cover_image_url",
+	"cover_image_url":  "cover_image_url",
+	"banner_image_url": "banner_image_url",
+	"tags":             "tags",
 }
 
 // applyEventEdit writes ONLY the allow-listed fields present in the payload.
@@ -368,6 +388,16 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 	args := make([]any, 0, len(fields)+1)
 	args = append(args, eventID)
 
+	// Ticket tiers live in their own table, so they cannot ride the column
+	// UPDATE below. Pull them out first and apply them separately.
+	var tierPayload []any
+	if raw, ok := fields["ticket_types"]; ok {
+		if arr, ok := raw.([]any); ok {
+			tierPayload = arr
+		}
+		delete(fields, "ticket_types")
+	}
+
 	for key, val := range fields {
 		col, allowed := editableEventFields[key]
 		if !allowed {
@@ -381,6 +411,10 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 	}
 
 	if len(sets) == 0 {
+		// A tier-only edit is legitimate: nothing on `events` changed.
+		if len(tierPayload) > 0 {
+			return applyTicketTypeEdits(ctx, tx, eventID, tierPayload)
+		}
 		return fmt.Errorf("event edit contained no editable fields")
 	}
 
@@ -393,6 +427,99 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("event not found")
+	}
+
+	if len(tierPayload) > 0 {
+		return applyTicketTypeEdits(ctx, tx, eventID, tierPayload)
+	}
+	return nil
+}
+
+// applyTicketTypeEdits updates existing tiers and inserts new ones inside the
+// SAME transaction as the event UPDATE, so an approved edit is all-or-nothing.
+//
+// Deliberately does NOT delete tiers that are absent from the payload.
+// Removing a tier someone has already bought would orphan their booking's
+// ticket_type_id; deletion stays with the explicit
+// DELETE /organiser/ticket-types/:typeId route, which can refuse when sold.
+//
+// Price changes apply to FUTURE sales only. Bookings snapshot unit_price and
+// subtotal at purchase, so an existing ticket holder keeps what they paid —
+// repricing their booking would be a refund/charge, not an edit.
+func applyTicketTypeEdits(ctx context.Context, tx pgx.Tx, eventID string, tiers []any) error {
+	for _, raw := range tiers {
+		t, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		id, _ := t["id"].(string)
+		name, _ := t["name"].(string)
+		if name == "" {
+			return fmt.Errorf("ticket type needs a name")
+		}
+
+		// json.Unmarshal gives every number as float64.
+		var price float64
+		if p, ok := t["price"].(float64); ok {
+			price = p
+		}
+		if price < 0 {
+			return fmt.Errorf("ticket type %q: price cannot be negative", name)
+		}
+
+		var capacity *int
+		if c, ok := t["capacity"].(float64); ok {
+			ci := int(c)
+			capacity = &ci
+		}
+
+		description, _ := t["description"].(string)
+		sortOrder := 0
+		if so, ok := t["sort_order"].(float64); ok {
+			sortOrder = int(so)
+		}
+		isVisible := true
+		if v, ok := t["is_visible"].(bool); ok {
+			isVisible = v
+		}
+
+		if id == "" {
+			// New tier.
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO ticket_types
+					(event_id, name, description, price, capacity, sort_order, is_visible)
+				VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7)
+			`, eventID, name, description, price, capacity, sortOrder, isVisible); err != nil {
+				return fmt.Errorf("create ticket type %q: %w", name, err)
+			}
+			continue
+		}
+
+		// Existing tier. Capacity may not drop below what is already sold or
+		// held — the guard is in the WHERE clause so a concurrent sale cannot
+		// slip between a check and the write.
+		tag, err := tx.Exec(ctx, `
+			UPDATE ticket_types
+			SET name        = $3,
+			    description = NULLIF($4, ''),
+			    price       = $5,
+			    capacity    = $6,
+			    sort_order  = $7,
+			    is_visible  = $8,
+			    updated_at  = NOW()
+			WHERE id = $1
+			  AND event_id = $2
+			  AND ($6::int IS NULL OR $6::int >= tickets_sold + reserved_count)
+		`, id, eventID, name, description, price, capacity, sortOrder, isVisible)
+		if err != nil {
+			return fmt.Errorf("update ticket type %q: %w", name, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf(
+				"ticket type %q: not found on this event, or the new capacity is below tickets already sold or reserved",
+				name)
+		}
 	}
 	return nil
 }

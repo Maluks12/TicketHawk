@@ -132,6 +132,29 @@ export default function EventsPage() {
   // ── Actions ─────────────────────────────────────────────────────────────────
   // The API requires a reason of at least 10 characters and rejects the request
   // without one, so this prompts rather than posting an empty body.
+  // ── Delete a draft ──────────────────────────────────────────────────────────
+  // Hard delete. The backend refuses anything that is not status='draft', and
+  // bookings.event_id is ON DELETE RESTRICT, so a draft that somehow carries a
+  // booking is rejected by Postgres rather than silently cascading away.
+  async function deleteDraft(id: string, title: string) {
+    confirm(
+      'Delete this draft?',
+      `"${title}" will be permanently deleted, along with any ticket tiers and `
+      + 'images set up on it. This cannot be undone.',
+      async () => {
+        try {
+          await api.delete(`/organiser/events/${id}`);
+          toast('Draft deleted', 'success');
+          setEvents(prev => prev.filter(ev => ev.id !== id));
+          setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+        } catch (e: unknown) {
+          const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+          toast(msg ?? 'Failed to delete draft', 'error');
+        }
+      },
+    );
+  }
+
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -425,15 +448,29 @@ export default function EventsPage() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                        <Link href={`/event/${e.id}`} className="btn btn-xs">
-                          Details
+                        {/* A draft opens the create form in edit mode; anything
+                            live goes to the read-only details page. */}
+                        <Link
+                          href={e.status === 'draft' ? `/events/create?edit=${e.id}` : `/event/${e.id}`}
+                          className="btn btn-xs">
+                          {e.status === 'draft' ? 'Edit' : 'Details'}
                         </Link>
+
                         {e.status === 'draft' && (
                           <button className="btn btn-xs btn-primary" onClick={() => publishEvent(e.id)}>
                             Submit
                           </button>
                         )}
-                        {!['cancelled', 'completed'].includes(e.status) && (
+
+                        {/* Drafts are deleted, not cancelled. Nothing has been
+                            sold and the event was never discoverable, so there
+                            is no audience to notify — "Cancel" implied a
+                            standing commitment that a draft never made. */}
+                        {e.status === 'draft' ? (
+                          <button className="btn btn-xs btn-danger" onClick={() => deleteDraft(e.id, e.title)}>
+                            Delete
+                          </button>
+                        ) : !['cancelled', 'completed'].includes(e.status) && (
                           <button className="btn btn-xs btn-danger" onClick={() => cancelEvent(e.id)}>
                             Cancel
                           </button>
