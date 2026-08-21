@@ -430,6 +430,60 @@ func main() {
 	}
 
 	// ==========================================
+	// Public Organiser Profile Routes
+	//
+	// GET /organisers/:slug         — profile (accepts slug or UUID)
+	// GET /organisers/:slug/events  — ?scope=upcoming|past
+	//
+	// OptionalAuth so a signed-in visitor is identified when a token is
+	// present. Nothing here needs it yet; phase 2's follow state will, and
+	// adding the middleware later would silently change behaviour on an
+	// endpoint the clients cache.
+	//
+	// An organiser that cannot be resolved 404s identically whether they do
+	// not exist, are suspended, or have hidden their page — see
+	// repository.ErrOrganizerProfileNotFound for why the causes are not
+	// distinguished.
+	//
+	// Its own rate-limit bucket rather than sharing "events-public": a visitor
+	// paging through an organiser's back catalogue burns requests fast, and
+	// sharing the bucket would throttle them out of the main feed.
+	// ==========================================
+	organisersPublic := v1.Group("/organisers")
+	organisersPublic.Use(middleware.OptionalAuth(cfg))
+	if rateLimitManager != nil {
+		organisersPublic.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 120, RefillRate: 3.0, TTL: 15 * time.Minute},
+			"organisers-public"))
+	}
+	{
+		organisersPublic.GET("/:slug",        handlers.GetPublicOrganizerHandler(pool))
+		organisersPublic.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
+	}
+
+	// American-spelling alias for the same two routes.
+	//
+	// This codebase is already inconsistent — admin routes say /organizers, the
+	// organiser group says /organiser — and these are PUBLIC URLs that end up
+	// in shared links and search results. A 404 on a plausible spelling is a
+	// support ticket, not a principle.
+	//
+	// Registered as a second group because gin cannot hold two different
+	// wildcard names at the same position in one tree; a separate static prefix
+	// gets its own subtree and sidesteps that entirely.
+	organizersPublicAlias := v1.Group("/organizers")
+	organizersPublicAlias.Use(middleware.OptionalAuth(cfg))
+	if rateLimitManager != nil {
+		organizersPublicAlias.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 120, RefillRate: 3.0, TTL: 15 * time.Minute},
+			"organisers-public"))
+	}
+	{
+		organizersPublicAlias.GET("/:slug",        handlers.GetPublicOrganizerHandler(pool))
+		organizersPublicAlias.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
+	}
+
+	// ==========================================
 	// City Lookup
 	// ==========================================
 	cities := v1.Group("/cities")
@@ -1341,6 +1395,30 @@ func main() {
 
 		// Resubmit rejected merch for review
 		orgRoutes.POST("/merch/:id/resubmit", handlers.OrgResubmitMerchHandler(pool))
+
+		// ── Public organiser page (the organiser's own) ────────────────────
+		//
+		// GET   /organiser/public-profile                — including when not live
+		// PATCH /organiser/public-profile                — description, cover, on/off
+		// PUT   /organiser/public-profile/links          — replace the whole link set
+		// GET   /organiser/public-profile/link-platforms — picker options
+		//
+		// NOT /organiser/profile. That path is already taken further down by
+		// GetOrganizerProfileHandler, which returns the ACCOUNT record — legal
+		// name, business email, payout state. Registering a second handler on
+		// it would panic gin at startup. The two are genuinely different
+		// things, so they get different paths: the account versus the public
+		// page.
+		//
+		// These sit OUTSIDE the kyc_level >= 2 gate that governs whether the
+		// page RESOLVES publicly. An organiser at level 1 can compose their
+		// page and see exactly what it will look like; it simply does not go
+		// live until they verify. Gating the editor too would leave them
+		// staring at a dead screen with no way to prepare.
+		orgRoutes.GET("/public-profile",                 handlers.GetMyPublicProfileHandler(pool))
+		orgRoutes.PATCH("/public-profile",               handlers.UpdateMyPublicProfileHandler(pool))
+		orgRoutes.PUT("/public-profile/links",           handlers.ReplaceMyLinksHandler(pool))
+		orgRoutes.GET("/public-profile/link-platforms",  handlers.GetLinkPlatformsHandler())
 	}
 
 	// ==========================================
@@ -1360,6 +1438,31 @@ func main() {
 		media.POST("/banner/video",   handlers.UploadBannerVideoHandler(pool, imgService))
 		media.DELETE("/banner/video", handlers.DeleteBannerVideoHandler(pool, imgService))
 		media.POST("/gallery",        handlers.UploadGalleryImageHandler(pool, imgService))
+	}
+
+	// ==========================================
+	// Organiser Profile Media
+	//
+	// Separate from the event media group above, which is keyed on an :id the
+	// organiser must own and whose handlers all verify that ownership through
+	// GetEventImageURLs. A profile image has no event, so reusing that group
+	// would mean inventing a fake event id or skipping the check that makes it
+	// safe.
+	//
+	// Same tight bucket as event media — 20 burst, one refill per minute.
+	// Image uploads are the most expensive thing an organiser can ask of us.
+	// ==========================================
+	profileMedia := v1.Group("/organiser/public-profile/media")
+	profileMedia.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	profileMedia.Use(middleware.ExtendWriteTimeout(5 * time.Minute))
+	if rateLimitManager != nil {
+		profileMedia.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			"media-upload"))
+	}
+	{
+		profileMedia.POST("/cover", handlers.UploadOrganizerCoverHandler(pool, imgService))
+		profileMedia.POST("/logo",  handlers.UploadOrganizerLogoHandler(pool, imgService))
 	}
 
 	// ==========================================
