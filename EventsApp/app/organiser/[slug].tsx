@@ -187,7 +187,24 @@ export default function OrganiserScreen() {
         'Log in or sign up to follow organisers and hear about new events first.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Log in / Sign up', onPress: () => router.push('/auth/login' as any) },
+          {
+            text: 'Log in / Sign up',
+            // ── Deferred, and navigate() rather than push() ────────────────
+            //
+            // auth/login is registered with presentation: 'modal' in
+            // app/_layout.tsx. Navigating to a modal from inside an Alert's
+            // onPress races the alert's own dismissal on iOS: the alert is
+            // still tearing down its presentation when the navigator tries to
+            // present the modal, and the navigation is dropped — which lands
+            // on expo-router's Unmatched Route with an empty path.
+            //
+            // requestAnimationFrame pushes it to after the alert has gone.
+            // navigate() rather than push() so a login screen already on the
+            // stack is reused instead of stacking a second copy.
+            onPress: () => {
+              requestAnimationFrame(() => router.navigate('/auth/login' as any));
+            },
+          },
         ],
       );
       return;
@@ -336,15 +353,20 @@ export default function OrganiserScreen() {
             {links.map((l) => (
               <TouchableOpacity
                 key={l.platform}
-                style={[styles.linkBtn, { backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }]}
+                style={styles.linkBtn}
                 onPress={() => { Linking.openURL(l.url).catch(() => {}); }}
-                activeOpacity={0.75}
+                activeOpacity={0.6}
+                // hitSlop keeps the tap target at ~44pt even though the button
+                // no longer has a background giving it that size visually.
+                // Apple's minimum is 44; an unpadded 32pt glyph is a miss
+                // waiting to happen.
+                hitSlop={8}
                 // The icon carries no text, so it needs a label for anyone
                 // using a screen reader.
                 accessibilityRole="link"
                 accessibilityLabel={`${organiser.business_name} on ${SOCIAL_LABEL[l.platform] ?? l.platform}`}
               >
-                <SocialIcon platform={l.platform} size={19} color={colors.text} />
+                <SocialIcon platform={l.platform} size={32} color={colors.text} />
               </TouchableOpacity>
             ))}
           </View>
@@ -456,10 +478,16 @@ const styles = StyleSheet.create({
   },
   followText: { fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
 
-  linkWrap:  { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
-  // Square-ish icon buttons rather than text pills. A row of nine word-chips
-  // read as navigation; the marks read as what they are.
-  linkBtn:   { width: 44, height: 44, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  // Bare marks, no container.
+  //
+  // The grey rounded boxes were doing the job of a button on something that
+  // reads as a link, and nine of them made a strip of chrome across the page.
+  // The glyph is now 32pt — the size the box used to occupy — so the row reads
+  // as a set of marks rather than a toolbar. Tap target is held at ~44pt by
+  // hitSlop rather than by padding, so the visual weight drops without the
+  // target shrinking.
+  linkWrap:  { flexDirection: 'row', flexWrap: 'wrap', gap: 20, marginTop: 18 },
+  linkBtn:   { alignItems: 'center', justifyContent: 'center' },
 
   scopeRow:  { flexDirection: 'row', gap: 24, paddingHorizontal: 16, marginTop: 24, borderBottomWidth: 1 },
   scopeTab:  { paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },

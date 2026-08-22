@@ -84,6 +84,16 @@ export default function RootLayout() {
 
       <Stack.Screen name="event/[id]" />
 
+      {/* Organiser public page. Registered explicitly for the same reason
+          profile/delete-account is: an unlisted route gets expo-router's
+          default presentation rather than the slide-from-right every other
+          pushed screen in this app uses, so it arrives feeling like a
+          different app. */}
+      <Stack.Screen
+        name="organiser/[slug]"
+        options={{ animation: 'slide_from_right' }}
+      />
+
       <Stack.Screen
         name="category/[name]"
         options={{ animation: 'slide_from_right' }}

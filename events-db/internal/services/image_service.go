@@ -609,6 +609,12 @@ func (s *ImageService) UploadGenericImage(
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
+	// Keep the ORIGINAL bytes and type for the thumbnail, before compression
+	// rewrites them. makeThumbnail scales from the source for the same reason
+	// UploadEventImage does: thumbnailing an already-compressed JPEG stacks two
+	// lossy passes and the artefacts show at small sizes.
+	rawData, origContentType := data, contentType
+
 	// Compress before uploading.
 	data, contentType, ext, err := compressImage(data, contentType)
 	if err != nil {
@@ -616,5 +622,32 @@ func (s *ImageService) UploadGenericImage(
 	}
 
 	filename := fmt.Sprintf("uploads/misc/%s%s", uuid.New().String(), ext)
-	return s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
+	fullURL, err := s.uploadToR2(filename, contentType, bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return "", err
+	}
+
+	// ── Card thumbnail ──────────────────────────────────────────────────────
+	//
+	// Mirrors the block in UploadEventImage, at the same deterministic sibling
+	// path ("<key>_thumb.jpg"), so thumbUrl() on the client derives it with no
+	// DB field and no query change.
+	//
+	// This path is not just organiser logos. POST /organiser/upload is this
+	// function, which means LINE-UP images come through here too — those render
+	// at 46pt in the participant rows, and an organiser logo renders at 42pt in
+	// the ORGANISED BY row of every one of that organiser's events. Serving a
+	// full-resolution image into a 42pt box was a download and a decode per
+	// screen open.
+	//
+	// Best-effort: a thumbnail failure must never fail the upload the organiser
+	// is waiting on. CoverImage falls back to the full URL when the thumbnail
+	// 404s, so the worst case is exactly the behaviour before this block
+	// existed.
+	if thumb, terr := makeThumbnail(rawData, origContentType); terr == nil {
+		thumbKey := strings.TrimSuffix(filename, ext) + "_thumb.jpg"
+		_, _ = s.uploadToR2(thumbKey, "image/jpeg", bytes.NewReader(thumb), int64(len(thumb)))
+	}
+
+	return fullURL, nil
 }

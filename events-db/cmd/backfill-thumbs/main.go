@@ -91,6 +91,50 @@ func main() {
 		log.Fatalf("rows: %v", err)
 	}
 
+	// ── Generic uploads ─────────────────────────────────────────────────────
+	//
+	// Organiser logos and covers, and line-up images, all go through
+	// UploadGenericImage, which only started writing thumbnails alongside the
+	// full image recently. Everything uploaded before that has no "_thumb.jpg"
+	// sibling, so CoverImage 404s once per image and falls back.
+	//
+	// Nothing breaks without this — the fallback is exactly the old behaviour.
+	// It is here so the wasted round-trip stops, and because these are the
+	// images rendered smallest: a 42pt logo in the ORGANISED BY row of every
+	// event, and 46pt line-up avatars.
+	//
+	// Three separate queries rather than a UNION so a missing table (an
+	// environment behind on migrations 000077/000081) degrades to a warning
+	// instead of aborting the whole backfill.
+	for _, q := range []struct {
+		label string
+		sql   string
+	}{
+		{"organizer logos", `SELECT logo_url FROM organizers WHERE logo_url IS NOT NULL AND logo_url <> ''`},
+		{"organizer covers", `SELECT cover_image_url FROM organizers WHERE cover_image_url IS NOT NULL AND cover_image_url <> ''`},
+		{"lineup images", `SELECT image_url FROM event_lineup WHERE image_url IS NOT NULL AND image_url <> ''`},
+	} {
+		r2, err := pool.Query(ctx, q.sql)
+		if err != nil {
+			log.Printf("skipping %s: %v", q.label, err)
+			continue
+		}
+		n := 0
+		for r2.Next() {
+			var u *string
+			if err := r2.Scan(&u); err != nil {
+				log.Printf("scan %s: %v", q.label, err)
+				continue
+			}
+			if u != nil && *u != "" {
+				urls = append(urls, *u)
+				n++
+			}
+		}
+		r2.Close()
+		log.Printf("collected %d %s", n, q.label)
+	}
+
 	var made, skipped, failed int
 	for _, u := range urls {
 		key := keyFromURL(u, publicBase)

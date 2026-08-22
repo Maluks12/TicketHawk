@@ -125,7 +125,7 @@ func GetFollowedOrganizers(pool *pgxpool.Pool, userID string) ([]models.Followed
 	rows, err := pool.Query(ctx, `
 		SELECT o.id, o.slug, o.business_name, o.logo_url, o.verified, f.followed_at,
 		       (SELECT COUNT(*) FROM events e
-		         WHERE e.organizer_id = o.id
+		         WHERE e.organizer_id = o.user_id
 		           AND e.status = 'published'
 		           AND e.visibility = 'public'
 		           AND e.end_time >= NOW()) AS upcoming_events

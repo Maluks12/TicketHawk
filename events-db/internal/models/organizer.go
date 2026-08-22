@@ -132,6 +132,21 @@ type PublicOrganizer struct {
 	// Links is nil rather than empty when the organiser has set none, so the
 	// client can distinguish "no socials" from "not loaded".
 	Links []OrganizerLink `json:"links,omitempty"`
+
+	// OwnerUserID is `json:"-"` — internal only, never serialised.
+	//
+	// It exists because events.organizer_id holds a USER id, not an
+	// organizers.id (the column is `REFERENCES users(id)`; see migration
+	// 000004). Anything that counts or lists an organiser's events needs this
+	// value, and carrying it on the struct the lookup already produced avoids a
+	// second query for something the first one read.
+	//
+	// Confusing the two is not hypothetical: it shipped "0 events hosted" on a
+	// profile with six events, and separately dropped the organiser block from
+	// every event page. Both failed SILENTLY — no error, no log, just a zero or
+	// an empty list — which is why the two ids are now distinguished by name
+	// everywhere they appear.
+	OwnerUserID string `json:"-"`
 }
 
 // ── Links ────────────────────────────────────────────────────────────────────

@@ -95,13 +95,18 @@ func getPublicOrganizerProfile(pool *pgxpool.Pool, predicate, arg string) (*mode
 	defer cancel()
 
 	var (
-		org       models.PublicOrganizer
-		createdAt time.Time
+		org         models.PublicOrganizer
+		createdAt   time.Time
+		ownerUserID string
 	)
 
+	// o.user_id is selected but NOT exposed on PublicOrganizer — it is needed
+	// only internally, to count and list this organiser's events, because
+	// events.organizer_id holds a user id. Publishing it would leak an internal
+	// identifier for no reason.
 	const cols = `
 		o.id, o.slug, o.business_name, o.description,
-		o.logo_url, o.cover_image_url, o.verified, o.created_at`
+		o.logo_url, o.cover_image_url, o.verified, o.created_at, o.user_id`
 
 	const gate = `
 		  AND o.public_profile_enabled = TRUE
@@ -113,7 +118,7 @@ func getPublicOrganizerProfile(pool *pgxpool.Pool, predicate, arg string) (*mode
 
 	err := row.Scan(
 		&org.ID, &org.Slug, &org.BusinessName, &org.Description,
-		&org.LogoURL, &org.CoverImageURL, &org.Verified, &createdAt,
+		&org.LogoURL, &org.CoverImageURL, &org.Verified, &createdAt, &ownerUserID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -127,7 +132,7 @@ func getPublicOrganizerProfile(pool *pgxpool.Pool, predicate, arg string) (*mode
 	// Counts and links are separate round-trips rather than subqueries in the
 	// SELECT above. A failure to count events should not take down the whole
 	// profile — the page is still worth rendering without the stat.
-	count, err := CountPublicOrganizerEvents(pool, org.ID)
+	count, err := CountPublicOrganizerEvents(pool, ownerUserID)
 	if err == nil {
 		org.EventsHosted = count
 	}
@@ -143,6 +148,12 @@ func getPublicOrganizerProfile(pool *pgxpool.Pool, predicate, arg string) (*mode
 		org.FollowerCount = n
 	}
 
+	// Stashed on the struct but json:"-" — see the field comment on
+	// PublicOrganizer.OwnerUserID. GetPublicOrganizerEventsHandler needs it to
+	// list the organiser's events, and re-querying for it would be a second
+	// round-trip for a value this query already read.
+	org.OwnerUserID = ownerUserID
+
 	return &org, nil
 }
 
@@ -153,7 +164,18 @@ func getPublicOrganizerProfile(pool *pgxpool.Pool, predicate, arg string) (*mode
 // including them in a public count would leak both their existence and how many
 // there are. Draft, pending_review, rejected and cancelled are excluded for the
 // same reason they are excluded from the listing itself.
-func CountPublicOrganizerEvents(pool *pgxpool.Pool, organizerID string) (int, error) {
+//
+// ⚠️  TAKES A USER ID, NOT AN organizers.id.
+//
+// events.organizer_id is `REFERENCES users(id)` — see migration 000004. It is
+// NOT organizers.id, which is what organizer_links, organizer_follows and the
+// /organisers/:slug lookup key on. The parameter is named ownerUserID rather
+// than organizerID so the wrong value cannot be passed without reading wrongly
+// at the call site.
+//
+// Passing organizers.id here matches nothing and returns 0 — silently. That is
+// what put "0 events hosted" on the profile of an organiser with six.
+func CountPublicOrganizerEvents(pool *pgxpool.Pool, ownerUserID string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -163,7 +185,7 @@ func CountPublicOrganizerEvents(pool *pgxpool.Pool, organizerID string) (int, er
 		FROM events
 		WHERE organizer_id = $1
 		  AND status = ANY($2::event_status[])
-	`, organizerID, []string{
+	`, ownerUserID, []string{
 		string(models.EventPublished),
 		string(models.EventCompleted),
 	}).Scan(&n)
@@ -200,9 +222,11 @@ const (
 // Ordering differs by scope on purpose: upcoming events read soonest-first,
 // past events read most-recent-first. The keyset cursor mirrors whichever
 // ordering is in play, so paging stays stable across both.
+//
+// ⚠️  ownerUserID, NOT organizers.id — see CountPublicOrganizerEvents.
 func ListPublicOrganizerEvents(
 	pool *pgxpool.Pool,
-	organizerID string,
+	ownerUserID string,
 	scope OrganizerEventScope,
 	limit int,
 	cursor *utils.Cursor,
@@ -219,7 +243,7 @@ func ListPublicOrganizerEvents(
 		string(models.EventCompleted),
 	}
 
-	args := []interface{}{organizerID, liveOrDone}
+	args := []interface{}{ownerUserID, liveOrDone}
 	where := []string{
 		`e.organizer_id = $1`,
 		`e.status = ANY($2::event_status[])`,
@@ -449,7 +473,8 @@ func GetOwnerProfile(pool *pgxpool.Pool, userID string) (*OwnerProfileView, erro
 	org.ID = orgID
 	org.MemberSince = createdAt.Year()
 
-	if n, err := CountPublicOrganizerEvents(pool, orgID); err == nil {
+	// userID, not orgID — events.organizer_id is a user id.
+	if n, err := CountPublicOrganizerEvents(pool, userID); err == nil {
 		org.EventsHosted = n
 	}
 	if links, err := GetOrganizerLinks(pool, orgID); err == nil && len(links) > 0 {

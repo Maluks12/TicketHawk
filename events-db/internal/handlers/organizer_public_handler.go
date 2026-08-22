@@ -98,7 +98,13 @@ func GetPublicOrganizerEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			cursor = cur
 		}
 
-		events, next, err := repository.ListPublicOrganizerEvents(pool, profile.ID, scope, limit, cursor)
+		// profile.OwnerUserID, NOT profile.ID.
+		//
+		// events.organizer_id is a user id. Passing organizers.id here matches
+		// no rows and returns an empty list — which reads as "this organiser
+		// has no events" rather than as a bug, and is exactly how this went
+		// unnoticed.
+		events, next, err := repository.ListPublicOrganizerEvents(pool, profile.OwnerUserID, scope, limit, cursor)
 		if err != nil {
 			utils.InternalError(c, err, "failed to list organiser events")
 			return
