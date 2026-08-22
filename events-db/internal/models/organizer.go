@@ -7,9 +7,9 @@ import "time"
 type OrganizerStatus string
 
 const (
-	OrganizerActive    OrganizerStatus = "active"    // set automatically on self-registration
+	OrganizerActive    OrganizerStatus = "active"    // NOT IN THE DB ENUM
 	OrganizerSuspended OrganizerStatus = "suspended" // temporarily blocked by admin
-	OrganizerBanned    OrganizerStatus = "banned"    // permanently removed by admin
+	OrganizerBanned    OrganizerStatus = "banned"    // NOT IN THE DB ENUM
 
 	// Legacy DB values - kept so existing rows don't break. Do not write for new accounts.
 	OrganizerPending  OrganizerStatus = "pending"

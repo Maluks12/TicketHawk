@@ -62,7 +62,7 @@ func GetPublicOrganizerProfile(pool *pgxpool.Pool, slugOrID string) (*models.Pub
 	const gate = `
 		  AND o.public_profile_enabled = TRUE
 		  AND o.kyc_level >= 2
-		  AND o.status NOT IN ('suspended', 'banned', 'rejected')`
+		  AND o.status::text NOT IN ('suspended', 'banned', 'rejected')`
 
 	var row pgx.Row
 	if _, err := uuid.Parse(slugOrID); err == nil {
