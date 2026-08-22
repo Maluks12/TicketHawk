@@ -57,7 +57,21 @@ const (
 	previewTokenScope = "event_preview"
 )
 
-var ErrInvalidPreviewToken = errors.New("invalid or expired preview token")
+// Two distinct errors, because they mean different things to the person
+// reading the message.
+//
+// ErrPreviewTokenExpired is the ORDINARY case: the organiser left the preview
+// tab open past ten minutes. "Generate a new one" is exactly the right advice.
+//
+// ErrInvalidPreviewToken is everything else — a bad signature, the wrong
+// scope, a malformed token. Telling that user to "generate a new one" sends
+// them to fix something that was never broken, and during an incident it means
+// somebody probing the endpoint gets told "expired" while support fields a
+// report about a link that never worked.
+var (
+	ErrPreviewTokenExpired = errors.New("preview token expired")
+	ErrInvalidPreviewToken = errors.New("invalid preview token")
+)
 
 // MintEventPreviewToken issues a preview token for one event.
 func MintEventPreviewToken(cfg *config.Config, eventID, userID string) (string, time.Time, error) {
@@ -93,7 +107,16 @@ func ParseEventPreviewToken(cfg *config.Config, raw string) (eventID, userID str
 		}
 		return []byte(cfg.JWTSecret), nil
 	})
-	if err != nil || !token.Valid {
+	if err != nil {
+		// jwt.Parse wraps a genuine expiry as ErrTokenExpired. Everything else
+		// — bad signature, wrong algorithm, malformed — is not an expiry and
+		// must not be reported as one.
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return "", "", ErrPreviewTokenExpired
+		}
+		return "", "", ErrInvalidPreviewToken
+	}
+	if !token.Valid {
 		return "", "", ErrInvalidPreviewToken
 	}
 
@@ -212,9 +235,19 @@ func GetEventPreviewHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerF
 
 		tokenEventID, tokenUserID, err := ParseEventPreviewToken(cfg, raw)
 		if err != nil {
+			if errors.Is(err, ErrPreviewTokenExpired) {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": "this preview link has expired — generate a new one from the dashboard",
+					"code":  "preview_expired",
+				})
+				return
+			}
+			// Deliberately vague about WHY. A caller presenting a forged token
+			// learns nothing about which check rejected it, and the dashboard
+			// has no branch to write against a detail it cannot act on.
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "this preview link has expired — generate a new one from the dashboard",
-				"code":  "preview_expired",
+				"error": "this preview link is not valid",
+				"code":  "preview_invalid",
 			})
 			return
 		}

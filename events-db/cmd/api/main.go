@@ -161,6 +161,16 @@ func main() {
 	workers.StartOrganizerAnnounceWorker(pool, ctx)
 	log.Info().Msg("organiser announce worker started")
 
+	// Tells ticket holders when a live event's line-up changes.
+	//
+	// Phase 4 lets an organiser change a live line-up immediately — correct,
+	// because an act dropping out three days before a festival cannot wait in
+	// a review queue. But it means a headliner can be removed silently and
+	// somebody who paid to see them finds out by arriving. This closes that by
+	// telling the people with a stake rather than by blocking the change.
+	workers.StartLineupChangeWorker(pool, ctx)
+	log.Info().Msg("line-up change worker started")
+
 	bookingRepo    := repository.NewPgxBookingQuerier(pool)
 	eventRepo      := repository.NewPgxEventQuerier(pool)
 	cartQuerier    := repository.NewPgxCartQuerier(pool)
@@ -1164,6 +1174,33 @@ func main() {
 		admin.GET("/stats",
 			middleware.RequireCapabilityOn(pool, models.CapViewUserList),
 			handlers.GetAdminStatsHandler(pool))
+		// ── Event information catalogue ───────────────────────────────────
+		//
+		// The fields organisers choose from when filling in an event's
+		// Information block. Read at event.view, written at event.edit —
+		// matching how merch and collections are gated.
+		//
+		// There is no DELETE. Retiring is is_active = false, and
+		// event_info_items.info_key is ON DELETE RESTRICT, so information
+		// organisers entered cannot vanish because somebody tidied a list.
+		admin.GET("/event-info/catalogue",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.AdminListInfoCatalogueHandler(pool))
+		admin.POST("/event-info/catalogue",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminCreateInfoFieldHandler(pool))
+		// Registered BEFORE /:key so "order" is matched as a literal segment
+		// rather than being captured as a field key.
+		admin.PUT("/event-info/catalogue/order",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminReorderInfoCatalogueHandler(pool))
+		admin.PATCH("/event-info/catalogue/:key",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminUpdateInfoFieldHandler(pool))
+		admin.PUT("/event-info/catalogue/:key/active",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminSetInfoFieldActiveHandler(pool))
+
 		admin.GET("/merch/oversold",
 			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
 			handlers.GetOversoldMerchOrdersHandler(pool))
