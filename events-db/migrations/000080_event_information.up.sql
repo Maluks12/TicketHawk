@@ -196,7 +196,7 @@ VALUES
      'text', NULL, 150, FALSE),
 
     ('load_shedding', 'Load shedding',
-     'Backup power arrangements, or what happens if the stage falls during the event.',
+     'Backup power arrangements, or what happens if the power goes out mid-event.',
      'text', NULL, 160, FALSE),
 
     ('what_to_bring', 'What to bring',

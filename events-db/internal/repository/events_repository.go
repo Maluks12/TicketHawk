@@ -1216,6 +1216,10 @@ func getEventByID(pool *pgxpool.Pool, id string, requestingUserID *string, inclu
     // every tier is sold out as still available.
     event.ComputeAvailableTickets()
 
+    // Organiser block, Information block and line-up. Best-effort by design —
+    // see hydrateEventDetail.
+    hydrateEventDetail(pool, &event)
+
     return &event, nil
 }
 
@@ -1274,6 +1278,10 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 	// would always take the flat-price branch and report an event whose
 	// every tier is sold out as still available.
 	event.ComputeAvailableTickets()
+
+	// Organiser block, Information block and line-up. Best-effort by design —
+	// see hydrateEventDetail.
+	hydrateEventDetail(pool, &event)
 
 	return &event, nil
 }

@@ -96,7 +96,35 @@ type Event struct {
 
 	// IsSponsored is set at feed assembly time — never stored in DB.
 	IsSponsored    bool        `json:"is_sponsored,omitempty" db:"-"`
-	Organizer      *Organizer  `json:"organizer,omitempty" db:"-"`
+	// ⚠️  TYPE CHANGED IN PHASE 5: *Organizer → *PublicOrganizer.
+	//
+	// This field was declared and never assigned by anything — grep for
+	// `.Organizer =` across internal/ returns nothing — so it has always
+	// serialised as absent. Now that it is populated, the type matters: the
+	// full Organizer carries business_email, business_phone, commission_rate,
+	// payout_enabled and bank_account_last_4, and this struct is returned by a
+	// PUBLIC endpoint. PublicOrganizer is the hand-built projection that cannot
+	// leak them, and using it here means a field added to Organizer later
+	// cannot silently widen what visitors see.
+	//
+	// The json key stays "organizer" (US spelling). Both web apps already read
+	// `event.organiser ?? event.organizer ?? event.hosted_by ?? event.venue_name`,
+	// so this finally satisfies that chain — until now it fell through to
+	// venue_name, which is why the detail page has been showing the VENUE under
+	// "Organised by".
+	Organizer      *PublicOrganizer `json:"organizer,omitempty" db:"-"`
+
+	// InfoItems is the Information block — parking, accessibility, age
+	// requirement (phase 3). Only fields the organiser actually filled in have
+	// rows, so an unchosen field is absent rather than empty, and the client
+	// cannot render a heading with nothing under it.
+	InfoItems      []EventInfoItem  `json:"info_items,omitempty" db:"-"`
+
+	// Lineup is performers and teams with images, stages and set times
+	// (phase 4). The legacy Performers/Teams string arrays above are STILL
+	// populated alongside it — shipped mobile builds read those directly, and
+	// a user on an old build does not update because we deployed.
+	Lineup         []LineupEntry    `json:"lineup,omitempty" db:"-"`
 	// TicketTypes lists all visible pricing tiers. Populated by GetEventByID /
 	// GetEventBySlug. Nil (omitted) on list/feed endpoints for performance.
 	TicketTypes    []*TicketType `json:"ticket_types,omitempty" db:"-"`
