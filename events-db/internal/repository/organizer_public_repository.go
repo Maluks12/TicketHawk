@@ -38,9 +38,6 @@ var ErrOrganizerProfileNotFound = errors.New("organizer profile not found")
 // CanHavePublicProfile remains the single source of truth for the RULE — this
 // query mirrors it, and the model test asserts they agree.
 func GetPublicOrganizerProfile(pool *pgxpool.Pool, slugOrID string) (*models.PublicOrganizer, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	slugOrID = strings.TrimSpace(slugOrID)
 	if slugOrID == "" {
 		return nil, ErrOrganizerProfileNotFound
@@ -50,6 +47,53 @@ func GetPublicOrganizerProfile(pool *pgxpool.Pool, slugOrID string) (*models.Pub
 	// The UUID branch is guarded by a parse rather than by casting in SQL:
 	// `id::text = $1` would defeat the primary key index, and passing a
 	// non-UUID string to a uuid comparison is a 22P02 error, not a miss.
+	if _, err := uuid.Parse(slugOrID); err == nil {
+		return getPublicOrganizerProfile(pool, "o.id = $1", slugOrID)
+	}
+	return getPublicOrganizerProfile(pool, "o.slug = $1", slugOrID)
+}
+
+// GetPublicOrganizerProfileByUserID resolves an organiser from a USER id.
+//
+// ⚠️  READ THIS BEFORE CHOOSING BETWEEN THIS AND GetPublicOrganizerProfile.
+//
+// There are TWO different UUIDs that both get called "the organiser id" in this
+// codebase, and they are not interchangeable:
+//
+//	organizers.id        what organizer_links, organizer_follows and the
+//	                     public /organisers/:slug route key on
+//	users.id             what events.organizer_id actually holds — the column
+//	                     is `REFERENCES users(id)`, despite its name
+//
+// So an event row hands you a USER id. Passing it to
+// GetPublicOrganizerProfile compares it against organizers.id, matches
+// nothing, and returns ErrOrganizerProfileNotFound — which callers reasonably
+// treat as "this organiser has no public page" and silently omit the block.
+// The failure is invisible: no error, no log, just a missing organiser on
+// every event page.
+//
+// That is exactly what happened when the event detail hydration was first
+// written. If you are starting from an EVENT, you want this function.
+func GetPublicOrganizerProfileByUserID(pool *pgxpool.Pool, userID string) (*models.PublicOrganizer, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, ErrOrganizerProfileNotFound
+	}
+	if _, err := uuid.Parse(userID); err != nil {
+		// A slug can never be a user id, so this is a caller mistake rather
+		// than a miss. Fail closed.
+		return nil, ErrOrganizerProfileNotFound
+	}
+	return getPublicOrganizerProfile(pool, "o.user_id = $1", userID)
+}
+
+// getPublicOrganizerProfile is the shared body. `predicate` must reference $1
+// and nothing else; it is a compile-time constant at every call site, never
+// user input.
+func getPublicOrganizerProfile(pool *pgxpool.Pool, predicate, arg string) (*models.PublicOrganizer, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var (
 		org       models.PublicOrganizer
 		createdAt time.Time
@@ -64,14 +108,8 @@ func GetPublicOrganizerProfile(pool *pgxpool.Pool, slugOrID string) (*models.Pub
 		  AND o.kyc_level >= 2
 		  AND o.status::text NOT IN ('suspended', 'banned', 'rejected')`
 
-	var row pgx.Row
-	if _, err := uuid.Parse(slugOrID); err == nil {
-		row = pool.QueryRow(ctx,
-			`SELECT `+cols+` FROM organizers o WHERE o.id = $1`+gate, slugOrID)
-	} else {
-		row = pool.QueryRow(ctx,
-			`SELECT `+cols+` FROM organizers o WHERE o.slug = $1`+gate, slugOrID)
-	}
+	row := pool.QueryRow(ctx,
+		`SELECT `+cols+` FROM organizers o WHERE `+predicate+gate, arg)
 
 	err := row.Scan(
 		&org.ID, &org.Slug, &org.BusinessName, &org.Description,
@@ -81,7 +119,7 @@ func GetPublicOrganizerProfile(pool *pgxpool.Pool, slugOrID string) (*models.Pub
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrOrganizerProfileNotFound
 		}
-		return nil, fmt.Errorf("GetPublicOrganizerProfile: %w", err)
+		return nil, fmt.Errorf("getPublicOrganizerProfile: %w", err)
 	}
 
 	org.MemberSince = createdAt.Year()

@@ -51,21 +51,34 @@ func hydrateEventDetail(pool *pgxpool.Pool, event *models.Event) {
 
 	// ── Organiser ────────────────────────────────────────────────────────────
 	//
+	// ⚠️  ByUserID, NOT GetPublicOrganizerProfile.
+	//
+	// events.organizer_id holds a USER id — the column is literally
+	// `REFERENCES users(id)` in migration 000004, despite its name. It is NOT
+	// organizers.id, which is what organizer_links, organizer_follows and the
+	// /organisers/:slug route all key on.
+	//
+	// Calling GetPublicOrganizerProfile here compares a user id against
+	// organizers.id, matches nothing, and returns ErrOrganizerProfileNotFound
+	// — which the branch below treats as "no public page" and silently omits
+	// the block. No error, no log, just a missing organiser on every event
+	// page. That is precisely the bug this line shipped with the first time.
+	//
 	// Gated exactly as the standalone organiser page is: kyc_level >= 2, page
 	// not disabled, account in good standing. An organiser who has switched
 	// their public page off should not have their name, logo and socials
 	// appear on their event pages instead — the switch would mean nothing.
 	//
-	// When the gate blocks them the field is simply absent, and the clients'
-	// existing fallback chain (organiser → organizer → hosted_by → venue_name)
-	// lands on the venue name, which is what the page shows today.
+	// When the gate legitimately blocks them the field is absent, and the
+	// clients' existing fallback chain (organiser → organizer → hosted_by →
+	// venue_name) lands on the venue name, which is what the page shows today.
 	if event.OrganizerID != "" {
-		if org, err := GetPublicOrganizerProfile(pool, event.OrganizerID); err == nil {
+		if org, err := GetPublicOrganizerProfileByUserID(pool, event.OrganizerID); err == nil {
 			event.Organizer = org
 		} else if err != ErrOrganizerProfileNotFound {
 			log.Warn().Err(err).
 				Str("event_id", event.ID).
-				Str("organizer_id", event.OrganizerID).
+				Str("organizer_user_id", event.OrganizerID).
 				Msg("event detail: organiser block failed to load")
 		}
 	}
