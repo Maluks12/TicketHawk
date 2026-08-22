@@ -487,6 +487,10 @@ func main() {
 			"organisers-public"))
 	}
 	{
+		// BEFORE /:slug — "search" must be matched as a literal segment, not
+		// captured as a slug. Registered the other way round this endpoint
+		// would resolve as "the organiser whose slug is 'search'" and 404.
+		organisersPublic.GET("/search",       handlers.SearchOrganizersHandler(pool))
 		organisersPublic.GET("/:slug",        handlers.GetPublicOrganizerHandler(pool))
 		organisersPublic.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
 	}
@@ -509,6 +513,7 @@ func main() {
 			"organisers-public"))
 	}
 	{
+		organizersPublicAlias.GET("/search",       handlers.SearchOrganizersHandler(pool))
 		organizersPublicAlias.GET("/:slug",        handlers.GetPublicOrganizerHandler(pool))
 		organizersPublicAlias.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
 	}

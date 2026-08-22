@@ -15,7 +15,13 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
-import { CalendarDots, Clock, MapPin, UsersThree, Heart, Export, Hash, Ticket, type Icon as PhosphorIcon } from 'phosphor-react-native';
+// UsersThree and Hash are gone with the Capacity row and the Tags section.
+// Storefront/CheckCircle are for the new Organiser row. Both are already used
+// elsewhere in this app (see components/), so they are known to exist in
+// phosphor-react-native 3.0.6 — unlike Buildings/SealCheck, which are not.
+// Export stays: the SHARE button was removed from the action card, but the
+// hero still has one at the top right — that is the one being kept.
+import { CalendarDots, Clock, MapPin, Heart, Export, Ticket, Storefront, CheckCircle, type Icon as PhosphorIcon } from 'phosphor-react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -24,6 +30,8 @@ import { useAppTheme } from '../../theme/colors';
 import { getBaseUrl } from '../../components/FilterModal';
 import { toggleFollow, getFollowStatus } from '../../lib/api';
 import { buildEventShare } from '../../lib/shareLinks';
+import { PolicySheet } from '../../components/PolicySheet';
+import { IMG_PLACEHOLDER } from '../../lib/img';
 
 // ─── Hero frame ───────────────────────────────────────────────────────────────
 // The hero no longer forces every image into one tall portrait box. The frame
@@ -81,6 +89,97 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
 
+// ─── LineupRow ────────────────────────────────────────────────────────────────
+//
+// One act or team. Handles both shapes: a structured `lineup` row with an
+// image, a stage and a set time, and a bare {name} object built from the legacy
+// performers/teams arrays.
+//
+// The chevron only renders when there is somewhere to go. The old rows always
+// showed one, which promised a screen that has never existed — now it appears
+// only for an entry carrying an external_url, and tapping opens that link.
+function LineupRow({
+  entry,
+  isLast,
+  colors,
+}: {
+  entry: { id?: string; name: string; image_url?: string; subtitle?: string; stage?: string; set_time?: string; external_url?: string };
+  isLast: boolean;
+  colors: any;
+}) {
+  const hasLink = typeof entry.external_url === 'string' && entry.external_url.length > 0;
+
+  // "Main stage · 21:30" — whichever of the two exist. Set times are full
+  // timestamps because festivals cross midnight, so only the clock part is
+  // shown here; the date is the event's own.
+  const metaBits: string[] = [];
+  if (entry.subtitle) metaBits.push(entry.subtitle);
+  if (entry.stage && entry.stage !== entry.subtitle) metaBits.push(entry.stage);
+  if (entry.set_time) {
+    const d = new Date(entry.set_time);
+    if (!Number.isNaN(d.getTime())) {
+      metaBits.push(d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }));
+    }
+  }
+  const meta = metaBits.join(' · ');
+
+  const body = (
+    <>
+      <View
+        className={s.participantAvatar}
+        style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor, overflow: 'hidden' }}
+      >
+        {entry.image_url ? (
+          <ExpoImage
+            source={{ uri: entry.image_url }}
+            style={{ width: '100%', height: '100%' }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={IMG_PLACEHOLDER}
+            placeholderContentFit="cover"
+            recyclingKey={entry.id ?? entry.name}
+            allowDownscaling
+            transition={120}
+          />
+        ) : (
+          <Text className={s.participantAvatarText} style={{ color: colors.text }}>
+            {entry.name.trim().charAt(0).toUpperCase()}
+          </Text>
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text className={s.participantName} style={{ color: colors.text }} numberOfLines={1}>
+          {entry.name}
+        </Text>
+        {meta.length > 0 && (
+          <Text className={s.participantMeta} style={{ color: colors.subText }} numberOfLines={1}>
+            {meta}
+          </Text>
+        )}
+      </View>
+      {hasLink && <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>}
+    </>
+  );
+
+  const rowClass = isLast ? s.participantRowLast : s.participantRow;
+  const rowStyle = isLast ? undefined : { borderBottomColor: colors.dividerColor };
+
+  if (!hasLink) {
+    return <View className={rowClass} style={rowStyle}>{body}</View>;
+  }
+
+  return (
+    <TouchableOpacity
+      className={rowClass}
+      style={rowStyle}
+      activeOpacity={0.75}
+      onPress={() => { Linking.openURL(entry.external_url!).catch(() => {}); }}
+    >
+      {body}
+    </TouchableOpacity>
+  );
+}
+
 // ─── MetaItem ─────────────────────────────────────────────────────────────────
 
 function MetaItem({ icon: IconCmp, label, value }: { icon: PhosphorIcon; label: string; value: string }) {
@@ -130,6 +229,11 @@ export default function EventDetail() {
 
   const { colors, isDark } = useAppTheme();
   const [expanded, setExpanded] = useState(false);
+
+  // Which policy the sheet is showing, or null. One piece of state for both
+  // rows rather than two booleans — they are mutually exclusive by nature and
+  // two flags would allow a state that cannot be rendered.
+  const [policySheet, setPolicySheet] = useState<null | 'refund' | 'terms'>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
 
   // Natural aspect ratio (w/h) of the hero artwork, learned from the image
@@ -383,7 +487,6 @@ export default function EventDetail() {
   // under them when they tapped through to Get Tickets. The frame below adapts
   // to the artwork, so preferring the wide banner no longer costs anything.
   const heroImage    = event.banner_image_url ?? event.cover_image_url;
-  const maxCap       = ev.max_capacity ?? 0;
   const isSoldOut    = event.is_sold_out ?? false;
 
   // An event can still resolve from the API while being over: status is only
@@ -398,9 +501,38 @@ export default function EventDetail() {
   const hasEnded     = Number.isFinite(endedAtMs) && endedAtMs < Date.now();
   const isCancelled  = String(ev.status ?? '').toLowerCase() === 'cancelled';
   const isASport     = event.category?.toLowerCase() === 'sports';
+
+  // ── Line-up ───────────────────────────────────────────────────────────────
+  //
+  // Prefer the structured `lineup` rows (names + images + stages + set times)
+  // and fall back to the legacy flat arrays.
+  //
+  // The fallback is not dead code. The backend still writes teams/performers
+  // on every line-up save, and an event that has not been re-saved since the
+  // migration has rows in both places — but a CACHED event object held by this
+  // store from before the app updated will only have the arrays. Reading both
+  // means the section never empties during a rollout.
+  const lineupRows: any[] = Array.isArray(ev.lineup) ? ev.lineup : [];
+  const lineupTeams      = lineupRows.filter((l: any) => l.kind === 'team');
+  const lineupPerformers = lineupRows.filter((l: any) => l.kind !== 'team');
+
   const teams:      string[] = ev.teams      ?? [];
   const performers: string[] = ev.performers ?? [];
-  const tags:       string[] = (ev.tags ?? []).filter((t: string) => !!t?.trim());
+
+  // Information block — only fields the organiser actually filled in have
+  // rows, so there is nothing here to guard against rendering empty.
+  const infoItems: any[] = Array.isArray(ev.info_items) ? ev.info_items : [];
+
+  // Organiser. Absent when they have no public page (KYC below level 2, page
+  // switched off, account suspended) — in which case nothing renders rather
+  // than falling back to the venue name, which is what this screen used to
+  // imply by having no organiser at all.
+  const organiser: any = ev.organizer ?? null;
+
+  // Refund policy and T&Cs are columns on the event, not catalogue items, and
+  // they render at the bottom of the Information block.
+  const refundPolicy = typeof ev.refund_policy === 'string' ? ev.refund_policy.trim() : '';
+  const termsAndConditions = typeof ev.terms_and_conditions === 'string' ? ev.terms_and_conditions.trim() : '';
 
   // Routing unchanged — matches index.tsx push to /event/${event.id}
   const handleGetTickets = () => router.push('/event/purchase');
@@ -612,8 +744,56 @@ export default function EventDetail() {
           <MetaItem icon={CalendarDots} label="DATE"     value={formatDateShort(event.start_time)} />
           <MetaItem icon={Clock}        label="TIME"     value={formatTime(event.start_time)} />
           <MetaItem icon={MapPin}       label="VENUE"    value={`${event.venue_name}, ${event.city}`} />
-          {maxCap > 0 && (
-            <MetaItem icon={UsersThree} label="CAPACITY" value={`${maxCap.toLocaleString('en-ZA')} Seats`} />
+          {/* Organiser replaces Capacity here.
+              Capacity told the buyer nothing actionable — this screen never
+              showed remaining tickets beside it, so "800 Seats" on a sold-out
+              event read as availability. max_capacity is untouched in the
+              model and still drives the sold-out calculation and the organiser
+              dashboard; it is only this row that goes.
+
+              Tappable, unlike the three rows above it, so it carries a chevron
+              and its own press target rather than being a fourth static
+              MetaItem. */}
+          {organiser && (
+            <TouchableOpacity
+              className={s.metaItemRow}
+              onPress={() => router.push(`/organiser/${organiser.slug ?? organiser.id}`)}
+              activeOpacity={0.75}
+            >
+              <View className={s.metaIconBox} style={{ backgroundColor: colors.sectionCardBg }}>
+                {organiser.logo_url ? (
+                  /* cachePolicy + placeholder + recyclingKey, matching
+                     CoverImage and the hero. Without cachePolicy expo-image
+                     re-downloads on every mount, which on this screen means
+                     every time someone opens an event by this organiser. */
+                  <ExpoImage
+                    source={{ uri: organiser.logo_url }}
+                    style={{ width: '100%', height: '100%', borderRadius: 12 }}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    placeholder={IMG_PLACEHOLDER}
+                    placeholderContentFit="cover"
+                    recyclingKey={organiser.id}
+                    allowDownscaling
+                    transition={120}
+                  />
+                ) : (
+                  <Storefront size={20} color={colors.text} weight="regular" />
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text className={s.metaLabelText} style={{ color: colors.subText }}>ORGANISED BY</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Text className={s.metaValueText} style={{ color: colors.text }} numberOfLines={1}>
+                    {organiser.business_name}
+                  </Text>
+                  {organiser.verified && (
+                    <CheckCircle size={15} color="#2f7cf6" weight="fill" />
+                  )}
+                </View>
+              </View>
+              <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+            </TouchableOpacity>
           )}
           <View style={[sheet.metaDivider, { backgroundColor: colors.dividerColor }]} />
           <View className={s.ctaWrap}>
@@ -638,36 +818,41 @@ export default function EventDetail() {
                 <Text className={s.btnPrimaryText}>GET TICKETS</Text>
               </TouchableOpacity>
             )}
-            <View className={s.actionRow}>
+            {/* ── Follow ──────────────────────────────────────────────────
+                Full width, matching GET TICKETS above it.
 
-              {/* ── Follow button ──────────────────────────────────────────── */}
-              <TouchableOpacity
-                className={s.btnOutline}
-                onPress={handleFollow}
-                activeOpacity={0.85}
-                disabled={followLoading}
-                style={isFollowing
-                  ? { backgroundColor: '#2d1c3a', borderColor: '#b57bee' }
-                  : undefined}
+                SHARE was removed from here rather than relocated: the header
+                already carries a share control at the top right of the hero,
+                so this was the second one on the same screen. Sharing it
+                twice does not make it more likely, and the pair of half-width
+                buttons made FOLLOW read as the lesser of two secondary
+                actions when it is the only one.
+
+                Labelled FOLLOW EVENT, not FOLLOW, because the organiser row
+                immediately above now leads to a page with its own follow
+                button. Two unlabelled follows on adjacent surfaces would be
+                ambiguous about what is being followed. */}
+            <TouchableOpacity
+              className={s.btnOutlineWide}
+              onPress={handleFollow}
+              activeOpacity={0.85}
+              disabled={followLoading}
+              style={isFollowing
+                ? { backgroundColor: '#2d1c3a', borderColor: '#b57bee' }
+                : undefined}
+            >
+              <Heart
+                size={17}
+                color={isFollowing ? '#b57bee' : '#FFFFFF'}
+                weight={isFollowing ? 'fill' : 'regular'}
+              />
+              <Text
+                className={s.btnOutlineText}
+                style={isFollowing ? { color: '#b57bee' } : undefined}
               >
-                <Heart
-                  size={16}
-                  color={isFollowing ? '#b57bee' : '#FFFFFF'}
-                  weight={isFollowing ? 'fill' : 'regular'}
-                />
-                <Text
-                  className={s.btnOutlineText}
-                  style={isFollowing ? { color: '#b57bee' } : undefined}
-                >
-                  {followLoading ? '...' : isFollowing ? 'FOLLOWING' : 'FOLLOW'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity className={s.btnOutline} onPress={handleShare} activeOpacity={0.85}>
-                <Export size={16} color="#FFFFFF" weight="regular" />
-                <Text className={s.btnOutlineText}>SHARE</Text>
-              </TouchableOpacity>
-            </View>
+                {followLoading ? '...' : isFollowing ? 'FOLLOWING' : 'FOLLOW EVENT'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -692,24 +877,22 @@ export default function EventDetail() {
           <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Teams */}
-          {isASport && teams.length > 0 && (
+          {isASport && (lineupTeams.length > 0 || teams.length > 0) && (
             <>
               <View style={{ marginBottom: 8 }}>
                 <View className={s.sectionHeader}>
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>TEAMS</Text>
                 </View>
-                {teams.map((team, i) => (
-                  <View key={i} className={i < teams.length - 1 ? s.participantRow : s.participantRowLast}
-                    style={i < teams.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
-                    <View className={s.participantAvatar}
-                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                      <Text className={s.participantAvatarText} style={{ color: colors.text }}>
-                        {team.trim().charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text className={s.participantName} style={{ color: colors.text }}>{team}</Text>
-                    <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
-                  </View>
+                {(lineupTeams.length > 0
+                  ? lineupTeams
+                  : teams.map((name: string) => ({ id: name, name }))
+                ).map((entry: any, i: number, arr: any[]) => (
+                  <LineupRow
+                    key={entry.id ?? i}
+                    entry={entry}
+                    isLast={i === arr.length - 1}
+                    colors={colors}
+                  />
                 ))}
               </View>
               <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
@@ -719,49 +902,53 @@ export default function EventDetail() {
           <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Performers */}
-          {!isASport && performers.length > 0 && (
+          {!isASport && (lineupPerformers.length > 0 || performers.length > 0) && (
             <>
               <View style={{ marginBottom: 8 }}>
                 <View className={s.sectionHeader}>
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>PERFORMERS</Text>
                 </View>
-                {performers.map((performer, i) => (
-                  <View key={i} className={i < performers.length - 1 ? s.participantRow : s.participantRowLast}
-                    style={i < performers.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
-                    <View className={s.participantAvatar}
-                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                      <Text className={s.participantAvatarText} style={{ color: colors.text }}>
-                        {performer.trim().charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text className={s.participantName} style={{ color: colors.text }}>{performer}</Text>
-                    <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
-                  </View>
+                {(lineupPerformers.length > 0
+                  ? lineupPerformers
+                  : performers.map((name: string) => ({ id: name, name }))
+                ).map((entry: any, i: number, arr: any[]) => (
+                  <LineupRow
+                    key={entry.id ?? i}
+                    entry={entry}
+                    isLast={i === arr.length - 1}
+                    colors={colors}
+                  />
                 ))}
               </View>
             </>
           )}
 
-          {/* Tags — same ESPN-style row list as Teams/Performers */}
-          {tags.length > 0 && (
+          {/* TAGS REMOVED.
+              Tags are not decorative metadata — the events_search_trigger in
+              migration 000004 folds them into search_vector at weight B, the
+              same weight as the description. They are invisible SEARCH
+              KEYWORDS that were mistakenly being rendered as a visible list of
+              untappable rows.
+              events.tags is untouched and still feeds search. Only the display
+              is gone. */}
+
+          {/* Information */}
+          {infoItems.length > 0 && (
             <>
               <View style={{ marginBottom: 8 }}>
                 <View className={s.sectionHeader}>
-                  <Text className={s.sectionTitle} style={{ color: colors.text }}>TAGS</Text>
+                  <Text className={s.sectionTitle} style={{ color: colors.text }}>INFORMATION</Text>
                 </View>
-                {tags.map((tag, i) => (
-                  <View key={i} className={i < tags.length - 1 ? s.participantRow : s.participantRowLast}
-                    style={i < tags.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
-                    <View className={s.participantAvatar}
-                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
-                      <Hash size={16} color={colors.text} weight="regular" />
-                    </View>
-                    {/* No chevron here: unlike Teams/Performers these rows
-                        aren't tappable, so the arrow was promising a screen
-                        that doesn't exist. */}
-                    <Text className={s.participantName} style={{ color: colors.text }}>
-                      {tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1)}
+                {infoItems.map((item: any, i: number) => (
+                  <View
+                    key={item.key ?? i}
+                    className={i < infoItems.length - 1 ? s.infoRow : s.infoRowLast}
+                    style={i < infoItems.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}
+                  >
+                    <Text className={s.infoLabel} style={{ color: colors.subText }}>
+                      {String(item.label ?? '').toUpperCase()}
                     </Text>
+                    <Text className={s.infoValue} style={{ color: colors.text }}>{item.value}</Text>
                   </View>
                 ))}
               </View>
@@ -815,9 +1002,56 @@ export default function EventDetail() {
             </View>
           </View>
 
+          {/* ── Policies ───────────────────────────────────────────────
+              Below LOCATION on purpose. These are read at the point of
+              deciding to buy or after something has gone wrong, not while
+              browsing — putting them above the map would push the venue, which
+              people check constantly, further down the scroll.
+
+              refund_policy and terms_and_conditions are COLUMNS on the event,
+              not catalogue items. They stay that way because the booking and
+              refund flows reference them and they are the two fields most
+              likely to be produced in a dispute — findable by name, not by
+              string key. */}
+          {(refundPolicy.length > 0 || termsAndConditions.length > 0) && (
+            <>
+              <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
+              <View style={{ marginBottom: 8 }}>
+                {refundPolicy.length > 0 && (
+                  <TouchableOpacity
+                    className={termsAndConditions.length > 0 ? s.infoRow : s.infoRowLast}
+                    style={termsAndConditions.length > 0 ? { borderBottomColor: colors.dividerColor } : undefined}
+                    onPress={() => setPolicySheet('refund')}
+                    activeOpacity={0.7}
+                  >
+                    <Text className={s.infoLabel} style={{ color: colors.subText }}>TICKET REFUND POLICY</Text>
+                    <Text className={s.policyLink} style={{ color: '#FF2D55' }}>View policy ↗</Text>
+                  </TouchableOpacity>
+                )}
+                {termsAndConditions.length > 0 && (
+                  <TouchableOpacity
+                    className={s.infoRowLast}
+                    onPress={() => setPolicySheet('terms')}
+                    activeOpacity={0.7}
+                  >
+                    <Text className={s.infoLabel} style={{ color: colors.subText }}>TERMS &amp; CONDITIONS</Text>
+                    <Text className={s.policyLink} style={{ color: '#FF2D55' }}>View terms ↗</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </>
+          )}
+
           <View className={s.bottomPad} />
         </View>
       </Animated.ScrollView>
+
+      <PolicySheet
+        visible={policySheet !== null}
+        title={policySheet === 'terms' ? 'Terms & Conditions' : 'Ticket Refund Policy'}
+        body={policySheet === 'terms' ? termsAndConditions : refundPolicy}
+        onClose={() => setPolicySheet(null)}
+      />
     </View>
   );
 }

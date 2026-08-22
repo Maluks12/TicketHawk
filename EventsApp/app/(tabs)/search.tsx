@@ -6,7 +6,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { searchEvents, getActiveEvents, getTrendingEvents, type Event } from '../../lib/api';
+import { searchEvents, getActiveEvents, getTrendingEvents, searchOrganizers,
+         type Event, type PublicOrganizer } from '../../lib/api';
+import { CheckCircle } from 'phosphor-react-native';
 import { useEventStore } from '../../store/eventStore';
 import { s, sheet } from '../../styles/search';
 import { useAppTheme } from '../../theme/colors';
@@ -93,6 +95,68 @@ const SuggestedRow = React.memo(({ item, onPress, colors, priority }: {
   );
 }, (a, b) => a.item.id === b.item.id && a.priority === b.priority && a.colors === b.colors);
 
+// Organiser result row.
+//
+// Built to the SAME fixed height as SuggestedRow (ROW_HEIGHT) on purpose — see
+// the getItemLayout note in the results list below. A round avatar rather than
+// the landscape thumbnail so the two kinds of result are distinguishable at a
+// glance without a label on every row.
+const OrganiserRow = React.memo(({ item, onPress, colors }: {
+  item: PublicOrganizer; onPress: () => void; colors: any;
+}) => {
+  const upcoming = item.events_hosted ?? 0;
+  const meta = upcoming > 0
+    ? `${upcoming} event${upcoming === 1 ? '' : 's'} on sale`
+    : 'No events on sale';
+
+  return (
+    <TouchableOpacity style={sheet.nfRow} onPress={onPress} activeOpacity={0.7}>
+      <View style={[sheet.nfThumb, {
+        backgroundColor: colors.sectionCardBg,
+        width: 68, borderRadius: 34, overflow: 'hidden',
+      }]}>
+        {item.logo_url
+          ? <CoverImage
+              uri={item.logo_url}
+              style={StyleSheet.absoluteFillObject}
+              recyclingKey={item.id}
+            />
+          : <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+              <Ionicons name="business-outline" size={22} color={colors.iconColor} />
+            </View>
+        }
+      </View>
+
+      <View style={{ flex: 1, justifyContent: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text, lineHeight: 21, flexShrink: 1 }} numberOfLines={1}>
+            {item.business_name}
+          </Text>
+          {item.verified && <CheckCircle size={15} color="#2f7cf6" weight="fill" />}
+        </View>
+        <Text style={{ fontSize: 12, color: colors.subText, marginTop: 3 }} numberOfLines={1}>
+          {meta}
+        </Text>
+      </View>
+
+      <Ionicons name="chevron-forward" size={20} color={colors.iconColor} style={{ flexShrink: 0 }} />
+    </TouchableOpacity>
+  );
+}, (a, b) => a.item.id === b.item.id && a.colors === b.colors);
+
+// Small uppercase divider between the two kinds of result.
+function SectionLabel({ text, colors }: { text: string; colors: any }) {
+  return (
+    <Text style={{
+      fontSize: 11, fontWeight: '800', letterSpacing: 1.1,
+      textTransform: 'uppercase', color: colors.subText,
+      paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6,
+    }}>
+      {text}
+    </Text>
+  );
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SearchScreen() {
@@ -106,6 +170,7 @@ export default function SearchScreen() {
   const [query,     setQuery]     = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [results,   setResults]   = useState<Event[]>([]);
+  const [organisers, setOrganisers] = useState<PublicOrganizer[]>([]);
   const [loading,   setLoading]   = useState(false);
   const [view,      setView]      = useState<'idle' | 'typing' | 'results'>('idle');
 
@@ -164,10 +229,22 @@ export default function SearchScreen() {
 
   const runSearch = useCallback(async (q: string) => {
     const trimmed = q.trim();
-    if (!trimmed) { setResults([]); setView('idle'); return; }
-    if (trimmed.length < MIN_QUERY_LENGTH) { setResults([]); setView('typing'); return; }
+    if (!trimmed) { setResults([]); setOrganisers([]); setView('idle'); return; }
+    if (trimmed.length < MIN_QUERY_LENGTH) { setResults([]); setOrganisers([]); setView('typing'); return; }
     setLoading(true); setView('results');
-    const found = await searchEvents(trimmed);
+
+    // Both searches in parallel rather than in sequence. They hit different
+    // tables and neither depends on the other, so awaiting them one after the
+    // other would add the organiser round-trip to every keystroke for no
+    // reason. allSettled, not all: an organiser-search failure must not blank
+    // the event results, which are the main thing being asked for.
+    const [evRes, orgRes] = await Promise.allSettled([
+      searchEvents(trimmed),
+      searchOrganizers(trimmed),
+    ]);
+    const found = evRes.status === 'fulfilled' ? evRes.value : [];
+    setOrganisers(orgRes.status === 'fulfilled' ? orgRes.value : []);
+
     // Results go on screen the moment they arrive. The prefetch is fire-and-
     // forget: this runs on every debounced keystroke, so awaiting it here added
     // ~0.9s to EVERY search — by far the worst place in the app to spend that.
@@ -183,10 +260,11 @@ export default function SearchScreen() {
     debounce.current = setTimeout(() => runSearch(text), 320);
   };
 
-  const handleClear  = () => { setQuery(''); setResults([]); setView('idle'); inputRef.current?.focus(); };
-  const handleCancel = () => { Keyboard.dismiss(); setQuery(''); setResults([]); setView('idle'); setIsFocused(false); };
+  const handleClear  = () => { setQuery(''); setResults([]); setOrganisers([]); setView('idle'); inputRef.current?.focus(); };
+  const handleCancel = () => { Keyboard.dismiss(); setQuery(''); setResults([]); setOrganisers([]); setView('idle'); setIsFocused(false); };
 
   const handleEventPress = (event: Event) => { setSelectedEvent(event); router.push(`/event/${event.id}`); };
+  const handleOrganiserPress = (o: PublicOrganizer) => { router.push(`/organiser/${o.slug}` as any); };
 
   const showCancel  = isFocused || query.length > 0;
   const searchBoxBg = isFocused
@@ -302,20 +380,55 @@ export default function SearchScreen() {
                 priority={index < ABOVE_FOLD ? 'high' : 'normal'}
               />
             )}
-            getItemLayout={(_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
+            /* Organisers sit above the events as a header.
+               Ordered this way because someone typing an organiser's name
+               wants the organiser — the events are what they will find on that
+               page anyway. */
+            ListHeaderComponent={
+              organisers.length > 0 ? (
+                <View>
+                  <SectionLabel text="Organisers" colors={colors} />
+                  {organisers.map((o) => (
+                    <OrganiserRow
+                      key={o.id}
+                      item={o}
+                      colors={colors}
+                      onPress={() => handleOrganiserPress(o)}
+                    />
+                  ))}
+                  {results.length > 0 && <SectionLabel text="Events" colors={colors} />}
+                </View>
+              ) : null
+            }
+            /* getItemLayout is DROPPED when a header is present.
+               Its offsets assume item N starts at ROW_HEIGHT * N from the top
+               of the content, which is only true with no header. With one, every
+               offset is wrong by the header's height and the list scrolls to the
+               wrong place and mis-renders on fling.
+               Keeping it for the (far more common) no-organiser case preserves
+               the optimisation where it applies, and dropping it for a list of
+               at most eight extra rows costs a measure pass nobody will feel. */
+            getItemLayout={organisers.length > 0
+              ? undefined
+              : (_, index) => ({ length: ROW_HEIGHT, offset: ROW_HEIGHT * index, index })}
             initialNumToRender={ABOVE_FOLD}
             maxToRenderPerBatch={6}
             windowSize={7}
             removeClippedSubviews
             contentContainerStyle={{ paddingBottom: 24 }}
             ListEmptyComponent={
-              <View className={s.centred}>
-                <Ionicons name="search-outline" size={48} color={colors.iconColor} />
-                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 6 }}>No events found</Text>
-                <Text style={{ fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 19 }}>
-                  No results for "{query}". Try a different keyword.
-                </Text>
-              </View>
+              /* Only when BOTH are empty. An organiser match with no events
+                 was still a successful search, and telling someone "no events
+                 found" under a list of organisers would be nonsense. */
+              organisers.length > 0 ? null : (
+                <View className={s.centred}>
+                  <Ionicons name="search-outline" size={48} color={colors.iconColor} />
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 6 }}>Nothing found</Text>
+                  <Text style={{ fontSize: 13, color: colors.subText, textAlign: 'center', lineHeight: 19 }}>
+                    No events or organisers match "{query}". Try a different keyword.
+                  </Text>
+                </View>
+              )
             }
           />
         )

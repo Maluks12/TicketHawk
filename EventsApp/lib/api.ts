@@ -414,6 +414,9 @@ export interface Event {
   max_capacity?: number;
   max_tickets_per_user?: number | null;
   venue_type?: 'stadium' | 'auditorium' | 'none' | null;
+  organizer?:  PublicOrganizer;
+  info_items?: EventInfoItem[];
+  lineup?:     LineupEntry[];
 }
 
 export interface HomeSection {
@@ -1096,4 +1099,135 @@ export async function toggleFollow(eventId: string): Promise<FollowStatusRespons
 export async function getFollowStatus(eventId: string): Promise<FollowStatusResponse> {
   const res = await api.get<FollowStatusResponse>(`/v1/events/${eventId}/follow`);
   return res.data;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APPEND TO: EventsApp/lib/api.ts
+//
+// Everything below is additive. Two edits are needed to the EXISTING `Event`
+// interface — marked at the bottom of this file.
+// ═══════════════════════════════════════════════════════════════════════════
+
+
+// ─── Organiser ────────────────────────────────────────────────────────────────
+
+export interface OrganizerLink {
+  platform: 'instagram' | 'x' | 'facebook' | 'tiktok' | 'youtube'
+          | 'linkedin' | 'whatsapp' | 'spotify' | 'website';
+  url: string;
+  sort_order: number;
+}
+
+export interface PublicOrganizer {
+  id: string;
+  slug: string;
+  business_name: string;
+  description?: string;
+  logo_url?: string;
+  cover_image_url?: string;
+  verified: boolean;
+  member_since: number;
+  events_hosted: number;
+  follower_count: number;
+  /**
+   * Absent when the request carried no valid token — NOT `false`.
+   *
+   * The server omits the key for a logged-out visitor on purpose, so the
+   * follow button can render an unauthenticated state rather than claiming
+   * "you are not following", which is a different thing.
+   */
+  is_following?: boolean;
+  links?: OrganizerLink[];
+}
+
+export interface OrganizerFollowResponse {
+  following:      boolean;
+  follower_count: number;
+  organizer_id:   string;
+  organizer_slug: string;
+}
+
+/** Slug or UUID — the route accepts either, matching the event detail route. */
+export const getOrganizer = (slugOrId: string) =>
+  api.get<PublicOrganizer>(`/v1/organisers/${slugOrId}`);
+
+export const getOrganizerEvents = (
+  slugOrId: string,
+  scope: 'upcoming' | 'past' = 'upcoming',
+  cursor?: string,
+) =>
+  api.get<{ data: Event[]; scope: string; next_cursor?: string }>(
+    `/v1/organisers/${slugOrId}/events?scope=${scope}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+  );
+
+export async function toggleOrganizerFollow(slugOrId: string): Promise<OrganizerFollowResponse> {
+  const res = await api.post<OrganizerFollowResponse>(`/v1/organisers/${slugOrId}/follow`);
+  return res.data;
+}
+
+export async function getOrganizerFollowStatus(slugOrId: string) {
+  const res = await api.get<{ following: boolean; follower_count: number; organizer_id: string }>(
+    `/v1/organisers/${slugOrId}/follow`
+  );
+  return res.data;
+}
+
+
+// ─── Event information ────────────────────────────────────────────────────────
+
+export interface EventInfoItem {
+  key: string;
+  label: string;
+  value: string;
+  value_type: 'text' | 'enum' | 'time';
+  sort_order: number;
+}
+
+
+// ─── Line-up ──────────────────────────────────────────────────────────────────
+
+export interface LineupEntry {
+  id: string;
+  kind: 'performer' | 'team';
+  name: string;
+  image_url?: string;
+  subtitle?: string;
+  stage?: string;
+  set_time?: string;
+  external_url?: string;
+  sort_order: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APPEND TO: EventsApp/lib/api.ts
+//
+// Follow-on to the first api-additions block. Requires PublicOrganizer, which
+// that block declares.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Find organisers by name.
+ *
+ * Returns [] rather than throwing on failure, matching searchEvents. This is
+ * called on every debounced keystroke alongside the event search, and a
+ * rejected promise there would need handling at every call site to avoid an
+ * unhandled rejection warning for something as unremarkable as a dropped
+ * request while typing.
+ *
+ * Note `events_hosted` on these rows carries the count of events CURRENTLY ON
+ * SALE, not the lifetime total the profile endpoint returns. On a search row
+ * "3 events on sale" is a reason to tap; "24 events hosted" is trivia.
+ */
+export async function searchOrganizers(query: string, limit = 8): Promise<PublicOrganizer[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  try {
+    const res = await api.get<{ data: PublicOrganizer[]; count: number }>(
+      '/v1/organisers/search',
+      { params: { q, limit } },
+    );
+    return res.data?.data ?? [];
+  } catch {
+    return [];
+  }
 }
