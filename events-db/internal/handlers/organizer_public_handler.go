@@ -38,6 +38,17 @@ func GetPublicOrganizerHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// Phase 2. OptionalAuth means user_id is set only when a valid token
+		// was presented, so an empty string here is a logged-out visitor and
+		// is_following stays absent rather than false. A failed lookup is
+		// swallowed for the same reason: the page is worth rendering with an
+		// indeterminate follow button, not worth 500ing over one.
+		if userID := c.GetString("user_id"); userID != "" {
+			if following, err := repository.IsFollowingOrganizer(pool, userID, profile.ID); err == nil {
+				profile.IsFollowing = &following
+			}
+		}
+
 		c.JSON(http.StatusOK, profile)
 	}
 }
@@ -109,7 +120,7 @@ func GetPublicOrganizerEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // GetMyPublicProfileHandler returns the organiser's own page as the dashboard
 // needs to render it, including when it is not live.
 //
-//	GET /v1/organiser/profile
+//	GET /v1/organiser/public-profile
 func GetMyPublicProfileHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString("user_id")
@@ -130,7 +141,7 @@ func GetMyPublicProfileHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 // UpdateMyPublicProfileHandler applies the organiser's edits to their page.
 //
-//	PATCH /v1/organiser/profile
+//	PATCH /v1/organiser/public-profile
 //
 // Note what is NOT editable here: business_name (and therefore the slug),
 // business_email, business_phone. Those sit behind the existing organiser
@@ -168,7 +179,7 @@ func UpdateMyPublicProfileHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 // ReplaceMyLinksHandler replaces the organiser's whole social/website link set.
 //
-//	PUT /v1/organiser/profile/links
+//	PUT /v1/organiser/public-profile/links
 //
 // Validation errors come back as 400 with the offending platform named, because
 // "instagram: link does not point at that platform" is something an organiser
@@ -211,7 +222,7 @@ func ReplaceMyLinksHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // GetLinkPlatformsHandler lists the platforms the dashboard picker may offer,
 // in canonical display order.
 //
-//	GET /v1/organiser/profile/link-platforms
+//	GET /v1/organiser/public-profile/link-platforms
 //
 // Served from the server rather than hardcoded in three frontends so that
 // adding a platform is one deploy, not four.

@@ -151,6 +151,16 @@ func main() {
 	workers.StartSellOutWorker(pool, ctx)
 	log.Info().Msg("sell-out worker started")
 
+	// Announces newly published events to the organiser's followers.
+	//
+	// A worker rather than a hook on the publish path: an event reaches
+	// 'published' via AdminApproveEvent, ApproveEventWithFeature AND
+	// AdminPromoteEvent, so hooking any one of them would miss the others.
+	// Polling for the state instead of the transition covers all three, plus
+	// whatever the fourth turns out to be. See the worker for the full note.
+	workers.StartOrganizerAnnounceWorker(pool, ctx)
+	log.Info().Msg("organiser announce worker started")
+
 	bookingRepo    := repository.NewPgxBookingQuerier(pool)
 	eventRepo      := repository.NewPgxEventQuerier(pool)
 	cartQuerier    := repository.NewPgxCartQuerier(pool)
@@ -732,6 +742,11 @@ func main() {
 		user.DELETE("/me",               handlers.DeleteMyAccountHandler(pool, oidcVerifier))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
+		// Organisers, not events. Separate endpoint rather than a ?type= on
+		// /following because the two return different shapes — an event card
+		// versus an organiser card — and one endpoint returning either is a
+		// discriminated union the clients would have to unpick.
+		user.GET("/following-organisers", handlers.GetFollowedOrganizersHandler(pool))
 	}
 
 	// ==========================================
@@ -763,6 +778,34 @@ func main() {
 	{
 		eventFollowGroup.POST("/:id/follow", handlers.ToggleFollowHandler(pool))
 		eventFollowGroup.GET("/:id/follow",  handlers.GetFollowStatusHandler(pool))
+	}
+
+	// ==========================================
+	// Organiser Follow Routes (authenticated)
+	// POST /organisers/:slug/follow  — toggle follow on/off
+	// GET  /organisers/:slug/follow  — status + follower count
+	// GET  /user/following-organisers — registered under the user group below
+	//
+	// A separate group from organisersPublic for the same reason
+	// eventFollowGroup is separate from the public events group: that group
+	// runs OptionalAuth, and a follow needs a real user rather than one that
+	// might be there. Gin merges the two into one tree, so /organisers/:slug
+	// stays public while /organisers/:slug/follow requires a token.
+	//
+	// The slug resolves through the same public gate as the profile, so a
+	// suspended or unverified organiser cannot accumulate followers while
+	// invisible.
+	// ==========================================
+	organiserFollowGroup := v1.Group("/organisers")
+	organiserFollowGroup.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		organiserFollowGroup.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"organiser-follow"))
+	}
+	{
+		organiserFollowGroup.POST("/:slug/follow", handlers.ToggleOrganizerFollowHandler(pool))
+		organiserFollowGroup.GET("/:slug/follow",  handlers.GetOrganizerFollowStatusHandler(pool))
 	}
 
 	// ==========================================

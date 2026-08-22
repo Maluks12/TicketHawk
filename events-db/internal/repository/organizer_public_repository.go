@@ -99,6 +99,12 @@ func GetPublicOrganizerProfile(pool *pgxpool.Pool, slugOrID string) (*models.Pub
 		org.Links = links
 	}
 
+	// Phase 2. Same tolerance as the event count: a follower count that fails
+	// to load should not take down the page it decorates.
+	if n, err := GetOrganizerFollowerCount(pool, org.ID); err == nil {
+		org.FollowerCount = n
+	}
+
 	return &org, nil
 }
 
@@ -410,6 +416,9 @@ func GetOwnerProfile(pool *pgxpool.Pool, userID string) (*OwnerProfileView, erro
 	}
 	if links, err := GetOrganizerLinks(pool, orgID); err == nil && len(links) > 0 {
 		org.Links = links
+	}
+	if n, err := GetOrganizerFollowerCount(pool, orgID); err == nil {
+		org.FollowerCount = n
 	}
 
 	// Rebuild a minimal Organizer so the live/blocked decision comes from

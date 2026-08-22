@@ -121,9 +121,14 @@ type PublicOrganizer struct {
 	// and revenue figures are deliberately absent: they would let a competitor
 	// size an organiser's business from a page we publish on their behalf.
 	EventsHosted int `json:"events_hosted"`
-	// FollowerCount is populated in phase 2 (organiser follows). Zero until
-	// then; the field is here so the client shape does not change under it.
+	// FollowerCount is populated in phase 2 (organiser follows).
 	FollowerCount int64 `json:"follower_count"`
+	// IsFollowing is set only when the request carried a valid token. A
+	// pointer, not a bool, so a logged-out visitor gets the key omitted rather
+	// than a hard `false` — the client renders an unauthenticated follow button
+	// differently from a "you are not following" one, and cannot tell those
+	// apart from a plain false.
+	IsFollowing *bool `json:"is_following,omitempty"`
 	// Links is nil rather than empty when the organiser has set none, so the
 	// client can distinguish "no socials" from "not loaded".
 	Links []OrganizerLink `json:"links,omitempty"`
