@@ -398,6 +398,23 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 		delete(fields, "ticket_types")
 	}
 
+	// Same for the Information block: event_info_items is its own table.
+	//
+	// infoPresent is tracked separately from len(infoPayload) because an EMPTY
+	// array is a meaningful instruction — "remove every information field" —
+	// and is not the same as the key being absent, which means "leave the
+	// block alone". Collapsing the two would make it impossible to clear an
+	// event's information through the review flow.
+	var infoPayload []any
+	infoPresent := false
+	if raw, ok := fields["event_info"]; ok {
+		infoPresent = true
+		if arr, ok := raw.([]any); ok {
+			infoPayload = arr
+		}
+		delete(fields, "event_info")
+	}
+
 	for key, val := range fields {
 		col, allowed := editableEventFields[key]
 		if !allowed {
@@ -411,9 +428,18 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 	}
 
 	if len(sets) == 0 {
-		// A tier-only edit is legitimate: nothing on `events` changed.
+		// A tier-only or information-only edit is legitimate: nothing on
+		// `events` itself changed.
+		if infoPresent {
+			if err := applyEventInfoEdit(ctx, tx, eventID, infoPayload); err != nil {
+				return err
+			}
+		}
 		if len(tierPayload) > 0 {
 			return applyTicketTypeEdits(ctx, tx, eventID, tierPayload)
+		}
+		if infoPresent {
+			return nil
 		}
 		return fmt.Errorf("event edit contained no editable fields")
 	}
@@ -427,6 +453,12 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("event not found")
+	}
+
+	if infoPresent {
+		if err := applyEventInfoEdit(ctx, tx, eventID, infoPayload); err != nil {
+			return err
+		}
 	}
 
 	if len(tierPayload) > 0 {

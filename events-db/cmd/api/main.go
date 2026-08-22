@@ -1439,6 +1439,26 @@ func main() {
 		// Resubmit rejected merch for review
 		orgRoutes.POST("/merch/:id/resubmit", handlers.OrgResubmitMerchHandler(pool))
 
+		// ── Event information block ────────────────────────────────────────
+		//
+		// GET /organiser/event-info/catalogue  — the fields on offer
+		// GET /organiser/events/:id/info       — this event's chosen fields
+		// PUT /organiser/events/:id/info       — replace the whole block
+		//
+		// The catalogue is served rather than hardcoded in the dashboard, so
+		// retiring a field or adding one takes effect without a frontend
+		// deploy.
+		//
+		// PUT applies immediately on a live event for every field EXCEPT those
+		// the catalogue marks review_required_when_published — today only
+		// age_requirement, which returns 409 and routes to the edit-request
+		// flow. Parking and gate changes must not wait in an admin queue; an
+		// age restriction changing after people have bought must not happen
+		// silently.
+		orgRoutes.GET("/event-info/catalogue", handlers.GetEventInfoCatalogueHandler(pool))
+		orgRoutes.GET("/events/:id/info",      handlers.GetEventInfoHandler(pool))
+		orgRoutes.PUT("/events/:id/info",      handlers.ReplaceEventInfoHandler(pool, eventCache))
+
 		// ── Public organiser page (the organiser's own) ────────────────────
 		//
 		// GET   /organiser/public-profile                — including when not live

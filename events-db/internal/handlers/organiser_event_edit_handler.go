@@ -55,6 +55,23 @@ var editableWhenPublished = map[string]bool{
 	"cover_image_url":  true,
 	"banner_image_url": true,
 	"ticket_types":     true,
+
+	// The Information block (parking, accessibility, age requirement, …).
+	//
+	// Most information fields are editable on a live event WITHOUT review, and
+	// go through PUT /organiser/events/:id/info directly — see
+	// ReplaceEventInfoHandler for why: a "the north gate is now closed" update
+	// that waits in an admin queue arrives after the event.
+	//
+	// This key exists for the fields the catalogue marks
+	// review_required_when_published — today only age_requirement. That
+	// endpoint refuses those with a 409 pointing here, so without this entry
+	// the refusal would be a dead end: the organiser is told to file a request
+	// and the request would then be rejected as an uneditable field.
+	//
+	// The payload is the WHOLE block, not a diff of it. See
+	// applyEventInfoEdit.
+	"event_info":       true,
 }
 
 // ── DELETE /organiser/events/:id ─────────────────────────────────────────────

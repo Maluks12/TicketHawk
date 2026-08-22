@@ -173,7 +173,7 @@ func ValidateOrganizerLink(platform, raw string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("%w: %s is not a %s link", ErrLinkWrongHost, host, p)
+	return "", fmt.Errorf("%w: %s is not a link to %s", ErrLinkWrongHost, host, p)
 }
 
 // looksLikeHandle reports whether raw is a bare username rather than a URL.
