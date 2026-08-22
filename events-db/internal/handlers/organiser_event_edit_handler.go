@@ -72,6 +72,22 @@ var editableWhenPublished = map[string]bool{
 	// The payload is the WHOLE block, not a diff of it. See
 	// applyEventInfoEdit.
 	"event_info":       true,
+
+	// Line-up — performers and teams, with images, stages and set times.
+	//
+	// The organiser's own route (PUT /organiser/events/:id/lineup) applies
+	// directly and is NOT review-gated: an act drops out three days before a
+	// festival and the replacement is announced the same afternoon, so a
+	// line-up sitting in an admin queue is wrong on exactly the days most
+	// people are looking at it.
+	//
+	// This key is for the OTHER route into the same data — an admin correcting
+	// a line-up from the console files an event_edit like any other change.
+	// Without it that request would execute with the line-up silently skipped
+	// while reporting success.
+	//
+	// Payload is the whole list, not a diff. See applyEventLineupEdit.
+	"lineup":           true,
 }
 
 // ── DELETE /organiser/events/:id ─────────────────────────────────────────────

@@ -1459,6 +1459,22 @@ func main() {
 		orgRoutes.GET("/events/:id/info",      handlers.GetEventInfoHandler(pool))
 		orgRoutes.PUT("/events/:id/info",      handlers.ReplaceEventInfoHandler(pool, eventCache))
 
+		// ── Line-up ────────────────────────────────────────────────────────
+		//
+		// GET /organiser/events/:id/lineup
+		// PUT /organiser/events/:id/lineup  — replace the whole list
+		//
+		// Applies immediately even on a live event, deliberately: an act drops
+		// out three days out and the replacement is announced the same
+		// afternoon. A line-up waiting in an admin queue is wrong on exactly
+		// the days most people are looking at it.
+		//
+		// Images go through the existing POST /organiser/upload, which returns
+		// a URL to include in the PUT — no dedicated endpoint, because that one
+		// already enforces the MIME allow-list, size ceiling and compression.
+		orgRoutes.GET("/events/:id/lineup", handlers.GetEventLineupHandler(pool))
+		orgRoutes.PUT("/events/:id/lineup", handlers.ReplaceEventLineupHandler(pool, eventCache))
+
 		// ── Public organiser page (the organiser's own) ────────────────────
 		//
 		// GET   /organiser/public-profile                — including when not live

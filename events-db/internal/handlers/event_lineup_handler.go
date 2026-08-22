@@ -1,0 +1,133 @@
+package handlers
+
+import (
+	"errors"
+	"net/http"
+	"time"
+
+	"events-db/internal/cache"
+	"events-db/internal/models"
+	"events-db/internal/repository"
+	"events-db/internal/utils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// GetEventLineupHandler returns an event's line-up to its organiser.
+//
+//	GET /v1/organiser/events/:id/lineup
+func GetEventLineupHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		eventID := c.Param("id")
+
+		editCtx, err := repository.GetEventEditContext(pool, eventID, userID)
+		if err != nil {
+			if errors.Is(err, repository.ErrEventNotOwned) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to load event")
+			return
+		}
+
+		entries, err := repository.GetEventLineup(pool, eventID)
+		if err != nil {
+			utils.InternalError(c, err, "failed to load line-up")
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"entries":      entries,
+			"is_published": editCtx.IsPublished,
+			"status":       editCtx.Status,
+		})
+	}
+}
+
+// ReplaceEventLineupHandler replaces an event's whole line-up.
+//
+//	PUT /v1/organiser/events/:id/lineup
+//
+// ── Why this is NOT review-gated on a live event ────────────────────────────
+//
+// Line-ups change. An act drops out three days before a festival and a
+// replacement is announced the same afternoon — that is the normal operation of
+// the business, not an edge case. Routing it through an admin queue would mean
+// the schedule on the page is wrong for however long the queue takes, on
+// precisely the days when the most people are looking at it.
+//
+// That is a real trade rather than a free one. Someone who bought a ticket to
+// see a headliner who has since been removed has a genuine complaint, and this
+// endpoint lets an organiser make that change silently. The right answer is to
+// NOTIFY ticket holders and followers when a published event's line-up changes,
+// not to block the change — a correct page nobody was told about is still
+// better than a stale one. That notification is not built yet; see the README.
+//
+// Images are uploaded separately via POST /organiser/upload, which returns a
+// URL to include here. No dedicated upload endpoint: that one already enforces
+// the MIME allow-list, the size ceiling and compression, and a line-up image is
+// not special enough to justify a second path through the compressor.
+func ReplaceEventLineupHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.GetString("user_id")
+		eventID := c.Param("id")
+
+		var dto models.ReplaceEventLineupDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": utils.FormatValidationErrors(err)})
+			return
+		}
+
+		editCtx, err := repository.GetEventEditContext(pool, eventID, userID)
+		if err != nil {
+			if errors.Is(err, repository.ErrEventNotOwned) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+				return
+			}
+			utils.InternalError(c, err, "failed to load event")
+			return
+		}
+
+		// A finished or cancelled event is a record of what happened. Rewriting
+		// its line-up afterwards changes the history rather than the plan.
+		if editCtx.Status == models.EventCancelled || editCtx.Status == models.EventCompleted {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "this event has ended or been cancelled and its line-up can no longer be changed",
+				"code":  "event_closed",
+			})
+			return
+		}
+
+		// Event times bound the set-time check. A failure here is not fatal:
+		// the check is a guard against a mistyped DATE, and losing it is better
+		// than refusing an otherwise valid line-up save.
+		var start, end time.Time
+		if s, e, err := repository.GetEventTimes(pool, eventID); err == nil {
+			start, end = s, e
+		}
+		// On error start/end stay zero, which ValidateLineupEntries treats as
+		// "skip the range check". Losing the guard is better than refusing an
+		// otherwise valid line-up save.
+
+		entries, err := models.ValidateLineupEntries(dto.Entries, start, end)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := repository.ReplaceEventLineup(pool, eventID, entries); err != nil {
+			utils.InternalError(c, err, "failed to save line-up")
+			return
+		}
+
+		// The legacy performers/teams arrays are part of the cached detail
+		// payload, so a stale cache would show a dropped act as still playing.
+		if ec != nil && editCtx.IsPublished {
+			ec.BustOnPublish(c.Request.Context())
+		}
+
+		c.JSON(http.StatusOK, gin.H{"entries": entries})
+	}
+}

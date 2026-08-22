@@ -415,6 +415,20 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 		delete(fields, "event_info")
 	}
 
+	// Line-up. Same shape as event_info: its own table, so it cannot ride the
+	// column UPDATE, and an empty array means "clear the line-up" rather than
+	// "leave it alone" — which is why presence is tracked separately from
+	// length.
+	var lineupPayload []any
+	lineupPresent := false
+	if raw, ok := fields["lineup"]; ok {
+		lineupPresent = true
+		if arr, ok := raw.([]any); ok {
+			lineupPayload = arr
+		}
+		delete(fields, "lineup")
+	}
+
 	for key, val := range fields {
 		col, allowed := editableEventFields[key]
 		if !allowed {
@@ -435,10 +449,15 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 				return err
 			}
 		}
+		if lineupPresent {
+			if err := applyEventLineupEdit(ctx, tx, eventID, lineupPayload); err != nil {
+				return err
+			}
+		}
 		if len(tierPayload) > 0 {
 			return applyTicketTypeEdits(ctx, tx, eventID, tierPayload)
 		}
-		if infoPresent {
+		if infoPresent || lineupPresent {
 			return nil
 		}
 		return fmt.Errorf("event edit contained no editable fields")
@@ -457,6 +476,12 @@ func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []by
 
 	if infoPresent {
 		if err := applyEventInfoEdit(ctx, tx, eventID, infoPayload); err != nil {
+			return err
+		}
+	}
+
+	if lineupPresent {
+		if err := applyEventLineupEdit(ctx, tx, eventID, lineupPayload); err != nil {
 			return err
 		}
 	}
