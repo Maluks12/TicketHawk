@@ -1198,26 +1198,6 @@ export interface LineupEntry {
   sort_order: number;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// APPEND TO: EventsApp/lib/api.ts
-//
-// Follow-on to the first api-additions block. Requires PublicOrganizer, which
-// that block declares.
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Find organisers by name.
- *
- * Returns [] rather than throwing on failure, matching searchEvents. This is
- * called on every debounced keystroke alongside the event search, and a
- * rejected promise there would need handling at every call site to avoid an
- * unhandled rejection warning for something as unremarkable as a dropped
- * request while typing.
- *
- * Note `events_hosted` on these rows carries the count of events CURRENTLY ON
- * SALE, not the lifetime total the profile endpoint returns. On a search row
- * "3 events on sale" is a reason to tap; "24 events hosted" is trivia.
- */
 export async function searchOrganizers(query: string, limit = 8): Promise<PublicOrganizer[]> {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -1230,4 +1210,14 @@ export async function searchOrganizers(query: string, limit = 8): Promise<Public
   } catch {
     return [];
   }
+}
+
+export interface FollowedOrganizer {
+  id: string;
+  slug: string;
+  business_name: string;
+  logo_url?: string;
+  verified: boolean;
+  followed_at: string;
+  upcoming_events: number;
 }

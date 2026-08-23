@@ -66,11 +66,6 @@ function formatTime(iso?: string | null) {
   return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
 
-function compactCount(n: number) {
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
-  return String(n);
-}
-
 // ─── Card ─────────────────────────────────────────────────────────────────────
 // Same shape as CategoryEventCard so an organiser's events look identical to
 // the same events anywhere else in the app.
@@ -125,9 +120,8 @@ export default function OrganiserScreen() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [error,     setError]     = useState<string | null>(null);
 
-  const [following,     setFollowing]     = useState(false);
-  const [followerCount, setFollowerCount] = useState(0);
-  const [followBusy,    setFollowBusy]    = useState(false);
+  const [following,  setFollowing]  = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!slug) return;
@@ -135,7 +129,6 @@ export default function OrganiserScreen() {
     try {
       const { data } = await getOrganizer(slug);
       setOrganiser(data);
-      setFollowerCount(data.follower_count ?? 0);
       // `is_following` is ABSENT (not false) when the request carried no valid
       // token, so `=== true` keeps a logged-out visitor at false without
       // treating "unknown" as "not following".
@@ -212,15 +205,15 @@ export default function OrganiserScreen() {
     // slow connection, and the reconciliation below is cheap.
     const wasFollowing = following;
     setFollowing(!wasFollowing);
-    setFollowerCount((c) => c + (wasFollowing ? -1 : 1));
     setFollowBusy(true);
     try {
+      // res.follower_count is deliberately ignored. The count is not shown —
+      // the button reads FOLLOW / FOLLOWING and nothing else — and tracking a
+      // number that never renders is state that can only go wrong silently.
       const res = await toggleOrganizerFollow(slug);
       setFollowing(res.following);
-      setFollowerCount(res.follower_count);
     } catch {
       setFollowing(wasFollowing);
-      setFollowerCount((c) => c + (wasFollowing ? 1 : -1));
     } finally {
       setFollowBusy(false);
     }
@@ -340,7 +333,6 @@ export default function OrganiserScreen() {
         >
           <Text style={[styles.followText, { color: following ? '#b57bee' : colors.text }]}>
             {following ? 'FOLLOWING' : 'FOLLOW'}
-            {followerCount > 0 ? `  ·  ${compactCount(followerCount)}` : ''}
           </Text>
         </TouchableOpacity>
 

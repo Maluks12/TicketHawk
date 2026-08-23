@@ -66,6 +66,21 @@ export const s = {
   sectionTitle:      'text-[18px] font-extrabold text-[#111111] tracking-[0.05em] uppercase',
   sectionLink:       'text-[10px] font-bold text-[#111111] tracking-[0.1em]',
   divider:           'h-[1px] bg-[#EEEEEE] my-6',
+  // ── Section rhythm ──────────────────────────────────────────────────────
+  //
+  // ONE class controls the gap between every section on this screen, so they
+  // cannot drift apart again.
+  //
+  // They had. Spacing was built from two mechanisms at once — a transparent
+  // `divider` (my-6, so 49px including the hairline) used as a spacer, plus an
+  // inline marginBottom: 8 on each block — and the dividers were placed by
+  // hand. About→Performers ended up with TWO of them (106px); Performers→
+  // Information had none (8px). A 13x difference on the same screen.
+  //
+  // 32px is the gap. The section header already carries mb-4 beneath its
+  // title, so the distance from the last row of one section to the next
+  // section's heading reads as one clear break rather than two competing ones.
+  sectionBlock:      'mb-8',
 
   // ── About ─────────────────────────────────────────────────────────────────────
   descText:          'text-[15px] text-[#555555] leading-[24px]',
@@ -124,7 +139,16 @@ export const s = {
   organizerByLabel:     'text-[10px] font-bold tracking-[0.1em] uppercase text-[#888888] mb-0.5',
   organizerName:        'text-[15px] font-bold text-[#111111] uppercase',
 
-  bottomPad:            'h-32',
+  // 48px, was 128px.
+  //
+  // The old value dated from when this screen had a sticky purchase bar
+  // pinned to the bottom that content had to clear. There is no sticky bar —
+  // GET TICKETS lives in the action card at the top — so it was 128px of
+  // nothing after the last row, which reads as the page having failed to load
+  // something.
+  //
+  // 48px still clears the home indicator on a notched device.
+  bottomPad:            'h-12',
 
   // ── Legacy (kept for other screens) ──────────────────────────────────────────
   metaRow:              'flex-row items-center gap-1.5 mb-1.5',

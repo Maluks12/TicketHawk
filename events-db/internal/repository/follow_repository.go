@@ -108,7 +108,41 @@ func GetFollowedEvents(
 	defer cancel()
 
 	args := []interface{}{userID}
-	where := "WHERE f.user_id = $1"
+
+	// ── Past and cancelled events are HIDDEN, not deleted ───────────────────
+	//
+	// Following an event means "remind me before this happens". Once it has
+	// happened the follow has no job left, and a list that keeps growing with
+	// things you cannot attend stops being a list you open.
+	//
+	// end_time, not start_time. A festival that started on Friday is still
+	// running on Saturday, and dropping it at the start would remove it from
+	// the list on the one weekend it matters most.
+	//
+	// Cancelled events go too. The holder was told separately when it was
+	// cancelled (NotifEventCancelled), so leaving it here is a second reminder
+	// of something they can no longer attend.
+	//
+	// ── Why the ROW is left alone ───────────────────────────────────────────
+	//
+	// This filters the QUERY. It does not DELETE FROM event_follows, and that
+	// is deliberate:
+	//
+	//   * A postponed event moves its end_time forward. If the follows had
+	//     been deleted when it lapsed, everyone who wanted to know would have
+	//     been silently unsubscribed — the exact people the new date matters to.
+	//   * follow counts on the event page are historical interest, and
+	//     retro-actively deleting them would make a sold-out event look
+	//     unpopular.
+	//   * It is not reversible. A filter can be relaxed; a DELETE cannot be
+	//     undone.
+	//
+	// The rows are cheap. If they ever are not, a periodic prune of follows on
+	// events that ended over a year ago is the answer, not deleting on read.
+	where := `
+		WHERE f.user_id = $1
+		  AND e.end_time >= NOW()
+		  AND e.status <> 'cancelled'`
 
 	if cursor != nil {
 		where += `

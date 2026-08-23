@@ -873,7 +873,7 @@ export default function EventDetail() {
         <View className={s.content} style={{ marginTop: 28 }}>
 
           {/* About */}
-          <View style={{ marginBottom: 8 }}>
+          <View className={s.sectionBlock}>
             <View className={s.sectionHeader}>
               <Text className={s.sectionTitle} style={{ color: colors.text }}>About This Event</Text>
             </View>
@@ -887,12 +887,10 @@ export default function EventDetail() {
             )}
           </View>
 
-          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-
           {/* Teams */}
           {isASport && (lineupTeams.length > 0 || teams.length > 0) && (
             <>
-              <View style={{ marginBottom: 8 }}>
+              <View className={s.sectionBlock}>
                 <View className={s.sectionHeader}>
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>TEAMS</Text>
                 </View>
@@ -908,16 +906,13 @@ export default function EventDetail() {
                   />
                 ))}
               </View>
-              <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-            </>
+                </>
           )}
-
-          <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
 
           {/* Performers */}
           {!isASport && (lineupPerformers.length > 0 || performers.length > 0) && (
             <>
-              <View style={{ marginBottom: 8 }}>
+              <View className={s.sectionBlock}>
                 <View className={s.sectionHeader}>
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>PERFORMERS</Text>
                 </View>
@@ -948,7 +943,7 @@ export default function EventDetail() {
           {/* Information */}
           {infoItems.length > 0 && (
             <>
-              <View style={{ marginBottom: 8 }}>
+              <View className={s.sectionBlock}>
                 <View className={s.sectionHeader}>
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>INFORMATION</Text>
                 </View>
@@ -965,12 +960,11 @@ export default function EventDetail() {
                   </View>
                 ))}
               </View>
-              <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-            </>
+                </>
           )}
 
           {/* Location */}
-          <View style={{ marginBottom: 8 }}>
+          <View className={s.sectionBlock}>
             <View className={s.sectionHeader}>
               <Text className={s.sectionTitle} style={{ color: colors.text }}>LOCATION</Text>
             </View>
@@ -1028,8 +1022,7 @@ export default function EventDetail() {
               string key. */}
           {(refundPolicy.length > 0 || termsAndConditions.length > 0) && (
             <>
-              <View className={s.divider} style={{ backgroundColor: 'transparent' }} />
-              <View style={{ marginBottom: 8 }}>
+              <View className={s.sectionBlock}>
                 {refundPolicy.length > 0 && (
                   <TouchableOpacity
                     className={termsAndConditions.length > 0 ? s.infoRow : s.infoRowLast}
