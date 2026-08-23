@@ -189,7 +189,14 @@ function MetaItem({ icon: IconCmp, label, value }: { icon: PhosphorIcon; label: 
       <View className={s.metaIconBox} style={{ backgroundColor: colors.sectionCardBg }}>
         <IconCmp size={22} color={colors.text} weight="regular" />
       </View>
-      <View>
+      {/* flex:1 is load-bearing.
+          Without it this View sizes to its content, so a long value — "Menlyn
+          Maine Central Square, Pretoria" — runs straight off the right edge of
+          the card instead of wrapping. It affects DATE and TIME too; VENUE is
+          just the first one long enough to show it.
+          Wrapping rather than truncating: a venue name cut off mid-word is a
+          venue somebody cannot find. */}
+      <View style={{ flex: 1 }}>
         <Text className={s.metaLabelText} style={{ color: colors.subText }}>{label}</Text>
         <Text className={s.metaValueText} style={{ color: colors.text }}>{value}</Text>
       </View>
@@ -349,14 +356,18 @@ export default function EventDetail() {
   // ── Toggle follow ─────────────────────────────────────────────────────────
   const handleFollow = useCallback(async () => {
     if (!authUser) {
-      Alert.alert(
-        'Sign in required',
-        'Log in or sign up to follow events and get reminders.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Log in / Sign up', onPress: () => router.push('/auth/login' as any) },
-        ],
-      );
+      // Straight to login — no Alert.
+      //
+      // The Alert version of this never reached the login screen. auth/login is
+      // registered with presentation: 'modal', and presenting a modal from
+      // inside an Alert callback on iOS races the alert's own dismissal: the
+      // navigation is dropped and expo-router lands on Unmatched Route with an
+      // empty path.
+      //
+      // This path only ran for a logged-out user tapping FOLLOW EVENT, which is
+      // why it went unnoticed. Five other places in this app push to auth/login
+      // directly from a button press and all of them work; this now matches.
+      router.push('/auth/login' as any);
       return;
     }
     if (!event?.id || followLoading) return;

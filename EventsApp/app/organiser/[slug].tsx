@@ -8,7 +8,6 @@ import {
   StyleSheet,
   Dimensions,
   Linking,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect, useCallback } from 'react';
@@ -170,43 +169,36 @@ export default function OrganiserScreen() {
   async function handleFollow() {
     if (!organiser) return;
 
-    // ── This used to router.push('/auth/login') and that was the bug ────────
+    // authUser is read as the OBJECT, not a derived boolean.
     //
-    // Tapping FOLLOW navigated away, and if the auth store had not finished
-    // hydrating yet it navigated a logged-IN user away too — which is what
-    // produced the unmatched-route screen.
+    // The first version of this used `useAuthStore(st => !!st.user)`, which is
+    // null while the store is still hydrating — so a logged-IN user tapping
+    // quickly was treated as logged out. Reading the object matches how every
+    // other screen in the app does it.
+    // ── Logged out: navigate straight to login ──────────────────────────
     //
-    // Now it never navigates on its own. The same Alert the event follow
-    // button uses offers login as a CHOICE, so the tap does what it says on
-    // the button and nothing else. Reading authUser (the object) rather than a
-    // derived boolean also means a null during hydration reads as "not loaded"
-    // consistently with every other screen.
+    // This used to raise an Alert and push from its onPress. That never
+    // reached the login screen, and the reason is which route it is:
+    // auth/login is registered with presentation: 'modal' in app/_layout.tsx,
+    // and presenting a modal from inside an Alert callback on iOS races the
+    // alert's own dismissal — the navigation is dropped and expo-router lands
+    // on Unmatched Route with an empty path.
+    //
+    // Deferring it with requestAnimationFrame did not help either, so the
+    // Alert layer is gone rather than worked around. Five places in this app
+    // push to auth/login directly from a plain button press — tickets.tsx,
+    // cart, profile, booking, notifications — and all of them work. This now
+    // matches them.
+    //
+    // (Worth knowing: event/[id].tsx:253 still pushes from inside an Alert
+    // and is almost certainly broken the same way. It has just never been
+    // exercised, because that path only runs for a logged-out user tapping
+    // Follow on an event.)
+    //
+    // Losing the Alert costs little. The button says Follow, so being asked to
+    // sign in is not a surprise, and login has its own back button.
     if (!authUser) {
-      Alert.alert(
-        'Sign in required',
-        'Log in or sign up to follow organisers and hear about new events first.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Log in / Sign up',
-            // ── Deferred, and navigate() rather than push() ────────────────
-            //
-            // auth/login is registered with presentation: 'modal' in
-            // app/_layout.tsx. Navigating to a modal from inside an Alert's
-            // onPress races the alert's own dismissal on iOS: the alert is
-            // still tearing down its presentation when the navigator tries to
-            // present the modal, and the navigation is dropped — which lands
-            // on expo-router's Unmatched Route with an empty path.
-            //
-            // requestAnimationFrame pushes it to after the alert has gone.
-            // navigate() rather than push() so a login screen already on the
-            // stack is reused instead of stacking a second copy.
-            onPress: () => {
-              requestAnimationFrame(() => router.navigate('/auth/login' as any));
-            },
-          },
-        ],
-      );
+      router.push('/auth/login' as any);
       return;
     }
     if (followBusy) return;
