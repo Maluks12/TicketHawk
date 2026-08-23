@@ -1,7 +1,89 @@
 import { Platform } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
+
+// ─── Google Sign-In is loaded LAZILY, and this is load-bearing ───────────────
+//
+// It used to be a plain top-level import:
+//
+//     import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+//
+// That package calls TurboModuleRegistry.getEnforcing('RNGoogleSignin') at
+// MODULE SCOPE. In Expo Go the native module does not exist — Expo Go ships
+// only Expo's own native modules — so merely importing this file threw an
+// Invariant Violation.
+//
+// The consequence was much larger than a broken button. expo-router builds its
+// route tree by IMPORTING EVERY ROUTE FILE (getRoutesCore.loadRoute). Three
+// routes import this module — auth/login, profile/edit and
+// profile/delete-account — so all three threw during discovery and were
+// dropped from the tree entirely. router.push('/auth/login') then had nowhere
+// to go, and Metro logged:
+//
+//     [Layout children]: No route named "auth/login" exists in nested children
+//
+// A require() inside a function does not run until the function is called, so
+// the file now imports cleanly everywhere and only touches native code at the
+// moment somebody actually taps Continue with Google.
+//
+// ⚠️  Do NOT convert this back to a static import. It will silently delete
+// three routes from the app in Expo Go.
+
+let googleModule: any = null;
+let googleLoadFailed = false;
+
+/**
+ * True in Expo Go, false in a development build and in every store build.
+ *
+ * Same check lib/push.ts uses for the same class of problem, and for the
+ * reason its comment gives: executionEnvironment is reliable, while
+ * Constants.appOwnership is deprecated and returns null in dev builds.
+ *
+ * This is checked BEFORE the require rather than relying on the try/catch
+ * below. The catch does work — it is why the app boots at all now — but Metro
+ * logs the Invariant Violation as it passes through guardedLoadModule, so the
+ * developer still gets a red error to dismiss on every render of the login
+ * screen. Not attempting the require is the only way to have no error.
+ */
+function isExpoGo(): boolean {
+  return Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+}
+
+function loadGoogle(): any {
+  if (googleModule) return googleModule;
+  if (googleLoadFailed) return null;
+
+  // Expo Go can never have this native module, so do not even try.
+  if (isExpoGo()) {
+    googleLoadFailed = true;
+    return null;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    googleModule = require('@react-native-google-signin/google-signin');
+    return googleModule;
+  } catch {
+    // Kept as a backstop for any other environment where the native module is
+    // missing — a misconfigured dev build, for instance. Rare, but it must not
+    // take the login route down with it.
+    googleLoadFailed = true;
+    return null;
+  }
+}
+
+/**
+ * Whether Google Sign-In can actually run in this binary.
+ *
+ * False in Expo Go, true in a development build or a store build. The button
+ * is hidden rather than shown-and-failing: an auth button that throws on tap
+ * is worse than one that is not there, because the user has no way to tell it
+ * from their account being broken.
+ */
+export function isGoogleSignInAvailable(): boolean {
+  const m = loadGoogle();
+  return !!m?.GoogleSignin;
+}
 
 // ─── What this module does, and what it deliberately doesn't ─────────────────
 //
@@ -164,6 +246,12 @@ let googleConfigured = false;
 
 function configureGoogle() {
   if (googleConfigured) return;
+  const { GoogleSignin } = loadGoogle() ?? {};
+  if (!GoogleSignin) {
+    throw new SocialAuthProviderError(
+      'Google Sign-In needs a development build — it is not available in Expo Go.',
+    );
+  }
   GoogleSignin.configure({
     webClientId: GOOGLE_WEB_CLIENT_ID,
     iosClientId: GOOGLE_IOS_CLIENT_ID,
@@ -191,6 +279,11 @@ export async function signInWithGoogle(): Promise<SocialCredential> {
   }
 
   configureGoogle();
+
+  // configureGoogle() has already thrown if the native module is absent, so
+  // these are safe to destructure here. Pulled from the lazily loaded module
+  // rather than from a top-level import — see the note at the top of this file.
+  const { GoogleSignin, statusCodes } = loadGoogle();
 
   try {
     // Android only; resolves immediately on iOS.

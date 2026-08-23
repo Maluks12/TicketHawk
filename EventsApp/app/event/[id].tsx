@@ -356,18 +356,20 @@ export default function EventDetail() {
   // ── Toggle follow ─────────────────────────────────────────────────────────
   const handleFollow = useCallback(async () => {
     if (!authUser) {
-      // Straight to login — no Alert.
-      //
-      // The Alert version of this never reached the login screen. auth/login is
-      // registered with presentation: 'modal', and presenting a modal from
-      // inside an Alert callback on iOS races the alert's own dismissal: the
-      // navigation is dropped and expo-router lands on Unmatched Route with an
-      // empty path.
-      //
-      // This path only ran for a logged-out user tapping FOLLOW EVENT, which is
-      // why it went unnoticed. Five other places in this app push to auth/login
-      // directly from a button press and all of them work; this now matches.
-      router.push('/auth/login' as any);
+      // If this Alert's login button appears to do nothing, the route tree is
+      // stale — auth/login goes missing from expo-router's discovered routes
+      // and the push resolves to nothing, landing on Unmatched Route with an
+      // EMPTY path. Metro logs it as:
+      //   [Layout children]: No route named "auth/login" exists
+      // Fix is `npx expo start --clear`, not a change here.
+      Alert.alert(
+        'Sign in required',
+        'Log in or sign up to follow events and get reminders.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log in / Sign up', onPress: () => router.push('/auth/login' as any) },
+        ],
+      );
       return;
     }
     if (!event?.id || followLoading) return;

@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useAuthStore } from '../store/authStore';
 import {
-  isAppleAvailable, signInWithApple, signInWithGoogle,
+  isAppleAvailable, isGoogleSignInAvailable, signInWithApple, signInWithGoogle,
   SocialAuthCancelled, SocialAuthProviderError, type SocialCredential,
 } from '../lib/socialAuth';
 import { useAppTheme } from '../theme/colors';
@@ -100,6 +100,16 @@ export default function SocialAuthButtons({
   const isDisabled = !!disabled || !!busy;
   const showApple = Platform.OS === 'ios' && appleReady;
 
+  // False in Expo Go, where the RNGoogleSignin native module is not in the
+  // binary. Hidden rather than shown-and-failing: a sign-in button that throws
+  // on tap is worse than one that is absent, because the user cannot tell it
+  // from their account being broken.
+  //
+  // Computed once at render rather than in state — isGoogleSignInAvailable()
+  // is a cached require() after the first call, so there is nothing to await
+  // and nothing to re-check.
+  const showGoogle = isGoogleSignInAvailable();
+
   return (
     <View style={{ width: '100%' }}>
       {/* Divider */}
@@ -132,6 +142,7 @@ export default function SocialAuthButtons({
         </View>
       )}
 
+      {showGoogle && (
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Continue with Google"
@@ -161,6 +172,15 @@ export default function SocialAuthButtons({
           </>
         )}
       </TouchableOpacity>
+      )}
+
+      {/* Neither provider available — Expo Go on Android, for instance. The
+          divider above would otherwise sit over nothing. */}
+      {!showApple && !showGoogle && (
+        <Text style={{ color: colors.subText, fontSize: 12, textAlign: 'center' }}>
+          Social sign-in needs a development build. Use your email and password.
+        </Text>
+      )}
     </View>
   );
 }

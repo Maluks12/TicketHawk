@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Dimensions,
   Linking,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect, useCallback } from 'react';
@@ -175,32 +176,36 @@ export default function OrganiserScreen() {
     // null while the store is still hydrating — so a logged-IN user tapping
     // quickly was treated as logged out. Reading the object matches how every
     // other screen in the app does it.
-    // ── Logged out: navigate straight to login ──────────────────────────
+    // ── Logged out ──────────────────────────────────────────────────────
     //
-    // This used to raise an Alert and push from its onPress. That never
-    // reached the login screen, and the reason is which route it is:
-    // auth/login is registered with presentation: 'modal' in app/_layout.tsx,
-    // and presenting a modal from inside an Alert callback on iOS races the
-    // alert's own dismissal — the navigation is dropped and expo-router lands
-    // on Unmatched Route with an empty path.
+    // The Alert is back. It was removed on a wrong diagnosis: I thought
+    // presenting a modal route from an Alert callback was racing the alert's
+    // dismissal, because auth/login is registered with
+    // presentation: 'modal'.
     //
-    // Deferring it with requestAnimationFrame did not help either, so the
-    // Alert layer is gone rather than worked around. Five places in this app
-    // push to auth/login directly from a plain button press — tickets.tsx,
-    // cart, profile, booking, notifications — and all of them work. This now
-    // matches them.
+    // The actual cause was that auth/login was MISSING FROM THE ROUTE TREE
+    // entirely — expo-router's discovery had a stale manifest, so the route
+    // did not exist at runtime and the push resolved to nothing. That is why
+    // the Unmatched Route screen showed an empty path rather than
+    // "/auth/login". Nothing about the Alert was involved.
     //
-    // (Worth knowing: event/[id].tsx:253 still pushes from inside an Alert
-    // and is almost certainly broken the same way. It has just never been
-    // exercised, because that path only runs for a logged-out user tapping
-    // Follow on an event.)
-    //
-    // Losing the Alert costs little. The button says Follow, so being asked to
-    // sign in is not a surprise, and login has its own back button.
+    // If the login screen still fails to open, the route tree is stale again:
+    // check the Metro logs for
+    //   [Layout children]: No route named "auth/login" exists
+    // and restart with `npx expo start --clear`. That warning is the tell —
+    // navigation code cannot work around a route that was never registered.
     if (!authUser) {
-      router.push('/auth/login' as any);
+      Alert.alert(
+        'Sign in required',
+        'Log in or sign up to follow organisers and hear about new events first.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Log in / Sign up', onPress: () => router.push('/auth/login' as any) },
+        ],
+      );
       return;
     }
+
     if (followBusy) return;
 
     // Optimistic. A follow toggle that waits on the network feels broken on a
