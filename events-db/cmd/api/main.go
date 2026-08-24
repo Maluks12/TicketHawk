@@ -1640,6 +1640,17 @@ func main() {
 		middleware.OrganizerOnlyMiddleware(),
 		handlers.GetOrganizerProfileHandler(pool),
 	)
+	// The account was read-only until now: UpdateOrganizerDTO existed in the
+	// model with no repository function and no route, so an organiser who
+	// mistyped their business name at sign-up could not correct it.
+	//
+	// PATCH, not PUT — the settings form saves one section at a time and an
+	// omitted key must leave its column alone rather than blanking it.
+	v1.PATCH("/organiser/profile",
+		middleware.AuthMiddleware(cfg),
+		middleware.OrganizerOnlyMiddleware(),
+		handlers.UpdateOrganizerProfileHandler(pool),
+	)
 
 	// Legal acceptance — auth-only, NOT organiser-only, for the same reason as
 	// KYC above: a pending applicant reaches /onboarding and /kyc before the

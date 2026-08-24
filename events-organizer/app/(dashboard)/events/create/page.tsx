@@ -895,10 +895,33 @@ export default function CreateEventPage() {
         router.push('/events');
 
       } else {
-        await api.post('/organiser/events/create', body);
+        // ── Land on the new event, not the list ──────────────────────────
+        //
+        // The wizard deliberately does NOT collect information or line-up.
+        // Both are edit-time by nature: an organiser has a date and a venue
+        // before they have a confirmed line-up, and blocking event creation on
+        // a headliner who has not signed yet would be the wrong trade.
+        //
+        // But dropping them back on /events made those tabs invisible — there
+        // was nothing telling them the event has an Information block or a
+        // Line-up at all. Routing straight to the event's Information tab puts
+        // the next step in front of them instead of hoping they find it.
+        //
+        // The create endpoint returns the full event, so the id is already
+        // here; ?created=1 lets the event page show a first-time prompt.
+        const res = await api.post('/organiser/events/create', body);
         localStorage.removeItem(DRAFT_KEY);
         toast('Event submitted for review', 'success');
-        router.push('/events');
+
+        const newId = (res.data as { event?: { id?: string } })?.event?.id;
+        if (newId) {
+          router.push(`/event/${newId}?tab=info&created=1`);
+        } else {
+          // Older API build, or a shape change. The event WAS created, so
+          // falling back to the list is right — failing here would suggest it
+          // was not.
+          router.push('/events');
+        }
       }
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
@@ -1304,20 +1327,32 @@ export default function CreateEventPage() {
                   </FormCard>
                 )}
 
-                <FormCard title="Tags & people" icon={Tag}
-                  subtitle="Helps the right people find your event">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Tags</label>
-                      <TagInput tags={tags} onChange={setTags} />
-                    </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Performers</label>
-                      <TagInput tags={performers} onChange={setPerformers} />
-                    </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Teams</label>
-                      <TagInput tags={teams} onChange={setTeams} />
+                {/* ── Search keywords ──────────────────────────────────────
+                    Renamed from "Tags & people", and PERFORMERS / TEAMS are
+                    gone from here.
+
+                    Tags were never shown on the event page — the
+                    events_search_trigger in migration 000004 folds them into
+                    search_vector at weight B, the same weight as the
+                    description. They are invisible search keywords, and
+                    labelling them "Tags" beside two fields that DO render made
+                    organisers think they appeared on the page.
+
+                    Performers and teams moved to the Line-up tab on the event
+                    itself, where each act gets a photo, a stage, a set time
+                    and a link. Leaving the flat text versions here would mean
+                    two places to edit the same thing, silently disagreeing —
+                    the backend writes both from the line-up rows now. */}
+                <FormCard title="Search keywords" icon={Tag}
+                  subtitle="Helps people find your event — not shown on the page">
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Keywords</label>
+                    <TagInput tags={tags} onChange={setTags} />
+                    <div className="field-hint">
+                      Words someone might type when looking for an event like
+                      yours — a genre, a vibe, a neighbourhood. These are
+                      matched by search but never displayed, so there is no
+                      cost to being generous.
                     </div>
                   </div>
                 </FormCard>

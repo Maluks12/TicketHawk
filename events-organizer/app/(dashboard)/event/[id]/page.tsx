@@ -1,13 +1,16 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import TicketTiersPanel from '../../../../components/TicketTiersPanel';
+import EventInfoEditor from '../../../../components/eventInfoEditor';
+import LineupBuilder from '../../../../components/lineupBuilder';
+import PreviewFrame from '../../../../components/previewFrame';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
-type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
+type Tab = 'overview' | 'info' | 'lineup' | 'preview' | 'bookings' | 'merch' | 'scan';
 
 // Launch gate: merch is built but NOT launching — the tab and its section
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
@@ -102,7 +105,23 @@ export default function EventDetailPage() {
   const router = useRouter();
   const toast = useToast();
 
-  const [tab, setTab] = useState<Tab>('overview');
+  // ── Opening tab comes from the URL ─────────────────────────────────────
+  //
+  // The create wizard finishes at /event/<id>?tab=info&created=1 so a brand new
+  // event lands on its Information block rather than on Overview, where the
+  // Information and Line-up tabs are easy to miss entirely.
+  //
+  // Validated against the known set rather than cast: ?tab=nonsense should show
+  // Overview, not an empty pane.
+  const search = useSearchParams();
+  const initialTab: Tab = (() => {
+    const t = search.get('tab');
+    return (['overview', 'info', 'lineup', 'preview', 'bookings'] as const)
+      .includes(t as never) ? (t as Tab) : 'overview';
+  })();
+  const justCreated = search.get('created') === '1';
+
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [merch, setMerch] = useState<MerchItem[]>([]);
@@ -268,6 +287,12 @@ export default function EventDetailPage() {
       <div className="tab-bar">
         {([
           { id: 'overview' as Tab, label: 'Overview' },
+          // Content tabs sit next to Overview, before Bookings: they are what
+          // an organiser edits while preparing an event, and Bookings is what
+          // they watch after it is live.
+          { id: 'info' as Tab, label: 'Information' },
+          { id: 'lineup' as Tab, label: 'Line-up' },
+          { id: 'preview' as Tab, label: 'Preview' },
           { id: 'bookings' as Tab, label: `Bookings (${stats.total_bookings})` },
           ...(MERCH_ENABLED ? [{ id: 'merch' as Tab, label: 'Merch' }] : []),
         ]).map(t => (
@@ -290,6 +315,38 @@ export default function EventDetailPage() {
 
       {/* ── Tab content ──────────────────────────────────────────────── */}
       <div className="page-content">
+
+        {tab === 'info' && (
+          <div className="card"><div className="card-body">
+            {justCreated && (
+              <div className="alert alert-success" style={{ marginBottom: 18 }}>
+                <div>
+                  <strong>Event created.</strong> It is a draft pending review.
+                  While you wait, fill in the information attendees ask about
+                  and add your line-up — both are tabs above, and both can be
+                  changed later.
+                </div>
+              </div>
+            )}
+            <EventInfoEditor eventId={id} />
+          </div></div>
+        )}
+
+        {tab === 'lineup' && (
+          <div className="card"><div className="card-body">
+            <LineupBuilder
+              eventId={id}
+              eventStart={ev.start_time}
+              isSport={ev.category?.toLowerCase() === 'sports'}
+            />
+          </div></div>
+        )}
+
+        {tab === 'preview' && (
+          <div className="card"><div className="card-body">
+            <PreviewFrame eventId={id} />
+          </div></div>
+        )}
 
         {tab === 'overview' && (
           <div>
