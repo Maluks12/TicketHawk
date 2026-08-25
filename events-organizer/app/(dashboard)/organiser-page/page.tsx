@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // available to verify anything beyond that list, and a wrong name renders as a
 // blank box. Arrows and pluses are plain characters for the same reason.
 import {
-  X, CheckCircle, Warning, ArrowSquareOut, ImageSquare,
+  X, Warning, ArrowSquareOut, ImageSquare,
 } from '@phosphor-icons/react';
 import { useToast } from '../../../lib/toast';
 import {
@@ -183,21 +183,21 @@ export default function OrganiserPageEditor() {
         )}
       </div>
 
-      {/* ── Live / not live ──────────────────────────────────────────────── */}
-      <div className={`alert ${profile.is_live ? 'alert-success' : 'alert-warning'}`} style={{ marginBottom: 18 }}>
-        {profile.is_live ? (
-          <>
-            <CheckCircle size={16} weight="fill" />
-            <div>
-              Live at <strong>{profile.public_url_path}</strong> ·{' '}
-              {profile.events_hosted} event{profile.events_hosted === 1 ? '' : 's'} ·{' '}
-              {profile.follower_count} follower{profile.follower_count === 1 ? '' : 's'}
-            </div>
-          </>
-        ) : (
-          <>
-            <Warning size={16} weight="fill" />
-            <div>
+      {/* ── Not-live warning only ────────────────────────────────────────
+          The green "Live at …" banner is gone.
+
+          It restated three things already visible or better placed elsewhere:
+          the URL is in the header link, the event count is on My Events, and
+          the follower count belongs on Analytics next to the other numbers
+          somebody actually compares over time. A permanent green bar saying
+          everything is fine is a bar nobody reads after the first week.
+
+          The WARNING stays, because it is the one state that needs acting on
+          and is not visible anywhere else. */}
+      {!profile.is_live && (
+        <div className="alert alert-warning" style={{ marginBottom: 18 }}>
+          <Warning size={16} weight="fill" />
+          <div>
               {profile.blocked_reason === 'kyc_level_required' && (
                 <>Your page is not visible yet. Complete identity verification to
                 publish it — you can build it here in the meantime.</>
@@ -210,11 +210,10 @@ export default function OrganiserPageEditor() {
                 <>Your account is suspended, so your page is hidden. Contact
                 support.</>
               )}
-              {!profile.blocked_reason && <>Your page is not currently visible.</>}
-            </div>
-          </>
-        )}
-      </div>
+            {!profile.blocked_reason && <>Your page is not currently visible.</>}
+          </div>
+        </div>
+      )}
 
       {/* No preview tab.
           It framed the public organiser page in an iframe, and that page does

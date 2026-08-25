@@ -80,7 +80,6 @@ interface EventDraft {
   ticketTypes: TicketTypeRow[];
   // Retained in the draft shape even though the form no longer shows them, so
   // a draft saved by the previous version still round-trips without throwing.
-  refundPolicy: string; termsAndConditions: string;
   coverImageUrl: string | null; bannerImageUrl: string | null;
 }
 
@@ -516,6 +515,21 @@ export default function CreateEventPage() {
   // A ref, not state, because the guard must be visible to the already-
   // scheduled effect closure without triggering another render.
   const submittedRef = useRef(false);
+
+  // Local 'YYYY-MM-DDTHH:mm' for right now, used as the floor on every date
+  // field. Local rather than ISO because DateTimePicker parses it as wall-clock
+  // time — an ISO string would shift the boundary by the UTC offset and, in
+  // SAST, make the first two hours of today unselectable.
+  //
+  // useState with an initialiser rather than useMemo: this must be stable for
+  // the life of the form. A value that advances while somebody is filling it in
+  // could invalidate a start time they already chose.
+  const [nowLocal] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
 
   // ── Text fields ───────────────────────────────────────────────────────────
@@ -597,8 +611,19 @@ export default function CreateEventPage() {
   // R0, with "Set ticket pricing" stuck unticked because nothing had been typed
   // into a field the organiser was no longer allowed to type into.
   const effectivePrice = ticketTypes.length > 0 ? lowestTierPrice : price;
-  const [refundPolicy,        setRefundPolicy]        = useState('');
-  const [termsAndConditions,  setTermsAndConditions]  = useState('');
+  // ── refundPolicy / termsAndConditions removed ───────────────────────────
+  //
+  // Both were write-only: state that was submitted but never rendered by any
+  // field on this form, so every event created here sent them as null anyway.
+  //
+  // More to the point, a per-event refund policy was never real. Refunds are
+  // decided entirely by the sliding scale in the backend's
+  // models/refund_policy.go — 100% at 30+ days, down to nothing inside 7 —
+  // and that code never reads events.refund_policy. Anything an organiser
+  // typed was display prose that the actual refund would contradict.
+  //
+  // Terms are platform-wide for the same reason: they are the terms of the
+  // sale we process, not of the organiser's event.
 
   // ── Image state ───────────────────────────────────────────────────────────
   const [coverImageUrl,   setCoverImageUrl]   = useState<string | null>(null);
@@ -660,6 +685,16 @@ export default function CreateEventPage() {
         setTimezone(ev.timezone ?? 'Africa/Johannesburg');
         setStartTime(ev.start_time ? toLocalInput(ev.start_time) : '');
         setEndTime(ev.end_time ? toLocalInput(ev.end_time) : '');
+        // These three were never restored, so opening Edit silently blanked
+        // them — and because the form then submits what it holds, saving wrote
+        // the blanks back over real values. The booking deadline is validated
+        // as required, so the organiser at least saw an error; the refund
+        // policy and terms would have been erased without a word.
+        //
+        // The API did not return them either. Both halves are fixed:
+        // organiser_event_edit_handler.go now selects expires_at,
+        // refund_policy and terms_and_conditions.
+        setExpiresAt(ev.expires_at ? toLocalInput(ev.expires_at) : '');
         setOriginalStartDate(ev.start_time ? toLocalInput(ev.start_time).slice(0, 10) : null);
         setIsFree(!ev.price || Number(ev.price) === 0);
         setPrice(ev.price != null ? String(ev.price) : '0');
@@ -715,7 +750,7 @@ export default function CreateEventPage() {
         title, description, categoryId, timezone, startTime, endTime, expiresAt,
         isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
         venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
-        refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
+        coverImageUrl, bannerImageUrl,
         // Included so a refresh mid-form does not lose a line-up somebody has
         // just typed out — the most tedious part of this page to re-enter.
         lineup, infoChosen, infoValues,
@@ -730,7 +765,7 @@ export default function CreateEventPage() {
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
       isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
       venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
-      refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
+      coverImageUrl, bannerImageUrl,
       lineup, infoChosen, infoValues, submitting]);
 
   // The information catalogue is server-owned, so it is fetched rather than
@@ -771,8 +806,6 @@ export default function CreateEventPage() {
     setPerformers(d.performers ?? []);
     setTeams(d.teams ?? []);
     setTicketTypes(d.ticketTypes ?? []);
-    setRefundPolicy(d.refundPolicy ?? '');
-    setTermsAndConditions(d.termsAndConditions ?? '');
     setCoverImageUrl(d.coverImageUrl ?? null);
     setBannerImageUrl(d.bannerImageUrl ?? null);
     setDraftSavedAt(d.savedAt);
@@ -894,8 +927,6 @@ export default function CreateEventPage() {
         tags,
         performers,
         teams,
-        refund_policy:        refundPolicy.trim()       || null,
-        terms_and_conditions: termsAndConditions.trim() || null,
         visibility:           eventType === 'public' ? 'public' : 'private_link',
       };
       if (scanWindowMode === 'custom') {
@@ -1166,19 +1197,34 @@ export default function CreateEventPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Start time <Required /></label>
+                      {/* min={nowLocal} — the picker already disables days
+                          before `min`; it simply was not being given one, so
+                          an event could be created in the past. Computed once
+                          on mount rather than per render, so the calendar does
+                          not re-key itself every keystroke elsewhere in the
+                          form. */}
                       <DateTimePicker value={startTime} onChange={setStartTime}
-                        placeholder="When doors open" style={inp} />
+                        min={nowLocal} placeholder="When doors open" style={inp} />
                     </div>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>End time <Required /></label>
                       {/* min={startTime} stops the "end before start" error being
                           reachable at all, rather than catching it on submit. */}
+                      {/* Falls back to now when no start is chosen yet —
+                          otherwise this field is unconstrained until the user
+                          happens to fill the one before it. */}
                       <DateTimePicker value={endTime} onChange={setEndTime}
-                        min={startTime} placeholder="When it wraps up" style={inp} />
+                        min={startTime || nowLocal} placeholder="When it wraps up" style={inp} />
                     </div>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Booking deadline <Required /></label>
+                      {/* max={endTime}: selling tickets after the event has
+                          finished is never intended, and the deadline is
+                          commonly meant to be the start rather than the end —
+                          but some events do sell at the door, so the end is
+                          the honest ceiling rather than the start. */}
                       <DateTimePicker value={expiresAt} onChange={setExpiresAt}
+                        min={nowLocal} max={endTime || undefined}
                         placeholder="Last moment to buy" style={inp} />
                       <div className="field-hint">Tickets stop selling after this</div>
                     </div>
