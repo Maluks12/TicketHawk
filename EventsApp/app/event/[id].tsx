@@ -30,7 +30,7 @@ import { useAppTheme } from '../../theme/colors';
 import { getBaseUrl } from '../../components/FilterModal';
 import { toggleFollow, getFollowStatus } from '../../lib/api';
 import { buildEventShare } from '../../lib/shareLinks';
-import { PolicySheet } from '../../components/PolicySheet';
+import { LEGAL_URLS } from '../../lib/legalLinks';
 import { IMG_PLACEHOLDER } from '../../lib/img';
 
 // ─── Hero frame ───────────────────────────────────────────────────────────────
@@ -237,10 +237,6 @@ export default function EventDetail() {
   const { colors, isDark } = useAppTheme();
   const [expanded, setExpanded] = useState(false);
 
-  // Which policy the sheet is showing, or null. One piece of state for both
-  // rows rather than two booleans — they are mutually exclusive by nature and
-  // two flags would allow a state that cannot be rendered.
-  const [policySheet, setPolicySheet] = useState<null | 'refund' | 'terms'>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
 
   // Natural aspect ratio (w/h) of the hero artwork, learned from the image
@@ -542,10 +538,19 @@ export default function EventDetail() {
   // imply by having no organiser at all.
   const organiser: any = ev.organizer ?? null;
 
-  // Refund policy and T&Cs are columns on the event, not catalogue items, and
-  // they render at the bottom of the Information block.
-  const refundPolicy = typeof ev.refund_policy === 'string' ? ev.refund_policy.trim() : '';
-  const termsAndConditions = typeof ev.terms_and_conditions === 'string' ? ev.terms_and_conditions.trim() : '';
+  // ── Policies are PLATFORM-WIDE ──────────────────────────────────────────
+  //
+  // events.refund_policy and events.terms_and_conditions are no longer read.
+  //
+  // A per-event refund policy was never real: refunds are decided entirely by
+  // the sliding scale in the backend's models/refund_policy.go — 100% at 30+
+  // days, down to nothing inside 7 — and that code never consulted the column.
+  // Whatever an organiser typed was prose the actual refund would contradict,
+  // which is worse than no text at all when somebody is deciding whether to
+  // buy.
+  //
+  // Both rows now link to the published documents on the website, which is
+  // also where the version somebody agreed to actually lives.
 
   // Routing unchanged — matches index.tsx push to /event/${event.id}
   const handleGetTickets = () => router.push('/event/purchase');
@@ -1020,30 +1025,28 @@ export default function EventDetail() {
               refund flows reference them and they are the two fields most
               likely to be produced in a dispute — findable by name, not by
               string key. */}
-          {(refundPolicy.length > 0 || termsAndConditions.length > 0) && (
+          {/* Always shown — these apply to every event, so there is no
+              condition under which they are absent. */}
+          {true && (
             <>
               <View className={s.sectionBlock}>
-                {refundPolicy.length > 0 && (
-                  <TouchableOpacity
-                    className={termsAndConditions.length > 0 ? s.infoRow : s.infoRowLast}
-                    style={termsAndConditions.length > 0 ? { borderBottomColor: colors.dividerColor } : undefined}
-                    onPress={() => setPolicySheet('refund')}
-                    activeOpacity={0.7}
-                  >
-                    <Text className={s.infoLabel} style={{ color: colors.subText }}>TICKET REFUND POLICY</Text>
-                    <Text className={s.policyLink} style={{ color: '#FF2D55' }}>View policy ↗</Text>
-                  </TouchableOpacity>
-                )}
-                {termsAndConditions.length > 0 && (
-                  <TouchableOpacity
-                    className={s.infoRowLast}
-                    onPress={() => setPolicySheet('terms')}
-                    activeOpacity={0.7}
-                  >
-                    <Text className={s.infoLabel} style={{ color: colors.subText }}>TERMS &amp; CONDITIONS</Text>
-                    <Text className={s.policyLink} style={{ color: '#FF2D55' }}>View terms ↗</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                  className={s.infoRow}
+                  style={{ borderBottomColor: colors.dividerColor }}
+                  onPress={() => { Linking.openURL(LEGAL_URLS.legal).catch(() => {}); }}
+                  activeOpacity={0.7}
+                >
+                  <Text className={s.infoLabel} style={{ color: colors.subText }}>TICKET REFUND POLICY</Text>
+                  <Text className={s.policyLink} style={{ color: '#FF2D55' }}>View policy ↗</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  className={s.infoRowLast}
+                  onPress={() => { Linking.openURL(LEGAL_URLS.terms).catch(() => {}); }}
+                  activeOpacity={0.7}
+                >
+                  <Text className={s.infoLabel} style={{ color: colors.subText }}>TERMS &amp; CONDITIONS</Text>
+                  <Text className={s.policyLink} style={{ color: '#FF2D55' }}>View terms ↗</Text>
+                </TouchableOpacity>
               </View>
             </>
           )}
@@ -1052,12 +1055,6 @@ export default function EventDetail() {
         </View>
       </Animated.ScrollView>
 
-      <PolicySheet
-        visible={policySheet !== null}
-        title={policySheet === 'terms' ? 'Terms & Conditions' : 'Ticket Refund Policy'}
-        body={policySheet === 'terms' ? termsAndConditions : refundPolicy}
-        onClose={() => setPolicySheet(null)}
-      />
     </View>
   );
 }

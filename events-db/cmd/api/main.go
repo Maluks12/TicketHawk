@@ -445,16 +445,6 @@ func main() {
 		// clamps the reported duration and checks the event is publicly
 		// visible before writing anything.
 		public.POST("/:id/dwell",        handlers.RecordDwellHandler(pool, eventCache))
-		// Dashboard preview. UNAUTHENTICATED — the signed token in ?token=
-		// is the whole authorisation, which is why it is scoped to one event,
-		// expires in 10 minutes, and carries the owner's user id so the draft
-		// is loaded through the ordinary ownership branch rather than a
-		// status bypass. See event_preview_handler.go.
-		//
-		// Registered BEFORE the catch-all below: "/:id/preview" is a distinct
-		// path so gin routes it correctly either way, but keeping it above the
-		// wildcard keeps the reading order honest.
-		public.GET("/:id/preview",       handlers.GetEventPreviewHandler(pool, cfg))
 		// Must be last — catches both UUIDs and slugs
 		public.GET("/:id",               handlers.GetEventBySlugHandler(pool, eventCache))
 	}
@@ -1526,19 +1516,6 @@ func main() {
 		// already enforces the MIME allow-list, size ceiling and compression.
 		orgRoutes.GET("/events/:id/lineup", handlers.GetEventLineupHandler(pool))
 		orgRoutes.PUT("/events/:id/lineup", handlers.ReplaceEventLineupHandler(pool, eventCache))
-
-		// ── Preview ────────────────────────────────────────────────────────
-		//
-		// POST /organiser/events/:id/preview → a short-lived signed link.
-		//
-		// The dashboard frames the REAL event page at that URL rather than
-		// rebuilding it in React. A replica drifts from the page it imitates
-		// the moment either side changes, and a preview that lies is worse
-		// than no preview — the organiser makes decisions on it.
-		//
-		// Ownership is checked HERE, at mint time. The token is then the only
-		// credential the preview endpoint needs.
-		orgRoutes.POST("/events/:id/preview", handlers.CreateEventPreviewHandler(pool, cfg))
 
 		// ── Public organiser page (the organiser's own) ────────────────────
 		//

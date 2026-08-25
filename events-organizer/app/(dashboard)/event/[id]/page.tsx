@@ -7,10 +7,13 @@ import { useToast } from '../../../../lib/toast';
 import TicketTiersPanel from '../../../../components/TicketTiersPanel';
 import EventInfoEditor from '../../../../components/eventInfoEditor';
 import LineupBuilder from '../../../../components/lineupBuilder';
-import PreviewFrame from '../../../../components/previewFrame';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
-type Tab = 'overview' | 'info' | 'lineup' | 'preview' | 'bookings' | 'merch' | 'scan';
+// 'preview' is gone. The framed preview loaded the public event page in an
+// iframe, and it never worked reliably — see the note in the manifest. An
+// organiser can open their own event on the site directly, which is the same
+// page without a component in between that can lie about it.
+type Tab = 'overview' | 'info' | 'lineup' | 'bookings' | 'merch' | 'scan';
 
 // Launch gate: merch is built but NOT launching — the tab and its section
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
@@ -116,7 +119,7 @@ export default function EventDetailPage() {
   const search = useSearchParams();
   const initialTab: Tab = (() => {
     const t = search.get('tab');
-    return (['overview', 'info', 'lineup', 'preview', 'bookings'] as const)
+    return (['overview', 'info', 'lineup', 'bookings'] as const)
       .includes(t as never) ? (t as Tab) : 'overview';
   })();
   const justCreated = search.get('created') === '1';
@@ -292,7 +295,6 @@ export default function EventDetailPage() {
           // they watch after it is live.
           { id: 'info' as Tab, label: 'Information' },
           { id: 'lineup' as Tab, label: 'Line-up' },
-          { id: 'preview' as Tab, label: 'Preview' },
           { id: 'bookings' as Tab, label: `Bookings (${stats.total_bookings})` },
           ...(MERCH_ENABLED ? [{ id: 'merch' as Tab, label: 'Merch' }] : []),
         ]).map(t => (
@@ -339,12 +341,6 @@ export default function EventDetailPage() {
               eventStart={ev.start_time}
               isSport={ev.category?.toLowerCase() === 'sports'}
             />
-          </div></div>
-        )}
-
-        {tab === 'preview' && (
-          <div className="card"><div className="card-body">
-            <PreviewFrame eventId={id} />
           </div></div>
         )}
 

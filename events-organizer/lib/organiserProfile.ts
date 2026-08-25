@@ -113,20 +113,36 @@ async function uploadProfileImage(
   kind: 'cover' | 'logo',
   file: File,
 ): Promise<{ url: string; saved: boolean; error?: string }> {
-  const form = new FormData();
-  form.append('image', file);
-  const { data } = await api.post<Record<string, unknown>>(
-    `/organiser/public-profile/media/${kind}`,
-    form,
-    // Content-Type is deliberately NOT set. The browser must generate the
-    // multipart boundary itself; setting it by hand produces a header with no
-    // boundary and the server rejects the body.
-    { headers: { 'Content-Type': undefined as unknown as string } },
-  );
+  // ── Raw fetch, not the axios instance ───────────────────────────────────
+  //
+  // Passing `Content-Type: undefined` to axios does not reliably remove the
+  // header — depending on the adapter it can send an empty Content-Type, and a
+  // multipart body with no boundary is rejected by the server. The browser has
+  // to generate the boundary itself, which it only does when nothing sets the
+  // header at all.
+  //
+  // Same pattern as uploadImage() in the create page, which has always worked.
+  const fd = new FormData();
+  fd.append('image', file);
+
+  const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
+  const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+
+  const res = await fetch(`${baseURL}/organiser/public-profile/media/${kind}`, {
+    method: 'POST', headers, body: fd,
+  });
+  const json = await res.json().catch(() => null) as Record<string, unknown> | null;
+
+  if (!res.ok) {
+    throw new Error((json?.error as string) ?? `Upload failed (HTTP ${res.status})`);
+  }
   return {
-    url: (data.cover_image_url ?? data.logo_url ?? '') as string,
-    saved: data.saved !== false,
-    error: data.error as string | undefined,
+    url: (json?.cover_image_url ?? json?.logo_url ?? '') as string,
+    // The handler returns saved:false when the bytes reached R2 but the row did
+    // not update — the URL is still returned so a retry costs no re-upload.
+    saved: json?.saved !== false,
+    error: json?.error as string | undefined,
   };
 }
 

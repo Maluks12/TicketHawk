@@ -189,6 +189,14 @@ func GetOrganiserEventForEditHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				BannerImageURL    *string    `json:"banner_image_url"`
 				StartTime         time.Time  `json:"start_time"`
 				EndTime           time.Time  `json:"end_time"`
+				// ⚠️  expires_at was MISSING from this struct and from the query
+				// below, so the edit form had nothing to restore it from — an
+				// organiser opening Edit lost their booking deadline, and
+				// because the form submits what it holds, saving wrote the
+				// blank back.
+				//
+				// NOT NULL on events, hence the plain time.Time.
+				ExpiresAt         time.Time  `json:"expires_at"`
 				Timezone          string     `json:"timezone"`
 				VenueName         string     `json:"venue_name"`
 				Address           string     `json:"address"`
@@ -215,7 +223,7 @@ func GetOrganiserEventForEditHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		err := pool.QueryRow(ctx, `
 			SELECT id, title, description, status::text,
 			       cover_image_url, banner_image_url,
-			       start_time, end_time, timezone,
+			       start_time, end_time, expires_at, timezone,
 			       COALESCE(venue_name,''), COALESCE(address,''), COALESCE(city,''),
 			       latitude, longitude, place_id,
 			       category_id, price, currency,
@@ -228,7 +236,7 @@ func GetOrganiserEventForEditHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		`, eventID, userID).Scan(
 			&ev.ID, &ev.Title, &ev.Description, &ev.Status,
 			&ev.CoverImageURL, &ev.BannerImageURL,
-			&ev.StartTime, &ev.EndTime, &ev.Timezone,
+			&ev.StartTime, &ev.EndTime, &ev.ExpiresAt, &ev.Timezone,
 			&ev.VenueName, &ev.Address, &ev.City,
 			&ev.Latitude, &ev.Longitude, &ev.PlaceID,
 			&ev.CategoryID, &ev.Price, &ev.Currency,

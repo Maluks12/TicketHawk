@@ -132,37 +132,32 @@ export async function replaceEventLineup(
  * now writes a card thumbnail alongside the full image.
  */
 export async function uploadLineupImage(file: File): Promise<string> {
-  const form = new FormData();
-  form.append('image', file);
-  const { data } = await api.post<{ url: string }>('/organiser/upload', form, {
-    headers: { 'Content-Type': undefined as unknown as string },
-  });
-  return data.url;
-}
+  // ── Raw fetch, not the axios instance ───────────────────────────────────
+  //
+  // Two things were wrong with the axios version and both produced the same
+  // symptom — an upload that appeared to do nothing:
+  //
+  //  1. The response field is `image_url`, not `url`. Reading `data.url` gave
+  //     undefined, so the image was uploaded successfully and then thrown away
+  //     without an error anywhere.
+  //
+  //  2. Passing `Content-Type: undefined` to axios does not reliably remove
+  //     the header — depending on the adapter it can send an empty
+  //     Content-Type, and multipart without a boundary is rejected by the
+  //     server. The browser must be left to generate the boundary itself.
+  //
+  // This mirrors uploadImage() in the create page, which has always worked.
+  const fd = new FormData();
+  fd.append('image', file);
 
-// ── Preview ──────────────────────────────────────────────────────────────────
+  const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
+  const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
-export interface PreviewLink {
-  token: string;
-  expires_at: string;
-  expires_in: number;
-  api_url: string;
-  web_url: string;
-  web_mobile_url: string;
-}
+  const res = await fetch(`${baseURL}/organiser/upload`, { method: 'POST', headers, body: fd });
+  const json = await res.json().catch(() => null) as { image_url?: string; error?: string } | null;
 
-/**
- * Mints a short-lived signed link to the REAL event page.
- *
- * The dashboard frames that URL rather than rebuilding the event page in
- * React. A replica drifts from the page it imitates the moment either side
- * changes, and a preview that lies is worse than no preview because the
- * organiser makes decisions on it.
- *
- * The token expires in 10 minutes and is scoped to one event, so the frame has
- * to be re-minted if someone leaves the tab open.
- */
-export async function createEventPreview(eventId: string): Promise<PreviewLink> {
-  const { data } = await api.post<PreviewLink>(`/organiser/events/${eventId}/preview`);
-  return data;
+  if (!res.ok) throw new Error(json?.error ?? `Upload failed (HTTP ${res.status})`);
+  if (!json?.image_url) throw new Error('Upload succeeded but no URL was returned');
+  return json.image_url;
 }

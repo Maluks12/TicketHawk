@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Article, CalendarBlank, MapPin, Ticket, Tag, ImageSquare,
@@ -16,6 +16,12 @@ import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete
 import DateTimePicker from '@/components/dateTimePicker';
 import TicketTypeModal from '@/components/ticketTypeModal';
 import Select from '@/components/select';
+import LineupFields from '@/components/lineupFields';
+import EventInfoFields from '@/components/eventInfoFields';
+import {
+  getInfoCatalogue, replaceEventInfo, replaceEventLineup,
+  type InfoCatalogueEntry, type LineupEntry,
+} from '../../../../lib/eventContent';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI-ONLY REWRITE
@@ -66,6 +72,11 @@ interface EventDraft {
   latitude?: number | null; longitude?: number | null;
   venueType: 'auto' | 'stadium' | 'auditorium' | 'none';
   tags: string[]; performers: string[]; teams: string[];
+  // Optional: drafts saved before line-up and information existed will not have
+  // them, and restoring one of those must not throw.
+  lineup?: LineupEntry[];
+  infoChosen?: string[];
+  infoValues?: Record<string, string>;
   ticketTypes: TicketTypeRow[];
   // Retained in the draft shape even though the form no longer shows them, so
   // a draft saved by the previous version still round-trips without throwing.
@@ -487,6 +498,24 @@ export default function CreateEventPage() {
   const [categories, setCategories]   = useState<{ id: number; name: string; slug: string }[]>([]);
   const [submitting, setSubmitting]   = useState(false);
   const [pendingDraft, setPendingDraft] = useState<EventDraft | null>(null);
+
+  // ── Why a ref and not state ─────────────────────────────────────────────
+  //
+  // Once an event has been created, this form must never write its draft
+  // again. The autosave already guards on `submitting`, but that is not
+  // enough: the finally block sets submitting back to false, and because
+  // router.push does not unmount the page synchronously, the debounced
+  // autosave then fires ~800ms later with the form still fully populated and
+  // rewrites the draft that was just deleted.
+  //
+  // That is the "Unsaved draft — saved just now" banner on My Events after a
+  // successful create, and it is worse than untidy: Resume draft reloads a
+  // form for an event that already exists, so submitting it again creates a
+  // duplicate.
+  //
+  // A ref, not state, because the guard must be visible to the already-
+  // scheduled effect closure without triggering another render.
+  const submittedRef = useRef(false);
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
 
   // ── Text fields ───────────────────────────────────────────────────────────
@@ -525,6 +554,21 @@ export default function CreateEventPage() {
   // Location card where the picker used to be.
   const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('none');
   const [tags,                setTags]                = useState<string[]>([]);
+
+  // ── Line-up and information, held locally until the event exists ─────────
+  //
+  // Neither can be saved during creation: both are keyed on an event id, and
+  // the event does not exist until this form is submitted. So they are
+  // collected here and written straight after the create call succeeds.
+  //
+  // That is a follow-up request rather than part of the create payload,
+  // because CreateEventDTO has no line-up or information fields — adding them
+  // would mean a migration to the DTO, the handler and the repository to save
+  // one round-trip on a form somebody fills in once.
+  const [lineup,     setLineup]     = useState<LineupEntry[]>([]);
+  const [infoChosen, setInfoChosen] = useState<string[]>([]);
+  const [infoValues, setInfoValues] = useState<Record<string, string>>({});
+  const [infoCatalogue, setInfoCatalogue] = useState<InfoCatalogueEntry[]>([]);
   const [performers,          setPerformers]          = useState<string[]>([]);
   const [teams,               setTeams]               = useState<string[]>([]);
   const [ticketTypes,         setTicketTypes]         = useState<TicketTypeRow[]>([]);
@@ -658,6 +702,8 @@ export default function CreateEventPage() {
   // ── Auto-save draft (debounced 800 ms) ────────────────────────────────────
   useEffect(() => {
     if (submitting) return;
+    // Set on a successful create and never cleared — see submittedRef.
+    if (submittedRef.current) return;
     // Editing a saved event: the server is the source of truth, so there is
     // nothing to keep in localStorage and keeping it would resurface these
     // values the next time someone starts a brand-new event.
@@ -670,6 +716,9 @@ export default function CreateEventPage() {
         isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
         venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
         refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
+        // Included so a refresh mid-form does not lose a line-up somebody has
+        // just typed out — the most tedious part of this page to re-enter.
+        lineup, infoChosen, infoValues,
       };
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -681,7 +730,16 @@ export default function CreateEventPage() {
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
       isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
       venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
-      refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl, submitting]);
+      refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
+      lineup, infoChosen, infoValues, submitting]);
+
+  // The information catalogue is server-owned, so it is fetched rather than
+  // hardcoded — an admin retiring a field or adding one takes effect here
+  // without a dashboard deploy. A failure leaves the section empty rather than
+  // blocking event creation, which must not depend on it.
+  useEffect(() => {
+    getInfoCatalogue().then(setInfoCatalogue).catch(() => setInfoCatalogue([]));
+  }, []);
 
   // ── Restore draft ─────────────────────────────────────────────────────────
   function restoreDraft(d: EventDraft) {
@@ -707,6 +765,9 @@ export default function CreateEventPage() {
     setPlaceLabel(d.placeLabel ?? '');
     setVenueType(d.venueType ?? 'none');
     setTags(d.tags ?? []);
+    setLineup((d as { lineup?: LineupEntry[] }).lineup ?? []);
+    setInfoChosen((d as { infoChosen?: string[] }).infoChosen ?? []);
+    setInfoValues((d as { infoValues?: Record<string, string> }).infoValues ?? {});
     setPerformers(d.performers ?? []);
     setTeams(d.teams ?? []);
     setTicketTypes(d.ticketTypes ?? []);
@@ -910,12 +971,60 @@ export default function CreateEventPage() {
         // The create endpoint returns the full event, so the id is already
         // here; ?created=1 lets the event page show a first-time prompt.
         const res = await api.post('/organiser/events/create', body);
-        localStorage.removeItem(DRAFT_KEY);
         toast('Event submitted for review', 'success');
 
+        // BEFORE anything that can throw or await. If the line-up write below
+        // fails, the event still exists and its draft must still be gone.
+        submittedRef.current = true;
+        localStorage.removeItem(DRAFT_KEY);
+        setPendingDraft(null);
+
         const newId = (res.data as { event?: { id?: string } })?.event?.id;
+
         if (newId) {
-          router.push(`/event/${newId}?tab=info&created=1`);
+          // ── Line-up and information, written now the event has an id ─────
+          //
+          // Sequential rather than parallel: both hit the same event row and
+          // failing one should not obscure which. Each is caught separately so
+          // a line-up failure does not lose the information block too.
+          //
+          // Neither failure undoes the event. It exists, it is in review, and
+          // both of these are editable on its own page — so the honest
+          // outcome is a warning plus a route to where they can be fixed, not
+          // an error implying nothing was created.
+          const cleanedLineup = lineup
+            .map(l => ({ ...l, name: l.name.trim() }))
+            .filter(l => l.name.length > 0)
+            .map(({ id: _id, ...rest }, i) => ({ ...rest, sort_order: i }));
+
+          if (cleanedLineup.length > 0) {
+            try {
+              await replaceEventLineup(newId, cleanedLineup);
+            } catch {
+              toast('Event created, but the line-up did not save — add it on the event page', 'error');
+            }
+          }
+
+          const infoItems = infoChosen
+            .map(key => ({ key, value: (infoValues[key] ?? '').trim() }))
+            .filter(i => i.value.length > 0);
+
+          if (infoItems.length > 0) {
+            try {
+              await replaceEventInfo(newId, infoItems);
+            } catch {
+              toast('Event created, but the information did not save — add it on the event page', 'error');
+            }
+          }
+
+          // Back to the events list, as expected after creating something.
+          //
+          // This briefly routed to the new event's Information tab instead, on
+          // the reasoning that it put the next step in front of the organiser.
+          // But it is surprising — "create" should land where the thing you
+          // created now lives — and the line-up and information are collected
+          // in this form now anyway, so there is no next step to point at.
+          router.push('/events');
         } else {
           // Older API build, or a shape change. The event WAS created, so
           // falling back to the list is right — failing here would suggest it
@@ -1355,6 +1464,39 @@ export default function CreateEventPage() {
                       cost to being generous.
                     </div>
                   </div>
+                </FormCard>
+
+                {/* ── Line-up ──────────────────────────────────────────────
+                    In the wizard, not edit-only.
+
+                    My first pass left this to the event page on the reasoning
+                    that an organiser has a date and a venue before a confirmed
+                    headliner. That is true, and it is still optional here —
+                    but it made the line-up invisible at the moment somebody is
+                    actually thinking about their event, which is worse than
+                    asking for something they can skip. */}
+                <FormCard title="Line-up" icon={Tag}
+                  subtitle="Who is playing — optional, and editable any time">
+                  <LineupFields
+                    entries={lineup}
+                    onChange={setLineup}
+                    eventStart={startTime || undefined}
+                    isSport={false}
+                  />
+                </FormCard>
+
+                {/* ── Information ──────────────────────────────────────────
+                    Parking, age limits, what to bring. Fields left blank get
+                    no row at all, so the event page cannot end up showing a
+                    heading with nothing under it. */}
+                <FormCard title="Information" icon={Info}
+                  subtitle="The questions attendees ask before buying">
+                  <EventInfoFields
+                    catalogue={infoCatalogue}
+                    chosen={infoChosen}
+                    values={infoValues}
+                    onChange={next => { setInfoChosen(next.chosen); setInfoValues(next.values); }}
+                  />
                 </FormCard>
 
                 {/* Media */}

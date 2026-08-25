@@ -12,7 +12,6 @@ import {
   getLinkPlatforms, uploadCover, uploadLogo,
   type OwnerProfile, type LinkPlatform,
 } from '../../../lib/organiserProfile';
-import PreviewFrame from '../../../components/previewFrame';
 
 /**
  * Organiser public page editor.
@@ -47,14 +46,11 @@ const PLATFORM_PLACEHOLDER: Record<string, string> = {
   website:   'yourdomain.co.za',
 };
 
-type Tab = 'edit' | 'preview';
-
 export default function OrganiserPageEditor() {
   const toast = useToast();
   const coverInput = useRef<HTMLInputElement | null>(null);
   const logoInput = useRef<HTMLInputElement | null>(null);
 
-  const [tab, setTab] = useState<Tab>('edit');
   const [profile, setProfile] = useState<OwnerProfile | null>(null);
   const [platforms, setPlatforms] = useState<LinkPlatform[]>([]);
   const [loading, setLoading] = useState(true);
@@ -220,28 +216,12 @@ export default function OrganiserPageEditor() {
         )}
       </div>
 
-      {/* ── Tabs ─────────────────────────────────────────────────────────── */}
-      <div className="tab-bar" style={{ marginBottom: 18 }}>
-        <button className={`tab-item${tab === 'edit' ? ' active' : ''}`} onClick={() => setTab('edit')}>
-          Edit
-        </button>
-        <button className={`tab-item${tab === 'preview' ? ' active' : ''}`} onClick={() => setTab('preview')}>
-          Preview
-        </button>
-      </div>
-
-      {tab === 'preview' ? (
-        profile.is_live ? (
-          <PreviewFrame organiserPath={profile.public_url_path} />
-        ) : (
-          <div className="alert alert-info">
-            The preview shows the real page, and yours is not published yet —
-            so there is nothing to load. It will appear here once your page goes
-            live.
-          </div>
-        )
-      ) : (
-        <div style={{ display: 'grid', gap: 18 }}>
+      {/* No preview tab.
+          It framed the public organiser page in an iframe, and that page does
+          not exist yet in either web app — so it only ever rendered a 404 as a
+          blank white rectangle. View live page in the header goes to the real
+          thing once it does exist. */}
+      <div style={{ display: 'grid', gap: 18 }}>
 
           {/* ── Images ───────────────────────────────────────────────────── */}
           <section className="card">
@@ -407,8 +387,7 @@ export default function OrganiserPageEditor() {
               </button>
             </div>
           </section>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
