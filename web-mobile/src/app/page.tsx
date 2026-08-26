@@ -15,6 +15,7 @@ import FilterModal, {
 } from '@/components/filterModal';
 import { useAppTheme } from '@/themes/colors';
 import { CoverImage } from '@/components/coverImage';
+import ComingSoon from '@/components/comingSoon';
 
 // LIVE only while the event is actually running: start <= now <= end.
 // Events without an end_time are assumed live for 4 hours after start.
@@ -490,6 +491,15 @@ export default function HomePage() {
     return result;
   }, [sections]);
 
+  // Total events actually returned by the API, across every section (featured
+  // included — allEvents deliberately skips it). Drives the Coming Soon cover:
+  // zero here means there is nothing at all to show, not merely an empty feed.
+  const totalEventCount = useMemo(
+    () => sections.reduce((n, s) => n + (s.events?.length ?? 0), 0),
+    [sections],
+  );
+  const showComingSoon = !loading && totalEventCount === 0;
+
   const feedSections       = useMemo(() => sections.filter((s) => s.id !== 'featured'), [sections]);
   const freeEvents         = useMemo(() => allEvents.filter((e) => e.price === 0).slice(0, 10), [allEvents]);
   const premiumEvents      = useMemo(() => allEvents.filter((e) => e.price >= 3000).slice(0, 10), [allEvents]);
@@ -602,6 +612,27 @@ export default function HomePage() {
     setDateLabelText(dateLabelText);
   }, [locationLabel, dateLabelText]);
 
+
+  // While the cover is up, re-check quietly so the feed appears on its own the
+  // moment the first event goes live — the visitor never has to reload. The
+  // interval is torn down as soon as events arrive.
+  useEffect(() => {
+    if (!showComingSoon) return;
+    const id = setInterval(() => { fetchSections(filterParams.city); }, 45000);
+    return () => clearInterval(id);
+  }, [showComingSoon, fetchSections, filterParams.city]);
+
+  // ── Cover page: no events anywhere ──────────────────────────────────────────
+  // Sits after every hook above, so hook order stays identical on both paths.
+  // FilterModal stays mounted because the navbar can still open it.
+  if (showComingSoon) {
+    return (
+      <div style={{ backgroundColor: colors.background, minHeight: '100vh' }}>
+        <ComingSoon onRefresh={() => fetchSections(filterParams.city)} />
+        <FilterModal visible={filterOpen} onClose={() => setFilterOpen(false)} initialParams={filterParams} onApply={handleFilterApply} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ backgroundColor: colors.background, minHeight: '100vh' }} className="pt-4">
