@@ -116,6 +116,30 @@ export const s = {
   participantAvatarText: 'text-[15px] font-black text-[#333333]',
   participantName:       'flex-1 text-[14px] font-semibold text-[#111111]',
   participantArrow:      'text-[20px] text-[#CCCCCC]',
+  // Second line under a line-up name: "Main stage · 21:30".
+  participantMeta:       'text-[12px] font-medium text-[#888888] mt-0.5',
+
+  // ── Information ───────────────────────────────────────────────────────────────
+  // Stacked, not side-by-side: values run to full sentences ("No glass, no
+  // outside food, no professional cameras") and a two-column layout would wrap
+  // them into a narrow ribbon on a phone.
+  infoRow:               'py-3.5 border-b border-[#EEEEEE]',
+  infoRowLast:           'py-3.5',
+  infoLabel:             'text-[10px] font-bold tracking-[0.12em] uppercase text-[#888888]',
+  infoValue:             'text-[15px] font-medium text-[#111111] leading-relaxed mt-1.5',
+
+  // Summary tiles: age, doors and ID. Negative margin cancels the section's
+  // px-5 so the strip runs to the screen edge, with the padding moved onto
+  // contentContainerStyle instead — see the ScrollView in event/[id].tsx.
+  infoTileStrip:         '-mx-5 mb-1',
+  // Fixed width, not flex: the three tiles must stay the same size as each
+  // other whether a value reads "18+" or "Under 18s with an adult".
+  infoTile:              'w-[124px] rounded-xl px-3 py-3.5',
+  infoTileLabel:         'text-[10px] font-bold tracking-[0.09em] uppercase text-[#888888]',
+  infoTileValue:         'text-[14px] font-semibold text-[#111111] mt-1 leading-snug',
+  // Refund policy and T&Cs are links, not walls of text — the full wording
+  // opens in a sheet. See PolicySheet for why.
+  policyLink:            'text-[15px] font-semibold mt-1.5',
 
   // ── Organizer ─────────────────────────────────────────────────────────────────
   organizerCard:        'flex-row items-center justify-between p-5 bg-white border border-[#EEEEEE] rounded-xl',
