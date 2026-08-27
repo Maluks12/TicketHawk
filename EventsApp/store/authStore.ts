@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import { AppState, type AppStateStatus } from 'react-native';
 import {
-  authLogin, authRegister, authLogout, getMe,
+  authLogin, authRegister, authLogout, getMe, authSocial,
+  type SocialSignInBody,
   saveTokens as persistTokens,
   clearTokens as wipeTokens,
   getAccessToken, getRefreshToken,
@@ -21,6 +22,7 @@ interface AuthState {
   authReady: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (dto: RegisterDTO) => Promise<void>;
+  socialLogin: (body: SocialSignInBody) => Promise<{ created: boolean; needsInfo: boolean }>;
   logout: () => Promise<void>;
   loadUser: () => Promise<void>;
   // Applies a freshly-updated profile (e.g. after PATCH /v1/user/me) to
@@ -92,6 +94,32 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data: user } = await getMe();
       await saveCachedUser(user); // cache for offline session restore
       set({ user, isLoading: false, authReady: true });
+    } catch (e) {
+      set({ isLoading: false });
+      throw e;
+    }
+  },
+
+  /**
+   * Signs in (or signs up) with Google or Apple.
+   *
+   * Identical tail to `login`: same token storage, same profile fetch, same
+   * cached-user write — so a social session is indistinguishable from a
+   * password session everywhere downstream, including offline restore.
+   *
+   * Returns whether the account was newly created so the caller can route a
+   * first-time user differently.
+   */
+  socialLogin: async (body: SocialSignInBody) => {
+    set({ isLoading: true });
+    try {
+      const { data } = await authSocial(body);
+      await saveTokens(data.access_token, data.refresh_token);
+
+      const { data: user } = await getMe();
+      await saveCachedUser(user);
+      set({ user, isLoading: false, authReady: true });
+      return { created: data.created, needsInfo: data.needs_info };
     } catch (e) {
       set({ isLoading: false });
       throw e;

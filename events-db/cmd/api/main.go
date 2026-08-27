@@ -151,6 +151,26 @@ func main() {
 	workers.StartSellOutWorker(pool, ctx)
 	log.Info().Msg("sell-out worker started")
 
+	// Announces newly published events to the organiser's followers.
+	//
+	// A worker rather than a hook on the publish path: an event reaches
+	// 'published' via AdminApproveEvent, ApproveEventWithFeature AND
+	// AdminPromoteEvent, so hooking any one of them would miss the others.
+	// Polling for the state instead of the transition covers all three, plus
+	// whatever the fourth turns out to be. See the worker for the full note.
+	workers.StartOrganizerAnnounceWorker(pool, ctx)
+	log.Info().Msg("organiser announce worker started")
+
+	// Tells ticket holders when a live event's line-up changes.
+	//
+	// Phase 4 lets an organiser change a live line-up immediately — correct,
+	// because an act dropping out three days before a festival cannot wait in
+	// a review queue. But it means a headliner can be removed silently and
+	// somebody who paid to see them finds out by arriving. This closes that by
+	// telling the people with a stake rather than by blocking the change.
+	workers.StartLineupChangeWorker(pool, ctx)
+	log.Info().Msg("line-up change worker started")
+
 	bookingRepo    := repository.NewPgxBookingQuerier(pool)
 	eventRepo      := repository.NewPgxEventQuerier(pool)
 	cartQuerier    := repository.NewPgxCartQuerier(pool)
@@ -327,6 +347,11 @@ func main() {
 	// token bucket when Redis is down (fail-safe, never open). /login also
 	// gets a per-account (email) bucket so one account can't be brute-forced
 	// from many rotating IPs.
+
+	// Verifies Google / Apple ID tokens. Constructed once: it owns a JWKS cache
+	// so provider signing keys aren't refetched on every sign-in.
+	oidcVerifier := services.NewOIDCVerifier(cfg.GoogleClientIDs, cfg.AppleClientIDs)
+
 	auth := v1.Group("/auth")
 
 	// ── /login ── two stacked buckets: per-IP and per-target-account ──────
@@ -352,6 +377,18 @@ func main() {
 		"register"))
 	registerGroup.POST("/register", handlers.CreateUserhandler(pool))
 
+	// ── social sign-in (Google / Apple) ────────────────────────────────────
+	// Rate limited by IP only: there is no target email to key on until the
+	// token is verified, and the provider has already done the expensive part.
+	// Looser than /login because there is nothing to brute-force here — a
+	// forged token fails signature verification, it does not fail "slowly
+	// enough to guess". This is abuse protection, not credential protection.
+	socialGroup := auth.Group("")
+	socialGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
+		ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 30.0, TTL: 2 * time.Hour},
+		"social-auth"))
+	socialGroup.POST("/social", handlers.SocialSignInHandler(pool, cfg, oidcVerifier))
+
 	// ── password reset ─────────────────────────────────────────────────────
 	passwordResetGroup := auth.Group("")
 	passwordResetGroup.Use(middleware.RateLimitAuthByIP(rateLimitManager,
@@ -370,6 +407,12 @@ func main() {
 
 	// ── /logout ────────────────────────────────────────────────────────────
 	auth.POST("/logout", middleware.AuthMiddleware(cfg), handlers.LogoutHandler(pool))
+
+	// Connected-accounts management on the profile screen. Unlinking is guarded
+	// server-side: an account with no password cannot remove its last identity,
+	// or nothing could ever sign into it again.
+	auth.GET("/identities", middleware.AuthMiddleware(cfg), handlers.ListLinkedIdentitiesHandler(pool))
+	auth.DELETE("/identities/:provider", middleware.AuthMiddleware(cfg), handlers.UnlinkIdentityHandler(pool))
 
 	// ==========================================
 	// Public Event Routes
@@ -404,6 +447,65 @@ func main() {
 		public.POST("/:id/dwell",        handlers.RecordDwellHandler(pool, eventCache))
 		// Must be last — catches both UUIDs and slugs
 		public.GET("/:id",               handlers.GetEventBySlugHandler(pool, eventCache))
+	}
+
+	// ==========================================
+	// Public Organiser Profile Routes
+	//
+	// GET /organisers/:slug         — profile (accepts slug or UUID)
+	// GET /organisers/:slug/events  — ?scope=upcoming|past
+	//
+	// OptionalAuth so a signed-in visitor is identified when a token is
+	// present. Nothing here needs it yet; phase 2's follow state will, and
+	// adding the middleware later would silently change behaviour on an
+	// endpoint the clients cache.
+	//
+	// An organiser that cannot be resolved 404s identically whether they do
+	// not exist, are suspended, or have hidden their page — see
+	// repository.ErrOrganizerProfileNotFound for why the causes are not
+	// distinguished.
+	//
+	// Its own rate-limit bucket rather than sharing "events-public": a visitor
+	// paging through an organiser's back catalogue burns requests fast, and
+	// sharing the bucket would throttle them out of the main feed.
+	// ==========================================
+	organisersPublic := v1.Group("/organisers")
+	organisersPublic.Use(middleware.OptionalAuth(cfg))
+	if rateLimitManager != nil {
+		organisersPublic.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 120, RefillRate: 3.0, TTL: 15 * time.Minute},
+			"organisers-public"))
+	}
+	{
+		// BEFORE /:slug — "search" must be matched as a literal segment, not
+		// captured as a slug. Registered the other way round this endpoint
+		// would resolve as "the organiser whose slug is 'search'" and 404.
+		organisersPublic.GET("/search",       handlers.SearchOrganizersHandler(pool))
+		organisersPublic.GET("/:slug",        handlers.GetPublicOrganizerHandler(pool))
+		organisersPublic.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
+	}
+
+	// American-spelling alias for the same two routes.
+	//
+	// This codebase is already inconsistent — admin routes say /organizers, the
+	// organiser group says /organiser — and these are PUBLIC URLs that end up
+	// in shared links and search results. A 404 on a plausible spelling is a
+	// support ticket, not a principle.
+	//
+	// Registered as a second group because gin cannot hold two different
+	// wildcard names at the same position in one tree; a separate static prefix
+	// gets its own subtree and sidesteps that entirely.
+	organizersPublicAlias := v1.Group("/organizers")
+	organizersPublicAlias.Use(middleware.OptionalAuth(cfg))
+	if rateLimitManager != nil {
+		organizersPublicAlias.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 120, RefillRate: 3.0, TTL: 15 * time.Minute},
+			"organisers-public"))
+	}
+	{
+		organizersPublicAlias.GET("/search",       handlers.SearchOrganizersHandler(pool))
+		organizersPublicAlias.GET("/:slug",        handlers.GetPublicOrganizerHandler(pool))
+		organizersPublicAlias.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
 	}
 
 	// ==========================================
@@ -493,10 +595,20 @@ func main() {
 			ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 			"guest-bookings"))
 	}
+
+	// Brute-force / enumeration guard for every bookingNumber + email route.
+	//
+	// Replaces the per-handler lockout that only covered two endpoints while
+	// /payment, /refund-quote, /offline, /pool-qr and POST /refund accepted the
+	// same credential with none. Keyed on booking+email AND on IP, so a
+	// stranger guessing an address cannot lock the real owner out of their own
+	// ticket. Safe with a nil client: returns a pass-through handler and logs a
+	// warning, which is what happens when Redis is down at startup.
+	guest.Use(middleware.GuestBookingGuard(rdb))
 	{
 		guest.POST("/bookings",                              handlers.CreateGuestBookingHandler(pool, paymentService))
-		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool, rdb))
-		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool, rdb))
+		guest.GET("/bookings/:bookingNumber",                handlers.GetGuestBookingHandler(pool))
+		guest.GET("/bookings/:bookingNumber/assignments",    handlers.GetGuestTicketAssignmentsHandler(pool))
 		guest.GET("/bookings/:bookingNumber/assignments/:assignmentId/qr", handlers.GetGuestRotatingQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/pool-qr",                      handlers.GetGuestPoolQRTokenHandler(pool, rotatingQRService))
 		guest.GET("/bookings/:bookingNumber/offline",                     handlers.GetGuestOfflineTicketsHandler(pool, rotatingQRService))
@@ -629,13 +741,27 @@ func main() {
 		user.GET("/me",           handlers.GetMyProfileHandler(pool))
 		// PATCH, not PUT: the edit-profile form submits only changed fields, and
 		// a sparse patch means an omitted field is left alone rather than cleared.
-		user.PATCH("/me",         handlers.UpdateMyProfileHandler(pool, emailService))
+		//
+		// Takes oidcVerifier because changing the EMAIL address requires step-up
+		// re-authentication, and a Google/Apple account has no password to check.
+		// It proves identity with a fresh provider token instead — see
+		// handlers/reauth.go.
+		user.PATCH("/me",         handlers.UpdateMyProfileHandler(pool, emailService, oidcVerifier))
 		// Account deletion (Apple Guideline 5.1.1(v)). The preview drives the
 		// confirmation screen; the DELETE re-authenticates and anonymises.
+		//
+		// Same reason for oidcVerifier: without it a social-only account could
+		// never satisfy the password check and therefore could never delete
+		// itself, which is the exact thing 5.1.1(v) requires.
 		user.GET("/me/deletion-preview", handlers.GetAccountDeletionPreviewHandler(pool))
-		user.DELETE("/me",               handlers.DeleteMyAccountHandler(pool))
+		user.DELETE("/me",               handlers.DeleteMyAccountHandler(pool, oidcVerifier))
 		user.GET("/merch-orders", handlers.GetMyMerchOrdersHandler(pool))
 		user.GET("/following",    handlers.GetFollowedEventsHandler(pool))
+		// Organisers, not events. Separate endpoint rather than a ?type= on
+		// /following because the two return different shapes — an event card
+		// versus an organiser card — and one endpoint returning either is a
+		// discriminated union the clients would have to unpick.
+		user.GET("/following-organisers", handlers.GetFollowedOrganizersHandler(pool))
 	}
 
 	// ==========================================
@@ -667,6 +793,34 @@ func main() {
 	{
 		eventFollowGroup.POST("/:id/follow", handlers.ToggleFollowHandler(pool))
 		eventFollowGroup.GET("/:id/follow",  handlers.GetFollowStatusHandler(pool))
+	}
+
+	// ==========================================
+	// Organiser Follow Routes (authenticated)
+	// POST /organisers/:slug/follow  — toggle follow on/off
+	// GET  /organisers/:slug/follow  — status + follower count
+	// GET  /user/following-organisers — registered under the user group below
+	//
+	// A separate group from organisersPublic for the same reason
+	// eventFollowGroup is separate from the public events group: that group
+	// runs OptionalAuth, and a follow needs a real user rather than one that
+	// might be there. Gin merges the two into one tree, so /organisers/:slug
+	// stays public while /organisers/:slug/follow requires a token.
+	//
+	// The slug resolves through the same public gate as the profile, so a
+	// suspended or unverified organiser cannot accumulate followers while
+	// invisible.
+	// ==========================================
+	organiserFollowGroup := v1.Group("/organisers")
+	organiserFollowGroup.Use(middleware.AuthMiddleware(cfg))
+	if rateLimitManager != nil {
+		organiserFollowGroup.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 60, RefillRate: 2.0, TTL: 15 * time.Minute},
+			"organiser-follow"))
+	}
+	{
+		organiserFollowGroup.POST("/:slug/follow", handlers.ToggleOrganizerFollowHandler(pool))
+		organiserFollowGroup.GET("/:slug/follow",  handlers.GetOrganizerFollowStatusHandler(pool))
 	}
 
 	// ==========================================
@@ -877,8 +1031,15 @@ func main() {
 			// The old approvals screen showed a summary, which meant nobody
 			// ever saw the tiers — where the actual mistakes are (a VIP tier
 			// priced at R0, unlimited capacity at a 200-seat venue).
+			// event.view, NOT event.approve.
+			//
+			// This is what the eye icon on the events list opens. Gating it on
+			// event.approve meant read_only and access — the two roles whose
+			// entire job is looking at things — clicked "view details" and got a
+			// 403. Every staff level can now open an event; only the roles that
+			// hold event.approve see the approve/reject controls on it.
 			staffAPI.GET("/events/:id/review",
-				middleware.RequireCapability(pool, models.CapApproveEvent),
+				middleware.RequireCapability(pool, models.CapViewEvents),
 				handlers.GetEventReviewHandler(pool))
 
 			// Approve, optionally with a BOUNDED featuring window. Replaces the
@@ -982,6 +1143,9 @@ func main() {
 		admin.PUT("/events/:id/organizer",
 			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
 			handlers.AdminTransferEventHandler(pool, eventCache, emailService, cfg))
+		// CapEditEvents is now held by admin only. An editor changes a live event
+		// by filing an event_edit request carrying the field diff, which an admin
+		// approves and executes — see models.ReqEventEdit.
 		admin.PUT("/events/:id",
 			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
 			handlers.AdminUpdateEventHandler(pool, eventCache))
@@ -1005,6 +1169,33 @@ func main() {
 		admin.GET("/stats",
 			middleware.RequireCapabilityOn(pool, models.CapViewUserList),
 			handlers.GetAdminStatsHandler(pool))
+		// ── Event information catalogue ───────────────────────────────────
+		//
+		// The fields organisers choose from when filling in an event's
+		// Information block. Read at event.view, written at event.edit —
+		// matching how merch and collections are gated.
+		//
+		// There is no DELETE. Retiring is is_active = false, and
+		// event_info_items.info_key is ON DELETE RESTRICT, so information
+		// organisers entered cannot vanish because somebody tidied a list.
+		admin.GET("/event-info/catalogue",
+			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
+			handlers.AdminListInfoCatalogueHandler(pool))
+		admin.POST("/event-info/catalogue",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminCreateInfoFieldHandler(pool))
+		// Registered BEFORE /:key so "order" is matched as a literal segment
+		// rather than being captured as a field key.
+		admin.PUT("/event-info/catalogue/order",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminReorderInfoCatalogueHandler(pool))
+		admin.PATCH("/event-info/catalogue/:key",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminUpdateInfoFieldHandler(pool))
+		admin.PUT("/event-info/catalogue/:key/active",
+			middleware.RequireCapabilityOn(pool, models.CapEditEvents),
+			handlers.AdminSetInfoFieldActiveHandler(pool))
+
 		admin.GET("/merch/oversold",
 			middleware.RequireCapabilityOn(pool, models.CapViewEvents),
 			handlers.GetOversoldMerchOrdersHandler(pool))
@@ -1149,12 +1340,20 @@ func main() {
 			handlers.AdminSetOrganizerTierHandler(pool, payoutService))
 		// Writing payout bank details is THE most dangerous action in the product
 		// — it is how ticket money gets redirected, and it is why ReqBankAdd
-		// carries subject confirmation, a cooling-off period and a 48h payout
-		// hold. This direct route bypasses all of that, so it is restricted to
-		// request.act, the capability only an admin holds. Editors must go through
-		// the staff request flow.
+		// carries subject confirmation, a 60-minute cooling-off and a 48h payout
+		// hold.
+		//
+		// This direct route bypasses every one of those, so it is now MASTER ADMIN
+		// ONLY. An admin who needs a bank change files a bank_details_add request;
+		// a master admin approves it. Leaving this open to request.act meant an
+		// admin could simply call the endpoint instead of filing the request, and
+		// the approval chain would be a formality anyone could step around.
+		//
+		// It survives at all as the break-glass path for the case the request flow
+		// cannot serve: ReqBankAdd cannot be executed from a payload, because the
+		// account number never enters one (see request_execute_handler.go).
 		admin.POST("/organizers/:id/payout-details",
-			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
+			handlers.RequireMasterAdmin(pool),
 			handlers.AdminSetOrganizerPayoutDetailsHandler(payoutService))
 		admin.GET("/payouts",
 			middleware.RequireCapabilityOn(pool, models.CapViewBankTail),
@@ -1198,6 +1397,25 @@ func main() {
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
+
+		// ── Editing an existing event ──────────────────────────────────────
+		//
+		// Split by lifecycle, not by convenience:
+		//
+		//   DELETE /events/:id           draft only, hard delete
+		//   PUT    /events/:id           draft only, saves straight through
+		//   GET    /events/:id/edit      full row + tiers, hydrates the form
+		//   POST   /events/:id/edit-request
+		//                                published only, files an event_edit
+		//                                staff_request for admin approval
+		//
+		// A draft has no buyers and is not discoverable, so the organiser owns it
+		// outright. A published event has people who paid against its current
+		// terms, so changes go through review while it stays live and on sale.
+		orgRoutes.DELETE("/events/:id",            handlers.DeleteDraftEventHandler(pool, eventCache))
+		orgRoutes.PUT("/events/:id",               handlers.UpdateDraftEventHandler(pool, eventCache))
+		orgRoutes.GET("/events/:id/edit",          handlers.GetOrganiserEventForEditHandler(pool))
+		orgRoutes.POST("/events/:id/edit-request", handlers.SubmitOrganiserEventEditHandler(pool))
 		orgRoutes.POST("/upload",         middleware.ExtendWriteTimeout(5*time.Minute), handlers.UploadOrganiserImageHandler(imgService))
 		// Listing fee — required for events with 20+ ticket capacity
 		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))
@@ -1262,6 +1480,66 @@ func main() {
 
 		// Resubmit rejected merch for review
 		orgRoutes.POST("/merch/:id/resubmit", handlers.OrgResubmitMerchHandler(pool))
+
+		// ── Event information block ────────────────────────────────────────
+		//
+		// GET /organiser/event-info/catalogue  — the fields on offer
+		// GET /organiser/events/:id/info       — this event's chosen fields
+		// PUT /organiser/events/:id/info       — replace the whole block
+		//
+		// The catalogue is served rather than hardcoded in the dashboard, so
+		// retiring a field or adding one takes effect without a frontend
+		// deploy.
+		//
+		// PUT applies immediately on a live event for every field EXCEPT those
+		// the catalogue marks review_required_when_published — today only
+		// age_requirement, which returns 409 and routes to the edit-request
+		// flow. Parking and gate changes must not wait in an admin queue; an
+		// age restriction changing after people have bought must not happen
+		// silently.
+		orgRoutes.GET("/event-info/catalogue", handlers.GetEventInfoCatalogueHandler(pool))
+		orgRoutes.GET("/events/:id/info",      handlers.GetEventInfoHandler(pool))
+		orgRoutes.PUT("/events/:id/info",      handlers.ReplaceEventInfoHandler(pool, eventCache))
+
+		// ── Line-up ────────────────────────────────────────────────────────
+		//
+		// GET /organiser/events/:id/lineup
+		// PUT /organiser/events/:id/lineup  — replace the whole list
+		//
+		// Applies immediately even on a live event, deliberately: an act drops
+		// out three days out and the replacement is announced the same
+		// afternoon. A line-up waiting in an admin queue is wrong on exactly
+		// the days most people are looking at it.
+		//
+		// Images go through the existing POST /organiser/upload, which returns
+		// a URL to include in the PUT — no dedicated endpoint, because that one
+		// already enforces the MIME allow-list, size ceiling and compression.
+		orgRoutes.GET("/events/:id/lineup", handlers.GetEventLineupHandler(pool))
+		orgRoutes.PUT("/events/:id/lineup", handlers.ReplaceEventLineupHandler(pool, eventCache))
+
+		// ── Public organiser page (the organiser's own) ────────────────────
+		//
+		// GET   /organiser/public-profile                — including when not live
+		// PATCH /organiser/public-profile                — description, cover, on/off
+		// PUT   /organiser/public-profile/links          — replace the whole link set
+		// GET   /organiser/public-profile/link-platforms — picker options
+		//
+		// NOT /organiser/profile. That path is already taken further down by
+		// GetOrganizerProfileHandler, which returns the ACCOUNT record — legal
+		// name, business email, payout state. Registering a second handler on
+		// it would panic gin at startup. The two are genuinely different
+		// things, so they get different paths: the account versus the public
+		// page.
+		//
+		// These sit OUTSIDE the kyc_level >= 2 gate that governs whether the
+		// page RESOLVES publicly. An organiser at level 1 can compose their
+		// page and see exactly what it will look like; it simply does not go
+		// live until they verify. Gating the editor too would leave them
+		// staring at a dead screen with no way to prepare.
+		orgRoutes.GET("/public-profile",                 handlers.GetMyPublicProfileHandler(pool))
+		orgRoutes.PATCH("/public-profile",               handlers.UpdateMyPublicProfileHandler(pool))
+		orgRoutes.PUT("/public-profile/links",           handlers.ReplaceMyLinksHandler(pool))
+		orgRoutes.GET("/public-profile/link-platforms",  handlers.GetLinkPlatformsHandler())
 	}
 
 	// ==========================================
@@ -1281,6 +1559,31 @@ func main() {
 		media.POST("/banner/video",   handlers.UploadBannerVideoHandler(pool, imgService))
 		media.DELETE("/banner/video", handlers.DeleteBannerVideoHandler(pool, imgService))
 		media.POST("/gallery",        handlers.UploadGalleryImageHandler(pool, imgService))
+	}
+
+	// ==========================================
+	// Organiser Profile Media
+	//
+	// Separate from the event media group above, which is keyed on an :id the
+	// organiser must own and whose handlers all verify that ownership through
+	// GetEventImageURLs. A profile image has no event, so reusing that group
+	// would mean inventing a fake event id or skipping the check that makes it
+	// safe.
+	//
+	// Same tight bucket as event media — 20 burst, one refill per minute.
+	// Image uploads are the most expensive thing an organiser can ask of us.
+	// ==========================================
+	profileMedia := v1.Group("/organiser/public-profile/media")
+	profileMedia.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	profileMedia.Use(middleware.ExtendWriteTimeout(5 * time.Minute))
+	if rateLimitManager != nil {
+		profileMedia.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			"media-upload"))
+	}
+	{
+		profileMedia.POST("/cover", handlers.UploadOrganizerCoverHandler(pool, imgService))
+		profileMedia.POST("/logo",  handlers.UploadOrganizerLogoHandler(pool, imgService))
 	}
 
 	// ==========================================
@@ -1313,6 +1616,17 @@ func main() {
 		middleware.AuthMiddleware(cfg),
 		middleware.OrganizerOnlyMiddleware(),
 		handlers.GetOrganizerProfileHandler(pool),
+	)
+	// The account was read-only until now: UpdateOrganizerDTO existed in the
+	// model with no repository function and no route, so an organiser who
+	// mistyped their business name at sign-up could not correct it.
+	//
+	// PATCH, not PUT — the settings form saves one section at a time and an
+	// omitted key must leave its column alone rather than blanking it.
+	v1.PATCH("/organiser/profile",
+		middleware.AuthMiddleware(cfg),
+		middleware.OrganizerOnlyMiddleware(),
+		handlers.UpdateOrganizerProfileHandler(pool),
 	)
 
 	// Legal acceptance — auth-only, NOT organiser-only, for the same reason as

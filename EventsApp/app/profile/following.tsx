@@ -14,10 +14,12 @@ import {
   api,
   type FollowedEvent,
   type FollowingResponse,
+  type FollowedOrganizer,
   fmtFollowDate,
   fmtFollowPrice,
   followAvailPct,
 } from '../../lib/api';
+import { CheckCircle } from 'phosphor-react-native';
 
 // ─── Card colour palettes ─────────────────────────────────────────────────────
 
@@ -114,11 +116,14 @@ const cs = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
     borderRadius: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
-    elevation: 12,
+    // No shadow.
+    //
+    // These cards are already dark artwork with a gradient scrim, so a
+    // shadowOpacity of 0.5 at radius 14 was casting a heavy dark halo onto a
+    // light background — it read as a rendering artefact rather than depth,
+    // and stacked between adjacent cards into a grey band.
+    //
+    // The card has its own contrast; it does not need lifting off the page.
   },
   card: {
     height: 188,
@@ -162,6 +167,92 @@ const cs = StyleSheet.create({
   price: { fontSize: 12, fontWeight: '800' },
 });
 
+// ─── Organiser row ────────────────────────────────────────────────────────────
+//
+// Deliberately NOT the same 188pt artwork card the events use. An organiser has
+// no cover art of their own worth that much height, and a list of six identical
+// dark rectangles with a logo in the corner would be harder to scan than a
+// compact row. The count of what they have on sale is the useful part.
+
+function OrganiserRow({ item, onPress, onUnfollow, unfollowing, colors }: {
+  item: FollowedOrganizer;
+  onPress: () => void;
+  onUnfollow: () => void;
+  unfollowing: boolean;
+  colors: any;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.75}
+      onPress={onPress}
+      style={[os.row, { borderBottomColor: colors.dividerColor }]}
+    >
+      <View style={[os.logo, { backgroundColor: colors.sectionCardBg }]}>
+        {item.logo_url ? (
+          <Image
+            source={{ uri: item.logo_url }}
+            style={StyleSheet.absoluteFillObject}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={item.id}
+            transition={140}
+          />
+        ) : (
+          <Ionicons name="business-outline" size={20} color={colors.iconColor} />
+        )}
+      </View>
+
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Text style={[os.name, { color: colors.text }]} numberOfLines={1}>
+            {item.business_name}
+          </Text>
+          {item.verified && <CheckCircle size={15} color="#2f7cf6" weight="fill" />}
+        </View>
+        <Text style={[os.meta, { color: colors.subText }]} numberOfLines={1}>
+          {item.upcoming_events > 0
+            ? `${item.upcoming_events} event${item.upcoming_events === 1 ? '' : 's'} on sale`
+            : 'No events on sale'}
+        </Text>
+      </View>
+
+      <TouchableOpacity
+        onPress={onUnfollow}
+        disabled={unfollowing}
+        hitSlop={10}
+        style={[os.unfollow, { borderColor: colors.dividerColor }]}
+      >
+        {unfollowing
+          ? <ActivityIndicator size="small" color={colors.subText} />
+          : <Text style={[os.unfollowText, { color: colors.subText }]}>FOLLOWING</Text>}
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+}
+
+const os = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  logo: {
+    width: 50, height: 50, borderRadius: 14,
+    overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+  },
+  name: { fontSize: 15.5, fontWeight: '700', letterSpacing: -0.1, flexShrink: 1 },
+  meta: { fontSize: 12.5, marginTop: 3 },
+  unfollow: {
+    borderWidth: 1, borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 7,
+    minWidth: 92, alignItems: 'center',
+  },
+  unfollowText: { fontSize: 10.5, fontWeight: '800', letterSpacing: 0.9 },
+});
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function FollowingScreen() {
@@ -177,6 +268,12 @@ export default function FollowingScreen() {
   const [hasMore,     setHasMore]     = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [unfollowing, setUnfollowing] = useState<Set<string>>(new Set());
+
+  // Which list is showing. Events first — it is the older feature, the larger
+  // list for most people, and the one the profile row has always led to.
+  const [tab, setTab] = useState<'events' | 'organisers'>('events');
+  const [organisers, setOrganisers] = useState<FollowedOrganizer[]>([]);
+  const [orgLoading, setOrgLoading] = useState(true);
 
   const load = useCallback(async (replace = false) => {
     if (!user) { setLoading(false); return; }
@@ -197,7 +294,28 @@ export default function FollowingScreen() {
     }
   }, [user, cursor]);
 
-  useEffect(() => { load(true); }, []);
+  // Organisers load ONCE on mount, alongside the events, rather than lazily
+  // when the tab is first opened.
+  //
+  // The list is unpaged and small — a user following more than a few dozen
+  // organisers does not exist yet — so fetching it up front costs one request
+  // and makes the tab switch instant. Deferring it would put a spinner behind
+  // a tap that should feel like nothing happened.
+  const loadOrganisers = useCallback(async () => {
+    if (!user) { setOrgLoading(false); return; }
+    try {
+      const res = await api.get<{ data: FollowedOrganizer[]; count: number }>(
+        '/v1/user/following-organisers',
+      );
+      setOrganisers(res.data?.data ?? []);
+    } catch {
+      setOrganisers([]);
+    } finally {
+      setOrgLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => { load(true); loadOrganisers(); }, []);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -217,6 +335,20 @@ export default function FollowingScreen() {
     }
   }, []);
 
+  const handleUnfollowOrganiser = useCallback(async (org: FollowedOrganizer) => {
+    setUnfollowing(prev => new Set(prev).add(org.id));
+    try {
+      // Slug, not id — the route resolves either, but the slug is what every
+      // other organiser call in the app uses and keeps the logs readable.
+      await api.post(`/v1/organisers/${org.slug}/follow`);
+      setOrganisers(prev => prev.filter(o => o.id !== org.id));
+    } catch {
+      Alert.alert('Error', 'Could not unfollow. Please try again.');
+    } finally {
+      setUnfollowing(prev => { const n = new Set(prev); n.delete(org.id); return n; });
+    }
+  }, []);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const renderContent = () => {
@@ -226,7 +358,7 @@ export default function FollowingScreen() {
           <View style={ss.emptyIcon}>
             <Ionicons name="heart-outline" size={30} color="rgba(255,255,255,0.2)" />
           </View>
-          <Text style={ss.emptyTitle}>Sign in to see followed events</Text>
+          <Text style={[ss.emptyTitle, { color: colors.text }]}>Sign in to see followed events</Text>
           <Text style={[ss.emptySub, { color: colors.subText }]}>
             Follow events you're excited about and we'll remind you as the date gets close.
           </Text>
@@ -234,6 +366,44 @@ export default function FollowingScreen() {
       );
     }
 
+    // ── Organisers ─────────────────────────────────────────────────────────
+    if (tab === 'organisers') {
+      if (orgLoading) {
+        return <View style={ss.centred}><ActivityIndicator color="#ff2d55" size="large" /></View>;
+      }
+      if (organisers.length === 0) {
+        return (
+          <View style={ss.centred}>
+            <View style={ss.emptyIcon}>
+              <Ionicons name="business-outline" size={30} color={colors.subText} />
+            </View>
+            <Text style={[ss.emptyTitle, { color: colors.text }]}>No followed organisers yet</Text>
+            <Text style={[ss.emptySub, { color: colors.subText }]}>
+              Follow an organiser and you&apos;ll hear about their new events as soon as they go on sale.
+            </Text>
+          </View>
+        );
+      }
+      return (
+        <FlatList
+          data={organisers}
+          keyExtractor={o => o.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: insets.bottom + 32 }}
+          renderItem={({ item }) => (
+            <OrganiserRow
+              item={item}
+              colors={colors}
+              onPress={() => router.push(`/organiser/${item.slug}` as any)}
+              onUnfollow={() => handleUnfollowOrganiser(item)}
+              unfollowing={unfollowing.has(item.id)}
+            />
+          )}
+        />
+      );
+    }
+
+    // ── Events ─────────────────────────────────────────────────────────────
     if (loading) {
       return <View style={ss.centred}><ActivityIndicator color="#ff2d55" size="large" /></View>;
     }
@@ -244,7 +414,7 @@ export default function FollowingScreen() {
           <View style={ss.emptyIcon}>
             <Ionicons name="heart-outline" size={30} color="rgba(255,255,255,0.2)" />
           </View>
-          <Text style={ss.emptyTitle}>No followed events yet</Text>
+          <Text style={[ss.emptyTitle, { color: colors.text }]}>No followed events yet</Text>
           <Text style={[ss.emptySub, { color: colors.subText }]}>
             Tap Follow on any event to track it. You'll get reminders as the date approaches and alerts when tickets sell out.
           </Text>
@@ -291,9 +461,16 @@ export default function FollowingScreen() {
         </TouchableOpacity>
         <View style={ss.headerCenter}>
           <Text style={[ss.headerTitle, { color: colors.text }]}>Following</Text>
-          {events.length > 0 && !loading && (
+          {/* Count follows the visible tab. A header reading "12 events" above
+              a list of organisers is worse than no count at all. */}
+          {tab === 'events' && events.length > 0 && !loading && (
             <Text style={[ss.headerCount, { color: colors.subText }]}>
               {events.length} event{events.length !== 1 ? 's' : ''}
+            </Text>
+          )}
+          {tab === 'organisers' && organisers.length > 0 && !orgLoading && (
+            <Text style={[ss.headerCount, { color: colors.subText }]}>
+              {organisers.length} organiser{organisers.length !== 1 ? 's' : ''}
             </Text>
           )}
         </View>
@@ -301,8 +478,21 @@ export default function FollowingScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Subtle separator */}
-      <View style={[ss.headerDivider, { backgroundColor: colors.dividerColor }]} />
+      {/* ── Tabs ──────────────────────────────────────────────────────────── */}
+      <View style={[ss.tabRow, { borderBottomColor: colors.dividerColor }]}>
+        {([['events', 'EVENTS'], ['organisers', 'ORGANISERS']] as const).map(([key, label]) => (
+          <TouchableOpacity
+            key={key}
+            onPress={() => setTab(key)}
+            activeOpacity={0.8}
+            style={[ss.tab, tab === key && { borderBottomColor: '#ff2d55' }]}
+          >
+            <Text style={[ss.tabText, { color: tab === key ? colors.text : colors.subText }]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {renderContent()}
     </View>
@@ -340,9 +530,21 @@ const ss = StyleSheet.create({
     fontWeight: '500',
     marginTop: 1,
   },
-  headerDivider: {
-    height: StyleSheet.hairlineWidth,
-    marginBottom: 4,
+  tabRow: {
+    flexDirection: 'row',
+    gap: 24,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tab: {
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.1,
   },
   centred: {
     flex: 1,
@@ -363,7 +565,9 @@ const ss = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#ffffff',
+    // Was hardcoded '#ffffff', which is invisible on the light theme — the
+    // screenshot of this screen in light mode had a blank line where the
+    // heading should be. Every call site now passes colors.text.
     textAlign: 'center',
     letterSpacing: -0.2,
   },

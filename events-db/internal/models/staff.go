@@ -117,8 +117,17 @@ var capabilities = map[StaffRole]map[Capability]bool{
 		CapVerifyKYC:       true,
 	},
 
-	// Acts on events and accounts, and LOGS dangerous actions for an admin to
-	// approve. Never carries one out — that split is the whole point.
+	// Reviews and approves events, and LOGS everything else for an admin to
+	// approve. Never carries out a dangerous action itself — that split is the
+	// whole point.
+	//
+	// NOTE: CapEditEvents is deliberately ABSENT. An editor changes an event by
+	// filing an event_edit request that an admin approves; the diff is on
+	// screen at the moment of the decision. Editing a live event silently
+	// changes the terms of a sale that buyers have already paid for — the date,
+	// the venue, the price — which is exactly the shape of action the request
+	// system exists for. Approving a NEW event is different: nobody has bought
+	// a ticket yet, so that stays direct.
 	StaffEditor: {
 		CapViewEvents:       true,
 		CapViewUserList:     true,
@@ -126,7 +135,6 @@ var capabilities = map[StaffRole]map[Capability]bool{
 		CapViewBankTail:     true,
 		CapViewKYCStatus:    true,
 		CapVerifyKYC:        true,
-		CapEditEvents:       true,
 		CapApproveEvent:     true,
 		CapFeatureEvent:     true,
 		CapEditUserContact:  true,
@@ -196,13 +204,37 @@ func Capabilities(role *StaffRole) []Capability {
 type StaffRequestKind string
 
 const (
-	ReqBankDelete       StaffRequestKind = "bank_details_delete"
-	ReqBankAdd          StaffRequestKind = "bank_details_add"
-	ReqEventTakedown    StaffRequestKind = "event_takedown"
-	ReqRoleChange       StaffRequestKind = "role_change"
-	ReqCredentialReset  StaffRequestKind = "credential_reset"
-	ReqAccountDelete    StaffRequestKind = "account_delete"
+	ReqBankDelete      StaffRequestKind = "bank_details_delete"
+	ReqBankAdd         StaffRequestKind = "bank_details_add"
+	ReqEventTakedown   StaffRequestKind = "event_takedown"
+	ReqRoleChange      StaffRequestKind = "role_change"
+	ReqCredentialReset StaffRequestKind = "credential_reset"
+	ReqAccountDelete   StaffRequestKind = "account_delete"
+	// ReqEventEdit carries a FIELD DIFF, not a whole event. An editor proposes
+	// changes, an admin sees exactly which fields move and to what, and
+	// approving applies only those fields.
+	ReqEventEdit StaffRequestKind = "event_edit"
 )
+
+// MasterApproverKinds are the request kinds a plain admin may ASK for but not
+// APPROVE — those need a master admin.
+//
+// Bank details are the one thing in the product that redirects money to an
+// account of the requester's choosing. If the same rank can both file and
+// approve that change, the four-eyes rule is decorative: any single admin
+// account, or anyone who steals one, completes the whole chain alone. Pushing
+// approval up to the master-admin tier means redirecting payouts needs two
+// people who are not the same kind of person.
+var MasterApproverKinds = map[StaffRequestKind]bool{
+	ReqBankAdd:    true,
+	ReqBankDelete: true,
+}
+
+// RequiresMasterApproval reports whether this kind needs a master admin to sign
+// off, rather than any admin.
+func RequiresMasterApproval(k StaffRequestKind) bool {
+	return MasterApproverKinds[k]
+}
 
 // RequestPolicy is how much friction a given action carries.
 type RequestPolicy struct {
@@ -263,5 +295,16 @@ var RequestPolicies = map[StaffRequestKind]RequestPolicy{
 		SubjectMustConfirm: true,
 		CoolingOffMinutes:  24 * 60,
 		Description: "Permanently anonymises this account. Cannot be undone.",
+	},
+	// No subject confirmation and no cooling-off: the organiser is usually the
+	// reason the edit is needed, and an admin reading the diff IS the control.
+	// Adding an OTP round-trip to fix a typo in a venue name would push staff
+	// to ask an admin to make the change by hand, which loses the diff and the
+	// audit trail — friction that defeats the control it was meant to add.
+	ReqEventEdit: {
+		SubjectMustConfirm: false,
+		CoolingOffMinutes:  0,
+		Description: "Changes a live event's details. Ticket holders have " +
+			"already bought against the current terms.",
 	},
 }

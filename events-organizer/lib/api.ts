@@ -1,8 +1,43 @@
 import axios from 'axios';
 
+// ── baseURL must be set, and we say so loudly if it is not ──────────────────
+//
+// NEXT_PUBLIC_API_URL is only ever supplied as a Docker BUILD ARG (Dockerfile
+// line 23), so it is present in every deployed environment and absent in every
+// local one unless a .env.local exists. When it is missing, axios silently
+// falls back to resolving paths against the page origin — /organiser/kyc
+// becomes http://localhost:3000/organiser/kyc — and the failure surfaces
+// several layers away as a dashboard that never stops loading.
+//
+// A console error at startup turns twenty minutes of spinner into one line.
+if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_API_URL) {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[api] NEXT_PUBLIC_API_URL is not set. Every API call will hit the Next ' +
+    'dev server instead of the backend. Create .env.local with:\n' +
+    '  NEXT_PUBLIC_API_URL=http://127.0.0.1:8080/v1',
+  );
+}
+
 export const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
   withCredentials: true,
+
+  // ── A timeout, because axios has none by default ───────────────────────
+  //
+  // axios defaults to timeout: 0, meaning wait forever. Any request that
+  // stalls — wrong host, API down, a connection dropped rather than refused —
+  // leaves its promise unsettled for the life of the page.
+  //
+  // That is not merely slow, it is a permanent UI state: the dashboard layout
+  // gates rendering on `kycChecked`, which is only set in getKycStatus()'s
+  // .then or .catch. Neither runs if the promise never settles, so the
+  // spinner is forever and no error is ever logged.
+  //
+  // 20s is long enough for a cold Go container plus a slow mobile connection,
+  // and short enough that a person notices something is wrong rather than
+  // assuming the app is thinking.
+  timeout: 20_000,
 });
 
 api.interceptors.request.use((config) => {

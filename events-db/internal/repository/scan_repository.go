@@ -234,6 +234,11 @@ func IngestScans(
 	return out, nil
 }
 
+// bookingStatusConfirmed mirrors models.BookingConfirmed. Kept as a local
+// literal so this file does not take a dependency on the models package;
+// the value is fixed by the booking_status enum in migration 000001.
+const bookingStatusConfirmed = "confirmed"
+
 func ingestOne(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -265,24 +270,40 @@ func ingestOne(
 		rawRef    string
 	)
 	isPool := sc.Kind == "pool"
+
+	// bookingConfirmed is resolved from the DB, never from the device.
+	//
+	// BuildManifest ships booking_status = 'confirmed' to the scanner as a
+	// boolean and lets it gate locally, but a device runs on a manifest
+	// snapshot: a booking cancelled or refunded after its last sync still
+	// looks valid on that handset. Without this the server accepted the
+	// device's verdict and recorded an 'admitted' scan against a refunded
+	// ticket. Migration 000051 states the intent plainly -- verdict is
+	// "SERVER-decided, not the device's claim" -- so re-check it here.
+	bookingConfirmed := false
+
 	if isPool {
 		rawRef = sc.BookingID
-		var one int
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM bookings WHERE id = $1 AND event_id = $2`,
-			sc.BookingID, eventID).Scan(&one); err == nil {
+		var status string
+		if err := tx.QueryRow(ctx,
+			`SELECT booking_status::text FROM bookings WHERE id = $1 AND event_id = $2`,
+			sc.BookingID, eventID).Scan(&status); err == nil {
 			bookingID = &sc.BookingID
+			bookingConfirmed = status == bookingStatusConfirmed
 		}
 	} else {
 		rawRef = sc.AssignmentID
-		var bID string
+		var bID, status string
 		err := tx.QueryRow(ctx, `
-			SELECT ta.booking_id FROM ticket_assignments ta
+			SELECT ta.booking_id, b.booking_status::text
+			FROM ticket_assignments ta
 			JOIN bookings b ON b.id = ta.booking_id
 			WHERE ta.id = $1 AND b.event_id = $2
-		`, sc.AssignmentID, eventID).Scan(&bID)
+		`, sc.AssignmentID, eventID).Scan(&bID, &status)
 		if err == nil {
 			assignID = &sc.AssignmentID
 			bookingID = &bID
+			bookingConfirmed = status == bookingStatusConfirmed
 		}
 	}
 
@@ -316,6 +337,13 @@ func ingestOne(
 	outcome := &ScanOutcome{ID: sc.ID}
 
 	switch {
+	case bookingID != nil && !bookingConfirmed:
+		// Resolved to a real booking that is cancelled, refunded, or still
+		// pending. Record the attempt and admit nothing. 'rejected' is a
+		// terminal verdict, so the device will not retry it, and the row stays
+		// in the ledger for the organiser's exceptions report.
+		outcome.Verdict = "rejected"
+
 	case !isPool && assignID != nil:
 		// Individual: apply iff still unscanned — the same atomic guard the
 		// online scan path uses, now fed from the ledger.

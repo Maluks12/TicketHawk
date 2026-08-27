@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ── Profile editing ──────────────────────────────────────────────────────────
@@ -57,8 +56,11 @@ type UpdateProfileRequest struct {
 	LastName    *string `json:"last_name"`
 	PhoneNumber *string `json:"phone_number"`
 	Email       *string `json:"email"`
-	// CurrentPassword is required only when Email is present. See the note above.
+	// CurrentPassword is required only when Email is present. See the note
+	// above. Social-only accounts have no password, so ReauthCredentials also
+	// accepts a fresh Google/Apple token as equivalent proof.
 	CurrentPassword *string `json:"current_password"`
+	ReauthCredentials
 }
 
 // UpdateMyProfileHandler updates the authenticated user's own profile.
@@ -70,7 +72,7 @@ type UpdateProfileRequest struct {
 //
 // emailService may be nil (tests, or a deployment with email disabled); the
 // change-notification below is skipped rather than panicking in that case.
-func UpdateMyProfileHandler(pool *pgxpool.Pool, emailService *services.EmailService) gin.HandlerFunc {
+func UpdateMyProfileHandler(pool *pgxpool.Pool, emailService *services.EmailService, verifier *services.OIDCVerifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(string)
 
@@ -125,29 +127,17 @@ func UpdateMyProfileHandler(pool *pgxpool.Pool, emailService *services.EmailServ
 
 			// Re-authenticate. A valid access token is not sufficient authority
 			// to change the login identifier.
-			if req.CurrentPassword == nil || *req.CurrentPassword == "" {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "Enter your current password to change your email address",
-					"code":  "password_required",
-				})
-				return
+			//
+			// Accepts a password OR a fresh provider token: an account created
+			// through Google or Apple has no password, and demanding one meant
+			// those users could never correct their email address.
+			creds := req.ReauthCredentials
+			if creds.Password == "" && req.CurrentPassword != nil {
+				// Back-compat: the existing clients send current_password.
+				creds.Password = *req.CurrentPassword
 			}
-			hash, err := repository.GetPasswordHash(pool, c.Request.Context(), userID)
-			if err != nil {
-				if errors.Is(err, repository.ErrUserNotFound) {
-					c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-					return
-				}
-				utils.InternalError(c, err, "verifying password")
-				return
-			}
-			if bcrypt.CompareHashAndPassword([]byte(hash), []byte(*req.CurrentPassword)) != nil {
-				// 401 rather than 403: the credential supplied was wrong, which
-				// is what the client needs to distinguish from "not allowed".
-				c.JSON(http.StatusUnauthorized, gin.H{
-					"error": "That password is incorrect",
-					"code":  "password_incorrect",
-				})
+			if err := Reauthenticate(pool, verifier, c, userID, creds); err != nil {
+				AbortWithReauthError(c, err)
 				return
 			}
 

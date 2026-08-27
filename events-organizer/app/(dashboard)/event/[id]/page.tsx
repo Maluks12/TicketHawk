@@ -1,13 +1,19 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import TicketTiersPanel from '../../../../components/TicketTiersPanel';
+import EventInfoEditor from '../../../../components/eventInfoEditor';
+import LineupBuilder from '../../../../components/lineupBuilder';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
-type Tab = 'overview' | 'bookings' | 'merch' | 'scan';
+// 'preview' is gone. The framed preview loaded the public event page in an
+// iframe, and it never worked reliably — see the note in the manifest. An
+// organiser can open their own event on the site directly, which is the same
+// page without a component in between that can lie about it.
+type Tab = 'overview' | 'info' | 'lineup' | 'bookings' | 'merch' | 'scan';
 
 // Launch gate: merch is built but NOT launching — the tab and its section
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
@@ -73,10 +79,23 @@ interface EventStats {
   total_refunded?: number;
 }
 
+// Mirrors repository.OrganizerBookingRow in the backend. The previous shape
+// (`user` object + `total_amount`) never existed on the wire, so every row
+// fell through to "Guest" with a blank amount.
+//
+// Attendee email is deliberately absent: the backend tags it `json:"-"`
+// because it is attendee PII that organisers are not given access to.
 interface Booking {
   id: string; booking_number: string; booking_status: string;
-  created_at: string; total_amount: number; currency: string;
-  user?: { email: string; first_name: string; last_name: string };
+  created_at: string;
+  ticket_quantity: number;
+  unit_price: number;
+  subtotal: number;
+  platform_fee: number;
+  net_earning: number;
+  currency: string;
+  is_guest: boolean;
+  attendee_name: string;
 }
 
 interface MerchItem {
@@ -89,7 +108,23 @@ export default function EventDetailPage() {
   const router = useRouter();
   const toast = useToast();
 
-  const [tab, setTab] = useState<Tab>('overview');
+  // ── Opening tab comes from the URL ─────────────────────────────────────
+  //
+  // The create wizard finishes at /event/<id>?tab=info&created=1 so a brand new
+  // event lands on its Information block rather than on Overview, where the
+  // Information and Line-up tabs are easy to miss entirely.
+  //
+  // Validated against the known set rather than cast: ?tab=nonsense should show
+  // Overview, not an empty pane.
+  const search = useSearchParams();
+  const initialTab: Tab = (() => {
+    const t = search.get('tab');
+    return (['overview', 'info', 'lineup', 'bookings'] as const)
+      .includes(t as never) ? (t as Tab) : 'overview';
+  })();
+  const justCreated = search.get('created') === '1';
+
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [stats, setStats] = useState<EventStats | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [merch, setMerch] = useState<MerchItem[]>([]);
@@ -255,6 +290,11 @@ export default function EventDetailPage() {
       <div className="tab-bar">
         {([
           { id: 'overview' as Tab, label: 'Overview' },
+          // Content tabs sit next to Overview, before Bookings: they are what
+          // an organiser edits while preparing an event, and Bookings is what
+          // they watch after it is live.
+          { id: 'info' as Tab, label: 'Information' },
+          { id: 'lineup' as Tab, label: 'Line-up' },
           { id: 'bookings' as Tab, label: `Bookings (${stats.total_bookings})` },
           ...(MERCH_ENABLED ? [{ id: 'merch' as Tab, label: 'Merch' }] : []),
         ]).map(t => (
@@ -264,27 +304,45 @@ export default function EventDetailPage() {
           </button>
         ))}
 
-        {/* Scan Tickets — opens full-screen scanner */}
-        <Link
-          href={`/event/${id}/scan`}
-          style={{
-            marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '7px 14px', borderRadius: 6,
-            background: 'var(--accent)', color: '#fff',
-            fontSize: 13, fontWeight: 700, textDecoration: 'none',
-            alignSelf: 'center',
-          }}
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
-            <path fillRule="evenodd" d="M3 4a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm2 2V5h1v1H5zM3 13a1 1 0 011-1h3a1 1 0 011 1v3a1 1 0 01-1 1H4a1 1 0 01-1-1v-3zm2 2v-1h1v1H5zM13 3a1 1 0 00-1 1v3a1 1 0 001 1h3a1 1 0 001-1V4a1 1 0 00-1-1h-3zm1 2v1h1V5h-1z" clipRule="evenodd"/>
-            <path d="M11 4a1 1 0 10-2 0v1a1 1 0 002 0V4zM10 7a1 1 0 011 1v1h2a1 1 0 110 2h-3a1 1 0 01-1-1V8a1 1 0 011-1zM16 9a1 1 0 100 2 1 1 0 000-2zM9 13a1 1 0 011-1h1a1 1 0 110 2v2a1 1 0 11-2 0v-3zM7 11a1 1 0 100-2H4a1 1 0 100 2h3zM17 13a1 1 0 01-1 1h-2a1 1 0 110-2h2a1 1 0 011 1zM16 17a1 1 0 100-2h-3a1 1 0 100 2h3z"/>
-          </svg>
-          Scan Tickets
-        </Link>
+        {/* Scan Tickets removed. Door scanning happens in the EventsStudio
+            app, not here: the app holds the offline manifest, the scanner
+            credential and the local scan ledger, so a browser tab could only
+            ever scan while online — the one condition a door cannot rely on.
+            Offering it here implied a parity that does not exist.
+
+            The /event/[id]/scan route still exists and still works if opened
+            directly; only the entry point is gone. Delete the route too when
+            you are ready to drop the web scanner entirely. */}
       </div>
 
       {/* ── Tab content ──────────────────────────────────────────────── */}
       <div className="page-content">
+
+        {tab === 'info' && (
+          <div className="card"><div className="card-body">
+            {justCreated && (
+              <div className="alert alert-success" style={{ marginBottom: 18 }}>
+                <div>
+                  <strong>Event created.</strong> It is a draft pending review.
+                  While you wait, fill in the information attendees ask about
+                  and add your line-up — both are tabs above, and both can be
+                  changed later.
+                </div>
+              </div>
+            )}
+            <EventInfoEditor eventId={id} />
+          </div></div>
+        )}
+
+        {tab === 'lineup' && (
+          <div className="card"><div className="card-body">
+            <LineupBuilder
+              eventId={id}
+              eventStart={ev.start_time}
+              isSport={ev.category?.toLowerCase() === 'sports'}
+            />
+          </div></div>
+        )}
 
         {tab === 'overview' && (
           <div>
@@ -577,19 +635,30 @@ export default function EventDetailPage() {
                     <tr key={b.id}>
                       <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{b.booking_number}</td>
                       <td>
-                        {b.user ? (
+                        {b.attendee_name && b.attendee_name !== 'Guest' ? (
                           <div>
-                            <div style={{ fontWeight: 600 }}>{b.user.first_name} {b.user.last_name}</div>
-                            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{b.user.email}</div>
+                            <div style={{ fontWeight: 600 }}>{b.attendee_name}</div>
+                            {b.is_guest && (
+                              <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Guest checkout</div>
+                            )}
                           </div>
-                        ) : <span style={{ color: 'var(--text-3)' }}>Guest</span>}
+                        ) : (
+                          <span style={{ color: 'var(--text-3)' }}>Guest</span>
+                        )}
                       </td>
                       <td>
                         <span className={`badge badge-${b.booking_status === 'confirmed' ? 'active' : b.booking_status === 'cancelled' ? 'cancelled' : 'pending'}`}>
                           {b.booking_status.charAt(0).toUpperCase() + b.booking_status.slice(1)}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 600 }}>{fmtMoney(b.total_amount, b.currency)}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        {fmtMoney(b.subtotal, b.currency)}
+                        {b.ticket_quantity > 1 && (
+                          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-3)' }}>
+                            {b.ticket_quantity} x {fmtMoney(b.unit_price, b.currency)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ color: 'var(--text-2)', fontSize: 13 }}>{fmtDateTime(b.created_at)}</td>
                     </tr>
                   ))}

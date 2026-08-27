@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"events-db/internal/repository"
+	"events-db/internal/services"
 	"events-db/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +38,12 @@ type DeleteAccountRequest struct {
 	// to changing the email address in UpdateMyProfileHandler. Someone holding a
 	// stolen token should not be able to erase the victim's account (and with it
 	// their ability to reach their own tickets) in a single request.
-	Password string `json:"password" binding:"required"`
+	// Embedded so a social-only account can prove identity with a fresh
+	// provider token instead. NOT `binding:"required"` any more: an account
+	// created through Google or Apple has no password to send, and requiring
+	// one made deletion impossible for those users — an App Store Guideline
+	// 5.1.1(v) failure, since deletion must be available to every account.
+	ReauthCredentials
 
 	// AcknowledgeForfeit must be true when the account holds confirmed tickets
 	// for events that have not happened yet. The first call returns 409 with the
@@ -90,34 +95,26 @@ func GetAccountDeletionPreviewHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	401 — wrong password
 //	409 organiser_hold        — cannot proceed; live events or unsettled payouts
 //	409 tickets_will_be_lost  — retry with acknowledge_forfeit: true
-func DeleteMyAccountHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func DeleteMyAccountHandler(pool *pgxpool.Pool, verifier *services.OIDCVerifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(string)
 
 		var req DeleteAccountRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Enter your password to delete your account",
-				"code":  "password_required",
+				"error": "Confirm your identity to delete your account",
+				"code":  "reauth_required",
 			})
 			return
 		}
 
 		// ── Re-authenticate ──────────────────────────────────────────────────
-		hash, err := repository.GetPasswordHash(pool, c.Request.Context(), userID)
-		if err != nil {
-			if errors.Is(err, repository.ErrUserNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-				return
-			}
-			utils.InternalError(c, err, "verifying password")
-			return
-		}
-		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "That password is incorrect",
-				"code":  "password_incorrect",
-			})
+		// Password for password accounts, a fresh Google/Apple token for social
+		// ones. Deleting an account destroys tickets the user has paid for, so
+		// a valid access token alone is deliberately not enough — a stolen
+		// unlocked phone must not be able to do this.
+		if err := Reauthenticate(pool, verifier, c, userID, req.ReauthCredentials); err != nil {
+			AbortWithReauthError(c, err)
 			return
 		}
 

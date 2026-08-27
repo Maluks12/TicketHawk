@@ -181,7 +181,12 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Two-column lower section ─────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        {/* marginTop separates the stats band from Recent events / Quick
+            actions. .page-content is plain block flow with no row gap, so the
+            spacing has to live here. Not set on .metric-row itself, because
+            that class has a `+ .metric-row { margin-top: -1px }` rule for
+            stacking two bands into one seam — a bottom margin would split it. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 28 }}>
 
           {/* Recent Events */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>

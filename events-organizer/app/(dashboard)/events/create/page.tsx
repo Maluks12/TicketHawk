@@ -1,9 +1,9 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Article, CalendarBlank, MapPin, Ticket, Tag, ImageSquare,
-  MagicWand, Vault, MaskHappy, Confetti,
+  Confetti,
   Trash, Plus, X, Check, CheckCircle, Circle, PencilSimple,
   FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck, EyeSlash,
   type Icon as PhosphorIcon,
@@ -16,6 +16,12 @@ import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete
 import DateTimePicker from '@/components/dateTimePicker';
 import TicketTypeModal from '@/components/ticketTypeModal';
 import Select from '@/components/select';
+import LineupFields from '@/components/lineupFields';
+import EventInfoFields from '@/components/eventInfoFields';
+import {
+  getInfoCatalogue, replaceEventInfo, replaceEventLineup,
+  type InfoCatalogueEntry, type LineupEntry,
+} from '../../../../lib/eventContent';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI-ONLY REWRITE
@@ -42,8 +48,14 @@ import Select from '@/components/select';
 export const DRAFT_KEY = 'org_event_draft';
 
 interface TicketTypeRow {
+  // id is present only for tiers loaded from an existing event. A row without
+  // one is new, which is how the backend tells "update this tier" apart from
+  // "create this tier".
+  id?: string;
   name: string; price: number; capacity: string;
   sort_order: number; description: string; is_visible: boolean;
+  // Sold + reserved on an existing tier: capacity may not be set below this.
+  min_capacity?: number;
 }
 
 interface EventDraft {
@@ -60,10 +72,14 @@ interface EventDraft {
   latitude?: number | null; longitude?: number | null;
   venueType: 'auto' | 'stadium' | 'auditorium' | 'none';
   tags: string[]; performers: string[]; teams: string[];
+  // Optional: drafts saved before line-up and information existed will not have
+  // them, and restoring one of those must not throw.
+  lineup?: LineupEntry[];
+  infoChosen?: string[];
+  infoValues?: Record<string, string>;
   ticketTypes: TicketTypeRow[];
   // Retained in the draft shape even though the form no longer shows them, so
   // a draft saved by the previous version still round-trips without throwing.
-  refundPolicy: string; termsAndConditions: string;
   coverImageUrl: string | null; bannerImageUrl: string | null;
 }
 
@@ -410,13 +426,110 @@ function FormCard({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+// LockedFieldset greys out and disables everything inside it when a field is
+// frozen. A native <fieldset disabled> is used rather than adding `disabled` to
+// each input because it covers every control in the subtree — including the
+// ones inside PlacesAutocomplete and the tier builder — and cannot be missed
+// when a new field is added later.
+//
+// The fields stay VISIBLE. An organiser needs to see the venue and date they
+// committed to; hiding them would read as data loss rather than a restriction.
+function LockedFieldset({
+  locked, note, children,
+}: { locked: boolean; note?: string; children: React.ReactNode }) {
+  return (
+    <fieldset
+      disabled={locked}
+      style={{
+        border: 'none', padding: 0, margin: 0, minWidth: 0,
+        opacity: locked ? 0.55 : 1,
+        cursor: locked ? 'not-allowed' : undefined,
+      }}>
+      {locked && note && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 7,
+          fontSize: 12, color: 'var(--text-3)', marginBottom: 10,
+        }}>
+          <LockKey size={14} weight="fill" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>{note}</span>
+        </div>
+      )}
+      {children}
+    </fieldset>
+  );
+}
+
 export default function CreateEventPage() {
   const router  = useRouter();
   const toast   = useToast();
 
+  // ── Edit mode ───────────────────────────────────────────────────────────
+  //
+  // The page doubles as the editor for an existing event, entered via
+  // /events/create?edit=<id>.
+  //
+  //   mode 'create'    — blank form, posts to /organiser/events/create
+  //   mode 'draft'     — hydrated, saves straight to PUT /organiser/events/:id
+  //   mode 'published' — hydrated, files an edit request for admin review;
+  //                      fields that cannot change are visibly locked
+  //
+  // The id is read from window.location rather than useSearchParams because
+  // useSearchParams forces the route into a Suspense boundary at build time;
+  // this page is already client-only, so reading location in an effect keeps
+  // the change local instead of restructuring the route.
+  const [editId,          setEditId]          = useState<string | null>(null);
+  const [mode,            setMode]            = useState<'create' | 'draft' | 'published'>('create');
+  const [hydrating,       setHydrating]       = useState(false);
+  const [editableFields,  setEditableFields]  = useState<Set<string>>(new Set());
+  const [editReason,      setEditReason]      = useState('');
+  // Start date is pinned on a published event — only the clock time may move.
+  // Kept so submit can prove the date is unchanged before sending.
+  const [originalStartDate, setOriginalStartDate] = useState<string | null>(null);
+
+  // locked() answers "is this field frozen right now?" — false in create and
+  // draft mode, true on a published event unless the backend listed the field
+  // as editable. The list comes FROM the API so the two cannot drift apart.
+  const locked = useCallback((field: string) => {
+    if (mode !== 'published') return false;
+    return !editableFields.has(field);
+  }, [mode, editableFields]);
+
   const [categories, setCategories]   = useState<{ id: number; name: string; slug: string }[]>([]);
   const [submitting, setSubmitting]   = useState(false);
   const [pendingDraft, setPendingDraft] = useState<EventDraft | null>(null);
+
+  // ── Why a ref and not state ─────────────────────────────────────────────
+  //
+  // Once an event has been created, this form must never write its draft
+  // again. The autosave already guards on `submitting`, but that is not
+  // enough: the finally block sets submitting back to false, and because
+  // router.push does not unmount the page synchronously, the debounced
+  // autosave then fires ~800ms later with the form still fully populated and
+  // rewrites the draft that was just deleted.
+  //
+  // That is the "Unsaved draft — saved just now" banner on My Events after a
+  // successful create, and it is worse than untidy: Resume draft reloads a
+  // form for an event that already exists, so submitting it again creates a
+  // duplicate.
+  //
+  // A ref, not state, because the guard must be visible to the already-
+  // scheduled effect closure without triggering another render.
+  const submittedRef = useRef(false);
+
+  // Local 'YYYY-MM-DDTHH:mm' for right now, used as the floor on every date
+  // field. Local rather than ISO because DateTimePicker parses it as wall-clock
+  // time — an ISO string would shift the boundary by the UTC offset and, in
+  // SAST, make the first two hours of today unselectable.
+  //
+  // useState with an initialiser rather than useMemo: this must be stable for
+  // the life of the form. A value that advances while somebody is filling it in
+  // could invalidate a start time they already chose.
+  const [nowLocal] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
 
   // ── Text fields ───────────────────────────────────────────────────────────
@@ -451,13 +564,66 @@ export default function CreateEventPage() {
   const [latitude,            setLatitude]            = useState<number | null>(null);
   const [longitude,           setLongitude]           = useState<number | null>(null);
   const [placeLabel,          setPlaceLabel]          = useState('');
-  const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('auto');
+  // Fixed at 'none' while seating maps are disabled; see the note in the
+  // Location card where the picker used to be.
+  const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('none');
   const [tags,                setTags]                = useState<string[]>([]);
+
+  // ── Line-up and information, held locally until the event exists ─────────
+  //
+  // Neither can be saved during creation: both are keyed on an event id, and
+  // the event does not exist until this form is submitted. So they are
+  // collected here and written straight after the create call succeeds.
+  //
+  // That is a follow-up request rather than part of the create payload,
+  // because CreateEventDTO has no line-up or information fields — adding them
+  // would mean a migration to the DTO, the handler and the repository to save
+  // one round-trip on a form somebody fills in once.
+  const [lineup,     setLineup]     = useState<LineupEntry[]>([]);
+  const [infoChosen, setInfoChosen] = useState<string[]>([]);
+  const [infoValues, setInfoValues] = useState<Record<string, string>>({});
+  const [infoCatalogue, setInfoCatalogue] = useState<InfoCatalogueEntry[]>([]);
   const [performers,          setPerformers]          = useState<string[]>([]);
   const [teams,               setTeams]               = useState<string[]>([]);
   const [ticketTypes,         setTicketTypes]         = useState<TicketTypeRow[]>([]);
-  const [refundPolicy,        setRefundPolicy]        = useState('');
-  const [termsAndConditions,  setTermsAndConditions]  = useState('');
+
+  // Mirrors what the backend stores: events.price follows the cheapest VISIBLE
+  // tier, so the locked field shows the real number rather than the stale one
+  // typed before any tier was added.
+  //
+  // Declared here, after both `price` and `ticketTypes` — a const referencing
+  // either before its useState line is a temporal dead zone error that throws
+  // on every render, not a lint warning.
+  //
+  // The visible filter can empty the array (every tier staged hidden), and
+  // Math.min() of nothing is Infinity, so fall back to the typed price.
+  const visibleTierPrices = ticketTypes.filter(t => t.is_visible).map(t => t.price);
+  const lowestTierPrice = visibleTierPrices.length
+    ? String(Math.min(...visibleTierPrices))
+    : price;
+
+  // The price the event is ACTUALLY sold at, and the single source of truth for
+  // the payload, the checklist and the locked field alike.
+  //
+  // Locking the base-price input stopped `price` being typed into, but the
+  // submit payload and the readiness checklist both still read that raw state.
+  // The result was an event that displayed R110 on screen and was created at
+  // R0, with "Set ticket pricing" stuck unticked because nothing had been typed
+  // into a field the organiser was no longer allowed to type into.
+  const effectivePrice = ticketTypes.length > 0 ? lowestTierPrice : price;
+  // ── refundPolicy / termsAndConditions removed ───────────────────────────
+  //
+  // Both were write-only: state that was submitted but never rendered by any
+  // field on this form, so every event created here sent them as null anyway.
+  //
+  // More to the point, a per-event refund policy was never real. Refunds are
+  // decided entirely by the sliding scale in the backend's
+  // models/refund_policy.go — 100% at 30+ days, down to nothing inside 7 —
+  // and that code never reads events.refund_policy. Anything an organiser
+  // typed was display prose that the actual refund would contradict.
+  //
+  // Terms are platform-wide for the same reason: they are the terms of the
+  // sale we process, not of the organiser's event.
 
   // ── Image state ───────────────────────────────────────────────────────────
   const [coverImageUrl,   setCoverImageUrl]   = useState<string | null>(null);
@@ -474,6 +640,10 @@ export default function CreateEventPage() {
 
   // ── Check for saved draft on mount ────────────────────────────────────────
   useEffect(() => {
+    // Never offer the local scratch draft while editing a saved event — it
+    // belongs to an unfinished CREATE and would silently overwrite the real
+    // record's fields with someone's abandoned draft.
+    if (typeof window !== 'undefined' && window.location.search.includes('edit=')) return;
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (!raw) return;
@@ -482,9 +652,97 @@ export default function CreateEventPage() {
     } catch { /* corrupt data — ignore */ }
   }, []);
 
+  // ── Hydrate from an existing event when ?edit=<id> is present ─────────────
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const id = new URLSearchParams(window.location.search).get('edit');
+    if (!id) return;
+    setEditId(id);
+    setHydrating(true);
+
+    (async () => {
+      try {
+        const res = await api.get(`/organiser/events/${id}/edit`);
+        const ev = res.data.event;
+        const tiers = res.data.ticket_types ?? [];
+
+        setMode(res.data.requires_review ? 'published' : 'draft');
+        const fields: string[] = res.data.editable_fields ?? [];
+        setEditableFields(new Set(fields));
+
+        // datetime-local wants 'YYYY-MM-DDTHH:mm' in LOCAL time; an ISO string
+        // sliced naively would shift the displayed time by the UTC offset.
+        const toLocalInput = (iso: string) => {
+          const d = new Date(iso);
+          const pad = (n: number) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+            + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        setTitle(ev.title ?? '');
+        setDescription(ev.description ?? '');
+        setCategoryId(ev.category_id ? String(ev.category_id) : '');
+        setTimezone(ev.timezone ?? 'Africa/Johannesburg');
+        setStartTime(ev.start_time ? toLocalInput(ev.start_time) : '');
+        setEndTime(ev.end_time ? toLocalInput(ev.end_time) : '');
+        // These three were never restored, so opening Edit silently blanked
+        // them — and because the form then submits what it holds, saving wrote
+        // the blanks back over real values. The booking deadline is validated
+        // as required, so the organiser at least saw an error; the refund
+        // policy and terms would have been erased without a word.
+        //
+        // The API did not return them either. Both halves are fixed:
+        // organiser_event_edit_handler.go now selects expires_at,
+        // refund_policy and terms_and_conditions.
+        setExpiresAt(ev.expires_at ? toLocalInput(ev.expires_at) : '');
+        setOriginalStartDate(ev.start_time ? toLocalInput(ev.start_time).slice(0, 10) : null);
+        setIsFree(!ev.price || Number(ev.price) === 0);
+        setPrice(ev.price != null ? String(ev.price) : '0');
+        setCurrency(ev.currency ?? 'ZAR');
+        setMaxCapacity(ev.max_capacity != null ? String(ev.max_capacity) : '');
+        setMaxTicketsPerUser(ev.max_tickets_per_user != null ? String(ev.max_tickets_per_user) : '');
+        setAllowWaitlist(!!ev.allow_waitlist);
+        setVenueName(ev.venue_name ?? '');
+        setAddress(ev.address ?? '');
+        setCity(ev.city ?? '');
+        setPlaceId(ev.place_id ?? '');
+        setLatitude(ev.latitude ?? null);
+        setLongitude(ev.longitude ?? null);
+        setTags(ev.tags ?? []);
+        setPerformers(ev.performers ?? []);
+        setTeams(ev.teams ?? []);
+        setCoverImageUrl(ev.cover_image_url ?? null);
+        setBannerImageUrl(ev.banner_image_url ?? null);
+        setTicketTypes(tiers.map((t: Record<string, unknown>, i: number) => ({
+          ...(t.id ? { id: String(t.id) } : {}),
+          name:        String(t.name ?? ''),
+          description: t.description ? String(t.description) : '',
+          price:       Number(t.price ?? 0),
+          capacity:    t.capacity != null ? String(t.capacity) : '',
+          sort_order:  Number(t.sort_order ?? i),
+          is_visible:  t.is_visible !== false,
+          ...(t.min_capacity != null ? { min_capacity: Number(t.min_capacity) } : {}),
+        })));
+      } catch (e: unknown) {
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        toast(msg ?? 'Could not load this event', 'error');
+        router.push('/events');
+      } finally {
+        setHydrating(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Auto-save draft (debounced 800 ms) ────────────────────────────────────
   useEffect(() => {
     if (submitting) return;
+    // Set on a successful create and never cleared — see submittedRef.
+    if (submittedRef.current) return;
+    // Editing a saved event: the server is the source of truth, so there is
+    // nothing to keep in localStorage and keeping it would resurface these
+    // values the next time someone starts a brand-new event.
+    if (editId) return;
     if (!title && !description && !venueName) return; // nothing worth saving
     const t = setTimeout(() => {
       const draft: EventDraft = {
@@ -492,7 +750,10 @@ export default function CreateEventPage() {
         title, description, categoryId, timezone, startTime, endTime, expiresAt,
         isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
         venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
-        refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl,
+        coverImageUrl, bannerImageUrl,
+        // Included so a refresh mid-form does not lose a line-up somebody has
+        // just typed out — the most tedious part of this page to re-enter.
+        lineup, infoChosen, infoValues,
       };
       try {
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -504,7 +765,16 @@ export default function CreateEventPage() {
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
       isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
       venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
-      refundPolicy, termsAndConditions, coverImageUrl, bannerImageUrl, submitting]);
+      coverImageUrl, bannerImageUrl,
+      lineup, infoChosen, infoValues, submitting]);
+
+  // The information catalogue is server-owned, so it is fetched rather than
+  // hardcoded — an admin retiring a field or adding one takes effect here
+  // without a dashboard deploy. A failure leaves the section empty rather than
+  // blocking event creation, which must not depend on it.
+  useEffect(() => {
+    getInfoCatalogue().then(setInfoCatalogue).catch(() => setInfoCatalogue([]));
+  }, []);
 
   // ── Restore draft ─────────────────────────────────────────────────────────
   function restoreDraft(d: EventDraft) {
@@ -528,13 +798,14 @@ export default function CreateEventPage() {
     setLatitude(typeof d.latitude === 'number' ? d.latitude : null);
     setLongitude(typeof d.longitude === 'number' ? d.longitude : null);
     setPlaceLabel(d.placeLabel ?? '');
-    setVenueType(d.venueType ?? 'auto');
+    setVenueType(d.venueType ?? 'none');
     setTags(d.tags ?? []);
+    setLineup((d as { lineup?: LineupEntry[] }).lineup ?? []);
+    setInfoChosen((d as { infoChosen?: string[] }).infoChosen ?? []);
+    setInfoValues((d as { infoValues?: Record<string, string> }).infoValues ?? {});
     setPerformers(d.performers ?? []);
     setTeams(d.teams ?? []);
     setTicketTypes(d.ticketTypes ?? []);
-    setRefundPolicy(d.refundPolicy ?? '');
-    setTermsAndConditions(d.termsAndConditions ?? '');
     setCoverImageUrl(d.coverImageUrl ?? null);
     setBannerImageUrl(d.bannerImageUrl ?? null);
     setDraftSavedAt(d.savedAt);
@@ -611,6 +882,26 @@ export default function CreateEventPage() {
       toast('Paid and public events need full verification first', 'error');
       router.push('/kyc'); return;
     }
+    // Published-event guards. The backend enforces both of these too; doing it
+    // here as well means the organiser is told before a round-trip.
+    if (mode === 'published') {
+      if (editReason.trim().length < 10) {
+        toast('Add a short reason for the change — an admin has to review it', 'error');
+        return;
+      }
+      if (originalStartDate && startTime.slice(0, 10) !== originalStartDate) {
+        toast('The event date cannot be changed here — only the time of day', 'error');
+        return;
+      }
+    }
+    // Capacity on an existing tier cannot fall below what is already sold.
+    const shrunk = ticketTypes.find(t =>
+      t.min_capacity != null && t.capacity !== '' && parseInt(t.capacity) < t.min_capacity);
+    if (shrunk) {
+      toast(`"${shrunk.name}" already has ${shrunk.min_capacity} tickets sold or held — capacity can't go below that`, 'error');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
@@ -630,14 +921,12 @@ export default function CreateEventPage() {
         start_time:   new Date(startTime).toISOString(),
         end_time:     new Date(endTime).toISOString(),
         expires_at:   new Date(expiresAt).toISOString(),
-        price:        isFree ? 0 : parseFloat(price) || 0,
+        price:        isFree ? 0 : parseFloat(effectivePrice) || 0,
         currency,
         allow_waitlist:       allowWaitlist,
         tags,
         performers,
         teams,
-        refund_policy:        refundPolicy.trim()       || null,
-        terms_and_conditions: termsAndConditions.trim() || null,
         visibility:           eventType === 'public' ? 'public' : 'private_link',
       };
       if (scanWindowMode === 'custom') {
@@ -658,10 +947,122 @@ export default function CreateEventPage() {
         }));
       }
 
-      await api.post('/organiser/events/create', body);
-      localStorage.removeItem(DRAFT_KEY);
-      toast('Event submitted for review', 'success');
-      router.push('/events');
+      if (mode === 'draft' && editId) {
+        // Draft: saved straight through. Tiers go to the existing replace
+        // route, which already refuses to drop a tier that has sales.
+        const { ticket_types, ...eventBody } = body as Record<string, unknown>;
+        await api.put(`/organiser/events/${editId}`, eventBody);
+        if (Array.isArray(ticket_types) && ticket_types.length) {
+          await api.put(`/organiser/events/${editId}/ticket-types`, { types: ticket_types });
+        }
+        toast('Draft saved', 'success');
+        router.push('/events');
+
+      } else if (mode === 'published' && editId) {
+        // Published: nothing is written to the event now. Only the fields the
+        // backend marked editable are sent; it strips anything else anyway,
+        // but filing a diff an admin cannot action just wastes their time.
+        const changes: Record<string, unknown> = {};
+        if (editableFields.has('title'))            changes.title            = title.trim();
+        if (editableFields.has('description'))      changes.description      = description.trim();
+        if (editableFields.has('start_time'))       changes.start_time       = new Date(startTime).toISOString();
+        if (editableFields.has('end_time'))         changes.end_time         = new Date(endTime).toISOString();
+        if (editableFields.has('tags'))             changes.tags             = tags;
+        if (editableFields.has('cover_image_url')  && coverImageUrl)  changes.cover_image_url  = coverImageUrl;
+        if (editableFields.has('banner_image_url') && bannerImageUrl) changes.banner_image_url = bannerImageUrl;
+        if (editableFields.has('ticket_types') && ticketTypes.length) {
+          changes.ticket_types = ticketTypes.filter(t => t.name).map(t => ({
+            ...(t.id ? { id: t.id } : {}),
+            name: t.name, price: t.price, sort_order: t.sort_order, is_visible: t.is_visible,
+            ...(t.capacity    ? { capacity:    parseInt(t.capacity) } : {}),
+            ...(t.description ? { description: t.description }       : {}),
+          }));
+        }
+
+        const res = await api.post(`/organiser/events/${editId}/edit-request`, {
+          reason: editReason.trim(),
+          changes,
+        });
+        toast(res.data?.message ?? 'Sent for review', 'success');
+        router.push('/events');
+
+      } else {
+        // ── Land on the new event, not the list ──────────────────────────
+        //
+        // The wizard deliberately does NOT collect information or line-up.
+        // Both are edit-time by nature: an organiser has a date and a venue
+        // before they have a confirmed line-up, and blocking event creation on
+        // a headliner who has not signed yet would be the wrong trade.
+        //
+        // But dropping them back on /events made those tabs invisible — there
+        // was nothing telling them the event has an Information block or a
+        // Line-up at all. Routing straight to the event's Information tab puts
+        // the next step in front of them instead of hoping they find it.
+        //
+        // The create endpoint returns the full event, so the id is already
+        // here; ?created=1 lets the event page show a first-time prompt.
+        const res = await api.post('/organiser/events/create', body);
+        toast('Event submitted for review', 'success');
+
+        // BEFORE anything that can throw or await. If the line-up write below
+        // fails, the event still exists and its draft must still be gone.
+        submittedRef.current = true;
+        localStorage.removeItem(DRAFT_KEY);
+        setPendingDraft(null);
+
+        const newId = (res.data as { event?: { id?: string } })?.event?.id;
+
+        if (newId) {
+          // ── Line-up and information, written now the event has an id ─────
+          //
+          // Sequential rather than parallel: both hit the same event row and
+          // failing one should not obscure which. Each is caught separately so
+          // a line-up failure does not lose the information block too.
+          //
+          // Neither failure undoes the event. It exists, it is in review, and
+          // both of these are editable on its own page — so the honest
+          // outcome is a warning plus a route to where they can be fixed, not
+          // an error implying nothing was created.
+          const cleanedLineup = lineup
+            .map(l => ({ ...l, name: l.name.trim() }))
+            .filter(l => l.name.length > 0)
+            .map(({ id: _id, ...rest }, i) => ({ ...rest, sort_order: i }));
+
+          if (cleanedLineup.length > 0) {
+            try {
+              await replaceEventLineup(newId, cleanedLineup);
+            } catch {
+              toast('Event created, but the line-up did not save — add it on the event page', 'error');
+            }
+          }
+
+          const infoItems = infoChosen
+            .map(key => ({ key, value: (infoValues[key] ?? '').trim() }))
+            .filter(i => i.value.length > 0);
+
+          if (infoItems.length > 0) {
+            try {
+              await replaceEventInfo(newId, infoItems);
+            } catch {
+              toast('Event created, but the information did not save — add it on the event page', 'error');
+            }
+          }
+
+          // Back to the events list, as expected after creating something.
+          //
+          // This briefly routed to the new event's Information tab instead, on
+          // the reasoning that it put the next step in front of the organiser.
+          // But it is surprising — "create" should land where the thing you
+          // created now lives — and the line-up and information are collected
+          // in this form now anyway, so there is no next step to point at.
+          router.push('/events');
+        } else {
+          // Older API build, or a shape change. The event WAS created, so
+          // falling back to the list is right — failing here would suggest it
+          // was not.
+          router.push('/events');
+        }
+      }
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
         ?? 'Failed to create event';
@@ -677,7 +1078,7 @@ export default function CreateEventPage() {
     { done: !!venueName && !!address && !!city,  label: 'Set venue and city' },
     { done: !!startTime && !!endTime,        label: 'Set start and end times' },
     { done: !!expiresAt,                     label: 'Set a booking deadline' },
-    { done: isFree || parseFloat(price) > 0, label: 'Set ticket pricing' },
+    { done: isFree || parseFloat(effectivePrice) > 0, label: 'Set ticket pricing' },
     { done: !!coverImageUrl,                 label: 'Upload a cover image' },
   ];
 
@@ -703,7 +1104,11 @@ export default function CreateEventPage() {
             }}>
             My Events
           </button>
-          <div className="page-title">Create a new event</div>
+          <div className="page-title">
+            {mode === 'draft'     ? 'Edit draft'
+             : mode === 'published' ? 'Request changes'
+             : 'Create a new event'}
+          </div>
           <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 3 }}>
             {eventType === 'public'
               ? 'Public events are reviewed by an admin before going live.'
@@ -792,19 +1197,34 @@ export default function CreateEventPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Start time <Required /></label>
+                      {/* min={nowLocal} — the picker already disables days
+                          before `min`; it simply was not being given one, so
+                          an event could be created in the past. Computed once
+                          on mount rather than per render, so the calendar does
+                          not re-key itself every keystroke elsewhere in the
+                          form. */}
                       <DateTimePicker value={startTime} onChange={setStartTime}
-                        placeholder="When doors open" style={inp} />
+                        min={nowLocal} placeholder="When doors open" style={inp} />
                     </div>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>End time <Required /></label>
                       {/* min={startTime} stops the "end before start" error being
                           reachable at all, rather than catching it on submit. */}
+                      {/* Falls back to now when no start is chosen yet —
+                          otherwise this field is unconstrained until the user
+                          happens to fill the one before it. */}
                       <DateTimePicker value={endTime} onChange={setEndTime}
-                        min={startTime} placeholder="When it wraps up" style={inp} />
+                        min={startTime || nowLocal} placeholder="When it wraps up" style={inp} />
                     </div>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Booking deadline <Required /></label>
+                      {/* max={endTime}: selling tickets after the event has
+                          finished is never intended, and the deadline is
+                          commonly meant to be the start rather than the end —
+                          but some events do sell at the door, so the end is
+                          the honest ceiling rather than the start. */}
                       <DateTimePicker value={expiresAt} onChange={setExpiresAt}
+                        min={nowLocal} max={endTime || undefined}
                         placeholder="Last moment to buy" style={inp} />
                       <div className="field-hint">Tickets stop selling after this</div>
                     </div>
@@ -855,6 +1275,7 @@ export default function CreateEventPage() {
                 {/* Location */}
                 <FormCard title="Location" icon={MapPin}
                   subtitle="Search to pin the exact venue on a map">
+                  <LockedFieldset locked={locked('venue_name')} note="Venue and city are fixed once an event is live — ticket holders chose to attend at this place. Cancel and re-list to move it.">
                   {/* Search first — picking a suggestion fills the three fields
                       below AND captures place_id + lat/lng, which is what lets the
                       app and website open the exact venue on a map instead of a
@@ -907,50 +1328,20 @@ export default function CreateEventPage() {
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 22 }}>
-                    <label style={{
-                      display: 'block', fontSize: 11, fontWeight: 700,
-                      letterSpacing: '.07em', textTransform: 'uppercase',
-                      color: 'var(--text-3)', marginBottom: 4,
-                    }}>
-                      Venue type
-                    </label>
-                    <div className="field-hint" style={{ marginTop: 0, marginBottom: 10 }}>
-                      Controls which seating map the app shows at checkout
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
-                      {([
-                        { value: 'auto',       Ico: MagicWand, label: 'Auto',          hint: 'Guess from category & name' },
-                        { value: 'stadium',    Ico: Vault,     label: 'Stadium',       hint: 'Stadium section map' },
-                        { value: 'auditorium', Ico: MaskHappy, label: 'Hall / Theatre', hint: 'Auditorium seating map' },
-                        { value: 'none',       Ico: Ticket,    label: 'None',          hint: 'Straight to checkout' },
-                      ] as const).map(o => {
-                        const on = venueType === o.value;
-                        return (
-                          <button key={o.value} type="button" title={o.hint}
-                            onClick={() => setVenueType(o.value)}
-                            style={{
-                              display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-                              gap: 7, padding: '13px 14px', borderRadius: 'var(--r-lg)',
-                              cursor: 'pointer', textAlign: 'left',
-                              border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
-                              background: on ? 'var(--accent-soft)' : 'var(--surface-alpha)',
-                              color: on ? 'var(--accent)' : 'var(--text-2)',
-                              transition: 'all .15s ease',
-                            }}>
-                            <o.Ico size={19} weight={on ? 'fill' : 'regular'} />
-                            <span style={{ fontSize: 13, fontWeight: on ? 700 : 600 }}>{o.label}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.35 }}>{o.hint}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  {/* Venue type picker removed — every event uses 'none'
+                      (straight to checkout) until the stadium / auditorium
+                      seating SVGs are reactivated. `venueType` state stays
+                      'none' and is omitted from the create payload, so the
+                      backend default applies. Restore the picker here to
+                      re-enable seat maps. */}
+
+                  </LockedFieldset>
                 </FormCard>
 
                 {/* Tickets & pricing */}
                 <FormCard title="Tickets & pricing" icon={Ticket}
                   subtitle="Category, price and capacity">
+                  <LockedFieldset locked={locked('price')} note="Category, price and capacity are locked on a live event — people have already paid against these terms. Ticket tiers below can still be changed.">
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Category <Required /></label>
@@ -999,35 +1390,43 @@ export default function CreateEventPage() {
                   </div>
 
                   {!isFree && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 18 }}>
-                      <div className="field" style={{ marginBottom: 0 }}>
-                        <label>Base price <Required /></label>
-                        <div style={{ position: 'relative' }}>
-                          <span style={{
-                            position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
-                            color: 'var(--text-3)', fontWeight: 700, fontSize: 14, pointerEvents: 'none',
-                          }}>R</span>
-                          <input type="number" min="0" step="0.01" value={price}
-                            onChange={e => setPrice(e.target.value)}
-                            style={{ ...inp, paddingLeft: 30 }} />
+                    <div style={{ marginTop: 18 }}>
+                      {/* Base price is SUPERSEDED once a tier exists.
+                          Tiers are the alternative to flat pricing, not an
+                          addition to it: the backend sets events.price from the
+                          tiers and buyers only ever choose between tiers. The
+                          field used to stay editable, so entering R100 here and
+                          then adding a R150 tier looked like two tickets and
+                          produced one — the R100 was silently discarded.
+                          Locking it says so before it happens rather than after. */}
+                      <LockedFieldset
+                        locked={ticketTypes.length > 0}
+                        note={`Base price is set by your ticket tiers. ${ticketTypes.length === 1
+                          ? 'Remove the tier below'
+                          : 'Remove all tiers below'} to price this event with a single flat price instead.`}>
+                        <div className="field" style={{ marginBottom: 0, maxWidth: 320 }}>
+                          <label>Base price <Required /></label>
+                          <div style={{ position: 'relative' }}>
+                            <span style={{
+                              position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
+                              color: 'var(--text-3)', fontWeight: 700, fontSize: 14, pointerEvents: 'none',
+                            }}>R</span>
+                            <input type="number" min="0" step="0.01"
+                              value={effectivePrice}
+                              onChange={e => setPrice(e.target.value)}
+                              style={{ ...inp, paddingLeft: 30 }} />
+                          </div>
+                          {/* Currency selector removed — ZAR only for launch. The
+                              `currency` state below stays fixed at 'ZAR' and is
+                              still sent in the create payload, so re-adding a
+                              picker later needs no backend change. */}
+                          <div className="field-hint">
+                            {ticketTypes.length > 0
+                              ? `Taken from your lowest tier — buyers choose between ${ticketTypes.length} tier${ticketTypes.length === 1 ? '' : 's'} at checkout`
+                              : 'Priced in ZAR (South African Rand)'}
+                          </div>
                         </div>
-                      </div>
-                      <div className="field" style={{ marginBottom: 0 }}>
-                        <label>Currency</label>
-                        <Select
-                          ariaLabel="Currency"
-                          value={currency}
-                          onChange={setCurrency}
-                          options={[
-                            { value: 'ZAR', label: 'ZAR — South African Rand' },
-                            { value: 'USD', label: 'USD — US Dollar' },
-                            { value: 'EUR', label: 'EUR — Euro' },
-                            { value: 'GBP', label: 'GBP — British Pound' },
-                            { value: 'KES', label: 'KES — Kenyan Shilling' },
-                            { value: 'NGN', label: 'NGN — Nigerian Naira' },
-                          ]}
-                        />
-                      </div>
+                      </LockedFieldset>
                     </div>
                   )}
 
@@ -1051,6 +1450,8 @@ export default function CreateEventPage() {
                     </label>
                   </div>
 
+                  </LockedFieldset>
+
                   <div style={{ marginTop: 26 }}>
                     <div className="section-sep" style={{ marginTop: 0 }}>Ticket types</div>
                     <TicketTypeBuilder rows={ticketTypes} onChange={setTicketTypes} />
@@ -1058,22 +1459,90 @@ export default function CreateEventPage() {
                 </FormCard>
 
                 {/* Tags & people */}
-                <FormCard title="Tags & people" icon={Tag}
-                  subtitle="Helps the right people find your event">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                {/* Review reason — published edits only. staff_requests
+                    rejects a blank reason at the DB level, and an approver
+                    reading a diff with no stated purpose has nothing to
+                    evaluate. */}
+                {mode === 'published' && (
+                  <FormCard title="Reason for this change" icon={NotePencil}
+                    subtitle="An admin reads this alongside your changes">
                     <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Tags</label>
-                      <TagInput tags={tags} onChange={setTags} />
+                      <textarea
+                        value={editReason}
+                        onChange={e => setEditReason(e.target.value)}
+                        rows={3}
+                        placeholder="e.g. Doors now open 30 minutes later at the venue's request"
+                        style={{ ...inp, resize: 'vertical', minHeight: 78 }} />
+                      <div className="field-hint">
+                        {editReason.trim().length < 10
+                          ? `${10 - editReason.trim().length} more characters needed`
+                          : 'Your event stays live and on sale while this is reviewed.'}
+                      </div>
                     </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Performers</label>
-                      <TagInput tags={performers} onChange={setPerformers} />
-                    </div>
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Teams</label>
-                      <TagInput tags={teams} onChange={setTeams} />
+                  </FormCard>
+                )}
+
+                {/* ── Search keywords ──────────────────────────────────────
+                    Renamed from "Tags & people", and PERFORMERS / TEAMS are
+                    gone from here.
+
+                    Tags were never shown on the event page — the
+                    events_search_trigger in migration 000004 folds them into
+                    search_vector at weight B, the same weight as the
+                    description. They are invisible search keywords, and
+                    labelling them "Tags" beside two fields that DO render made
+                    organisers think they appeared on the page.
+
+                    Performers and teams moved to the Line-up tab on the event
+                    itself, where each act gets a photo, a stage, a set time
+                    and a link. Leaving the flat text versions here would mean
+                    two places to edit the same thing, silently disagreeing —
+                    the backend writes both from the line-up rows now. */}
+                <FormCard title="Search keywords" icon={Tag}
+                  subtitle="Helps people find your event — not shown on the page">
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Keywords</label>
+                    <TagInput tags={tags} onChange={setTags} />
+                    <div className="field-hint">
+                      Words someone might type when looking for an event like
+                      yours — a genre, a vibe, a neighbourhood. These are
+                      matched by search but never displayed, so there is no
+                      cost to being generous.
                     </div>
                   </div>
+                </FormCard>
+
+                {/* ── Line-up ──────────────────────────────────────────────
+                    In the wizard, not edit-only.
+
+                    My first pass left this to the event page on the reasoning
+                    that an organiser has a date and a venue before a confirmed
+                    headliner. That is true, and it is still optional here —
+                    but it made the line-up invisible at the moment somebody is
+                    actually thinking about their event, which is worse than
+                    asking for something they can skip. */}
+                <FormCard title="Line-up" icon={Tag}
+                  subtitle="Who is playing — optional, and editable any time">
+                  <LineupFields
+                    entries={lineup}
+                    onChange={setLineup}
+                    eventStart={startTime || undefined}
+                    isSport={false}
+                  />
+                </FormCard>
+
+                {/* ── Information ──────────────────────────────────────────
+                    Parking, age limits, what to bring. Fields left blank get
+                    no row at all, so the event page cannot end up showing a
+                    heading with nothing under it. */}
+                <FormCard title="Information" icon={Info}
+                  subtitle="The questions attendees ask before buying">
+                  <EventInfoFields
+                    catalogue={infoCatalogue}
+                    chosen={infoChosen}
+                    values={infoValues}
+                    onChange={next => { setInfoChosen(next.chosen); setInfoValues(next.values); }}
+                  />
                 </FormCard>
 
                 {/* Media */}
@@ -1223,6 +1692,10 @@ export default function CreateEventPage() {
           <button type="submit" className="btn btn-primary" disabled={submitting}>
             {submitting
               ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Submitting…</>
+              : mode === 'draft'
+                ? <><FloppyDisk size={15} weight="bold" /> Save draft</>
+              : mode === 'published'
+                ? <><NotePencil size={15} weight="bold" /> Send for review</>
               : <><Confetti size={15} weight="bold" /> {eventType === 'public' ? 'Submit for review' : 'Create event'}</>}
           </button>
           <button type="button" className="btn" disabled={submitting}

@@ -542,52 +542,7 @@ export default function EventDetail() {
 
   const teams:      string[] = ev.teams      ?? [];
   const performers: string[] = ev.performers ?? [];
-
-  // Information block — only fields the organiser actually filled in have
-  // rows, so there is nothing here to guard against rendering empty.
-  const infoItems: any[] = Array.isArray(ev.info_items) ? ev.info_items : [];
-
-  // ── Summary tiles ───────────────────────────────────────────────────────────
-  // Age, doors and ID are the three questions asked before every other one, so
-  // they are lifted out of the stacked rows into a strip at the top.
-  //
-  // The strip is ALL-OR-NOTHING BY DESIGN: once the organiser has filled in any
-  // information field at all, all three tiles render, and one they skipped shows
-  // N/A rather than disappearing. A strip that changed shape per event would
-  // make "no ID line" ambiguous between "no ID needed" and "organiser did not
-  // say" — N/A says which. Every OTHER field keeps its existing behaviour and
-  // only appears when filled.
-  const summaryTiles = SUMMARY_INFO_KEYS.map(t => {
-    const match = infoItems.find((i: any) => i?.key === t.key);
-    const value = String(match?.value ?? '').trim();
-    return { key: t.key, label: t.label, value: value || INFO_NOT_GIVEN, given: !!value };
-  });
-
-  // The remaining fields, in the order the server sent them. Filtering by key
-  // rather than by position keeps this correct if display_order ever changes.
-  const detailItems = infoItems.filter(
-    (i: any) => !SUMMARY_INFO_KEYS.some(t => t.key === i?.key),
-  );
-
-  // Organiser. Absent when they have no public page (KYC below level 2, page
-  // switched off, account suspended) — in which case nothing renders rather
-  // than falling back to the venue name, which is what this screen used to
-  // imply by having no organiser at all.
-  const organiser: any = ev.organizer ?? null;
-
-  // ── Policies are PLATFORM-WIDE ──────────────────────────────────────────
-  //
-  // events.refund_policy and events.terms_and_conditions are no longer read.
-  //
-  // A per-event refund policy was never real: refunds are decided entirely by
-  // the sliding scale in the backend's models/refund_policy.go — 100% at 30+
-  // days, down to nothing inside 7 — and that code never consulted the column.
-  // Whatever an organiser typed was prose the actual refund would contradict,
-  // which is worse than no text at all when somebody is deciding whether to
-  // buy.
-  //
-  // Both rows now link to the published documents on the website, which is
-  // also where the version somebody agreed to actually lives.
+  const tags:       string[] = (ev.tags ?? []).filter((t: string) => !!t?.trim());
 
   // Routing unchanged — matches index.tsx push to /event/${event.id}
   const handleGetTickets = () => router.push('/event/purchase');
@@ -989,48 +944,18 @@ export default function EventDetail() {
                 <View className={s.sectionHeader}>
                   <Text className={s.sectionTitle} style={{ color: colors.text }}>INFORMATION</Text>
                 </View>
-                {/* Summary strip. Scrolls sideways so three tiles fit on a
-                    narrow screen without shrinking the values, and bleeds past
-                    the section padding so a partial tile shows at the edge —
-                    a row ending flush at the margin reads as complete and does
-                    not get swiped. */}
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  className={s.infoTileStrip}
-                  contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
-                >
-                  {summaryTiles.map(t => (
-                    <View
-                      key={t.key}
-                      className={s.infoTile}
-                      style={{ backgroundColor: colors.sectionCardBg }}
-                    >
-                      <Text className={s.infoTileLabel} style={{ color: colors.subText }}>
-                        {t.label}
-                      </Text>
-                      {/* An N/A is dimmed to subText so it reads as a gap the
-                          organiser left, not as an answer they gave. */}
-                      <Text
-                        className={s.infoTileValue}
-                        style={{ color: t.given ? colors.text : colors.subText }}
-                      >
-                        {t.value}
-                      </Text>
+                {tags.map((tag, i) => (
+                  <View key={i} className={i < tags.length - 1 ? s.participantRow : s.participantRowLast}
+                    style={i < tags.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}>
+                    <View className={s.participantAvatar}
+                      style={{ backgroundColor: colors.sectionCardBg, borderColor: colors.dividerColor }}>
+                      <Hash size={16} color={colors.text} weight="regular" />
                     </View>
-                  ))}
-                </ScrollView>
-
-                {/* Everything else: unchanged stacked rows, still only rendered
-                    for fields the organiser actually filled in. */}
-                {detailItems.map((item: any, i: number) => (
-                  <View
-                    key={item.key ?? i}
-                    className={i < detailItems.length - 1 ? s.infoRow : s.infoRowLast}
-                    style={i < detailItems.length - 1 ? { borderBottomColor: colors.dividerColor } : undefined}
-                  >
-                    <Text className={s.infoLabel} style={{ color: colors.subText }}>
-                      {String(item.label ?? '').toUpperCase()}
+                    {/* No chevron here: unlike Teams/Performers these rows
+                        aren't tappable, so the arrow was promising a screen
+                        that doesn't exist. */}
+                    <Text className={s.participantName} style={{ color: colors.text }}>
+                      {tag.trim().charAt(0).toUpperCase() + tag.trim().slice(1)}
                     </Text>
                     <Text className={s.infoValue} style={{ color: colors.text }}>{item.value}</Text>
                   </View>

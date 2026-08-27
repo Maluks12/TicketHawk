@@ -184,6 +184,11 @@ function TicketTypeForm({
     if (n === '') return '';
     return ALL_PRESETS.includes(n) ? n : CUSTOM;
   });
+  // Raw text for the price field, kept alongside the parsed number in `row`.
+  // A number-bound input cannot represent "empty", which is what produced the
+  // stuck leading zero.
+  const [priceText, setPriceText] = useState<string>(() =>
+    initial && initial.price ? String(initial.price) : '0');
   const [errors, setErrors] = useState<TicketErrors>({});
   // Errors only appear after a submit attempt. Marking fields red while someone
   // is still typing the first character is noise, not help.
@@ -304,10 +309,21 @@ function TicketTypeForm({
                   position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)',
                   color: 'var(--text-3)', fontWeight: 700, fontSize: 14, pointerEvents: 'none',
                 }}>R</span>
+                {/* Bound to priceText (a string), not row.price (a number).
+                    A number-bound input can never be empty: it rendered "0",
+                    so typing 100 after that literal zero produced "0100".
+                    The raw string lets the field clear on focus and stay clear
+                    while typing; row.price keeps the parsed number that the
+                    rest of the form validates against. */}
                 <input
                   id="tt-price" type="number" min="0" step="0.01"
-                  value={row.price}
-                  onChange={e => upd({ price: parseFloat(e.target.value) || 0 })}
+                  value={priceText}
+                  onFocus={e => { if (row.price === 0) { setPriceText(''); e.target.select(); } }}
+                  onChange={e => {
+                    setPriceText(e.target.value);
+                    upd({ price: parseFloat(e.target.value) || 0 });
+                  }}
+                  onBlur={() => setPriceText(String(row.price))}
                   style={{ ...inputStyle(err('price')), paddingLeft: 30 }}
                 />
               </div>

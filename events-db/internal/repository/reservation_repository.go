@@ -63,14 +63,53 @@ func CreateReservations(
 		return nil, ErrNoTicketItems
 	}
 
-	// Release any existing reservations for this cart before re-creating them
-	tx.Exec(ctx, `
+	// Release any existing reservations for this cart before re-creating them.
+	//
+	// Two things this MUST get right, both of which the previous version did not:
+	//
+	//  1. ticket_types.reserved_count has to come back too. The loop below
+	//     increments it, so releasing only events.reserved_count made the type
+	//     counter ratchet upward on every re-entry into checkout until the type
+	//     reported sold out with no real demand behind it.
+	//
+	//  2. The decrement must be pre-aggregated per target row. A cart holding
+	//     two ticket types for the SAME event produces two ticket_reservations
+	//     rows joining one events row; Postgres applies only one arbitrary match
+	//     in UPDATE ... FROM, silently stranding the other quantity forever.
+	//     Grouping first guarantees exactly one source row per target row.
+	if _, err := tx.Exec(ctx, `
+		UPDATE ticket_types tt
+		SET reserved_count = GREATEST(0, tt.reserved_count - agg.qty),
+		    updated_at     = NOW()
+		FROM (
+			SELECT ticket_type_id, SUM(quantity)::int AS qty
+			FROM ticket_reservations
+			WHERE cart_id = $1 AND ticket_type_id IS NOT NULL
+			GROUP BY ticket_type_id
+		) agg
+		WHERE tt.id = agg.ticket_type_id
+	`, cartID); err != nil {
+		return nil, fmt.Errorf("failed to release prior ticket type reservations: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
 		UPDATE events e
-		SET reserved_count = GREATEST(0, reserved_count - tr.quantity)
-		FROM ticket_reservations tr
-		WHERE tr.cart_id = $1 AND e.id = tr.event_id
-	`, cartID)
-	tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID)
+		SET reserved_count = GREATEST(0, e.reserved_count - agg.qty),
+		    updated_at     = NOW()
+		FROM (
+			SELECT event_id, SUM(quantity)::int AS qty
+			FROM ticket_reservations
+			WHERE cart_id = $1
+			GROUP BY event_id
+		) agg
+		WHERE e.id = agg.event_id
+	`, cartID); err != nil {
+		return nil, fmt.Errorf("failed to release prior event reservations: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID); err != nil {
+		return nil, fmt.Errorf("failed to delete prior reservations: %w", err)
+	}
 
 	var reservations []models.TicketReservation
 
@@ -211,33 +250,51 @@ func AbandonReservations(pool *pgxpool.Pool, cartID string) error {
 	}
 	defer tx.Rollback(ctx)
 
-	// Decrement reserved_count on ticket types
+	// Decrement reserved_count on ticket types.
+	//
+	// Pre-aggregated per ticket type: a cart can legitimately hold more than one
+	// reservation row per type, and UPDATE ... FROM only applies one arbitrary
+	// matching source row per target row.
 	_, err = tx.Exec(ctx, `
 		UPDATE ticket_types tt
-		SET reserved_count = GREATEST(0, tt.reserved_count - tr.quantity),
-		    updated_at = NOW()
-		FROM ticket_reservations tr
-		WHERE tr.cart_id = $1
-		  AND tr.ticket_type_id IS NOT NULL
-		  AND tt.id = tr.ticket_type_id
+		SET reserved_count = GREATEST(0, tt.reserved_count - agg.qty),
+		    updated_at     = NOW()
+		FROM (
+			SELECT ticket_type_id, SUM(quantity)::int AS qty
+			FROM ticket_reservations
+			WHERE cart_id = $1 AND ticket_type_id IS NOT NULL
+			GROUP BY ticket_type_id
+		) agg
+		WHERE tt.id = agg.ticket_type_id
 	`, cartID)
 	if err != nil {
 		return fmt.Errorf("AbandonReservations: failed to decrement ticket type reserved_count: %w", err)
 	}
 
-	// Decrement reserved_count on events
+	// Decrement reserved_count on events.
+	//
+	// Same aggregation, and this is the case that actually bit: a mixed GA + VIP
+	// cart for one event released only ONE of the two quantities, permanently
+	// stranding the rest as phantom reserved capacity on every abandon.
 	_, err = tx.Exec(ctx, `
 		UPDATE events e
-		SET reserved_count = GREATEST(0, e.reserved_count - tr.quantity),
-		    updated_at = NOW()
-		FROM ticket_reservations tr
-		WHERE tr.cart_id = $1 AND e.id = tr.event_id
+		SET reserved_count = GREATEST(0, e.reserved_count - agg.qty),
+		    updated_at     = NOW()
+		FROM (
+			SELECT event_id, SUM(quantity)::int AS qty
+			FROM ticket_reservations
+			WHERE cart_id = $1
+			GROUP BY event_id
+		) agg
+		WHERE e.id = agg.event_id
 	`, cartID)
 	if err != nil {
 		return fmt.Errorf("AbandonReservations: failed to decrement event reserved_count: %w", err)
 	}
 
-	tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID)
+	if _, err := tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE cart_id = $1`, cartID); err != nil {
+		return fmt.Errorf("AbandonReservations: failed to delete reservation rows: %w", err)
+	}
 
 	return tx.Commit(ctx)
 }

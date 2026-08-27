@@ -5,7 +5,10 @@
       "namespace": "android_app",
       "package_name": "com.tickethawk.app",
       "sha256_cert_fingerprints": [
-        "C2:C8:72:F8:33:8F:76:42:3E:52:C6:4E:57:49:0C:6A:65:62:A6:37:DD:BB:FD:16:D5:2A:2A:5A:FE:28:DE:CA"
+        "CA:5E:94:4F:DE:98:24:EA:B9:34:05:C6:A1:8F:73:6B:2F:6C:BF:D3:5C:34:26:5C:A8:23:89:EF:8A:24:06:21",
+        "BC:8A:41:AC:79:9D:43:64:30:54:AD:93:B6:0F:0A:5C:71:57:45:E2:9B:30:33:E1:4A:57:47:86:27:9A:9F:A6",
+        "C2:C8:72:F8:33:8F:76:42:3E:52:C6:4E:57:49:0C:6A:65:62:A6:37:DD:BB:FD:16:D5:2A:2A:5A:FE:28:DE:CA",
+        "C3:14:9D:54:F9:CE:98:95:94:D3:64:70:9B:16:92:03:CE:8F:DB:CB:9C:4B:64:1C:B4:BD:3C:B0:0E:62:78:2D"
       ]
     }
   }

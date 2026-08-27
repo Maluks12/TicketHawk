@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"events-db/internal/cache"
@@ -64,10 +66,16 @@ func ExecuteStaffRequestHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Ha
 		var subjectRequired bool
 		var subjectConfirmed *time.Time
 		var notBefore *time.Time
+		// payload carries the approved field diff for event_edit. Read inside
+		// the same locked SELECT as everything else, so the values applied are
+		// exactly the values that were on screen when the admin approved —
+		// a second read could pick up an edit made in between.
+		var payload []byte
 
 		err = tx.QueryRow(ctx, `
 			SELECT kind::text, target_user_id::text, target_event_id::text,
-			       subject_required, subject_confirmed_at, execute_not_before
+			       subject_required, subject_confirmed_at, execute_not_before,
+			       payload
 			FROM staff_requests
 			WHERE id = $1
 			  AND status = 'ready'
@@ -75,7 +83,7 @@ func ExecuteStaffRequestHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Ha
 			  AND expires_at > now()
 			FOR UPDATE
 		`, reqID).Scan(&kindStr, &targetUser, &targetEvent,
-			&subjectRequired, &subjectConfirmed, &notBefore)
+			&subjectRequired, &subjectConfirmed, &notBefore, &payload)
 
 		if errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusConflict, gin.H{
@@ -103,7 +111,7 @@ func ExecuteStaffRequestHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Ha
 		policy := models.RequestPolicies[kind]
 
 		// ── Perform the action ───────────────────────────────────────────────
-		if err := executeAction(ctx, tx, kind, targetUser, targetEvent, policy); err != nil {
+		if err := executeAction(ctx, tx, kind, targetUser, targetEvent, policy, payload); err != nil {
 			utils.InternalError(c, err, "could not perform the requested action")
 			return
 		}
@@ -147,8 +155,15 @@ func executeAction(
 	kind models.StaffRequestKind,
 	targetUser, targetEvent *string,
 	policy models.RequestPolicy,
+	payload []byte,
 ) error {
 	switch kind {
+
+	case models.ReqEventEdit:
+		if targetEvent == nil {
+			return fmt.Errorf("event edit needs a target event")
+		}
+		return applyEventEdit(ctx, tx, *targetEvent, payload)
 
 	case models.ReqBankDelete:
 		if targetUser == nil {
@@ -289,4 +304,279 @@ func RequestEventTakedownHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			"note":       "A different admin must approve this before the event comes down.",
 		})
 	}
+}
+
+// ── Applying an approved event edit ──────────────────────────────────────────
+
+// editableEventFields is an ALLOW-LIST, and the reason this is a map rather
+// than "apply whatever the payload contains".
+//
+// The payload arrives from the console and sits in a row for as long as the
+// request is open. Building an UPDATE from its keys would let anyone who can
+// file a request write to any column on events — status, organizer_id,
+// is_featured — by naming it. Approving a request is meant to authorise a
+// change to the event's DETAILS, not to hand out arbitrary column access.
+//
+// Money and lifecycle fields are deliberately absent:
+//
+//	status, organizer_id  moving an event or publishing it are their own
+//	                      actions with their own gates (takedown, transfer)
+//	is_featured           CapFeatureEvent covers it directly
+//	base_price            changing what a live event costs after people have
+//	                      paid is a refund question, not an edit
+// Four of these keys previously mapped to columns that do not exist on
+// `events`, so any approved edit touching them died at execution with
+// 42703 (undefined_column) and stranded the request:
+//
+//	venue_address    -> the column is `address`
+//	max_tickets_user -> the column is `max_tickets_per_user` (migration 000043)
+//	category         -> the column is `category_id`
+//	image_url        -> that column belongs to `categories`/`organizers`;
+//	                    events carry `cover_image_url` and `banner_image_url`
+//
+// The map KEY is the wire name the console/organiser sends; the VALUE is the
+// real column. Keys are kept stable so existing pending payloads still apply.
+var editableEventFields = map[string]string{
+	"title":            "title",
+	"description":      "description",
+	"venue_name":       "venue_name",
+	"venue_address":    "address",
+	"address":          "address",
+	"city":             "city",
+	"start_time":       "start_time",
+	"end_time":         "end_time",
+	"sale_start":       "sale_start",
+	"sale_end":         "sale_end",
+	"max_capacity":     "max_capacity",
+	"max_tickets_user": "max_tickets_per_user",
+	"allow_waitlist":   "allow_waitlist",
+	"category":         "category_id",
+	"category_id":      "category_id",
+	"timezone":         "timezone",
+
+	// Media and tags — organisers may edit these on a live event.
+	// `tags` is TEXT[]; pgx encodes a []string / []any of strings directly.
+	"image_url":        "cover_image_url",
+	"cover_image_url":  "cover_image_url",
+	"banner_image_url": "banner_image_url",
+	"tags":             "tags",
+}
+
+// applyEventEdit writes ONLY the allow-listed fields present in the payload.
+//
+// Built as a parameterised UPDATE with column names taken from the allow-list
+// map's VALUES — never from the payload's keys — so a key like
+// "title = 'x', status" cannot reach the SQL text.
+func applyEventEdit(ctx context.Context, tx pgx.Tx, eventID string, payload []byte) error {
+	if len(payload) == 0 {
+		return fmt.Errorf("event edit has no payload — nothing to apply")
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return fmt.Errorf("event edit payload is not readable: %w", err)
+	}
+
+	// The console stores the diff under "changes" so the payload can also carry
+	// context (the "before" values) for the approver to read without those
+	// being mistaken for values to write.
+	if nested, ok := fields["changes"].(map[string]any); ok {
+		fields = nested
+	}
+
+	sets := make([]string, 0, len(fields))
+	args := make([]any, 0, len(fields)+1)
+	args = append(args, eventID)
+
+	// Ticket tiers live in their own table, so they cannot ride the column
+	// UPDATE below. Pull them out first and apply them separately.
+	var tierPayload []any
+	if raw, ok := fields["ticket_types"]; ok {
+		if arr, ok := raw.([]any); ok {
+			tierPayload = arr
+		}
+		delete(fields, "ticket_types")
+	}
+
+	// Same for the Information block: event_info_items is its own table.
+	//
+	// infoPresent is tracked separately from len(infoPayload) because an EMPTY
+	// array is a meaningful instruction — "remove every information field" —
+	// and is not the same as the key being absent, which means "leave the
+	// block alone". Collapsing the two would make it impossible to clear an
+	// event's information through the review flow.
+	var infoPayload []any
+	infoPresent := false
+	if raw, ok := fields["event_info"]; ok {
+		infoPresent = true
+		if arr, ok := raw.([]any); ok {
+			infoPayload = arr
+		}
+		delete(fields, "event_info")
+	}
+
+	// Line-up. Same shape as event_info: its own table, so it cannot ride the
+	// column UPDATE, and an empty array means "clear the line-up" rather than
+	// "leave it alone" — which is why presence is tracked separately from
+	// length.
+	var lineupPayload []any
+	lineupPresent := false
+	if raw, ok := fields["lineup"]; ok {
+		lineupPresent = true
+		if arr, ok := raw.([]any); ok {
+			lineupPayload = arr
+		}
+		delete(fields, "lineup")
+	}
+
+	for key, val := range fields {
+		col, allowed := editableEventFields[key]
+		if !allowed {
+			// Skipped, not fatal. A payload written by an older console
+			// version should not strand an approved request in 'ready'
+			// forever — but the field is not written either.
+			continue
+		}
+		args = append(args, val)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+
+	if len(sets) == 0 {
+		// A tier-only or information-only edit is legitimate: nothing on
+		// `events` itself changed.
+		if infoPresent {
+			if err := applyEventInfoEdit(ctx, tx, eventID, infoPayload); err != nil {
+				return err
+			}
+		}
+		if lineupPresent {
+			if err := applyEventLineupEdit(ctx, tx, eventID, lineupPayload); err != nil {
+				return err
+			}
+		}
+		if len(tierPayload) > 0 {
+			return applyTicketTypeEdits(ctx, tx, eventID, tierPayload)
+		}
+		if infoPresent || lineupPresent {
+			return nil
+		}
+		return fmt.Errorf("event edit contained no editable fields")
+	}
+
+	sql := "UPDATE events SET " + strings.Join(sets, ", ") +
+		", updated_at = now() WHERE id = $1"
+
+	tag, err := tx.Exec(ctx, sql, args...)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("event not found")
+	}
+
+	if infoPresent {
+		if err := applyEventInfoEdit(ctx, tx, eventID, infoPayload); err != nil {
+			return err
+		}
+	}
+
+	if lineupPresent {
+		if err := applyEventLineupEdit(ctx, tx, eventID, lineupPayload); err != nil {
+			return err
+		}
+	}
+
+	if len(tierPayload) > 0 {
+		return applyTicketTypeEdits(ctx, tx, eventID, tierPayload)
+	}
+	return nil
+}
+
+// applyTicketTypeEdits updates existing tiers and inserts new ones inside the
+// SAME transaction as the event UPDATE, so an approved edit is all-or-nothing.
+//
+// Deliberately does NOT delete tiers that are absent from the payload.
+// Removing a tier someone has already bought would orphan their booking's
+// ticket_type_id; deletion stays with the explicit
+// DELETE /organiser/ticket-types/:typeId route, which can refuse when sold.
+//
+// Price changes apply to FUTURE sales only. Bookings snapshot unit_price and
+// subtotal at purchase, so an existing ticket holder keeps what they paid —
+// repricing their booking would be a refund/charge, not an edit.
+func applyTicketTypeEdits(ctx context.Context, tx pgx.Tx, eventID string, tiers []any) error {
+	for _, raw := range tiers {
+		t, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		id, _ := t["id"].(string)
+		name, _ := t["name"].(string)
+		if name == "" {
+			return fmt.Errorf("ticket type needs a name")
+		}
+
+		// json.Unmarshal gives every number as float64.
+		var price float64
+		if p, ok := t["price"].(float64); ok {
+			price = p
+		}
+		if price < 0 {
+			return fmt.Errorf("ticket type %q: price cannot be negative", name)
+		}
+
+		var capacity *int
+		if c, ok := t["capacity"].(float64); ok {
+			ci := int(c)
+			capacity = &ci
+		}
+
+		description, _ := t["description"].(string)
+		sortOrder := 0
+		if so, ok := t["sort_order"].(float64); ok {
+			sortOrder = int(so)
+		}
+		isVisible := true
+		if v, ok := t["is_visible"].(bool); ok {
+			isVisible = v
+		}
+
+		if id == "" {
+			// New tier.
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO ticket_types
+					(event_id, name, description, price, capacity, sort_order, is_visible)
+				VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7)
+			`, eventID, name, description, price, capacity, sortOrder, isVisible); err != nil {
+				return fmt.Errorf("create ticket type %q: %w", name, err)
+			}
+			continue
+		}
+
+		// Existing tier. Capacity may not drop below what is already sold or
+		// held — the guard is in the WHERE clause so a concurrent sale cannot
+		// slip between a check and the write.
+		tag, err := tx.Exec(ctx, `
+			UPDATE ticket_types
+			SET name        = $3,
+			    description = NULLIF($4, ''),
+			    price       = $5,
+			    capacity    = $6,
+			    sort_order  = $7,
+			    is_visible  = $8,
+			    updated_at  = NOW()
+			WHERE id = $1
+			  AND event_id = $2
+			  AND ($6::int IS NULL OR $6::int >= tickets_sold + reserved_count)
+		`, id, eventID, name, description, price, capacity, sortOrder, isVisible)
+		if err != nil {
+			return fmt.Errorf("update ticket type %q: %w", name, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf(
+				"ticket type %q: not found on this event, or the new capacity is below tickets already sold or reserved",
+				name)
+		}
+	}
+	return nil
 }

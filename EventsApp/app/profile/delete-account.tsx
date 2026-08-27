@@ -14,7 +14,24 @@
 // Three outcomes are handled:
 //   • organiser hold      — live events or unsettled payouts; explain and stop
 //   • upcoming tickets    — second confirmation naming the loss, then proceed
-//   • clean               — password, confirm, gone
+//   • clean               — confirm identity, confirm intent, gone
+//
+// ── Confirming identity without a password ───────────────────────────────────
+//
+// A valid access token is deliberately not enough to delete an account: that
+// would make a stolen unlocked phone sufficient to destroy someone's tickets.
+// So this screen demands step-up proof.
+//
+// Since migration 000075 an account can exist with password IS NULL — created
+// through Google or Apple. This screen used to render a password field
+// unconditionally, which for those users was an unfillable box in front of the
+// one action Guideline 5.1.1(v) says must always be available. They could not
+// delete their account at all.
+//
+// The social equivalent is a FRESH ID token from a provider already linked to
+// the account. The server checks the token's subject is linked here before
+// accepting it (see handlers/reauth.go), so this is genuine re-authentication
+// rather than a way around it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -28,6 +45,11 @@ import { useRouter } from 'expo-router';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useAppTheme } from '../../theme/colors';
+import {
+  signInWithApple, signInWithGoogle,
+  SocialAuthCancelled, SocialAuthProviderError,
+  type SocialCredential,
+} from '../../lib/socialAuth';
 
 const DANGER = '#ff453a';
 
@@ -56,6 +78,19 @@ export default function DeleteAccountScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // How this account proves who it is. Both fields come from GET /v1/user/me.
+  // `!== false` rather than `=== true`: an older cached user object predating
+  // the field should behave as a password account, which is the safe default —
+  // it shows a field the user can fill rather than a provider sheet they may
+  // have no identity for.
+  const hasPassword = (user as any)?.has_password !== false;
+  const linkedProviders: string[] = (user as any)?.linked_providers ?? [];
+  const socialProvider: 'apple' | 'google' | null =
+    linkedProviders.includes('apple') ? 'apple'
+    : linkedProviders.includes('google') ? 'google'
+    : null;
+  const providerLabel = socialProvider === 'apple' ? 'Apple' : 'Google';
+
   // ── Preview ────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -75,14 +110,39 @@ export default function DeleteAccountScreen() {
     return () => { cancelled = true; };
   }, []);
 
+  // Re-runs the linked provider's sign-in sheet. The token it returns is the
+  // social equivalent of typing a password, and the server rejects it unless
+  // its subject is already linked to this account.
+  const confirmWithProvider = useCallback(async (): Promise<SocialCredential> => {
+    if (socialProvider === 'apple') return signInWithApple();
+    if (socialProvider === 'google') return signInWithGoogle();
+    throw new SocialAuthProviderError(
+      'This account has no password and no connected sign-in method. Use “Forgot password” on the sign-in screen to set one, then try again.',
+    );
+  }, [socialProvider]);
+
   // ── Delete ─────────────────────────────────────────────────────────────────
   const doDelete = useCallback(async (acknowledgeForfeit: boolean) => {
     setBusy(true);
     setError(null);
     try {
+      // Build the step-up credential. ReauthCredentials is embedded in the
+      // server's DTO, so these flatten to the top level of the body — meaning
+      // the plain `password` shape that existing clients send still works
+      // unchanged.
+      const credential: Record<string, unknown> = {};
+      if (hasPassword) {
+        credential.password = password;
+      } else {
+        const cred = await confirmWithProvider();
+        credential.provider = cred.provider;
+        credential.id_token = cred.idToken;
+        if (cred.nonce) credential.nonce = cred.nonce;
+      }
+
       await api.delete('/v1/user/me', {
         data: {
-          password,
+          ...credential,
           acknowledge_forfeit: acknowledgeForfeit,
           reason: reason.trim() || undefined,
         },
@@ -98,6 +158,15 @@ export default function DeleteAccountScreen() {
         Alert.alert('Account deleted', 'Your account and personal details have been removed.');
       }, 400);
     } catch (e: any) {
+      // Backing out of the Apple/Google sheet is a normal outcome, not a
+      // failure — silently return to the screen.
+      if (e instanceof SocialAuthCancelled) { setBusy(false); return; }
+      if (e instanceof SocialAuthProviderError) {
+        setError(e.message);
+        setBusy(false);
+        return;
+      }
+
       const status = e?.response?.status;
       const body = e?.response?.data ?? {};
 
@@ -124,17 +193,24 @@ export default function DeleteAccountScreen() {
 
       if (status === 409 && body.code === 'organiser_hold') {
         setError(body.error ?? 'Your organiser account is still active.');
+      } else if (body.code === 'reauth_social_required') {
+        // The server says this account has no password. Reaching here means the
+        // cached user object was stale — the next attempt will take the social
+        // branch above.
+        setError(`This account signs in with ${providerLabel}. Tap “Delete my account” again to confirm.`);
+      } else if (body.code === 'reauth_wrong_account') {
+        setError(`That ${providerLabel} account isn’t the one connected to this profile.`);
       } else if (status === 401) {
-        setError('That password is incorrect.');
+        setError(hasPassword ? 'That password is incorrect.' : 'Could not confirm your identity.');
       } else {
         setError(body.error ?? 'Could not delete your account. Please try again.');
       }
       setBusy(false);
     }
-  }, [password, reason, logout, router]);
+  }, [password, reason, logout, router, hasPassword, confirmWithProvider, providerLabel]);
 
   const confirmThenDelete = useCallback(() => {
-    if (!password) { setError('Enter your password to continue.'); return; }
+    if (hasPassword && !password) { setError('Enter your password to continue.'); return; }
     Alert.alert(
       'Delete your account?',
       'This cannot be undone. Your name, email address and phone number will be ' +
@@ -144,10 +220,13 @@ export default function DeleteAccountScreen() {
         { text: 'Delete account', style: 'destructive', onPress: () => { void doDelete(false); } },
       ],
     );
-  }, [password, doDelete]);
+  }, [hasPassword, password, doDelete]);
 
   const held = preview?.organiser_hold === true;
   const cardBg = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(10,10,10,0.03)';
+  // A social account has nothing to type, so the button is enabled from the
+  // start — gating it on `password` would leave it permanently dead for them.
+  const canSubmit = !busy && (!hasPassword || !!password);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -255,26 +334,54 @@ export default function DeleteAccountScreen() {
                 </View>
               )}
 
-              {/* Password */}
+              {/* Identity confirmation */}
               {!held && (
                 <>
-                  <Text style={[ss.label, { color: colors.subText }]}>
-                    CONFIRM YOUR PASSWORD
-                  </Text>
-                  <TextInput
-                    value={password}
-                    onChangeText={(v) => { setPassword(v); setError(null); }}
-                    placeholder="Your password"
-                    placeholderTextColor={colors.iconColor}
-                    secureTextEntry
-                    autoCapitalize="none"
-                    textContentType="password"
-                    style={[ss.input, {
-                      color: colors.text,
-                      backgroundColor: cardBg,
-                      borderColor: error ? DANGER : colors.dividerColor,
-                    }]}
-                  />
+                  {hasPassword ? (
+                    <>
+                      <Text style={[ss.label, { color: colors.subText }]}>
+                        CONFIRM YOUR PASSWORD
+                      </Text>
+                      <TextInput
+                        value={password}
+                        onChangeText={(v) => { setPassword(v); setError(null); }}
+                        placeholder="Your password"
+                        placeholderTextColor={colors.iconColor}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        textContentType="password"
+                        style={[ss.input, {
+                          color: colors.text,
+                          backgroundColor: cardBg,
+                          borderColor: error ? DANGER : colors.dividerColor,
+                        }]}
+                      />
+                    </>
+                  ) : (
+                    // No password to type. Rendering the field anyway is what
+                    // made deletion impossible for these accounts — an
+                    // unfillable box in front of a mandatory action.
+                    <>
+                      <Text style={[ss.label, { color: colors.subText }]}>
+                        CONFIRM YOUR IDENTITY
+                      </Text>
+                      <View style={[ss.card, {
+                        backgroundColor: cardBg,
+                        borderColor: colors.dividerColor,
+                        marginBottom: 0,
+                        flexDirection: 'row',
+                        gap: 11,
+                        alignItems: 'flex-start',
+                      }]}>
+                        <Ionicons name="shield-checkmark-outline" size={17} color={colors.subText} />
+                        <Text style={[ss.bulletText, { color: colors.subText, marginBottom: 0 }]}>
+                          {socialProvider
+                            ? `You sign in with ${providerLabel}. You’ll be asked to confirm with ${providerLabel} before your account is deleted.`
+                            : 'This account has no password set. Use “Forgot password” on the sign-in screen to set one, then come back.'}
+                        </Text>
+                      </View>
+                    </>
+                  )}
 
                   <Text style={[ss.label, { color: colors.subText, marginTop: 18 }]}>
                     WHY ARE YOU LEAVING? (OPTIONAL)
@@ -305,9 +412,9 @@ export default function DeleteAccountScreen() {
 
                   <TouchableOpacity
                     onPress={confirmThenDelete}
-                    disabled={busy || !password}
+                    disabled={!canSubmit}
                     activeOpacity={0.85}
-                    style={[ss.deleteBtn, (busy || !password) && { opacity: 0.45 }]}
+                    style={[ss.deleteBtn, !canSubmit && { opacity: 0.45 }]}
                   >
                     {busy
                       ? <ActivityIndicator color="#fff" size="small" />

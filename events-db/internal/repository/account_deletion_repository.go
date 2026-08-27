@@ -162,7 +162,11 @@ func SoftDeleteUser(ctx context.Context, pool *pgxpool.Pool, userID string, reas
 	if _, err = tx.Exec(ctx, `
 		UPDATE users
 		SET email                      = 'deleted-' || id::text || '@deleted.invalid',
-		    password                   = 'account-deleted-no-login',
+		    -- NULL rather than a sentinel string now that 000075 allows it.
+		    -- LoginHandler rejects a NULL password before bcrypt, so this is
+		    -- strictly stronger than a placeholder that a future refactor
+		    -- might accidentally compare against.
+		    password                   = NULL,
 		    first_name                 = 'Deleted',
 		    last_name                  = 'User',
 		    phone_number               = NULL,
@@ -194,6 +198,13 @@ func SoftDeleteUser(ctx context.Context, pool *pgxpool.Pool, userID string, reas
 	// the one user. Tables are removed rather than anonymised because none of
 	// them is referenced by a financial record.
 	for _, stmt := range []string{
+		// Social identities MUST go, and this is load-bearing rather than
+		// hygiene. The row is anonymised, not deleted, so it survives with a
+		// deleted-<uuid>@deleted.invalid address — and (provider, subject) on
+		// user_identities would still point straight at it. Leaving them means
+		// tapping "Sign in with Google" after deleting your account walks you
+		// back into the anonymised stub, with the deletion silently undone.
+		`DELETE FROM user_identities WHERE user_id = $1`,
 		`DELETE FROM push_tokens     WHERE user_id = $1`,
 		`DELETE FROM notifications   WHERE user_id = $1`,
 		`DELETE FROM event_follows   WHERE user_id = $1`,

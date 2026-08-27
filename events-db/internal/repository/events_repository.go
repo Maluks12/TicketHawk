@@ -41,6 +41,17 @@ type OrganizerEventSummary struct {
 	Price       float64   `json:"price"`
 	Currency    string    `json:"currency"`
 	CreatedAt   time.Time `json:"created_at"`
+
+	// Location and reach. These were absent from both the struct and the
+	// SELECT, so the organiser events table had nothing to render and every
+	// row fell through to its "Not set — add" placeholder even when the
+	// event had a full address. EndTime and Views were missing for the same
+	// reason (the list showed "ends —" and 0 views on every row).
+	EndTime    *time.Time `json:"end_time,omitempty"`
+	VenueName  string     `json:"venue_name"`
+	Address    string     `json:"address"`
+	City       string     `json:"city"`
+	Views      int        `json:"views"`
 }
 
 // CreateEvent inserts a new event in draft status and returns the created row.
@@ -1205,6 +1216,10 @@ func getEventByID(pool *pgxpool.Pool, id string, requestingUserID *string, inclu
     // every tier is sold out as still available.
     event.ComputeAvailableTickets()
 
+    // Organiser block, Information block and line-up. Best-effort by design —
+    // see hydrateEventDetail.
+    hydrateEventDetail(pool, &event)
+
     return &event, nil
 }
 
@@ -1264,6 +1279,10 @@ func GetEventBySlug(pool *pgxpool.Pool, slug string) (*models.Event, error) {
 	// every tier is sold out as still available.
 	event.ComputeAvailableTickets()
 
+	// Organiser block, Information block and line-up. Best-effort by design —
+	// see hydrateEventDetail.
+	hydrateEventDetail(pool, &event)
+
 	return &event, nil
 }
 
@@ -1292,7 +1311,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
         JOIN categories c ON e.category_id = c.id
@@ -1314,7 +1333,7 @@ func GetAllEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1371,7 +1390,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
         JOIN categories c ON e.category_id = c.id
@@ -1392,7 +1411,7 @@ func FeaturedEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]mode
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1446,7 +1465,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
 		JOIN categories c ON e.category_id = c.id
@@ -1467,7 +1486,7 @@ func ActiveEvents(pool *pgxpool.Pool, limit int, cursor *utils.Cursor) ([]models
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1534,7 +1553,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
             e.id, e.slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
             e.city, e.venue_name, e.max_capacity, e.tickets_sold,
-            e.is_featured, e.status, e.views, e.created_at,
+            e.is_featured, e.status, e.views, e.created_at, e.updated_at,
             c.name as category
         FROM events e
 		JOIN categories c ON e.category_id = c.id
@@ -1555,7 +1574,7 @@ func GetEventBycategory(pool *pgxpool.Pool, category_id int, limit int, cursor *
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.MaxCapacity, &event.TicketsSold,
-			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt,
+			&event.IsFeatured, &event.Status, &event.Views, &event.CreatedAt, &event.UpdatedAt,
 			&event.Category,
 		)
 		if err != nil {
@@ -1604,9 +1623,24 @@ func GetCategories(pool *pgxpool.Pool) ([]models.Category, error) {
 	return cats, rows.Err()
 }
 
+// ErrEmptySearchQuery means the search term contained no alphanumeric
+// characters once normalized, so no tsquery can be built from it.
+var ErrEmptySearchQuery = errors.New("search query contains no searchable characters")
+
 func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cursor) ([]models.Event, *utils.Cursor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Normalise BEFORE building the tsquery. The old code interpolated the
+	// stripped string straight into to_tsquery, so an all-punctuation term such
+	// as "!!" survived the handler's 2-rune check, stripped to empty, and
+	// produced to_tsquery('simple', ':*') -- a hard Postgres syntax error that
+	// 500'd the whole endpoint. Reject it here instead.
+	normalized := normalizeSearchTerms(query)
+	if normalized == "" {
+		return nil, nil, ErrEmptySearchQuery
+	}
+	tsQuery := buildPrefixTsQuery(normalized)
 
 	// Combined search strategy:
 	//   1. Prefix full-text: to_tsquery with :* matches words that START with the query
@@ -1614,30 +1648,39 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
 	//   2. Trigram similarity: word_similarity() catches typos and transpositions
 	//      e.g. "joberg" -> matches "joburg", "captown" -> "Cape Town"
 	// Results are ranked by the best trigram similarity score across title/venue/city.
-	args := []interface{}{query, models.EventPublished}
+	//
+	// $1 = raw query (trigram comparisons), $2 = status, $3 = prebuilt tsquery.
+	args := []interface{}{query, models.EventPublished, tsQuery}
+
+	const relevanceExpr = `GREATEST(
+			word_similarity($1, e.title),
+			word_similarity($1, e.venue_name),
+			word_similarity($1, e.city)
+		)`
+
 	whereClauses := []string{
 		`e.status = $2`,
 		`(
-			e.search_vector @@ to_tsquery('simple',
-				regexp_replace(
-					regexp_replace(trim($1), '[^a-zA-Z0-9\s]', '', 'g'),
-					'\s+', ':* & ', 'g'
-				) || ':*'
-			)
+			e.search_vector @@ to_tsquery('simple', $3)
 			OR word_similarity($1, e.title)      > 0.2
 			OR word_similarity($1, e.venue_name) > 0.2
 			OR word_similarity($1, e.city)       > 0.2
 		)`,
 	}
 
+	// Keyset predicate must mirror the ORDER BY exactly, relevance included.
+	// The previous version paged on (start_time, id) while sorting primarily by
+	// relevance, so page 2 both skipped and repeated rows.
 	if cursor != nil {
-		startTimeIndex := len(args) + 1
-		idIndex := len(args) + 2
-		whereClauses = append(whereClauses, fmt.Sprintf(
-			"(e.start_time < $%d OR (e.start_time = $%d AND e.id < $%d))",
-			startTimeIndex, startTimeIndex, idIndex,
-		))
-		args = append(args, cursor.StartTime, cursor.ID)
+		relIdx := len(args) + 1
+		startIdx := len(args) + 2
+		idIdx := len(args) + 3
+		whereClauses = append(whereClauses, fmt.Sprintf(`(
+			%[1]s < $%[2]d
+			OR (%[1]s = $%[2]d AND e.start_time < $%[3]d)
+			OR (%[1]s = $%[2]d AND e.start_time = $%[3]d AND e.id < $%[4]d)
+		)`, relevanceExpr, relIdx, startIdx, idIdx))
+		args = append(args, cursor.Relevance, cursor.StartTime, cursor.ID)
 	}
 
 	finalWhere := "WHERE " + strings.Join(whereClauses, " AND ")
@@ -1648,20 +1691,17 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
         SELECT
             e.id, COALESCE(e.slug, '') AS slug, e.title, e.description, e.cover_image_url, e.banner_image_url,
             e.start_time, e.end_time, e.price, e.currency,
-            e.city, e.venue_name, c.name as category
+            e.city, e.venue_name, c.name as category,
+            %[1]s AS relevance
         FROM events e
         JOIN categories c ON e.category_id = c.id
-        %s
+        %[2]s
         ORDER BY
-            GREATEST(
-                word_similarity($1, e.title),
-                word_similarity($1, e.venue_name),
-                word_similarity($1, e.city)
-            ) DESC,
+            %[1]s DESC,
             e.start_time DESC,
             e.id DESC
-        LIMIT $%d
-    `, finalWhere, limitIndex)
+        LIMIT $%[3]d
+    `, relevanceExpr, finalWhere, limitIndex)
 
 	rows, err := pool.Query(ctx, querySQL, args...)
 	if err != nil {
@@ -1670,26 +1710,74 @@ func SearchEvents(pool *pgxpool.Pool, query string, limit int, cursor *utils.Cur
 	defer rows.Close()
 
 	events := make([]models.Event, 0, limit)
+	relevances := make([]float64, 0, limit)
 	for rows.Next() {
 		var event models.Event
-		err = rows.Scan(
+		var relevance float64
+		if err := rows.Scan(
 			&event.ID, &event.Slug, &event.Title, &event.Description, &event.CoverImageURL, &event.BannerImageURL,
 			&event.StartTime, &event.EndTime, &event.Price, &event.Currency,
 			&event.City, &event.VenueName, &event.Category,
-		)
-		if err != nil {
+			&relevance,
+		); err != nil {
 			return nil, nil, err
 		}
 		events = append(events, event)
+		relevances = append(relevances, relevance)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
 	}
 
 	var nextCursor *utils.Cursor
 	if len(events) > limit {
 		last := events[limit-1]
-		nextCursor = &utils.Cursor{StartTime: last.StartTime, ID: last.ID}
+		nextCursor = &utils.Cursor{
+			Relevance: relevances[limit-1],
+			StartTime: last.StartTime,
+			ID:        last.ID,
+		}
 		events = events[:limit]
 	}
 	return events, nextCursor, nil
+}
+
+// normalizeSearchTerms strips everything that is not alphanumeric or
+// whitespace, collapses runs of whitespace, and trims. An input that contains
+// no usable term at all returns "".
+func normalizeSearchTerms(raw string) string {
+	var b strings.Builder
+	b.Grow(len(raw))
+	prevSpace := true // leading whitespace is dropped
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevSpace = false
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		default:
+			// punctuation and symbols are dropped without joining words
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// buildPrefixTsQuery turns "cape town" into "cape:* & town:*". Input must
+// already be normalized and non-empty.
+func buildPrefixTsQuery(normalized string) string {
+	terms := strings.Fields(normalized)
+	for i, t := range terms {
+		terms[i] = t + ":*"
+	}
+	return strings.Join(terms, " & ")
 }
 
 func GetEventTitlesByIDs(pool *pgxpool.Pool, ids []string) (map[string]string, error) {
@@ -1723,7 +1811,12 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 
 	const baseQuery = `
 		SELECT id, COALESCE(slug, '') AS slug, title, description, start_time, status, tickets_sold,
-       		max_capacity, price, currency, created_at
+       		max_capacity, price, currency, created_at,
+			end_time,
+			COALESCE(venue_name, '') AS venue_name,
+			COALESCE(address, '')    AS address,
+			COALESCE(city, '')       AS city,
+			COALESCE(views, 0)       AS views
 		FROM events
 		WHERE organizer_id = $1
 	`
@@ -1754,6 +1847,7 @@ func GetOrganizerEvents(pool *pgxpool.Pool, organizerID string, status string) (
 			&e.ID, &e.Slug, &e.Title, &e.Description, &e.StartTime,
 			&e.Status, &e.TicketsSold, &e.MaxCapacity,
 			&e.Price, &e.Currency, &e.CreatedAt,
+			&e.EndTime, &e.VenueName, &e.Address, &e.City, &e.Views,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan organizer event row: %w", err)
 		}

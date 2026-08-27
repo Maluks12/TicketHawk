@@ -45,6 +45,11 @@ const NAV: NavEntry[] = [
   // resolution. Kept OFF the Overview and behind its own route so the
   // dashboard's first screen stays a summary rather than a control panel.
   { type: 'item', href: '/analytics', label: 'Analytics', icon: 'activity' },
+  // The organiser's own public page — what attendees reach from the ORGANISED
+  // BY row on any of their events, and from search. Sits under Dashboard
+  // rather than Account because it is a thing they BUILD, like an event, not a
+  // setting they configure once.
+  { type: 'item', href: '/organiser-page', label: 'Public Page', icon: 'user' },
   { type: 'divider' },
   { type: 'section', label: 'Account' },
   {
@@ -53,6 +58,10 @@ const NAV: NavEntry[] = [
     // ADS_ENABLED, and PublishEvent hard-fails every paid event without it.
     type: 'item', href: '/kyc', label: 'Verification & Payouts', icon: 'shield-check',
   },
+  // Business name, contact email, phone. Read-only until now — the model had
+  // an update DTO with no repository function and no route behind it, so a
+  // name mistyped at sign-up could not be corrected.
+  { type: 'item', href: '/settings', label: 'Account Settings', icon: 'settings' },
   ...(ADS_ENABLED
     ? [{ type: 'item' as const, href: '/campaigns', label: 'Campaigns', icon: 'bar-chart' as IconName }]
     : []),

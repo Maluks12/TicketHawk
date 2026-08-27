@@ -30,7 +30,7 @@ import {
   type HomeSection,
 } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
-import { Ticket } from 'phosphor-react-native';
+import { Ticket, CaretDown, MagnifyingGlass } from 'phosphor-react-native';
 import { useAuthStore } from '../../store/authStore';
 import { s, sheet } from '../../styles/home';
 import FilterModal, { FilterParams, buildFilterQueryString, formatDateRangeLabel, getBaseUrl } from '../../components/FilterModal';
@@ -671,6 +671,33 @@ export default function Index() {
     setRefreshing(false);
   }, [fetchSections, filterParams.city]);
 
+  // ── Empty-state action ──────────────────────────────────────────────────────
+  //
+  // "Try again" used to call onRefresh, which loads the UNFILTERED home feed —
+  // so the button appeared to reset the location while the header still showed
+  // the old one, and the feed no longer matched what the header claimed.
+  //
+  // Retrying is also the wrong verb here. The usual reason this state shows is
+  // that a filter matched nothing, and re-running the same filter returns the
+  // same nothing. Clearing it is the action that actually helps.
+  const hasActiveFilter = !!(
+    filterParams.city ||
+    filterParams.province ||
+    filterParams.lat ||
+    (filterParams.date && filterParams.date !== 'any')
+  );
+
+  // Mirrors the no-filter branch of handleFilterApply: bump filterReqId so any
+  // in-flight filtered request cannot land after this and repopulate the list.
+  const clearFilters = useCallback(() => {
+    filterReqId.current += 1;
+    setFilterParams({ date: 'any' });
+    setError(null);
+    setSections(homeSections);
+    headerOffset.current = 0;
+    Animated.spring(headerAnim, { toValue: 0, useNativeDriver: true, bounciness: 0, speed: 14 }).start();
+  }, [homeSections, headerAnim]);
+
   // PERF: useCallback so handleFilterApply reference is stable across renders
   const handleFilterApply = useCallback(async (params: FilterParams) => {
     setFilterParams(params);
@@ -962,13 +989,47 @@ export default function Index() {
           </View>
         </Modal>
 
-        {/* Error banner */}
+        {/* Empty / error state.
+            Restyled to match the rest of the feed: a centred block on the page
+            background, using the same section-card surface as every other card,
+            instead of a tinted red slab with a warning glyph and a shouting
+            all-caps heading. The pink wash and the ⚠ read as "something is
+            broken" even when the copy underneath says the filter simply matched
+            nothing, which is the most common reason this shows at all. */}
         {error && (
-          <View style={{ margin: 20, backgroundColor: 'rgba(255,60,110,0.12)', borderWidth: 1, borderColor: colors.dividerColor, borderRadius: 3, padding: 14 }}>
-            <Text style={{ color: colors.text, fontWeight: '800', fontSize: 12, marginBottom: 4, letterSpacing: 1 }}>⚠ COULD NOT LOAD SECTIONS</Text>
-            <Text style={{ color: colors.subText, fontSize: 11 }}>{error}</Text>
-            <TouchableOpacity onPress={onRefresh} style={{ marginTop: 10, alignSelf: 'flex-start', borderWidth: 1, borderColor: colors.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 2 }}>
-              <Text style={{ color: colors.text, fontWeight: '800', fontSize: 10, letterSpacing: 1.5 }}>RETRY</Text>
+          <View style={{ alignItems: 'center', paddingHorizontal: 40, paddingTop: 32, paddingBottom: 40 }}>
+            <View style={{
+              width: 64, height: 64, borderRadius: 22,
+              backgroundColor: colors.sectionCardBg,
+              alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+            }}>
+              <MagnifyingGlass size={26} color={colors.iconColor} weight="regular" />
+            </View>
+
+            <Text style={{
+              color: colors.text, fontSize: 17, fontWeight: '800',
+              letterSpacing: -0.3, textAlign: 'center', marginBottom: 6,
+            }}>
+              Nothing here yet
+            </Text>
+
+            <Text style={{
+              color: colors.subText, fontSize: 13, lineHeight: 19, textAlign: 'center',
+            }}>
+              {error}
+            </Text>
+
+            <TouchableOpacity
+              onPress={hasActiveFilter ? clearFilters : onRefresh}
+              activeOpacity={0.85}
+              style={{
+                marginTop: 18, paddingHorizontal: 22, paddingVertical: 11,
+                borderRadius: 999, backgroundColor: colors.sectionCardBg,
+              }}
+            >
+              <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+                {hasActiveFilter ? 'Clear filters' : 'Try again'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1099,8 +1160,21 @@ export default function Index() {
         className={s.locationHeader}
         onLayout={(e) => { headerHeight.current = e.nativeEvent.layout.height; }}
       >
-        <TouchableOpacity onPress={() => setFilterOpen(true)}>
-          <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
+        {/* The caret is the only thing marking this as tappable. Without it the
+            location and date read as a static page title, so the filter sheet
+            behind them went undiscovered. hitSlop widens the touch target
+            without changing the layout. */}
+        <TouchableOpacity
+          onPress={() => setFilterOpen(true)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Filter events. Currently ${locationLabel}, ${dateLabelText}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 16 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text className={s.locationCity} style={{ color: colors.text }}>{locationLabel}</Text>
+            <CaretDown size={16} weight="bold" color={colors.text} />
+          </View>
           <Text className={s.locationSub} style={{ color: colors.subText }}>{dateLabelText}</Text>
         </TouchableOpacity>
       </Animated.View>

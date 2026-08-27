@@ -21,6 +21,7 @@ import { Icon } from '@/components/icons';
 import { LineChart, BarChart, Funnel, Legend, Series } from '@/components/charts';
 import { StatusPill } from '@/components/ui';
 import Select from '@/components/select';
+import { getMyPublicProfile } from '@/lib/organiserProfile';
 import {
   getAnalyticsOverview, listEventAnalytics, getSeries,
   AnalyticsOverview, EventAnalyticsRow, SeriesResult, Granularity,
@@ -55,6 +56,17 @@ export default function AnalyticsPage() {
   const [scope, setScope] = useState<string>(() => params.get('event') ?? 'all');
 
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
+
+  // Followers of the ORGANISER, not of an event — so it does not vary with the
+  // event scope or the date range, and is fetched once rather than with the
+  // series. Null while loading or if the call fails; the tile shows a dash
+  // rather than a misleading zero.
+  const [followers, setFollowers] = useState<number | null>(null);
+  useEffect(() => {
+    getMyPublicProfile()
+      .then(p => setFollowers(p.follower_count ?? 0))
+      .catch(() => setFollowers(null));
+  }, []);
   const [events, setEvents] = useState<EventAnalyticsRow[]>([]);
   const [series, setSeries] = useState<SeriesResult | null>(null);
 
@@ -222,6 +234,28 @@ export default function AnalyticsPage() {
           <div className="card">
             <div className="toolbar" style={{ borderBottom: 'none' }}>
               <div className="toolbar-left" style={{ flexWrap: 'wrap' }}>
+                {/* ── Followers ────────────────────────────────────────────
+                    Sits in the toolbar rather than the metric grid below.
+
+                    Everything in that grid responds to the Resolution, Window
+                    and event scope controls. Followers does not — it is a
+                    count of people following the ORGANISER, identical whether
+                    you are looking at one event or all of them, last hour or
+                    last month. Put among tiles that all move together it read
+                    as broken, and it sat alone on a third row.
+
+                    Here it is chrome next to chrome, which is what it is. */}
+                <ControlGroup label="Followers">
+                  <span style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 15, fontWeight: 700,
+                    color: 'var(--text-1)', lineHeight: 1,
+                    padding: '0 4px',
+                  }}>
+                    {followers != null ? fmtNum(followers) : DASH}
+                  </span>
+                </ControlGroup>
+
                 <ControlGroup label="Resolution">
                   {GRAINS.map((g) => (
                     <button

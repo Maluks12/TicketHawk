@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
 
@@ -124,39 +123,33 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 	}
 }
 
-func GetGuestBookingHandler(pool *pgxpool.Pool, rdb *redis.Client) gin.HandlerFunc {
+// GetGuestBookingHandler no longer takes a Redis client.
+//
+// Brute-force lockout now lives in middleware.GuestBookingGuard on the whole
+// /guest group. That removes the nil-client panic this handler used to have
+// (main.go leaves rdb nil when Redis is down at startup, and this called
+// rdb.Get unguarded), and it means every guest route is protected rather than
+// just this one and /assignments.
+func GetGuestBookingHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bookingNumber := c.Param("bookingNumber")
 		email := c.Query("email")
 
-		// if bookingNumber == "" {
-		// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Booking number is required"})
-		// 	return
-		// }
+		if bookingNumber == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Booking number is required"})
+			return
+		}
 		if email == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required"})
 			return
 		}
 
-		lockKey := "guest:lockout:" + bookingNumber
-		count, _ := rdb.Get(c.Request.Context(), lockKey).Int()
-		if count >= 5 {
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many failed attempts. Try again later"})
-			return
-		}
-
+		// The 404 below is what the guard counts as a failed attempt.
 		booking, err := repository.GetGuestBooking(pool, bookingNumber, email)
 		if err != nil {
-			pipe :=rdb.Pipeline()
-			pipe.Incr(c.Request.Context(), lockKey)
-			pipe.Expire(c.Request.Context(), lockKey, time.Hour)
-			pipe.Exec(c.Request.Context())
-
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
 		}
-
-		rdb.Del(c.Request.Context(), lockKey)
 
 		c.JSON(http.StatusOK, booking)
 	}
@@ -202,7 +195,7 @@ func GuestPaymentStatusHandler(pool *pgxpool.Pool, paymentService *services.Paym
 // Identity is verified by bookingNumber + email, matching the pattern used by
 // GetGuestBookingHandler. The same Redis lockout (5 failed attempts → 1 hour
 // block) is applied to prevent enumeration.
-func GetGuestTicketAssignmentsHandler(pool *pgxpool.Pool, rdb *redis.Client) gin.HandlerFunc {
+func GetGuestTicketAssignmentsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bookingNumber := c.Param("bookingNumber")
 		email := c.Query("email")
@@ -212,33 +205,12 @@ func GetGuestTicketAssignmentsHandler(pool *pgxpool.Pool, rdb *redis.Client) gin
 			return
 		}
 
-		// Redis lockout — same key as GetGuestBookingHandler so failed attempts
-		// on either endpoint count toward the same limit.
-		lockKey := "guest:lockout:" + bookingNumber
-		if rdb != nil {
-			count, _ := rdb.Get(c.Request.Context(), lockKey).Int()
-			if count >= 5 {
-				c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many failed attempts. Try again later"})
-				return
-			}
-		}
-
-		// Verify identity: bookingNumber + email must match a guest booking.
+		// Lockout is handled by middleware.GuestBookingGuard on the /guest
+		// group; the 404 below is what it counts as a failed attempt.
 		booking, err := repository.GetGuestBooking(pool, bookingNumber, email)
 		if err != nil {
-			if rdb != nil {
-				pipe := rdb.Pipeline()
-				pipe.Incr(c.Request.Context(), lockKey)
-				pipe.Expire(c.Request.Context(), lockKey, time.Hour)
-				pipe.Exec(c.Request.Context())
-			}
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
-		}
-
-		// Clear lockout on success.
-		if rdb != nil {
-			rdb.Del(c.Request.Context(), lockKey)
 		}
 
 		assignments, err := repository.GetAssignmentsByBookingID(pool, booking.ID)
@@ -434,9 +406,17 @@ func GuestRefundHandler(
 		// Gateway first, database second. If the refund fails the booking stays
 		// confirmed and the guest keeps a valid ticket — the safe direction to
 		// fail in. The reverse order would void their ticket without paying them.
-		if err := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); err != nil {
-			utils.InternalError(c, err, "guest refund: gateway refund failed")
-			return
+		//
+		// A zero-value booking skips the gateway entirely: there may be no
+		// payments row at all, and the amount rounds to zero minor units, so
+		// ProcessRefund fails on its own guards. Attempting it would block the
+		// cancellation of a free ticket and leave the seat held — see the same
+		// case in booking_handler.go.
+		if quote.RefundAmount > 0 {
+			if err := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); err != nil {
+				utils.InternalError(c, err, "guest refund: gateway refund failed")
+				return
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

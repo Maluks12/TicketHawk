@@ -12,6 +12,10 @@ type Cursor struct {
 	ID        string    `json:"id"`
 	CreatedAt     time.Time  `json:"created_at,omitempty"`
 	Views         int        `json:"views,omitempty"`
+	// Relevance carries the trigram score of the last row on the previous
+	// page. Only SearchEvents sets it; omitempty keeps every other cursor
+	// payload byte-identical to before.
+	Relevance     float64    `json:"relevance,omitempty"`
 }
 
 func EncodeCursor(c *Cursor) string {

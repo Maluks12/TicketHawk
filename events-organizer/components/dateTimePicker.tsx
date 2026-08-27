@@ -113,6 +113,12 @@ interface Props {
   dateOnly?: boolean;
 }
 
+// NOTE: every label drawn on an --accent-deep fill uses --on-accent, never
+// '#fff'. The accent is near-black in the light theme and near-white in
+// dark, so a hardcoded white label made the selected date, the AM/PM
+// toggle and the Done button white-on-white and invisible in dark mode.
+// The token flips with the theme; the literal could not.
+
 export default function DateTimePicker({
   value,
   onChange,
@@ -385,7 +391,7 @@ export default function DateTimePicker({
                     color: disabled
                       ? 'var(--text-faint)'
                       : isSel
-                        ? '#fff'
+                        ? 'var(--on-accent)'
                         : inMonth ? 'var(--text)' : 'var(--text-3)',
                     fontWeight: isSel ? 700 : inMonth ? 500 : 400,
                     cursor: disabled ? 'not-allowed' : 'pointer',
@@ -419,7 +425,7 @@ export default function DateTimePicker({
               style={{
                 padding: '6px 14px',
                 border: 'none', borderRadius: 'var(--r)',
-                background: 'var(--accent-deep)', color: '#fff',
+                background: 'var(--accent-deep)', color: 'var(--on-accent)',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer',
                 fontFamily: 'inherit',
               }}
@@ -523,7 +529,7 @@ function TimeField({
   const cell = (on: boolean): CSSProperties => ({
     padding: '7px 0', border: 'none', borderRadius: 8,
     background: on ? 'var(--accent-deep)' : 'transparent',
-    color: on ? '#fff' : 'var(--text-2)',
+    color: on ? 'var(--on-accent)' : 'var(--text-2)',
     fontSize: 13, fontWeight: on ? 700 : 500,
     fontFamily: 'inherit', cursor: 'pointer',
     fontVariantNumeric: 'tabular-nums',
@@ -650,7 +656,7 @@ function TimeField({
             style={{
               width: '100%', marginTop: 12, padding: '7px 0',
               border: 'none', borderRadius: 'var(--r)',
-              background: 'var(--accent-deep)', color: '#fff',
+              background: 'var(--accent-deep)', color: 'var(--on-accent)',
               fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
             }}>
             Done

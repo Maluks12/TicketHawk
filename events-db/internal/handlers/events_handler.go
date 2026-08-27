@@ -320,10 +320,26 @@ func GetEventByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 			userID = &uidStr
 		}
 
+		// Two counters, deliberately both.
+		//
+		// IncrementView feeds events.views — the lifetime number the public page
+		// and the trending score read. RecordViewBucket feeds
+		// event_metric_buckets.views — the TIME SERIES the organiser analytics
+		// read. RecordViewBucket was written and documented as "additive to
+		// IncrementView" but never actually called from anywhere, so the bucket
+		// column sat at 0 permanently. That is why the dashboard showed
+		// impressions climbing with 0 views, and why conversion (tickets/views)
+		// and retention (dwell/views) rendered blank — both divide by it.
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), eventID)
+			if !ec.RecordViewBucket(c.Request.Context(), eventID) {
+				// Redis buffer unavailable — write straight through rather than
+				// losing the view, same fallback the dwell beacon uses.
+				_ = repository.RecordMetricsDirect(pool, eventID, 1, 0, 0)
+			}
 		} else {
 			_ = repository.IncrementViews(pool, eventID)
+			_ = repository.RecordMetricsDirect(pool, eventID, 1, 0, 0)
 		}
 
 		event, err := repository.GetEventByID(pool, eventID, userID)
@@ -453,10 +469,15 @@ func TrackEventViewHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			return
 		}
 
+		// Same pair as GetEventByIDHandler — see the note there.
 		if ec != nil {
 			ec.IncrementView(c.Request.Context(), event.ID)
+			if !ec.RecordViewBucket(c.Request.Context(), event.ID) {
+				_ = repository.RecordMetricsDirect(pool, event.ID, 1, 0, 0)
+			}
 		} else {
 			_ = repository.IncrementViews(pool, event.ID)
+			_ = repository.RecordMetricsDirect(pool, event.ID, 1, 0, 0)
 		}
 
 		c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -776,6 +797,13 @@ func SearchEventsHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 
 		events, nextCursor, err := repository.SearchEvents(pool, query, limit, cursor)
 		if err != nil {
+			// A term that normalizes to nothing ("!!", "??", "---") is a client
+			// mistake, not a server fault. It used to reach to_tsquery as ":*"
+			// and 500 the endpoint.
+			if errors.Is(err, repository.ErrEmptySearchQuery) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "search query must contain letters or numbers"})
+				return
+			}
 			utils.InternalError(c, err, "failed to search events")
 			return
 		}

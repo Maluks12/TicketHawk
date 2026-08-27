@@ -1,0 +1,57 @@
+-- ============================================================================
+-- 000079: Add the organizer_status labels the application already believes in.
+--
+-- THE BUG THIS FIXES
+--
+-- organizer_status was created in 000001 as:
+--
+--     ('pending', 'approved', 'suspended', 'rejected')
+--
+-- and never extended. But AdminUpdateOrganizerStatusHandler validates its input
+-- against a DIFFERENT set:
+--
+--     if dto.Status != OrganizerActive &&
+--        dto.Status != OrganizerSuspended &&
+--        dto.Status != OrganizerBanned { → 400 }
+--
+-- So the endpoint accepts exactly active / suspended / banned, and of those
+-- only 'suspended' exists in the database. AdminUpdateOrganizerStatus writes
+-- the value straight into the enum column, so an admin pressing "ban" or
+-- "reactivate" gets 22P02 wrapped as a 500. Two of the three admin actions on
+-- PUT /admin/organizers/:id/status have never worked.
+--
+-- It went unnoticed because suspend — the one that does work — is the one
+-- anybody reaches for first, and because a 500 on an admin action reads as a
+-- transient glitch rather than a missing enum label.
+--
+-- WHAT THIS DOES NOT DO
+--
+-- It does NOT migrate existing 'approved' rows to 'active'. Three code paths
+-- still WRITE OrganizerApproved on the happy path — organizer_respository.go
+-- lines 102, 231 and 326, plus event_transfer_repository.go — so renaming the
+-- data without changing those writers would just refill the column with
+-- 'approved' the next time anyone registered. Both labels stay valid and both
+-- mean "in good standing"; consolidating them is a separate change that has to
+-- move the writers first.
+--
+-- WHY 'active' IS ADDED EVEN THOUGH NOTHING READS IT
+--
+-- Because the admin endpoint WRITES it. Adding 'banned' alone would fix the ban
+-- button and leave the reactivate button throwing the same 500 — which is a
+-- worse state than now, since an admin could ban an organiser and then be
+-- unable to undo it.
+-- ============================================================================
+
+-- ⚠️  ADD VALUE ONLY. Nothing in this migration may USE these labels.
+--
+-- Postgres 12+ allows ALTER TYPE ... ADD VALUE inside a transaction, but the
+-- new label cannot be referenced until that transaction commits. golang-migrate
+-- wraps each migration file in one transaction, so an UPDATE using 'banned'
+-- here would fail with:
+--
+--     unsafe use of new value "banned" of enum type organizer_status
+--
+-- Any data change that depends on these labels belongs in 000080 or later.
+
+ALTER TYPE organizer_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE organizer_status ADD VALUE IF NOT EXISTS 'banned';

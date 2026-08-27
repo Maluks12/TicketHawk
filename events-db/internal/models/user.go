@@ -27,6 +27,26 @@ type User struct {
 	EmailVerificationExpires *time.Time `json:"-" db:"email_verification_expires"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+
+	// ── Sign-in method, for the client's benefit ─────────────────────────────
+	//
+	// Since 000075 an account can exist with password IS NULL (created through
+	// Google or Apple). The client cannot infer that from anything else it
+	// receives, and it needs to know two things:
+	//
+	//   • Whether to demand a current password before an email change, or run
+	//     the provider flow instead. Demanding a password the account has never
+	//     had is an unclearable form error.
+	//   • Whether to offer "Set a password" on the profile screen.
+	//
+	// Password itself stays `json:"-"` — this is a boolean ABOUT the password,
+	// never the hash.
+	HasPassword bool `json:"has_password" db:"-"`
+
+	// Providers linked to this account ("google", "apple"). Empty for a
+	// password-only account. Lets the client name the right button — "Confirm
+	// with Apple" rather than a generic prompt.
+	LinkedProviders []string `json:"linked_providers" db:"-"`
 }
 
 type UserProfile struct {
@@ -41,7 +61,6 @@ type RegisterUserDTO struct {
 	Password string `json:"password" binding:"required,min=8,max=128"`
 	FirstName string `json:"first_name" binding:"required,min=1,max=100"`
 	LastName string `json:"last_name" binding:"required,min=1,max=100"`
-	DateOfBirth time.Time `json:"date_of_birth" binding:"required"`
 	PhoneNumber string `json:"phone_number" binding:"required,min=10,max=20"`
 }
 
@@ -56,4 +75,30 @@ func (u *User)GetFullName() string {
 		return strings.TrimSpace(*u.FirstName + " " + *u.LastName)
 	}
 	return u.Email
+}
+
+// UserIdentity is a linked social sign-in provider, surfaced on the profile
+// screen so a user can see (and remove) what is connected to their account.
+type UserIdentity struct {
+	Provider    string     `json:"provider"`
+	Email       *string    `json:"email,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+}
+
+// SocialSignInDTO is the request body for POST /v1/auth/social.
+//
+// The client does the interactive OAuth dance and sends the resulting ID token.
+// There is no client_secret and no authorization code on this path — the server
+// only ever verifies a signed assertion.
+type SocialSignInDTO struct {
+	Provider string `json:"provider" binding:"required,oneof=google apple"`
+	IDToken  string `json:"id_token" binding:"required,max=8192"`
+	// Nonce the client generated before starting the flow. Replay defence.
+	Nonce string `json:"nonce" binding:"max=256"`
+	// Apple sends the display name ONCE, in the authorization response rather
+	// than in the ID token, and never again. The client forwards it on first
+	// sign-in; it is treated as a hint, never as identity.
+	FirstName string `json:"first_name" binding:"max=100"`
+	LastName  string `json:"last_name"  binding:"max=100"`
 }

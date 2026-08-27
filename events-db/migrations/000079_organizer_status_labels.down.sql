@@ -1,0 +1,29 @@
+-- ============================================================================
+-- 000079 down — INTENTIONALLY A NO-OP.
+--
+-- Postgres has no ALTER TYPE ... DROP VALUE. Removing an enum label means
+-- recreating the type and rewriting every column that uses it:
+--
+--     ALTER TABLE organizers ALTER COLUMN status TYPE text;
+--     DROP TYPE organizer_status;
+--     CREATE TYPE organizer_status AS ENUM (...);
+--     ALTER TABLE organizers ALTER COLUMN status TYPE organizer_status
+--         USING status::organizer_status;
+--
+-- That takes an ACCESS EXCLUSIVE lock on organizers for the duration and fails
+-- outright if any row is already using one of the labels being dropped — so a
+-- rollback after even one organiser has been banned would abort halfway, with
+-- the column left as text.
+--
+-- Adding an unused enum label costs nothing. Removing one risks the table. The
+-- correct rollback is to leave them in place.
+--
+-- If they genuinely must go, do it by hand, off-hours, with a backup, after
+-- confirming:
+--
+--     SELECT status, count(*) FROM organizers GROUP BY status;
+--
+-- returns no rows for 'active' or 'banned'.
+-- ============================================================================
+
+SELECT 1;

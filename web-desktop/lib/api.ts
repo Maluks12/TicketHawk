@@ -241,7 +241,6 @@ export interface RegisterDTO {
   first_name: string;
   last_name: string;
   phone_number: string;
-  date_of_birth: string;
 }
 
 export interface Event {
@@ -453,6 +452,11 @@ export interface UpdateProfileDTO {
   phone_number?: string;
   email?: string;
   current_password?: string;
+  // Social accounts have no password — a fresh provider token is the
+  // equivalent proof. See events-db/internal/handlers/reauth.go.
+  provider?: 'google' | 'apple';
+  id_token?: string;
+  nonce?: string;
 }
 
 export interface UpdateProfileResponse {

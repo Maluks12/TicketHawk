@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
+import SocialAuthButtons from '@/components/socialAuthButtons';
 import { useAppTheme } from '@/themes/colors';
 import { resolveReturnPath, clearReturnPath } from '@/lib/returnPath';
 
@@ -65,7 +66,6 @@ export default function AuthPage() {
   const [lastName, setLastName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [dob, setDob] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
 
@@ -73,12 +73,6 @@ export default function AuthPage() {
 
   const switchMode = (m: Mode) => { setMode(m); setGlobalErr(null); setErrors({}); };
 
-  const parseDobToISO = (f: string) => {
-    const [dd, mm, yyyy] = f.split('/');
-    if (!dd || !mm || !yyyy || yyyy.length < 4) return null;
-    const d = new Date(`${yyyy}-${mm}-${dd}`);
-    return isNaN(d.getTime()) ? null : d.toISOString();
-  };
 
   // Post-auth destination.
   //
@@ -125,8 +119,6 @@ export default function AuthPage() {
     else if (!/\S+@\S+\.\S+/.test(regEmail)) errs.regEmail = 'Enter a valid email';
     if (!phone.trim()) errs.phone = 'Required';
     else if (phone.replace(/\D/g, '').length < 10) errs.phone = 'Enter a valid number';
-    if (!dob) errs.dob = 'Required';
-    else if (!parseDobToISO(dob)) errs.dob = 'Use DD/MM/YYYY';
     if (!regPassword) errs.regPassword = 'Required';
     else if (!(regPassword.length >= 8 && /[A-Z]/.test(regPassword) && /[0-9]/.test(regPassword) && /[^A-Za-z0-9\s]/.test(regPassword))) errs.regPassword = 'Password does not meet all requirements';
     if (confirmPass !== regPassword) errs.confirmPass = "Passwords don't match";
@@ -137,14 +129,14 @@ export default function AuthPage() {
       await register({
         email: regEmail.trim().toLowerCase(), password: regPassword,
         first_name: firstName.trim(), last_name: lastName.trim(),
-        phone_number: phone.trim(), date_of_birth: parseDobToISO(dob)!,
+        phone_number: phone.trim(),
       });
       goAfterAuth();
     } catch (e: any) {
       const msg = e?.response?.data?.error ?? '';
       setGlobalErr(msg.toLowerCase().includes('email') ? 'An account with this email already exists.' : msg || 'Something went wrong.');
     } finally { setLoading(false); }
-  }, [firstName, lastName, regEmail, phone, dob, regPassword, confirmPass, agreed, register, router]);
+  }, [firstName, lastName, regEmail, phone, regPassword, confirmPass, agreed, register, router]);
 
   const bg = isDark ? '#0a0a0a' : '#f5f5f7';
   const cardBg = isDark ? '#111' : '#fff';
@@ -203,6 +195,11 @@ export default function AuthPage() {
             <p style={{ textAlign: 'center', fontSize: 13, color: colors.subText, margin: 0 }}>
               <span onClick={() => router.push('/reset-password')} style={{ color: '#ff2d55', fontWeight: 700, cursor: 'pointer' }}>Forgot password?</span>
             </p>
+
+            {/* Google + Apple. One tap covers both signup and login — the
+                server decides which, since only it can see whether this
+                provider identity already maps to an account. */}
+            <SocialAuthButtons isDark={isDark} onAuthed={goAfterAuth} />
             <p style={{ textAlign: 'center', fontSize: 13, color: colors.subText, margin: 0 }}>
               Don&apos;t have an account?{' '}
               <span onClick={() => switchMode('register')} style={{ color: '#ff2d55', fontWeight: 700, cursor: 'pointer' }}>Sign up</span>
@@ -242,7 +239,6 @@ export default function AuthPage() {
                 <Field placeholder="Phone number" value={phone} onChange={(v) => { setPhone(v); clearErr('phone'); }} type="tel" error={errors.phone} autoComplete="tel" />
               </div>
             </div>
-            <Field placeholder="Date of birth (DD/MM/YYYY)" value={dob} onChange={(v) => { setDob(v); clearErr('dob'); }} error={errors.dob} />
             {/* Terms */}
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 4 }}>
               <div onClick={() => { setAgreed((a) => !a); clearErr('agreed'); }} style={{

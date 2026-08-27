@@ -53,8 +53,19 @@ func EmailTakenByAnotherUser(pool *pgxpool.Pool, ctx context.Context, email, use
 // Deliberately narrow: it fetches the hash and nothing else, so a caller that
 // only needs to verify a password never pulls a whole user row into memory and
 // cannot accidentally serialise the hash into a response.
+// ErrNoPasswordSet means the account has no password: it was created through
+// Google or Apple sign-in (migration 000075 made users.password nullable).
+//
+// Callers MUST handle this distinctly from "wrong password". Every re-auth
+// site in this codebase used to scan straight into a string, which fails on a
+// NULL with an opaque pgx error and surfaces as a 500 — so a social-only user
+// hit a server error trying to change their email or delete their account,
+// with no way to tell that the real problem was "you have no password".
+var ErrNoPasswordSet = errors.New("account has no password (social sign-in only)")
+
 func GetPasswordHash(pool *pgxpool.Pool, ctx context.Context, userID string) (string, error) {
-	var hash string
+	// *string, not string: scanning NULL into a string is an error in pgx.
+	var hash *string
 	err := pool.QueryRow(ctx, `SELECT password FROM users WHERE id = $1`, userID).Scan(&hash)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -62,7 +73,27 @@ func GetPasswordHash(pool *pgxpool.Pool, ctx context.Context, userID string) (st
 		}
 		return "", fmt.Errorf("GetPasswordHash: %w", err)
 	}
-	return hash, nil
+	if hash == nil || *hash == "" {
+		return "", ErrNoPasswordSet
+	}
+	return *hash, nil
+}
+
+// HasPassword reports whether the account can be re-authenticated by password.
+// Lets the clients decide which confirmation UI to show before the user has
+// filled anything in.
+func HasPassword(pool *pgxpool.Pool, ctx context.Context, userID string) (bool, error) {
+	var has bool
+	err := pool.QueryRow(ctx,
+		`SELECT password IS NOT NULL AND password <> '' FROM users WHERE id = $1`, userID,
+	).Scan(&has)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrUserNotFound
+		}
+		return false, fmt.Errorf("HasPassword: %w", err)
+	}
+	return has, nil
 }
 
 // UpdateUserProfile applies a sparse patch and returns the updated row.

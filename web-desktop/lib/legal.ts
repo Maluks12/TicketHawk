@@ -46,7 +46,7 @@ export const COMPANY = {
 
   // TODO: registered physical address. Required by ECTA s43(1)(c).
   // A PO box does not satisfy this — it must be a physical address.
-  physicalAddress: '8 Orion Avenue Sundowner Randburg 2161',
+  physicalAddress: 'South Africa',
 
   supportEmail: 'support@ticket-hawk.com',
   legalEmail: 'legal@ticket-hawk.com',

@@ -18,7 +18,7 @@ import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 import { useAppTheme } from '../../theme/colors';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.2';
 
 // ─── Row ──────────────────────────────────────────────────────────────────────
 
@@ -375,10 +375,13 @@ export default function ProfileScreen() {
                 colors={colors}
               />
               <View style={[sheet.divider, { backgroundColor: colors.dividerColor }]} />
-              {/* ── Following Events ──────────────────────────────────────── */}
+              {/* ── Following ─────────────────────────────────────────────────
+                  "Following", not "Following Events" — that screen now has two
+                  tabs, Events and Organisers, so naming it after one of them
+                  would misdescribe half of it. */}
               <Row
                 icon={<Ionicons name="heart-outline" size={16} color={colors.iconColor} />}
-                label="Following Events"
+                label="Following"
                 onPress={() => router.push('/profile/following' as any)}
                 colors={colors}
               />

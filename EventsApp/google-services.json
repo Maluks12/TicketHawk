@@ -12,7 +12,20 @@
           "package_name": "com.tickethawk.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1095131355111-sm7epntca8otsh2na7o37hodftqso934.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tickethawk.app",
+            "certificate_hash": "78021d097ef8852ef5db1ed450c911558ad98554"
+          }
+        },
+        {
+          "client_id": "1095131355111-qp85blgedorjjtkbu5qqdc89bii8qsr3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDS9vNu0YVoF2fLgnRCjFZrOezXcqVnzqY"
@@ -20,7 +33,20 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1095131355111-qp85blgedorjjtkbu5qqdc89bii8qsr3.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tickethawk.app",
+                "app_store_id": "6795701222"
+              }
+            }
+          ]
         }
       }
     }

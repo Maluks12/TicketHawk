@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700;800;900&display=swap');
 
 /* ─────────────────────────────────────────────────────────────────────────────
    TicketHawk Organiser — Studio design system
@@ -31,152 +31,195 @@
 [data-theme='dark'] {
   color-scheme: dark;
 
-  /* Surfaces */
-  --bg:              #08080C;
-  --bg-elevated:     #0E0E15;
-  --surface:         #101017;
-  --surface-2:       #15151F;
-  --surface-3:       #1C1C27;
-  --surface-alpha:   rgba(255,255,255,.045);
-  --surface-strong:  rgba(255,255,255,.07);
-  --surface-hover:   rgba(255,255,255,.04);
+  /* INK-ON-PAPER, INVERTED.
+     The dark theme is the same editorial system with the paper turned off:
+     one near-black ground, hairline rules, and near-white as the accent so a
+     primary button is still the highest-contrast object on screen. */
 
-  /* Lines */
-  --border:          rgba(255,255,255,.08);
-  --border-2:        rgba(255,255,255,.14);
-  --border-strong:   rgba(255,255,255,.14);
+  /* Surfaces — a narrow range on purpose. The old palette used five distinct
+     greys to imply depth; an editorial layout gets its structure from RULES,
+     so the surfaces sit close together and the borders do the work. */
+  --bg:              #0D0D0C;
+  --bg-elevated:     #131312;
+  --surface:         #131312;
+  --surface-2:       #191918;
+  --surface-3:       #1F1F1E;
+  --surface-alpha:   rgba(242,241,238,.04);
+  --surface-strong:  rgba(242,241,238,.07);
+  --surface-hover:   rgba(242,241,238,.05);
 
-  /* Text */
-  --text:            #FFFFFF;
-  --text-2:          rgba(255,255,255,.55);
-  --text-3:          rgba(255,255,255,.34);
-  --text-faint:      rgba(255,255,255,.20);
-  --text-inv:        #08080C;
-  --on-accent:       #FFFFFF;
+  /* Lines — stronger than before. These carry the layout now. */
+  --border:          rgba(242,241,238,.13);
+  --border-2:        rgba(242,241,238,.22);
+  --border-strong:   rgba(242,241,238,.22);
 
-  /* Accent — Studio indigo */
-  --accent:          #7C8CFF;
-  --accent-h:        #93A0FF;
-  --accent-deep:     #4F46E5;
-  --accent-soft:     rgba(124,140,255,.14);
-  --accent-softer:   rgba(124,140,255,.08);
-  --accent-border:   rgba(124,140,255,.30);
-  --accent-ring:     rgba(124,140,255,.25);
+  --text:            #F2F1EE;
+  --text-2:          rgba(242,241,238,.60);
+  --text-3:          rgba(242,241,238,.38);
+  --text-faint:      rgba(242,241,238,.22);
+  --text-inv:        #0D0D0C;
+  --on-accent:       #0D0D0C;
 
-  /* Consumer brand pink — used only in the wordmark */
+  /* Accent = near-white. Inverts the light theme's near-black so the same
+     rule (`background: var(--accent); color: var(--on-accent)`) produces a
+     correctly contrasting button in both themes with no per-theme overrides. */
+  --accent:          #F2F1EE;
+  --accent-h:        #FFFFFF;
+  --accent-deep:     #F2F1EE;
+  --accent-soft:     rgba(242,241,238,.10);
+  --accent-softer:   rgba(242,241,238,.05);
+  --accent-border:   rgba(242,241,238,.28);
+  --accent-ring:     rgba(242,241,238,.22);
+
+  /* Brand red, and the MARK colour.
+     --mark is the editorial accent: it does the job red does on the landing
+     page — the 01/02 section numbers, the wordmark, the sold-tickets bar.
+     Small, deliberate marks against a neutral ground.
+     It is NOT the primary button. Ink stays the primary action so the two
+     never compete, which is exactly the landing page's own split. */
   --brand:           #FF2D55;
+  --mark:            #FF476B;
+  --mark-h:          #FF6B85;
+  --mark-soft:       rgba(255,71,107,.14);
+  --mark-border:     rgba(255,71,107,.34);
+  --mark-ring:       rgba(255,71,107,.26);
 
-  /* Semantic */
-  --success:         #00E5A0;
-  --success-fg:      #00E5A0;
-  --success-bg:      rgba(0,229,160,.13);
-  --success-border:  rgba(0,229,160,.30);
+  --success:         #4ADE80;
+  --success-fg:      #4ADE80;
+  --success-bg:      rgba(74,222,128,.12);
+  --success-border:  rgba(74,222,128,.28);
 
-  --warning:         #FFB830;
-  --warning-fg:      #FFB830;
-  --warning-bg:      rgba(255,184,48,.13);
-  --warning-border:  rgba(255,184,48,.30);
+  --warning:         #E8B04B;
+  --warning-fg:      #E8B04B;
+  --warning-bg:      rgba(232,176,75,.12);
+  --warning-border:  rgba(232,176,75,.28);
 
-  --danger:          #FF5A5A;
-  --danger-fg:       #FF5A5A;
-  --danger-bg:       rgba(255,90,90,.13);
-  --danger-border:   rgba(255,90,90,.30);
+  --danger:          #FF2D55;
+  --danger-fg:       #FF6B85;
+  --danger-bg:       rgba(255,45,85,.12);
+  --danger-border:   rgba(255,45,85,.30);
 
-  --info:            #4FA3FF;
-  --info-fg:         #4FA3FF;
-  --info-bg:         rgba(79,163,255,.13);
-  --info-border:     rgba(79,163,255,.30);
+  --info:            #7FA8D9;
+  --info-fg:         #7FA8D9;
+  --info-bg:         rgba(127,168,217,.12);
+  --info-border:     rgba(127,168,217,.28);
 
-  --orange:          #FF9F45;
-  --orange-bg:       rgba(255,159,69,.13);
+  --orange:          #E08A45;
+  --orange-bg:       rgba(224,138,69,.12);
 
-  --scrim:           rgba(0,0,0,.66);
-  --shadow:          0 4px 12px rgba(0,0,0,.45), 0 16px 40px rgba(0,0,0,.35);
-  --shadow-sm:       0 1px 2px rgba(0,0,0,.4);
-  --shadow-pop:      0 12px 32px rgba(0,0,0,.55);
+  --scrim:           rgba(0,0,0,.72);
+  /* Shadows near-eliminated. Editorial layouts separate with rules, not
+     drop shadows; the tokens survive so existing rules still resolve. */
+  --shadow:          0 1px 0 rgba(242,241,238,.06);
+  --shadow-sm:       none;
+  --shadow-pop:      0 16px 44px rgba(0,0,0,.6);
 }
 
 /* ══ LIGHT ════════════════════════════════════════════════════════════════ */
 [data-theme='light'] {
   color-scheme: light;
 
-  --bg:              #F4F5F9;
+  /* The landing page palette, exactly: warm off-white paper, near-black ink,
+     one hairline rule colour. Not pure white — #FFFFFF under a full-screen
+     dashboard reads clinical, and the warm cast is what makes the landing
+     page feel printed rather than rendered. */
+  --bg:              #F2F1EE;
   --bg-elevated:     #FFFFFF;
   --surface:         #FFFFFF;
-  --surface-2:       #F7F8FC;
-  --surface-3:       #EEF0F6;
-  --surface-alpha:   rgba(15,18,45,.028);
-  --surface-strong:  rgba(15,18,45,.055);
-  --surface-hover:   rgba(15,18,45,.035);
+  --surface-2:       #EAE8E3;
+  --surface-3:       #E3E1DB;
+  --surface-alpha:   rgba(17,17,16,.028);
+  --surface-strong:  rgba(17,17,16,.06);
+  --surface-hover:   rgba(17,17,16,.04);
 
-  --border:          rgba(16,20,50,.10);
-  --border-2:        rgba(16,20,50,.17);
-  --border-strong:   rgba(16,20,50,.17);
+  --border:          #D9D7D1;
+  --border-2:        #C4C1B8;
+  --border-strong:   #C4C1B8;
 
-  --text:            #0E1020;
-  --text-2:          rgba(14,16,32,.62);
-  --text-3:          rgba(14,16,32,.44);
-  --text-faint:      rgba(14,16,32,.26);
-  --text-inv:        #FFFFFF;
-  --on-accent:       #FFFFFF;
+  --text:            #111110;
+  --text-2:          #57564F;
+  --text-3:          #8A8880;
+  --text-faint:      rgba(17,17,16,.24);
+  --text-inv:        #F2F1EE;
+  --on-accent:       #F2F1EE;
 
-  --accent:          #4F46E5;
-  --accent-h:        #4338CA;
-  --accent-deep:     #4F46E5;
-  --accent-soft:     rgba(79,70,229,.09);
-  --accent-softer:   rgba(79,70,229,.05);
-  --accent-border:   rgba(79,70,229,.24);
-  --accent-ring:     rgba(79,70,229,.20);
+  /* Accent = ink. Primary actions are the darkest thing on the page, which
+     is how the landing page's "Start selling" button works. No indigo. */
+  --accent:          #111110;
+  --accent-h:        #2C2B28;
+  --accent-deep:     #111110;
+  --accent-soft:     rgba(17,17,16,.06);
+  --accent-softer:   rgba(17,17,16,.035);
+  --accent-border:   rgba(17,17,16,.22);
+  --accent-ring:     rgba(17,17,16,.18);
 
+  /* Mark red. Slightly deeper than the landing page's #FF2D55 so it holds up
+     as small text on paper — the landing uses it at 10px+ on large fills,
+     the dashboard uses it at 9px on micro-labels, where the brighter tone
+     vibrates against the off-white. */
   --brand:           #FF2D55;
+  --mark:            #E01B41;
+  --mark-h:          #C21536;
+  --mark-soft:       rgba(224,27,65,.08);
+  --mark-border:     rgba(224,27,65,.26);
+  --mark-ring:       rgba(224,27,65,.20);
 
-  --success:         #06A97B;
-  --success-fg:      #067A5A;
-  --success-bg:      rgba(6,169,123,.10);
-  --success-border:  rgba(6,169,123,.28);
+  --success:         #0E7C5A;
+  --success-fg:      #0A5F45;
+  --success-bg:      rgba(14,124,90,.09);
+  --success-border:  rgba(14,124,90,.26);
 
-  --warning:         #D98500;
-  --warning-fg:      #9A5B00;
-  --warning-bg:      rgba(217,133,0,.11);
-  --warning-border:  rgba(217,133,0,.28);
+  --warning:         #A66A00;
+  --warning-fg:      #7D5000;
+  --warning-bg:      rgba(166,106,0,.10);
+  --warning-border:  rgba(166,106,0,.26);
 
-  --danger:          #E23B3B;
-  --danger-fg:       #C22626;
-  --danger-bg:       rgba(226,59,59,.09);
-  --danger-border:   rgba(226,59,59,.26);
+  --danger:          #D11F42;
+  --danger-fg:       #B01634;
+  --danger-bg:       rgba(209,31,66,.08);
+  --danger-border:   rgba(209,31,66,.26);
 
-  --info:            #1F7AE0;
-  --info-fg:         #1560B4;
-  --info-bg:         rgba(31,122,224,.09);
-  --info-border:     rgba(31,122,224,.26);
+  --info:            #2C5F8F;
+  --info-fg:         #22496D;
+  --info-bg:         rgba(44,95,143,.08);
+  --info-border:     rgba(44,95,143,.24);
 
-  --orange:          #E06A12;
-  --orange-bg:       rgba(224,106,18,.10);
+  --orange:          #B85C10;
+  --orange-bg:       rgba(184,92,16,.09);
 
-  --scrim:           rgba(12,14,32,.45);
-  --shadow:          0 2px 6px rgba(16,20,50,.07), 0 14px 34px rgba(16,20,50,.09);
-  --shadow-sm:       0 1px 2px rgba(16,20,50,.07);
-  --shadow-pop:      0 14px 40px rgba(16,20,50,.16);
+  --scrim:           rgba(17,17,16,.40);
+  --shadow:          0 1px 0 rgba(17,17,16,.04);
+  --shadow-sm:       none;
+  --shadow-pop:      0 16px 44px rgba(17,17,16,.14);
 }
 
 /* ══ Legacy aliases ═══════════════════════════════════════════════════════
    Pages written against the old Meta palette keep working: --blue and friends
    now simply point at the Studio accent. */
 :root, [data-theme='dark'], [data-theme='light'] {
-  --blue:        var(--accent);
-  --blue-h:      var(--accent-h);
-  --blue-d:      var(--accent-ring);
-  --blue-light:  var(--accent-soft);
+  --blue:        var(--mark);
+  --blue-h:      var(--mark-h);
+  --blue-d:      var(--mark-ring);
+  --blue-light:  var(--mark-soft);
 
   --sidebar-w:   260px;
   --topbar-h:    58px;
 
-  --r:           9px;
-  --r-lg:        14px;
-  --r-xl:        18px;
+  /* Sharp corners. Rounded rectangles read as "app chrome"; a 2px radius
+     reads as a printed card and matches the landing page. --r-pill is kept
+     at a real pill because status chips depend on the shape to be legible as
+     chips rather than as buttons. */
+  --r:           2px;
+  --r-lg:        2px;
+  --r-xl:        3px;
   --r-pill:      999px;
 
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Display face for headings and figures only — the same pairing as the
+     landing page. Archivo is tighter and heavier than Inter at large sizes,
+     which is what makes an oversized number read as editorial rather than
+     merely big. Body copy stays Inter: Archivo is not a reading face. */
+  --font-display: 'Archivo', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 html, body {
@@ -199,7 +242,10 @@ body, .card, .stat-card, .modal, .toolbar, .page-header, aside, main {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 
-a { color: var(--accent); text-decoration: none; }
+/* Links carry the mark. With an ink accent they were black-on-paper and
+   indistinguishable from body copy — the one place the all-ink scheme
+   actually removed information rather than noise. */
+a { color: var(--mark); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* A link styled as a button is a button. The global a:hover underline was
@@ -208,7 +254,6 @@ a.btn:hover, a.btn:focus { text-decoration: none; }
 a.btn-primary:hover {
   background: var(--accent-h);
   border-color: var(--accent-h);
-  box-shadow: 0 2px 12px var(--accent-ring);
 }
 button { font-family: var(--font); cursor: pointer; }
 input, select, textarea { font-family: var(--font); }
@@ -260,7 +305,7 @@ select option:disabled { color: var(--text-faint); }
 ::selection { background: var(--accent-soft); color: var(--text); }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--mark);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -298,8 +343,10 @@ select option:disabled { color: var(--text-faint); }
 .btn-primary {
   background: var(--accent-deep) !important;
   border-color: var(--accent-deep) !important;
-  color: #fff !important;
-  box-shadow: 0 1px 0 rgba(255,255,255,.10) inset;
+  /* --on-accent, NOT #fff. The accent is near-black in light and near-white
+     in dark, so a hardcoded white label was invisible on the dark theme's
+     button. The token flips with the theme; the literal could not. */
+  color: var(--on-accent) !important;
 }
 .btn-primary:hover { background: var(--accent-h) !important; border-color: var(--accent-h) !important; }
 
@@ -340,7 +387,7 @@ select option:disabled { color: var(--text-faint); }
 .field input::placeholder, .field textarea::placeholder { color: var(--text-faint); }
 .field input:hover, .field select:hover, .field textarea:hover { border-color: var(--border-strong); }
 .field input:focus, .field select:focus, .field textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--mark);
   background: var(--surface-2);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
@@ -392,7 +439,10 @@ select option:disabled { color: var(--text-faint); }
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 15px 18px; border-bottom: 1px solid var(--border);
 }
-.card-title { font-size: 14.5px; font-weight: 800; color: var(--text); letter-spacing: -.01em; }
+.card-title {
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.02em;
+}
 .card-body { padding: 18px; }
 
 /* ── Stat cards ──────────────────────────────────────────────────────────── */
@@ -407,10 +457,14 @@ select option:disabled { color: var(--text-faint); }
   font-size: 10px; font-weight: 800; color: var(--text-3);
   text-transform: uppercase; letter-spacing: .1em; margin-bottom: 9px;
 }
-.stat-value { font-size: 27px; font-weight: 800; color: var(--text); line-height: 1; letter-spacing: -.03em; }
+.stat-value {
+  font-family: var(--font-display);
+  font-size: 30px; font-weight: 700; color: var(--text);
+  line-height: 1; letter-spacing: -.04em;
+}
 .stat-sub { font-size: 12px; color: var(--text-3); margin-top: 6px; }
 /* The old top-border accent becomes a left rail — reads better on charcoal. */
-.stat-card.blue   { box-shadow: inset 3px 0 0 var(--accent); }
+.stat-card.blue   { box-shadow: inset 3px 0 0 var(--mark); }
 .stat-card.green  { box-shadow: inset 3px 0 0 var(--success); }
 .stat-card.orange { box-shadow: inset 3px 0 0 var(--warning); }
 .stat-card.red    { box-shadow: inset 3px 0 0 var(--danger); }
@@ -428,8 +482,12 @@ select option:disabled { color: var(--text-faint); }
   background: radial-gradient(circle, var(--accent-soft) 0%, transparent 68%);
   pointer-events: none;
 }
-.hero-label { color: var(--accent); font-size: 10.5px; font-weight: 800; letter-spacing: .16em; }
-.hero-value { color: var(--text); font-size: 44px; font-weight: 800; letter-spacing: -.045em; margin-top: 8px; line-height: 1; }
+.hero-label { color: var(--mark); font-size: 10.5px; font-weight: 800; letter-spacing: .16em; }
+.hero-value {
+  font-family: var(--font-display);
+  color: var(--text); font-size: 48px; font-weight: 800;
+  letter-spacing: -.05em; margin-top: 8px; line-height: .95;
+}
 .hero-sub { color: var(--text-3); font-size: 13px; margin-top: 6px; }
 
 /* ── Badge / status pills ────────────────────────────────────────────────── */
@@ -479,7 +537,7 @@ select option:disabled { color: var(--text-faint); }
   transition: color .15s ease, border-color .15s ease;
 }
 .tab-item:hover { color: var(--text); }
-.tab-item.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-item.active { color: var(--mark); border-bottom-color: var(--mark); }
 
 /* Pill-style segmented control (Studio filter pills) */
 .pill {
@@ -489,7 +547,7 @@ select option:disabled { color: var(--text-faint); }
   transition: background .15s ease, color .15s ease, border-color .15s ease;
 }
 .pill:hover { color: var(--text); border-color: var(--border-2); }
-.pill.active { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+.pill.active { background: var(--mark-soft); border-color: var(--mark-border); color: var(--mark); }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 .toolbar {
@@ -505,7 +563,7 @@ select option:disabled { color: var(--text-faint); }
   border-radius: var(--r); padding: 8px 12px; min-width: 240px;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-.search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.search-box:focus-within { border-color: var(--mark); box-shadow: 0 0 0 3px var(--mark-ring); }
 .search-box input {
   border: none; background: transparent; outline: none;
   font-size: 13.5px; color: var(--text); width: 100%;
@@ -518,7 +576,7 @@ select option:disabled { color: var(--text-faint); }
   transition: border-color .15s ease, color .15s ease;
 }
 .filter-select:hover { color: var(--text); border-color: var(--border-2); }
-.filter-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.filter-select:focus { border-color: var(--mark); box-shadow: 0 0 0 3px var(--mark-ring); }
 .filter-select option { background: var(--surface); color: var(--text); }
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
@@ -544,7 +602,10 @@ select option:disabled { color: var(--text-faint); }
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 18px 22px; border-bottom: 1px solid var(--border);
 }
-.modal-title { font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: -.02em; }
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 700; color: var(--text); letter-spacing: -.03em;
+}
 .modal-body { padding: 22px; }
 .modal-footer {
   padding: 16px 22px; border-top: 1px solid var(--border);
@@ -588,7 +649,7 @@ select option:disabled { color: var(--text-faint); }
 /* ── Spinner ─────────────────────────────────────────────────────────────── */
 .spinner {
   width: 20px; height: 20px;
-  border: 2px solid var(--border-2); border-top-color: var(--accent);
+  border: 2px solid var(--border-2); border-top-color: var(--mark);
   border-radius: 50%; animation: spin .65s linear infinite; flex-shrink: 0;
 }
 .spinner-lg { width: 34px; height: 34px; border-width: 3px; }
@@ -615,10 +676,10 @@ select option:disabled { color: var(--text-faint); }
 .toast::before { content: ''; position: absolute; }
 .toast.success { border-color: var(--success-border); box-shadow: var(--shadow-pop), inset 3px 0 0 var(--success); }
 .toast.error   { border-color: var(--danger-border);  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--danger); }
-.toast.info    { border-color: var(--accent-border);  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--accent); }
+.toast.info    { border-color: var(--info-border);  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--info); }
 .toast.success > span:first-child { color: var(--success); }
 .toast.error   > span:first-child { color: var(--danger); }
-.toast.info    > span:first-child { color: var(--accent); }
+.toast.info    > span:first-child { color: var(--info); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* ── Divider ─────────────────────────────────────────────────────────────── */
@@ -635,9 +696,9 @@ select option:disabled { color: var(--text-faint); }
   border-radius: var(--r); padding: 7px 9px; min-height: 42px; cursor: text;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-.tag-input-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.tag-input-wrap:focus-within { border-color: var(--mark); box-shadow: 0 0 0 3px var(--mark-ring); }
 .tag-pill {
-  background: var(--accent-soft); border: 1px solid var(--accent-border); color: var(--accent);
+  background: var(--mark-soft); border: 1px solid var(--mark-border); color: var(--mark);
   padding: 3px 9px; border-radius: var(--r-pill); font-size: 12.5px; font-weight: 600;
   display: flex; align-items: center; gap: 5px;
 }
@@ -666,7 +727,11 @@ select option:disabled { color: var(--text-faint); }
   background: var(--bg-elevated); flex-shrink: 0;
 }
 .page-content { flex: 1; overflow-y: auto; padding: 26px 28px 48px; }
-.page-title { font-size: 21px; font-weight: 800; color: var(--text); letter-spacing: -.03em; }
+.page-title {
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 800; color: var(--text);
+  letter-spacing: -.035em; text-transform: uppercase;
+}
 
 /* Wide desktop: keep long-form content readable without wasting the viewport. */
 .page-content > .container,
@@ -683,14 +748,14 @@ select option:disabled { color: var(--text-faint); }
   transition: border-color .15s ease, background .15s ease;
 }
 .objective-card:hover { border-color: var(--accent-border); background: var(--accent-softer); }
-.objective-card.selected { border-color: var(--accent); background: var(--accent-soft); }
-.objective-icon { font-size: 22px; flex-shrink: 0; color: var(--accent); }
+.objective-card.selected { border-color: var(--mark); background: var(--mark-soft); }
+.objective-icon { font-size: 22px; flex-shrink: 0; color: var(--mark); }
 .objective-label { font-size: 14px; font-weight: 700; color: var(--text); }
 .objective-desc { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 
 /* ── Progress bar ────────────────────────────────────────────────────────── */
 .progress-bar { height: 6px; background: var(--surface-strong); border-radius: 99px; overflow: hidden; }
-.progress-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+.progress-fill { height: 100%; background: var(--mark); border-radius: 99px; transition: width .3s ease; }
 
 /* ── Responsive table wrapper ────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; }
@@ -709,16 +774,15 @@ select option:disabled { color: var(--text-faint); }
   padding: 16px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .brand-mark {
-  width: 36px; height: 36px; border-radius: 11px;
-  background: var(--accent-deep); color: #fff;
+  width: 36px; height: 36px; border-radius: var(--r);
+  background: var(--accent-deep); color: var(--on-accent);
   display: grid; place-items: center; flex-shrink: 0;
-  box-shadow: 0 2px 10px var(--accent-ring);
 }
 .brand-word { font-size: 15px; font-weight: 900; letter-spacing: -.02em; color: var(--text); line-height: 1.15; }
 .brand-tag {
   display: inline-flex; align-items: center;
-  background: var(--accent-soft); border: 1px solid var(--accent-border);
-  color: var(--accent); border-radius: 5px;
+  background: var(--mark-soft); border: 1px solid var(--mark-border);
+  color: var(--mark); border-radius: var(--r);
   padding: 1px 5px; font-size: 8.5px; font-weight: 800; letter-spacing: .12em;
 }
 
@@ -738,11 +802,11 @@ select option:disabled { color: var(--text-faint); }
 .nav-item:hover { background: var(--surface-strong); color: var(--text); text-decoration: none; }
 .nav-item .nav-icon { flex-shrink: 0; display: inline-flex; color: var(--text-3); transition: color .14s ease; }
 .nav-item:hover .nav-icon { color: var(--text-2); }
-.nav-item.active { background: var(--accent-soft); color: var(--accent); }
-.nav-item.active .nav-icon { color: var(--accent); }
+.nav-item.active { background: var(--mark-soft); color: var(--mark); }
+.nav-item.active .nav-icon { color: var(--mark); }
 .nav-item.active::before {
   content: ''; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--accent);
+  width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--mark);
 }
 .nav-divider { height: 1px; background: var(--border); margin: 10px 8px; }
 
@@ -754,7 +818,7 @@ select option:disabled { color: var(--text-faint); }
 }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%;
-  background: var(--accent-deep); color: #fff;
+  background: var(--accent-deep); color: var(--on-accent);
   display: grid; place-items: center;
   font-size: 12px; font-weight: 800; letter-spacing: .04em; flex-shrink: 0;
 }
@@ -781,7 +845,7 @@ select option:disabled { color: var(--text-faint); }
   transition: background .15s ease, color .15s ease;
 }
 .theme-toggle button:hover { color: var(--text); }
-.theme-toggle button.on { background: var(--accent-soft); color: var(--accent); }
+.theme-toggle button.on { background: var(--mark-soft); color: var(--mark); }
 
 /* ── Narrow viewports ────────────────────────────────────────────────────── */
 @media (max-width: 1180px) {

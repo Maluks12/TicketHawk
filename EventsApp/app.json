@@ -3,7 +3,7 @@
     "name": "TicketHawk",
     "slug": "EventsApp",
     "scheme": "eventsapp",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -15,8 +15,16 @@
         "applinks:www.ticket-hawk.com"
       ],
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
+            ]
+          }
+        ]
+      },
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -102,13 +110,23 @@
           "defaultChannel": "default",
           "enableBackgroundRemoteNotifications": false
         }
-      ]
+      ],
+      "expo-apple-authentication",
+        [
+          "@react-native-google-signin/google-signin",
+          {
+            "iosUrlScheme": "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
+          }
+        ]
     ],
     "extra": {
       "router": {},
       "eas": {
         "projectId": "f5bc9023-b3dc-40c9-b045-c3c88884cb45"
-      }
+      },
+      "googleIosClientId": "1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv.apps.googleusercontent.com",
+      "googleAndroidClientId": "1095131355111-sm7epntca8otsh2na7o37hodftqso934.apps.googleusercontent.com",
+      "googleWebClientId": "1095131355111-qp85blgedorjjtkbu5qqdc89bii8qsr3.apps.googleusercontent.com"
     }
   }
 }
