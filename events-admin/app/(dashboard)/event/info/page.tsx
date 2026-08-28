@@ -24,6 +24,22 @@ import { useStaff, AccessDenied } from '../../../../lib/permissions';
  *    touched. The error names the orphaned values.
  */
 
+/**
+ * Three keys the apps render as SUMMARY TILES rather than ordinary rows: they
+ * appear together at the top of the Information block, and a field the
+ * organiser skipped shows N/A instead of vanishing.
+ *
+ * That makes retiring one of them different from retiring anything else, and
+ * this screen has to say so. Retiring is normally safe — the field stops being
+ * offered and existing values keep rendering. Retire a summary key and the tile
+ * does NOT disappear: it keeps its slot reading N/A on every event, and no
+ * organiser can fill it because it is gone from the picker.
+ *
+ * Hardcoded because the clients hardcode it. If that ever moves to a catalogue
+ * column, this list should read from the API instead of duplicating it.
+ */
+const SUMMARY_TILE_KEYS = ['age_requirement', 'doors_open', 'id_required'];
+
 type ValueType = 'text' | 'enum' | 'time';
 
 interface CatalogueField {
@@ -171,11 +187,17 @@ export default function EventInfoCataloguePage() {
   // confirm(title, msg, cb) — callback-based, not promise-returning.
   function retire(f: CatalogueField) {
     const used = usage[f.key] || 0;
+    const isSummary = SUMMARY_TILE_KEYS.includes(f.key);
+    const base = used > 0
+      ? `${used} event${used === 1 ? '' : 's'} already use this field. They keep their values and keep showing them — it just stops appearing for new events. Nothing is deleted.`
+      : 'It will stop appearing when organisers add information to an event. Nothing is deleted.';
     confirm(
       `Retire "${f.label}"`,
-      used > 0
-        ? `${used} event${used === 1 ? '' : 's'} already use this field. They keep their values and keep showing them — it just stops appearing for new events. Nothing is deleted.`
-        : 'It will stop appearing when organisers add information to an event. Nothing is deleted.',
+      // Leads with the consequence, because for these three the usual
+      // reassurance above is the wrong mental model.
+      isSummary
+        ? `This is one of the three summary tiles on the event page. Retiring it does NOT remove the tile — it will read N/A on every event from now on, and no organiser will be able to fill it in. ${base}`
+        : base,
       async () => {
         try {
           await api.put(`/admin/event-info/catalogue/${f.key}/active`, { is_active: false });
@@ -296,6 +318,14 @@ export default function EventInfoCataloguePage() {
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: '.72rem', color: 'var(--text-3)', marginTop: '.1rem' }}>{f.key}</div>
                     {f.value_type === 'enum' && f.enum_options && (
                       <div style={{ fontSize: '.72rem', color: 'var(--text-3)', marginTop: '.2rem' }}>{f.enum_options.join(' · ')}</div>
+                    )}
+                    {SUMMARY_TILE_KEYS.includes(f.key) && (
+                      <div
+                        style={{ fontSize: '.68rem', color: 'var(--accent)', marginTop: '.2rem' }}
+                        title="Shown as a tile at the top of the event page's Information block, alongside the other two. Reads N/A if the organiser leaves it blank."
+                      >
+                        summary tile
+                      </div>
                     )}
                   </td>
 
