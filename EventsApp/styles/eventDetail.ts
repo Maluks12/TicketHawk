@@ -123,20 +123,32 @@ export const s = {
   // Stacked, not side-by-side: values run to full sentences ("No glass, no
   // outside food, no professional cameras") and a two-column layout would wrap
   // them into a narrow ribbon on a phone.
-  infoRow:               'py-3.5 border-b border-[#EEEEEE]',
-  infoRowLast:           'py-3.5',
+  // Spacing here is tuned against two fixed numbers: sections are 32px apart
+  // (sectionBlock), and a value's own lines are ~24px apart (leading-relaxed on
+  // 15px). Anything structural has to clear 24px or the paragraph looks airier
+  // than the frame holding it — which is what py-3.5 with mt-1.5 did.
+  //
+  //   strip → first label   12 + 20 = 32   (one section gap)
+  //   row → row             20 + 20 = 40   (clears the 24px line gap)
+  //   label → its value           10
+  //   last row → next section  0 + 32 = 32  (sectionBlock alone, see below)
+  infoRow:               'py-5 border-b border-[#EEEEEE]',
+  // Top padding only: the section's own mb-8 supplies the space underneath, and
+  // stacking both put 46px under the last value — more air than between two
+  // whole sections.
+  infoRowLast:           'pt-5',
   infoLabel:             'text-[10px] font-bold tracking-[0.12em] uppercase text-[#888888]',
-  infoValue:             'text-[15px] font-medium text-[#111111] leading-relaxed mt-1.5',
+  infoValue:             'text-[15px] font-medium text-[#111111] leading-relaxed mt-2.5',
 
   // Summary tiles: age, doors and ID. Negative margin cancels the section's
   // px-5 so the strip runs to the screen edge, with the padding moved onto
   // contentContainerStyle instead — see the ScrollView in event/[id].tsx.
-  infoTileStrip:         '-mx-5 mb-1',
+  infoTileStrip:         '-mx-5 mb-3',
   // Fixed width, not flex: the three tiles must stay the same size as each
   // other whether a value reads "18+" or "Under 18s with an adult".
-  infoTile:              'w-[124px] rounded-xl px-3 py-3.5',
+  infoTile:              'w-[132px] rounded-2xl px-3.5 py-4',
   infoTileLabel:         'text-[10px] font-bold tracking-[0.09em] uppercase text-[#888888]',
-  infoTileValue:         'text-[14px] font-semibold text-[#111111] mt-1 leading-snug',
+  infoTileValue:         'text-[14px] font-semibold text-[#111111] mt-1.5 leading-snug',
   // Refund policy and T&Cs are links, not walls of text — the full wording
   // opens in a sheet. See PolicySheet for why.
   policyLink:            'text-[15px] font-semibold mt-1.5',
