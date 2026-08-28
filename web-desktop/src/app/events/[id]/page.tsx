@@ -296,10 +296,18 @@ export default function EventDetailPage() {
         .ed-body {
           padding: 24px 32px 80px;
           display: grid; grid-template-columns: 1fr 340px; gap: 20px;
-          align-items: stretch;
+          /* start, not stretch: stretch made the sidebar as tall as the whole
+             left column, so the ticket card grew a dead void between the
+             organiser row and the CTA as more information sections were added
+             below. Its height is now its own content. */
+          align-items: start;
         }
         .ed-left    { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-        .ed-sidebar { display: flex; flex-direction: column; }
+        /* Sticky rather than tall: the card follows you down the page while you
+           read the information sections, instead of stretching to meet them.
+           78px = the 54px sticky header plus the body's 24px top padding, so it
+           pins exactly where it starts and never visibly jumps. */
+        .ed-sidebar { display: flex; flex-direction: column; position: sticky; top: 78px; }
 
         /* ── Shared card ── */
         .ed-card {
@@ -633,7 +641,7 @@ export default function EventDetailPage() {
 
         {/* Sidebar ─────────────────────────────────────────── */}
         <div className="ed-sidebar">
-          <div className="ed-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div className="ed-card" style={{ display: 'flex', flexDirection: 'column' }}>
 
             {/* Price */}
             <div className="sb-price">
@@ -665,8 +673,10 @@ export default function EventDetailPage() {
               </div>
             )}
 
-            {/* Spacer */}
-            <div style={{ flex: 1, minHeight: 20 }} />
+            {/* Gap above the CTA. Was flex:1 to push the button to the foot of a
+                full-height card; with the card sized to its content there is no
+                space to absorb, so it is a plain fixed gap. */}
+            <div style={{ height: 20 }} />
 
             {/* CTA */}
             <div className="sb-cta">
