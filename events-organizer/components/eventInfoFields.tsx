@@ -3,6 +3,14 @@ import { useMemo, useState } from 'react';
 import { Info, ShieldCheck, X } from '@phosphor-icons/react';
 import type { InfoCatalogueEntry } from '../lib/eventContent';
 
+// Matches the server's own ceiling: chk_event_info_value_len on
+// event_info_items, and the max=600 binding tag on EventInfoItemDTO. Kept in
+// one place here so the counter and the input can never disagree.
+const INFO_VALUE_MAX = 600;
+// Where the counter starts warning. 60 characters is roughly one more sentence
+// — enough runway to finish a thought rather than be cut mid-word.
+const INFO_VALUE_WARN_AT = INFO_VALUE_MAX - 60;
+
 /**
  * Information fields — CONTROLLED. Same split, same reason, as LineupFields:
  * the create wizard has no event id to load or save against.
@@ -124,9 +132,29 @@ export default function EventInfoFields({
               <input type="time" value={values[key] ?? ''} disabled={isLocked}
                 onChange={e => setValue(key, e.target.value)} />
             ) : (
-              <textarea rows={2} maxLength={600} value={values[key] ?? ''} disabled={isLocked}
+              <textarea rows={2} maxLength={INFO_VALUE_MAX} value={values[key] ?? ''} disabled={isLocked}
                 placeholder={entry.hint} onChange={e => setValue(key, e.target.value)}
                 style={{ minHeight: 62 }} />
+            )}
+
+            {/* Counter. maxLength on its own stops typing DEAD with no
+                explanation — the worst kind of limit, because the writer
+                assumes the field or the app has broken rather than that they
+                ran out of room. Shown only once the value is long enough to be
+                worth watching, so short answers are not nagged, and it turns
+                amber BEFORE the wall rather than at it. */}
+            {entry.value_type === 'text' && !isLocked && (values[key]?.length ?? 0) > INFO_VALUE_MAX / 2 && (
+              <div
+                className="field-hint"
+                style={{
+                  textAlign: 'right',
+                  color: (values[key]?.length ?? 0) >= INFO_VALUE_WARN_AT ? 'var(--warning-fg)' : undefined,
+                }}
+              >
+                {(values[key]?.length ?? 0) >= INFO_VALUE_MAX
+                  ? `${INFO_VALUE_MAX} character limit reached`
+                  : `${(values[key] ?? '').length} / ${INFO_VALUE_MAX}`}
+              </div>
             )}
 
             {entry.hint && entry.value_type !== 'text' && (
