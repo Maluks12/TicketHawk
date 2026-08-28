@@ -243,6 +243,15 @@ export interface RegisterDTO {
   phone_number: string;
 }
 
+export interface EventInfoItem {
+  key: string;
+  label: string;
+  value: string;
+  // 'text' | 'enum' | 'time'. Present so a client can treat typed values
+  // differently from prose without hardcoding which keys are which.
+  value_type?: string;
+}
+
 export interface Event {
   id: string;
   slug: string;
@@ -273,6 +282,12 @@ export interface Event {
   tickets_sold?: number;
   teams?: string[];
   performers?: string[];
+  // Organiser-supplied event information (parking, accessibility, age limit and
+  // so on). Each item is one row the organiser chose to fill in — a field they
+  // skipped has NO entry, so absence is meaningful and must not be rendered as
+  // an empty value. Keys and labels come from the server-side catalogue, which
+  // is why label ships with every item rather than being mapped client-side.
+  info_items?: EventInfoItem[];
   max_capacity?: number;
   max_tickets_per_user?: number | null;
   venue_type?: 'stadium' | 'auditorium' | 'none' | null;

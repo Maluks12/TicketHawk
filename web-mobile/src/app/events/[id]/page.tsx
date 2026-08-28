@@ -2,8 +2,22 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { api, type Event } from '@/lib/api';
+import { api, type Event, type EventInfoItem } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
+
+// ── Information: the three summary fields ────────────────────────────────────
+// Keys are catalogue keys, in the catalogue's display_order (10, 20, 30).
+// Labels are hardcoded rather than read from the item because a field the
+// organiser SKIPPED has no item to read a label from — which is the whole
+// reason the N/A tile exists.
+const SUMMARY_INFO_KEYS = [
+  { key: 'age_requirement', label: 'Ages' },
+  { key: 'doors_open',      label: 'Doors open' },
+  { key: 'id_required',     label: 'ID required' },
+] as const;
+
+// Shown in a summary tile the organiser left blank.
+const INFO_NOT_GIVEN = 'N/A';
 
 function fmtPrice(p: number) {
   if (p === 0) return 'Free';
@@ -166,6 +180,18 @@ export default function EventDetailPage() {
     router.push(`/events/${eventId}/purchase`);
   };
 
+  // ── Event information ───────────────────────────────────────────────────────
+  // Only fields the organiser filled in have items, so the section is hidden
+  // entirely when there are none. Age, doors and ID are lifted into summary
+  // tiles; the rest keep their stated order and only appear when present.
+  const evInfo: EventInfoItem[] = Array.isArray(event.info_items) ? event.info_items : [];
+  const evInfoTiles = SUMMARY_INFO_KEYS.map(t => {
+    const value = String(evInfo.find(i => i?.key === t.key)?.value ?? '').trim();
+    return { key: t.key, label: t.label, value: value || INFO_NOT_GIVEN, given: !!value };
+  });
+  // Filtered by key, not position, so this stays correct if display_order moves.
+  const evInfoRows = evInfo.filter(i => !SUMMARY_INFO_KEYS.some(t => t.key === i?.key));
+
   const venueStr  = `${event.venue_name ?? ''}${event.city ? `, ${event.city}` : ''}`;
   const mapsUrl   = buildMapsUrl(event);
   const infoItems = [
@@ -249,6 +275,44 @@ export default function EventDetailPage() {
         .info-cell-link:hover { background: ${subtle}; }
         .info-cell-link:hover .info-cell-arrow { opacity: 1; }
         .info-cell-arrow { opacity: 0; transition: opacity 0.12s; color: ${colors.subText}; flex-shrink: 0; margin-left: auto; }
+        /* ── Event information ──
+           Age, doors and ID as summary tiles, ALL-OR-NOTHING: once any
+           information field is filled, all three render and a skipped one reads
+           N/A. A strip that changed shape per event would leave "no ID line"
+           ambiguous between "no ID needed" and "organiser did not say".
+           Scrolls sideways here rather than wrapping — on a phone-width column
+           two-up leaves an orphan tile, and shrinking to fit three would wrap
+           "Under 18s with an adult" to four lines. */
+        .evinfo-tiles {
+          display: flex; gap: 8px; margin-bottom: 20px;
+          overflow-x: auto; scrollbar-width: none;
+          /* Bleed past the card padding so a partial tile shows at the edge —
+             a strip ending flush at the margin reads as complete and does not
+             get swiped. */
+          margin-left: -22px; margin-right: -22px;
+          padding: 2px 22px;
+        }
+        .evinfo-tiles::-webkit-scrollbar { display: none; }
+        /* Fixed width, not flex: tiles stay equal whether a value reads "18+"
+           or "Under 18s with an adult". */
+        .evinfo-tile {
+          flex: 0 0 132px; background: ${subtle};
+          border-radius: 12px; padding: 13px 14px;
+        }
+        .evinfo-tile-lbl {
+          margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.9px;
+          text-transform: uppercase; color: ${colors.subText};
+        }
+        .evinfo-tile-val { margin: 5px 0 0; font-size: 14px; font-weight: 600; line-height: 1.3; }
+        .evinfo-row { padding: 18px 0; border-bottom: 1px solid ${border}; }
+        .evinfo-row:last-child { padding-bottom: 0; border-bottom: none; }
+        .evinfo-row:first-of-type { padding-top: 0; }
+        .evinfo-lbl {
+          margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 1px;
+          text-transform: uppercase; color: ${colors.subText};
+        }
+        .evinfo-val { margin: 9px 0 0; font-size: 15px; line-height: 1.7; color: ${colors.text}; }
+
         .info-icon {
           width: 34px; height: 34px; border-radius: 9px;
           background: ${subtle}; display: flex; align-items: center;
@@ -435,6 +499,33 @@ export default function EventDetailPage() {
                   {expanded ? 'Show less' : 'Read more'}
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Event information */}
+          {evInfo.length > 0 && (
+            <div className="ed-card" style={{ padding: '20px 22px' }}>
+              <p className="sec-lbl">Information</p>
+
+              <div className="evinfo-tiles">
+                {evInfoTiles.map(t => (
+                  <div key={t.key} className="evinfo-tile">
+                    <p className="evinfo-tile-lbl">{t.label}</p>
+                    {/* N/A is dimmed to subText so it reads as a gap the
+                        organiser left, not an answer they gave. */}
+                    <p className="evinfo-tile-val" style={{ color: t.given ? colors.text : colors.subText }}>
+                      {t.value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {evInfoRows.map(item => (
+                <div key={item.key} className="evinfo-row">
+                  <p className="evinfo-lbl">{item.label}</p>
+                  <p className="evinfo-val">{item.value}</p>
+                </div>
+              ))}
             </div>
           )}
 
