@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { BadgeCheck, ChevronRight } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { api, toggleFollow, getFollowStatus, type Event, type EventInfoItem, type LineupEntry, type PublicOrganizer } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
@@ -144,6 +146,11 @@ export default function EventDetailPage() {
   const [followLoading, setFollowLoading] = useState(false);
   const [showSignIn,    setShowSignIn]    = useState(false);
   const [followErr,     setFollowErr]     = useState('');
+  // Share confirmation, for the clipboard fallback only. Declared up here with
+  // the other hooks: the loading and not-found guards below are early RETURNS,
+  // so a useState placed after them runs on some renders and not others, which
+  // is exactly the hook-order violation React refuses to tolerate.
+  const [shareNote,     setShareNote]     = useState<string | null>(null);
 
   useEffect(() => {
     if (!eventId) return;
@@ -196,8 +203,6 @@ export default function EventDetailPage() {
   // desktop), clipboard everywhere else. The URL is built the same way the app
   // builds it — canonical /events/<slug or id> on the public origin — so a link
   // shared from a phone and one shared from a laptop are the same link.
-  const [shareNote, setShareNote] = useState<string | null>(null);
-
   async function handleShare() {
     if (!event) return;
     const key = (event.slug && String(event.slug).trim()) || String(event.id ?? eventId);
@@ -262,11 +267,16 @@ export default function EventDetailPage() {
   // because the only events tested had organisers the gate excluded, so it
   // always fell through to the venue-name string.
   const organiserObj = ((event as any).organizer ?? (event as any).organiser) as PublicOrganizer | undefined;
+  //
+  // venue_name is deliberately NOT in this chain. It used to be, so an event
+  // whose organiser fails the gate showed the VENUE's name under "Organised
+  // by" — a claim about who ran the event that nobody made. Better to show no
+  // organiser than the wrong one, so the row hides when there is no real name.
   const organiserName =
     (organiserObj && typeof organiserObj === 'object' ? organiserObj.business_name : (organiserObj as any)) ??
     (event as any).hosted_by ??
     (event as any).organisation ??
-    event.venue_name;
+    null;
   // Only linkable when there is a real profile behind the name. A venue-name
   // fallback has no page to open.
   const organiserHref =
@@ -819,24 +829,26 @@ export default function EventDetailPage() {
                 name — the venue-name fallback has nowhere to go. */}
             {organiserName && (
               organiserHref ? (
-                <a className="sb-org sb-org-link" href={organiserHref}>
-                  <div className="org-avatar">
-                    {organiserObj?.logo_url
-                      ? <img src={organiserObj.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
-                      : '🏢'}
-                  </div>
+                <Link className="sb-org sb-org-link" href={organiserHref} prefetch>
+                  {/* The organiser's own picture. No placeholder icon when
+                      they have not set one — the slot is for a photo, and a
+                      generic glyph in its place is not a photo. */}
+                  {organiserObj?.logo_url && (
+                    <div className="org-avatar">
+                      <img src={organiserObj.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+                    </div>
+                  )}
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
                     <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {organiserName}
-                      {organiserObj?.verified && <span title="Verified organiser" style={{ color: '#2f7cf6', marginLeft: 5 }}>✓</span>}
+                      {organiserObj?.verified && <BadgeCheck size={14} color="#2f7cf6" style={{ display: 'inline', verticalAlign: -2, marginLeft: 5 }} aria-label="Verified organiser" />}
                     </p>
                   </div>
-                  <span style={{ color: colors.subText, flexShrink: 0 }}>›</span>
-                </a>
+                  <ChevronRight size={16} color={colors.subText} style={{ flexShrink: 0 }} />
+                </Link>
               ) : (
                 <div className="sb-org">
-                  <div className="org-avatar">🏢</div>
                   <div>
                     <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
                     <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text }}>{organiserName}</p>
