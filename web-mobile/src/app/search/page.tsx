@@ -2,14 +2,23 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, X, Star, Megaphone, ChevronRight } from 'lucide-react';
-import { searchEvents, getSuggestionEvents, type Event } from '@/lib/api';
+import { Search, X, Sparkles, Star, Megaphone, ChevronRight } from 'lucide-react';
+import { searchEvents, getSuggestionEvents, type Event, type SuggestionKey } from '@/lib/api';
 import { useEventStore } from '@/store/eventsStore';
 import { useAppTheme } from '@/themes/colors';
 
 const ACCENT = '#ff3c6e';
 
 const SUGGESTIONS = [
+  // Editor's Picks was on web-desktop but not here, so the same search on a
+  // phone offered one fewer way in. Same 'featured' key the other clients use.
+  {
+    key: 'featured'       as const,
+    label: "Editor's Picks",
+    Icon: Sparkles,
+    iconColor: '#eab308',
+    bgColor: 'rgba(234,179,8,0.12)',
+  },
   {
     key: 'popular'        as const,
     label: 'Popular Events',
@@ -75,7 +84,7 @@ export default function SearchPage() {
     debounceRef.current = setTimeout(() => runSearch(val), 350);
   };
 
-  const handleSuggestion = useCallback(async (key: 'popular' | 'just_announced', label: string) => {
+  const handleSuggestion = useCallback(async (key: SuggestionKey, label: string) => {
     setActiveSuggestion(key);
     setQuery('');
     setLoading(true);

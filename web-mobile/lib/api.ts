@@ -243,6 +243,20 @@ export interface RegisterDTO {
   phone_number: string;
 }
 
+export interface LineupEntry {
+  id: string;
+  kind: 'performer' | 'team';
+  name: string;
+  image_url?: string;
+  subtitle?: string;
+  stage?: string;
+  // RFC3339. A full timestamp rather than a clock string because festivals
+  // cross midnight — render the time part against the event's own date.
+  set_time?: string;
+  external_url?: string;
+  sort_order: number;
+}
+
 export interface EventInfoItem {
   key: string;
   label: string;
@@ -288,6 +302,10 @@ export interface Event {
   // an empty value. Keys and labels come from the server-side catalogue, which
   // is why label ships with every item rather than being mapped client-side.
   info_items?: EventInfoItem[];
+  // Structured line-up: names with artwork, stage and set time. The legacy
+  // teams/performers arrays above are still written by the backend and are the
+  // fallback for events created before this existed — not dead code.
+  lineup?: LineupEntry[];
   max_capacity?: number;
   max_tickets_per_user?: number | null;
   venue_type?: 'stadium' | 'auditorium' | 'none' | null;
@@ -517,9 +535,17 @@ export const searchEvents = async (query: string): Promise<Event[]> => {
   }
 };
 
-export const getSuggestionEvents = async (key: 'popular' | 'just_announced'): Promise<Event[]> => {
+export type SuggestionKey = 'popular' | 'just_announced' | 'featured';
+
+export const getSuggestionEvents = async (key: SuggestionKey): Promise<Event[]> => {
   try {
-    const endpoint = key === 'popular' ? '/v1/events/trending' : '/v1/events';
+    // 'featured' has its own endpoint. Without this branch it fell through to
+    // the generic /v1/events list, which would have returned ordinary results
+    // under an "Editor's Picks" heading.
+    const endpoint =
+      key === 'popular'  ? '/v1/events/trending' :
+      key === 'featured' ? '/v1/events/featured' :
+      '/v1/events';
     const params = key === 'just_announced' ? { sort: 'created_at', order: 'desc', limit: 30 } : { limit: 30 };
     const res = await api.get<{ data: Event[] }>(endpoint, { params });
     return res.data.data ?? [];
@@ -912,3 +938,67 @@ export async function getRotatingQRToken(assignmentId: string): Promise<Rotating
   const res = await api.get<RotatingQRToken>(`/v1/tickets/${assignmentId}/qr`);
   return res.data;
 }
+
+
+// ─── Organiser ────────────────────────────────────────────────────────────────
+// Public organiser profile. Same endpoints the mobile app uses — nothing here
+// is new server-side, the web simply never called them.
+
+export interface OrganizerLink {
+  platform: 'instagram' | 'x' | 'facebook' | 'tiktok' | 'youtube'
+          | 'linkedin' | 'whatsapp' | 'spotify' | 'website';
+  url: string;
+  sort_order: number;
+}
+
+export interface PublicOrganizer {
+  id: string;
+  slug: string;
+  business_name: string;
+  description?: string;
+  logo_url?: string;
+  cover_image_url?: string;
+  verified: boolean;
+  member_since: number;
+  events_hosted: number;
+  follower_count: number;
+  /**
+   * ABSENT when the request carried no valid token — not `false`. The server
+   * omits the key for a logged-out visitor on purpose, so the button can show
+   * an unauthenticated state rather than claiming "you are not following",
+   * which is a different thing. Compare with === true, never truthiness.
+   */
+  is_following?: boolean;
+  links?: OrganizerLink[];
+}
+
+export interface OrganizerFollowResponse {
+  following: boolean;
+  follower_count: number;
+  organizer_id: string;
+  organizer_slug: string;
+}
+
+/** Slug or UUID — the route accepts either, matching the event detail route. */
+export const getOrganizer = (slugOrId: string) =>
+  api.get<PublicOrganizer>(`/v1/organisers/${slugOrId}`);
+
+export const getOrganizerEvents = (
+  slugOrId: string,
+  scope: 'upcoming' | 'past' = 'upcoming',
+  cursor?: string,
+) =>
+  api.get<{ data: Event[]; scope: string; next_cursor?: string }>(
+    `/v1/organisers/${slugOrId}/events?scope=${scope}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+  );
+
+export async function toggleOrganizerFollow(slugOrId: string): Promise<OrganizerFollowResponse> {
+  const res = await api.post<OrganizerFollowResponse>(`/v1/organisers/${slugOrId}/follow`);
+  return res.data;
+}
+
+/** Followed organisers, for the profile Following screen. */
+export const getFollowedOrganizers = async (): Promise<PublicOrganizer[]> => {
+  const { data } = await api.get<{ data: PublicOrganizer[] }>('/v1/user/following-organisers');
+  return data.data ?? [];
+};

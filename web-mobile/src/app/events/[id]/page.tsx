@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { api, type Event, type EventInfoItem } from '@/lib/api';
+import { api, type Event, type EventInfoItem, type LineupEntry, type PublicOrganizer } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
 
 // ── Information: the three summary fields ────────────────────────────────────
@@ -18,6 +18,16 @@ const SUMMARY_INFO_KEYS = [
 
 // Shown in a summary tile the organiser left blank.
 const INFO_NOT_GIVEN = 'N/A';
+
+function IconShare() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7" />
+      <path d="M12 16V3" />
+      <path d="M8 7l4-4 4 4" />
+    </svg>
+  );
+}
 
 function fmtPrice(p: number) {
   if (p === 0) return 'Free';
@@ -155,7 +165,49 @@ export default function EventDetailPage() {
 
   const heroImg   = event.banner_image_url ?? event.cover_image_url;
   const isSoldOut = event.is_sold_out ?? false;
-  const tags      = [...(((event as any).teams) ?? []), ...(((event as any).performers) ?? [])];
+  // ── Share ───────────────────────────────────────────────────────────────────
+  // Web Share API where the browser has it (every mobile browser, Safari on
+  // desktop), clipboard everywhere else. The URL is built the same way the app
+  // builds it — canonical /events/<slug or id> on the public origin — so a link
+  // shared from a phone and one shared from a laptop are the same link.
+  const [shareNote, setShareNote] = useState<string | null>(null);
+
+  async function handleShare() {
+    if (!event) return;
+    const key = (event.slug && String(event.slug).trim()) || String(event.id ?? eventId);
+    const url = `${window.location.origin}/events/${encodeURIComponent(key)}`;
+    const title = event.title?.trim() || 'this event';
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text: `${title} on TicketHawk`, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setShareNote('Link copied');
+      setTimeout(() => setShareNote(null), 1800);
+    } catch {
+      // AbortError is the user dismissing the sheet — not worth a message.
+    }
+  }
+
+  // ── Line-up ─────────────────────────────────────────────────────────────────
+  // Prefer the structured rows (artwork, stage, set time, link) and fall back
+  // to the legacy flat name arrays for events created before they existed. The
+  // fallback is not dead code — the backend still writes both.
+  const lineupRows: LineupEntry[] = Array.isArray(event.lineup) ? event.lineup : [];
+  const isASport   = event.category?.toLowerCase() === 'sports';
+  const legacyTags = isASport
+    ? ((event as any).teams ?? [])
+    : ((event as any).performers ?? []);
+  // Sports events list teams, everything else lists performers — matching how
+  // the app splits them, so the same event reads the same on any device.
+  const lineup: LineupEntry[] = (lineupRows.length > 0
+    ? lineupRows.filter(l => (isASport ? l.kind === 'team' : l.kind !== 'team'))
+    : legacyTags.map((name: string, i: number) => ({
+        id: name, kind: isASport ? 'team' : 'performer', name, sort_order: i,
+      })) as LineupEntry[]
+  );
   const desc      = event.description ?? '';
   const shortDesc = desc.slice(0, 280);
   const hasMore   = desc.length > 280;
@@ -173,7 +225,28 @@ export default function EventDetailPage() {
   // The tier-level readers in ./purchase already do this (`< 0 ? null : ...`);
   // this event-level one was simply missed.
   const isLow     = avail != null && avail >= 0 && avail < 20;
-  const organiser = (event as any).organiser ?? (event as any).organizer ?? (event as any).hosted_by ?? (event as any).organisation ?? event.venue_name;
+  // ── Organiser ───────────────────────────────────────────────────────────────
+  // The API sends `organizer` as a PublicOrganizer OBJECT (id, slug, logo,
+  // verified), not a string — and only when the organiser passes the public-page
+  // gate (kyc_level >= 2, page enabled, good standing). When the gate blocks
+  // them the field is absent and the fallback lands on the venue name.
+  //
+  // The previous chain assigned that object straight into a variable rendered as
+  // {organiser}, which React refuses to render as a child. It never surfaced
+  // because the only events tested had organisers the gate excluded, so it
+  // always fell through to the venue-name string.
+  const organiserObj = ((event as any).organizer ?? (event as any).organiser) as PublicOrganizer | undefined;
+  const organiserName =
+    (organiserObj && typeof organiserObj === 'object' ? organiserObj.business_name : (organiserObj as any)) ??
+    (event as any).hosted_by ??
+    (event as any).organisation ??
+    event.venue_name;
+  // Only linkable when there is a real profile behind the name. A venue-name
+  // fallback has no page to open.
+  const organiserHref =
+    organiserObj && typeof organiserObj === 'object'
+      ? `/organiser/${encodeURIComponent(organiserObj.slug || organiserObj.id)}`
+      : null;
 
   const handleGetTickets = () => {
     sessionStorage.setItem(`event_detail_visited_${eventId}`, '1');
@@ -275,6 +348,37 @@ export default function EventDetailPage() {
         .info-cell-link:hover { background: ${subtle}; }
         .info-cell-link:hover .info-cell-arrow { opacity: 1; }
         .info-cell-arrow { opacity: 0; transition: opacity 0.12s; color: ${colors.subText}; flex-shrink: 0; margin-left: auto; }
+        .sb-org-link { text-decoration: none; cursor: pointer; transition: background 0.12s; }
+        .sb-org-link:hover { background: ${subtle}; }
+
+        /* ── Line-up rows ──
+           A row per act with artwork, stage and set time, replacing the flat
+           name chips. Rows with an external_url are anchors; the rest are
+           plain divs, so only the linkable ones get hover and a cursor. */
+        .lu-row {
+          display: flex; align-items: center; gap: 13px;
+          padding: 12px 0; border-bottom: 1px solid ${border};
+          text-decoration: none; color: inherit;
+        }
+        .lu-row-last { border-bottom: none; padding-bottom: 0; }
+        .lu-row:first-of-type { padding-top: 0; }
+        .lu-row-link { cursor: pointer; }
+        .lu-row-link:hover .lu-name { text-decoration: underline; }
+        .lu-row-link:hover .lu-arrow { opacity: 1; }
+        .lu-avatar {
+          width: 46px; height: 46px; flex-shrink: 0; border-radius: 12px;
+          background: ${subtle}; border: 1px solid ${border};
+          overflow: hidden; display: flex; align-items: center; justify-content: center;
+        }
+        .lu-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .lu-initial { font-size: 16px; font-weight: 700; color: ${colors.subText}; }
+        .lu-name {
+          display: block; font-size: 14.5px; font-weight: 600; color: ${colors.text};
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .lu-meta { display: block; font-size: 12.5px; color: ${colors.subText}; margin-top: 2px; }
+        .lu-arrow { flex-shrink: 0; color: ${colors.subText}; opacity: 0.55; transition: opacity 0.12s; }
+
         /* ── Event information ──
            Age, doors and ID as summary tiles, ALL-OR-NOTHING: once any
            information field is filled, all three render and a skipped one reads
@@ -404,6 +508,9 @@ export default function EventDetailPage() {
             TRENDING
           </span>
         )}
+        <button className="back-btn" onClick={handleShare} aria-label="Share" title="Share this event" style={{ flexShrink: 0 }}>
+          <IconShare />
+        </button>
       </header>
 
       {/* ── Hero ───────────────────────────────────────────────────────────── */}
@@ -529,13 +636,59 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          {/* Performers / Teams */}
-          {tags.length > 0 && (
+          {/* Line-up */}
+          {lineup.length > 0 && (
             <div className="ed-card" style={{ padding: '20px 22px' }}>
-              <p className="sec-lbl">{event.category?.toLowerCase() === 'sports' ? 'Teams' : 'Performers'}</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                {tags.map((tag: string) => <span key={tag} className="tag-chip">{tag}</span>)}
-              </div>
+              <p className="sec-lbl">{isASport ? 'Teams' : 'Performers'}</p>
+              {lineup.map((entry, i) => {
+                // "Main stage · 21:30" — whichever exist. stage is skipped when
+                // it just repeats the subtitle, which organisers often do.
+                const bits: string[] = [];
+                if (entry.subtitle) bits.push(entry.subtitle);
+                if (entry.stage && entry.stage !== entry.subtitle) bits.push(entry.stage);
+                if (entry.set_time) {
+                  const d = new Date(entry.set_time);
+                  if (!Number.isNaN(d.getTime())) {
+                    bits.push(d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }));
+                  }
+                }
+                const meta = bits.join(' · ');
+                const href = entry.external_url;
+
+                const body = (
+                  <>
+                    <span className="lu-avatar">
+                      {entry.image_url
+                        ? <img src={entry.image_url} alt="" />
+                        : <span className="lu-initial">{entry.name.charAt(0).toUpperCase()}</span>}
+                    </span>
+                    <span style={{ minWidth: 0, flex: 1 }}>
+                      <span className="lu-name">{entry.name}</span>
+                      {meta && <span className="lu-meta">{meta}</span>}
+                    </span>
+                    {/* Arrow only when there is somewhere to go — the app made
+                        the same fix. A chevron on every row promises a page
+                        that does not exist. */}
+                    {href && <span className="lu-arrow">↗</span>}
+                  </>
+                );
+
+                return href ? (
+                  <a
+                    key={entry.id ?? i}
+                    className={`lu-row lu-row-link${i === lineup.length - 1 ? ' lu-row-last' : ''}`}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {body}
+                  </a>
+                ) : (
+                  <div key={entry.id ?? i} className={`lu-row${i === lineup.length - 1 ? ' lu-row-last' : ''}`}>
+                    {body}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -582,15 +735,34 @@ export default function EventDetailPage() {
               )}
             </div>
 
-            {/* Organiser */}
-            {organiser && (
-              <div className="sb-org">
-                <div className="org-avatar">🏢</div>
-                <div>
-                  <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
-                  <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text }}>{organiser}</p>
+            {/* Organiser. A link only when there is a public profile behind the
+                name — the venue-name fallback has nowhere to go. */}
+            {organiserName && (
+              organiserHref ? (
+                <a className="sb-org sb-org-link" href={organiserHref}>
+                  <div className="org-avatar">
+                    {organiserObj?.logo_url
+                      ? <img src={organiserObj.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+                      : '🏢'}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {organiserName}
+                      {organiserObj?.verified && <span title="Verified organiser" style={{ color: '#2f7cf6', marginLeft: 5 }}>✓</span>}
+                    </p>
+                  </div>
+                  <span style={{ color: colors.subText, flexShrink: 0 }}>›</span>
+                </a>
+              ) : (
+                <div className="sb-org">
+                  <div className="org-avatar">🏢</div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text }}>{organiserName}</p>
+                  </div>
                 </div>
-              </div>
+              )
             )}
 
             {/* Spacer */}
@@ -665,6 +837,25 @@ export default function EventDetailPage() {
           : <button className="get-tickets-btn" style={{ flex: 1 }} onClick={handleGetTickets}>Get Tickets</button>
         }
       </div>
+
+      {/* Share confirmation. Only ever shown on the clipboard fallback — when
+          navigator.share exists the OS sheet is its own feedback, and a toast
+          on top of it would be noise. */}
+      {shareNote && (
+        <div
+          style={{
+            position: 'fixed', bottom: 24, left: 16, right: 16, zIndex: 200,
+            maxWidth: 260, margin: '0 auto',
+            background: 'rgba(255,255,255,0.95)', color: '#111',
+            borderRadius: 999, padding: '11px 18px', textAlign: 'center',
+            fontSize: 13, fontWeight: 600,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          }}
+          role="status"
+        >
+          {shareNote}
+        </div>
+      )}
     </div>
   );
 }
