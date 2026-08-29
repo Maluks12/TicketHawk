@@ -32,7 +32,7 @@ import { getBaseUrl } from '../../components/FilterModal';
 import { toggleFollow, getFollowStatus } from '../../lib/api';
 import { buildEventShare } from '../../lib/shareLinks';
 import { LEGAL_URLS } from '../../lib/legalLinks';
-import { IMG_PLACEHOLDER } from '../../lib/img';
+import { IMG_PLACEHOLDER, thumbUrl } from '../../lib/img';
 
 // ─── Hero frame ───────────────────────────────────────────────────────────────
 // The hero no longer forces every image into one tall portrait box. The frame
@@ -63,6 +63,17 @@ const HERO_MAX_H = HERO_H;
 const HERO_MIN_H = Math.round(SCREEN_H_LOCAL * 0.34);
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+
+// Aspect ratios already measured this session, keyed by image URL.
+//
+// Nothing in the API carries image dimensions, so the frame height can only be
+// derived from a loaded image — which is why the hero opens at HERO_MAX_H and
+// resizes once the artwork reports in. Remembering the ratio means that only
+// ever happens ONCE per image: coming back to an event you have already opened
+// renders at the right height on the first frame, with no resize at all.
+// Module scope, so it survives screen unmount but not app restart. Bounded
+// because a session realistically opens tens of events, not thousands.
+const HERO_ASPECT_CACHE = new Map<string, number>();
 
 // ── Information: the three summary fields ────────────────────────────────────
 // Keys are catalogue keys and the order is the catalogue's display_order (10,
@@ -666,9 +677,12 @@ export default function EventDetail() {
   // max height until the image has reported its dimensions.
   // Plain const, NOT useMemo: this sits below the `if (!event)` early return,
   // so a hook here would violate the rules of hooks. The maths is trivial.
-  const heroHeight = (!heroAspect || heroAspect <= 0)
+  // Falls back to a remembered ratio for this image before falling back to the
+  // max height, so a revisit never resizes.
+  const knownAspect = heroAspect ?? (heroImage ? HERO_ASPECT_CACHE.get(heroImage) : undefined);
+  const heroHeight = (!knownAspect || knownAspect <= 0)
     ? HERO_MAX_H
-    : Math.round(clamp(SCREEN_W / heroAspect, HERO_MIN_H, HERO_MAX_H));
+    : Math.round(clamp(SCREEN_W / knownAspect, HERO_MIN_H, HERO_MAX_H));
 
   // Gentle parallax on the sharp foreground only. The image is no longer
   // oversized (the old `bottom: -35%` overscan forced `cover` to upscale the
@@ -691,6 +705,8 @@ export default function EventDetail() {
     const h = e?.source?.height;
     if (!w || !h) return;
     const ratio = w / h;
+    // Remembered so a second visit to this event opens at the right height.
+    if (heroImage) HERO_ASPECT_CACHE.set(heroImage, ratio);
     setHeroAspect((prev) => (prev && Math.abs(prev - ratio) < 0.001 ? prev : ratio));
   };
 
@@ -724,14 +740,27 @@ export default function EventDetail() {
           {heroImage ? (
             <>
               {/* Blurred backdrop fills the frame edge-to-edge, so the sharp
-                  layer never needs to be zoomed/cropped to cover it. */}
+                  layer never needs to be zoomed/cropped to cover it.
+                  Loads the THUMBNAIL, not the full image: it is blurred at
+                  radius 24, where the two are indistinguishable, and the thumb
+                  is already in the disk cache from the card that was tapped —
+                  so the frame fills immediately instead of staying empty for
+                  the length of a full-resolution download. */}
               <ExpoImage
-                source={{ uri: heroImage }}
+                source={{ uri: thumbUrl(heroImage) ?? heroImage }}
                 style={sheet.heroBackdrop}
                 contentFit="cover"
                 blurRadius={24}
                 cachePolicy="memory-disk"
+                placeholder={IMG_PLACEHOLDER}
+                placeholderContentFit="cover"
+                priority="high"
                 transition={150}
+                /* Reports the same aspect as the full artwork, and arrives far
+                   sooner, so the frame settles to its final height off the
+                   THUMBNAIL rather than waiting for the full download. That is
+                   what stops the hero visibly resizing mid-load. */
+                onLoad={onHeroLoad}
               />
               {/* Sharp foreground. HERO_FIT='cover' now fills edge-to-edge, and
                   because the frame above matches the artwork's aspect ratio it
@@ -748,6 +777,8 @@ export default function EventDetail() {
                   contentFit={HERO_FIT}
                   onLoad={onHeroLoad}
                   cachePolicy="memory-disk"
+                  placeholder={IMG_PLACEHOLDER}
+                  placeholderContentFit="cover"
                   priority="high"
                   transition={150}
                 />

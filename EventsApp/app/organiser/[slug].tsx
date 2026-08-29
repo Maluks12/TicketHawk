@@ -17,7 +17,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckCircle, Storefront } from 'phosphor-react-native';
 import { SocialIcon, SOCIAL_LABEL } from '../../components/SocialIcon';
-import { IMG_PLACEHOLDER } from '../../lib/img';
+import { IMG_PLACEHOLDER, prefetchFullImages } from '../../lib/img';
 import {
   getOrganizer,
   getOrganizerEvents,
@@ -221,6 +221,12 @@ export default function OrganiserScreen() {
 
   function openEvent(e: Event) {
     setSelectedEvent(e);
+    // The detail screen renders the FULL-size banner, but only the card
+    // thumbnail was warmed for this list — so start the real download now and
+    // let it run under the push animation instead of beginning cold when the
+    // screen lands. The home feed has always done this; these screens did not,
+    // which is why arriving here felt slower than arriving from home.
+    prefetchFullImages([e.banner_image_url ?? e.cover_image_url]);
     router.push(`/event/${e.id}` as any);
   }
 

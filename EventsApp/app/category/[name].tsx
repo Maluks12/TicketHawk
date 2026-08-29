@@ -17,6 +17,7 @@ import { getEventsByCategory, type Event } from '../../lib/api';
 import { useEventStore } from '../../store/eventStore';
 import { useAppTheme } from '../../theme/colors';
 import { CoverImage } from '../../components/CoverImage';
+import { prefetchFullImages } from '../../lib/img';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_IMAGE_H = Math.round(SCREEN_W * 0.52);
@@ -142,6 +143,12 @@ export default function CategoryScreen() {
 
   const handleEventPress = (event: Event) => {
     setSelectedEvent(event);
+    // The detail screen renders the FULL-size banner, but only the card
+    // thumbnail was warmed for this list — so start the real download now and
+    // let it run under the push animation instead of beginning cold when the
+    // screen lands. The home feed has always done this; these screens did not,
+    // which is why arriving here felt slower than arriving from home.
+    prefetchFullImages([event.banner_image_url ?? event.cover_image_url]);
     router.push(`/event/${event.id}`);
   };
 
