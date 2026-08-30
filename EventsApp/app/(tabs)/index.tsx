@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { prefetchImages, prefetchFullImages } from '../../lib/img';
+import ComingSoon from '../../components/ComingSoon';
 import { CoverImage } from '../../components/CoverImage';
 import { useState, useEffect, useCallback, useRef, useMemo, memo, forwardRef, useImperativeHandle } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -830,6 +831,28 @@ export default function Index() {
           <Text style={{ color: colors.ctaText, fontSize: 14, fontWeight: '800', letterSpacing: 0.3 }}>Try Again</Text>
         </TouchableOpacity>
       </View>
+    );
+  }
+
+  // ── Nothing to show at all ──────────────────────────────────────────────────
+  // Counts events across EVERY section, featured included: `allEvents` skips
+  // the featured section deliberately, so it would report empty for a feed that
+  // has a carousel and nothing else.
+  //
+  // Only when the count is zero — a filter that matched nothing already falls
+  // back to the unfiltered feed and lands in the existing empty state below,
+  // which offers to clear the filter. That is a different problem with a
+  // different fix, and this cover would hide it.
+  //
+  // Placed with the offline state above: after every hook, before the main
+  // return, so hook order is identical on all three paths.
+  const totalEventCount = sections.reduce((n, sec) => n + (sec.events?.length ?? 0), 0);
+  if (!loading && !error && totalEventCount === 0) {
+    return (
+      <ComingSoon
+        colors={colors}
+        onRefresh={() => fetchSections(filterParams.city)}
+      />
     );
   }
 

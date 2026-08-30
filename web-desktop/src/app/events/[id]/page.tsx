@@ -875,7 +875,35 @@ export default function EventDetailPage() {
               )}
             </div>
 
-            {organiserBlock}
+            {/* Organiser. A link only when there is a public profile behind the
+                name — the venue-name fallback has nowhere to go. */}
+            {organiserName && (
+              organiserHref ? (
+                <a className="sb-org sb-org-link" href={organiserHref}>
+                  <div className="org-avatar">
+                    {organiserObj?.logo_url
+                      ? <img src={organiserObj.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+                      : '🏢'}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {organiserName}
+                      {organiserObj?.verified && <span title="Verified organiser" style={{ color: '#2f7cf6', marginLeft: 5 }}>✓</span>}
+                    </p>
+                  </div>
+                  <span style={{ color: colors.subText, flexShrink: 0 }}>›</span>
+                </a>
+              ) : (
+                <div className="sb-org">
+                  <div className="org-avatar">🏢</div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>Organised by</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text }}>{organiserName}</p>
+                  </div>
+                </div>
+              )
+            )}
 
             {/* Gap above the CTA. Was flex:1 to push the button to the foot of a
                 full-height card; with the card sized to its content there is no

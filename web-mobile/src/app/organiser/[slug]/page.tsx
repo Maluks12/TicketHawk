@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+// Only icons already proven present in this codebase's lucide-react (^0.400.0).
+import { BadgeCheck } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEventStore } from '@/store/eventsStore';
 import { useAppTheme } from '@/themes/colors';
@@ -147,7 +149,10 @@ export default function OrganiserPage() {
     }
   }, [slug]);
 
-  useEffect(() => { if (organiser) loadEvents(scope); }, [organiser, scope, loadEvents]);
+  // Fires on mount alongside the profile request rather than after it. The
+  // events endpoint takes the slug, not anything from the profile, so gating it
+  // on `organiser` serialised two independent round trips for no reason.
+  useEffect(() => { loadEvents(scope); }, [scope, loadEvents]);
 
   async function handleFollow() {
     if (followBusy || !organiser) return;
@@ -175,9 +180,26 @@ export default function OrganiserPage() {
   const handlePress = (item: Event) => { setSelectedEvent(item); router.push(`/events/${item.id}`); };
 
   if (loading) {
+    // Skeleton in the shape of the real page, not a lone spinner in the middle
+    // of an empty screen. The layout appearing instantly is most of what makes
+    // a wait feel short — the content then fills in where it was expected.
+    const bone = 'rgba(255,255,255,0.06)';
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: colors.background }}>
-        <div className="animate-pulse rounded-2xl" style={{ width: 96, height: 96, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+      <div className="min-h-screen" style={{ backgroundColor: colors.background }}>
+        <div className="w-full animate-pulse" style={{ height: 150, backgroundColor: bone }} />
+        <div className="mx-auto px-5" style={{ maxWidth: 640 }}>
+          <div className="flex flex-col items-center" style={{ marginTop: -44 }}>
+            <div className="rounded-2xl animate-pulse" style={{ width: 88, height: 88, backgroundColor: bone, border: `3px solid ${colors.background}` }} />
+            <div className="rounded-lg animate-pulse mt-4" style={{ width: 220, height: 26, backgroundColor: bone }} />
+            <div className="rounded animate-pulse mt-3" style={{ width: 160, height: 13, backgroundColor: bone }} />
+            <div className="rounded-xl animate-pulse mt-6" style={{ width: 150, height: 44, backgroundColor: bone }} />
+          </div>
+          <div className="grid gap-5 mt-12" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="animate-pulse rounded-xl" style={{ aspectRatio: '16 / 9', backgroundColor: bone }} />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -217,21 +239,24 @@ export default function OrganiserPage() {
       <div className="mx-auto px-5" style={{ maxWidth: 640 }}>
         {/* Identity — pulled up over the cover */}
         <div className="flex flex-col items-center text-center" style={{ marginTop: -44 }}>
-          <div
-            className="rounded-2xl overflow-hidden flex items-center justify-center"
-            style={{ width: 88, height: 88, backgroundColor: colors.cardBg, border: `3px solid ${colors.background}` }}
-          >
-            {organiser.logo_url
-              ? <img src={organiser.logo_url} alt="" className="w-full h-full object-cover" />
-              : <span style={{ fontSize: 34, color: colors.subText }}>🏢</span>}
-          </div>
+          {/* The organiser's own picture. Omitted entirely when they have not
+              set one, rather than filled with a placeholder glyph — the slot is
+              for a photo, and an icon is not a photo. */}
+          {organiser.logo_url && (
+            <div
+              className="rounded-2xl overflow-hidden"
+              style={{ width: 88, height: 88, backgroundColor: colors.cardBg, border: `3px solid ${colors.background}` }}
+            >
+              <img src={organiser.logo_url} alt="" className="w-full h-full object-cover" />
+            </div>
+          )}
 
           <div className="flex items-center gap-2 mt-4">
             <h1 className="font-black" style={{ color: colors.text, fontSize: 22, letterSpacing: '-0.3px', margin: 0 }}>
               {organiser.business_name}
             </h1>
             {organiser.verified && (
-              <span title="Verified organiser" style={{ color: '#2f7cf6', fontSize: 20, lineHeight: 1 }}>✓</span>
+              <BadgeCheck size={20} color="#2f7cf6" aria-label="Verified organiser" />
             )}
           </div>
 
@@ -247,8 +272,6 @@ export default function OrganiserPage() {
             </p>
           )}
 
-          {/* Follower count sits inside the button so the number and the action
-              that changes it are one target — same call the app makes. */}
           <button
             onClick={handleFollow}
             disabled={followBusy}
@@ -260,9 +283,6 @@ export default function OrganiserPage() {
             }
           >
             {following ? 'Following' : 'Follow'}
-            {organiser.follower_count > 0 && (
-              <span style={{ opacity: 0.65, marginLeft: 8 }}>{organiser.follower_count.toLocaleString('en-ZA')}</span>
-            )}
           </button>
 
           {links.length > 0 && (
