@@ -41,6 +41,18 @@ services:
     # reach it. The security group can then block ALL inbound traffic.
     ports:
       - "127.0.0.1:8080:8080"
+    # Without this, "container running" was the only signal — and three separate
+    # things can stop the API reaching its listener: a dirty schema_migrations
+    # row makes `migrate up` fail on every start, a panic on a worker goroutine
+    # kills the process, and the startup re-enqueue can stall. start_period
+    # covers migrations plus the unsent-booking sweep. wget is in busybox on the
+    # alpine runtime image, so no extra package.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
       redis:
         condition: service_healthy

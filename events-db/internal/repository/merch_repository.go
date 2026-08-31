@@ -238,9 +238,23 @@ func GetVariantByID(pool *pgxpool.Pool, variantID string) (*models.MerchandiseVa
 	return &v, basePrice, &fi, nil
 }
 
-func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMerchandiseDTO) (*models.Merchandise, error) {
+func CreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.CreateMerchandiseDTO, organizerID string) (*models.Merchandise, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Ownership. Without this any authenticated organiser could attach merch to
+	// any other organiser's event by passing that event's ID. The update and
+	// delete paths were already scoped; this create path was not.
+	// A nil eventID is standalone merch, which has no event to own.
+	if eventID != nil {
+		var verifyID string
+		if err := pool.QueryRow(ctx,
+			`SELECT id FROM events WHERE id = $1 AND organizer_id = $2`,
+			*eventID, organizerID,
+		).Scan(&verifyID); err != nil {
+			return nil, ErrMerchNotFound
+		}
+	}
 
 	mode := dto.FulfillmentMode
 	if mode == "" {
@@ -313,9 +327,23 @@ func AdminCreateMerchandise(pool *pgxpool.Pool, eventID *string, dto *models.Cre
 	return &m, nil
 }
 
-func CreateVariant(pool *pgxpool.Pool, merchID string, dto *models.CreateVariantDTO) (*models.MerchandiseVariant, error) {
+func CreateVariant(pool *pgxpool.Pool, merchID string, dto *models.CreateVariantDTO, organizerID string) (*models.MerchandiseVariant, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Ownership. Without this any authenticated organiser could add a variant —
+	// carrying its own price_override and stock_quantity — to any other
+	// organiser's merch item, including an already-approved one on sale.
+	// CreateVariant has no review status, so such a variant would go live
+	// immediately. Mirrors the verify in UpdateVariant below.
+	var verifyID string
+	if err := pool.QueryRow(ctx, `
+        SELECT e.id FROM merchandise m
+        JOIN events e ON e.id = m.event_id
+        WHERE m.id = $1 AND e.organizer_id = $2
+    `, merchID, organizerID).Scan(&verifyID); err != nil {
+		return nil, ErrMerchNotFound
+	}
 
 	var v models.MerchandiseVariant
 	err := pool.QueryRow(ctx, `

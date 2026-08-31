@@ -272,24 +272,33 @@ func RequireCapabilityOn(pool *pgxpool.Pool, cap models.Capability) gin.HandlerF
 // because the action was refused either way and the log is a detection aid
 // rather than the control itself.
 func auditDenied(pool *pgxpool.Pool, c *gin.Context, email string, role *models.StaffRole, action, reason string) {
+	// Everything read from the request is captured HERE, on the request
+	// goroutine. Gin recycles *gin.Context through a sync.Pool: once the handler
+	// chain returns, c.Request is reassigned and c.Keys is rebuilt for the next
+	// request. Reading them inside the goroutine raced that reuse, which both
+	// attributed audit rows to the wrong caller and risked a
+	// "concurrent map read and map write" runtime fatal — which no recover()
+	// catches, including gin.Recovery().
+	var roleStr *string
+	if role != nil {
+		s := string(*role)
+		roleStr = &s
+	}
+	userID, _ := c.Get("user_id")
+	path := c.Request.URL.Path
+	ip := c.ClientIP()
+	ua := c.Request.UserAgent()
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-
-		var roleStr *string
-		if role != nil {
-			s := string(*role)
-			roleStr = &s
-		}
-		userID, _ := c.Get("user_id")
 
 		_, err := pool.Exec(ctx, `
 			INSERT INTO staff_audit_log
 				(actor_id, actor_email, actor_role, action, allowed, detail, ip, user_agent)
 			VALUES ($1, $2, $3::console_role, $4, FALSE,
 			        jsonb_build_object('reason', $5::text, 'path', $6::text), $7, $8)
-		`, userID, email, roleStr, action, reason,
-			c.Request.URL.Path, c.ClientIP(), c.Request.UserAgent())
+		`, userID, email, roleStr, action, reason, path, ip, ua)
 		if err != nil {
 			log.Warn().Err(err).Str("action", action).Msg("audit: denied-write failed")
 		}
@@ -316,6 +325,10 @@ func AuditAllowed(pool *pgxpool.Pool, c *gin.Context, action, targetType string,
 		detail = map[string]any{}
 	}
 
+	// Captured on the request goroutine — see the note in auditDenied.
+	ip := c.ClientIP()
+	ua := c.Request.UserAgent()
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -325,7 +338,7 @@ func AuditAllowed(pool *pgxpool.Pool, c *gin.Context, action, targetType string,
 				 allowed, detail, ip, user_agent)
 			VALUES ($1, $2, $3::console_role, $4, $5, $6, TRUE, $7, $8, $9)
 		`, userID, emailStr, roleStr, action, targetType, targetID,
-			detail, c.ClientIP(), c.Request.UserAgent())
+			detail, ip, ua)
 		if err != nil {
 			log.Warn().Err(err).Str("action", action).Msg("audit: write failed")
 		}

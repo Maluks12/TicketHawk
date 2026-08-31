@@ -134,6 +134,13 @@ func main() {
 
 	bookingJobs := make(chan string, 256)
 
+	// The consumer starts BEFORE the re-enqueue loop below. It used to start
+	// after, so a backlog larger than the 256 buffer blocked the 257th send
+	// forever — no worker, no HTTP listener, no health endpoint, and no error
+	// printed. The trigger was a ticket-delivery backlog, which is exactly what
+	// a busy on-sale produces.
+	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
+
 	unsentIDs, err := repository.GetUnsentConfirmedBookingIDs(pool)
 	if err != nil {
 		log.Warn().Err(err).Msg("startup: failed to query unsent bookings — skipping re-enqueue")
@@ -143,7 +150,6 @@ func main() {
 		}
 		log.Info().Int("count", len(unsentIDs)).Msg("startup: re-enqueued unsent booking jobs")
 	}
-	workers.StartBookingWorker(pool, cfg, bookingJobs, ctx)
 
 	workers.StartReminderWorker(pool, ctx)
 	log.Info().Msg("reminder worker started")
@@ -212,6 +218,10 @@ func main() {
 		payoutService = payoutService.WithVerifyNow(verifyNow, kycService.Decrypt)
 	}
 	workers.StartPayoutWorker(pool, payoutService, ctx, 10*time.Minute)
+
+	// Recovers dropped ticket jobs and payments the webhook failed to apply.
+	// See internal/workers/reconcile_worker.go for why both gaps existed.
+	workers.StartReconcileWorker(pool, paymentService, bookingJobs, ctx, 2*time.Minute)
 
 	// Ads/campaigns DISABLED for launch — the ad worker, ad-account, campaign
 	// and ad-wallet routes are unregistered below. Feed placement is fully

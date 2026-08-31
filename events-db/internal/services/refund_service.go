@@ -8,7 +8,6 @@ import (
 	"events-db/internal/models"
 	"events-db/internal/repository"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -291,24 +290,28 @@ func (s *RefundService) accrueClawback(
 	}
 	defer tx.Rollback(ctx)
 
-	// ON CONFLICT: UNIQUE(event_id, kind) means re-running a cancellation cannot
-	// double-charge the organiser. DO NOTHING is correct rather than adding —
-	// the refund loop is itself idempotent, so a retry re-derives the same total.
-	var inserted bool
-	err = tx.QueryRow(ctx, `
+	// ADDITIVE on conflict, not DO NOTHING.
+	//
+	// The previous comment claimed "a retry re-derives the same total". It does
+	// not. loadCancellationTargets filters on p.status = 'completed', so every
+	// retry returns only the bookings NOT yet refunded — the target set shrinks.
+	// With DO NOTHING, a cancellation where some refunds failed accrued clawback
+	// for the successful ones only, and the retry that refunded the rest hit the
+	// conflict and skipped the debt entirely. The platform silently absorbed the
+	// organiser's share of every booking refunded on a later attempt.
+	//
+	// Adding is safe precisely BECAUSE the target set shrinks: each run's
+	// ClawbackAccrued is a non-overlapping delta, and the caller only reaches
+	// here when it is > 0, so a clean re-run with nothing left to refund adds
+	// nothing.
+	if _, err = tx.Exec(ctx, `
 		INSERT INTO organizer_payouts (organizer_id, event_id, kind, amount, currency, status)
 		VALUES ($1, $2, 'refund_clawback', $3, 'ZAR', 'processing')
-		ON CONFLICT (event_id, kind) DO NOTHING
-		RETURNING TRUE
-	`, organizerID, eventID, amount).Scan(&inserted)
-	if err == pgx.ErrNoRows {
-		// Row already existed — clawback was accrued by an earlier attempt.
-		log.Info().Str("event_id", eventID).
-			Msg("cancellation: clawback already recorded, skipping")
-		return tx.Commit(ctx)
-	}
-	if err != nil {
-		return fmt.Errorf("inserting clawback row: %w", err)
+		ON CONFLICT (event_id, kind) DO UPDATE
+		SET amount     = organizer_payouts.amount + EXCLUDED.amount,
+		    updated_at = CURRENT_TIMESTAMP
+	`, organizerID, eventID, amount); err != nil {
+		return fmt.Errorf("accruing clawback row: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `

@@ -77,6 +77,32 @@ echo "── Reclaiming space ────────────────�
 docker image prune -f
 
 echo
-docker compose -f "$COMPOSE_FILE" ps
-echo
-echo "Done. Logs:  docker compose -f ${COMPOSE_FILE} logs -f --tail 50"
+echo "── Waiting for the API ─────────────────────────────────────────"
+# `docker compose up -d` returns as soon as containers are CREATED, not when the
+# app is serving. Three things can stop the API reaching its listener: a dirty
+# schema_migrations row makes `migrate up` fail on every start, a panic on a
+# worker goroutine kills the process, and the startup re-enqueue can stall. All
+# three previously ended with this script printing "Done." over a dead API.
+for i in $(seq 1 40); do
+  if curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+    echo "API healthy after ${i} attempt(s)."
+    echo
+    docker compose -f "$COMPOSE_FILE" ps
+    echo
+    echo "Done. Logs:  docker compose -f ${COMPOSE_FILE} logs -f --tail 50"
+    exit 0
+  fi
+  sleep 3
+done
+
+echo "API did not become healthy within 120s." >&2
+echo >&2
+docker compose -f "$COMPOSE_FILE" ps >&2
+echo >&2
+echo "Last 50 lines from the api container:" >&2
+docker compose -f "$COMPOSE_FILE" logs --tail 50 api >&2
+echo >&2
+echo "If you see 'Dirty database version N', a migration failed partway. Inspect" >&2
+echo "the cause, then clear the flag from inside the api container with:" >&2
+echo "  migrate -path ./migrations -database \"\$DATABASE_URL\" force N" >&2
+exit 1

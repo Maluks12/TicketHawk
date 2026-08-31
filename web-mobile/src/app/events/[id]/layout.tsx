@@ -84,6 +84,22 @@ async function fetchEvent(id: string): Promise<ApiEvent | null> {
   }
 }
 
+/**
+ * JSON.stringify escapes " and \ but NOT < > &. Inside a <script> block the HTML
+ * parser closes the tag at the first </script> regardless of JSON context, so an
+ * organiser-controlled field containing </script> breaks out of the block and
+ * executes as script for every visitor to the page.
+ *
+ * \u003c and friends are valid JSON escapes that parse back to the original
+ * characters, so crawlers still read correct structured data.
+ */
+function safeJsonLd(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
+
 /** Trims to a length search engines actually display, without cutting mid-word. */
 function clamp(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
@@ -207,7 +223,7 @@ export default async function EventLayout(
           type="application/ld+json"
           // Structured data has to be in the server HTML to be seen — a crawler
           // that doesn't execute JS never sees anything added at runtime.
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }}
         />
       )}
       {children}

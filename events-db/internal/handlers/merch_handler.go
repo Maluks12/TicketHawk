@@ -112,6 +112,7 @@ func GetMerchByIDHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFu
 
 func OrgCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		organizerID := c.GetString("user_id")
 		eventID := c.Param("id")
 		var dto models.CreateMerchandiseDTO
 		if err := c.ShouldBindJSON(&dto); err != nil {
@@ -119,8 +120,12 @@ func OrgCreateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handler
 			return
 		}
 
-		item, err := repository.CreateMerchandise(pool, &eventID, &dto)
+		item, err := repository.CreateMerchandise(pool, &eventID, &dto, organizerID)
 		if err != nil {
+			if err == repository.ErrMerchNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found or access denied"})
+				return
+			}
 			utils.InternalError(c, err, "create merchandise")
 			return
 		}
@@ -144,7 +149,10 @@ func OrgCreateStandaloneMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) g
 			return
 		}
 
-		item, err := repository.CreateMerchandise(pool, nil, &dto)
+		// Standalone merch has no event, so the ownership guard inside
+		// CreateMerchandise is a no-op here — organizerID is passed for
+		// signature parity only.
+		item, err := repository.CreateMerchandise(pool, nil, &dto, c.GetString("user_id"))
 		if err != nil {
 			utils.InternalError(c, err, "create standalone merchandise")
 			return
@@ -225,6 +233,7 @@ func OrgDeactivateMerchHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Han
 
 func OrgCreateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		organizerID := c.GetString("user_id")
 		merchID := c.Param("id")
 		var dto models.CreateVariantDTO
 		if err := c.ShouldBindJSON(&dto); err != nil {
@@ -232,8 +241,12 @@ func OrgCreateVariantHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 			return
 		}
 
-		variant, err := repository.CreateVariant(pool, merchID, &dto)
+		variant, err := repository.CreateVariant(pool, merchID, &dto, organizerID)
 		if err != nil {
+			if err == repository.ErrMerchNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Merch item not found or access denied"})
+				return
+			}
 			utils.InternalError(c, err, "create variant")
 			return
 		}
