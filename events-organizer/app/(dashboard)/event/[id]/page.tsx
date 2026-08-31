@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import TicketTiersPanel from '../../../../components/TicketTiersPanel';
+import MaxPerAttendeeRow from '../../../../components/MaxPerAttendeeRow';
 import EventInfoEditor from '../../../../components/eventInfoEditor';
 import LineupBuilder from '../../../../components/lineupBuilder';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
@@ -536,7 +537,15 @@ export default function EventDetailPage() {
               <Row label="Base price"        value={ev.price > 0 ? fmtMoney(ev.price, ev.currency) : 'Free'} />
               <Row label="Currency"          value={ev.currency} />
               <Row label="Capacity"          value={ev.max_capacity ? ev.max_capacity.toLocaleString() : 'Unlimited'} />
-              <Row label="Max per attendee"  value={ev.max_tickets_per_user ? String(ev.max_tickets_per_user) : 'No limit'} />
+              {/* Was a <Row>. The number could only be changed by reopening the
+                  create wizard as an editor, which on a live event files a
+                  review request for the whole form rather than this one field. */}
+              <MaxPerAttendeeRow
+                eventId={id}
+                status={ev.status}
+                value={ev.max_tickets_per_user}
+                onChanged={fetchStats}
+              />
               <Row label="Waitlist"          value={ev.allow_waitlist ? 'Enabled' : 'Disabled'} />
 
               {/* Was a read-only table. The backend has always exposed full tier
