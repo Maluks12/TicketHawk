@@ -1426,7 +1426,12 @@ func main() {
 		orgRoutes.PUT("/events/:id",               handlers.UpdateDraftEventHandler(pool, eventCache))
 		orgRoutes.GET("/events/:id/edit",          handlers.GetOrganiserEventForEditHandler(pool))
 		orgRoutes.POST("/events/:id/edit-request", handlers.SubmitOrganiserEventEditHandler(pool))
+		// PATCH /events/:id/ticket-limit  max_tickets_per_user on its own;
+		//                                 draft applies, live files a review request
 		orgRoutes.PATCH("/events/:id/ticket-limit", handlers.UpdateEventTicketLimitHandler(pool, eventCache))
+		// PATCH /events/:id/capacity        max_capacity on its own. Applies
+		//                                   immediately even when live, and is
+		//                                   floored at the tickets already sold.
 		orgRoutes.PATCH("/events/:id/capacity", handlers.UpdateEventCapacityHandler(pool, eventCache))
 		orgRoutes.POST("/upload",         middleware.ExtendWriteTimeout(5*time.Minute), handlers.UploadOrganiserImageHandler(imgService))
 		// Listing fee — required for events with 20+ ticket capacity
@@ -1453,10 +1458,10 @@ func main() {
 
 		// Ticket Types
 		orgRoutes.GET("/events/:id/ticket-types",  handlers.OrgGetTicketTypesHandler(pool))
-		orgRoutes.POST("/events/:id/ticket-types", handlers.OrgCreateTicketTypesHandler(pool))
-		orgRoutes.PUT("/events/:id/ticket-types",  handlers.OrgReplaceTicketTypesHandler(pool))
-		orgRoutes.PATCH("/ticket-types/:typeId",   handlers.OrgUpdateTicketTypeHandler(pool))
-		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool))
+		orgRoutes.POST("/events/:id/ticket-types", handlers.OrgCreateTicketTypesHandler(pool, eventCache))
+		orgRoutes.PUT("/events/:id/ticket-types",  handlers.OrgReplaceTicketTypesHandler(pool, eventCache))
+		orgRoutes.PATCH("/ticket-types/:typeId",   handlers.OrgUpdateTicketTypeHandler(pool, eventCache))
+		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool, eventCache))
 		// ── Payouts ───────────────────────────────────────────────────────
 		orgRoutes.GET("/payouts/banks",    handlers.GetPayoutBanksHandler(payoutService))
 		orgRoutes.POST("/payouts/details", handlers.SetPayoutDetailsHandler(pool, payoutService))

@@ -361,13 +361,13 @@ func buildTicketTypeRouter(pool *pgxpool.Pool) *gin.Engine {
 	// Organiser routes
 	org := r.Group("/organiser")
 	org.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
-	{
-		org.GET("/events/:id/ticket-types", handlers.OrgGetTicketTypesHandler(pool))
-		org.POST("/events/:id/ticket-types", handlers.OrgCreateTicketTypesHandler(pool))
-		org.PUT("/events/:id/ticket-types", handlers.OrgReplaceTicketTypesHandler(pool))
-		org.PATCH("/ticket-types/:typeId", handlers.OrgUpdateTicketTypeHandler(pool))
-		org.DELETE("/ticket-types/:typeId", handlers.OrgDeleteTicketTypeHandler(pool))
-	}
+	// {
+	// 	org.GET("/events/:id/ticket-types", handlers.OrgGetTicketTypesHandler(pool))
+	// 	org.POST("/events/:id/ticket-types", handlers.OrgCreateTicketTypesHandler(pool))
+	// 	org.PUT("/events/:id/ticket-types", handlers.OrgReplaceTicketTypesHandler(pool))
+	// 	org.PATCH("/ticket-types/:typeId", handlers.OrgUpdateTicketTypeHandler(pool))
+	// 	org.DELETE("/ticket-types/:typeId", handlers.OrgDeleteTicketTypeHandler(pool))
+	// }
 
 	return r
 }

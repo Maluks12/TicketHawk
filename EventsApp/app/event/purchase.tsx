@@ -99,10 +99,36 @@ function isSoldOut(tt: TicketType): boolean {
   return av !== null && av <= 0;
 }
 
-function availLabel(tt: TicketType): string {
+// A tier's own availability is NOT how many can actually be bought.
+//
+// max_capacity is the event's hard ceiling and ComputeAvailableTickets clamps
+// everything to (max_capacity - tickets_sold), so a tier holding 4 on an event
+// with 1 seat left can sell exactly 1. Reading the tier alone produced "4 left"
+// next to a quantity picker offering 5, and the booking transaction then
+// refused the purchase under its row lock — the buyer found out at the point of
+// payment, having already chosen.
+//
+// event.available_tickets is the server's already-clamped number (-1 is the
+// UnlimitedTickets sentinel), so the real figure is the smaller of the two.
+function eventRemainingOf(event: any): number | null {
+  const av = event?.available_tickets;
+  if (typeof av !== 'number') return null; // older payload — tier alone
+  return av < 0 ? null : av;               // -1 = unlimited
+}
+
+function purchasableOf(tt: TicketType, event: any): number | null {
+  const tier = availableOf(tt);
+  const evt = eventRemainingOf(event);
+  if (tier === null) return evt;
+  if (evt === null) return tier;
+  return Math.min(tier, evt);
+}
+
+function availLabel(tt: TicketType, event?: any): string {
   if (isSoldOut(tt)) return 'Sold out';
-  const av = availableOf(tt);
+  const av = purchasableOf(tt, event);
   if (av === null) return 'Available';
+  if (av <= 0) return 'Sold out';
   if (av < 10) return `${av} left`;
   return `${av.toLocaleString()} available`;
 }
@@ -258,6 +284,17 @@ export default function TicketPurchaseScreen() {
   }, [event?.id]);
 
   const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
+
+  // Clamp a selection that is no longer sellable. Picking 5 on a roomy tier and
+  // then switching to one with 2 left would otherwise carry the 5 into the
+  // booking request, and the button grid would show it selected.
+  useEffect(() => {
+    if (!selectedType) return;
+    const left = purchasableOf(selectedType, event);
+    if (left !== null && left >= 1 && quantity > left) {
+      setQuantity(left);
+    }
+  }, [selectedType, quantity, event]);
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
   // Mirror the backend fee model (CalculateFees in events-db): a R10 service fee
   // per ticket, capped at 20% of the ticket's face value. This must match the
@@ -602,7 +639,7 @@ export default function TicketPurchaseScreen() {
                             <Text style={ss.ticketAvail} numberOfLines={1}>{tt.description}</Text>
                           )}
                           <Text style={[ss.ticketAvail, sold && ss.ticketNameSoldOut]} numberOfLines={1}>
-                            {availLabel(tt)}
+                            {availLabel(tt, event)}
                           </Text>
                           {sold ? (
                             <View style={ss.soldBadge}>
@@ -637,7 +674,17 @@ export default function TicketPurchaseScreen() {
                   // quantity stays at its initial value of 1.
                   if (maxPer === 1) return null;
 
-                  const maxVisible = Math.min(maxPer, 6);
+                  // Cap the picker by what is actually left, not just by the
+                  // per-person rule. Offering 5 when 1 remains sends the buyer
+                  // to a booking that the capacity guard refuses under its row
+                  // lock, so the failure surfaces at payment instead of here.
+                  const left = purchasableOf(selectedType, event);
+                  const maxSellable = left === null ? maxPer : Math.min(maxPer, left);
+
+                  // Nothing left at event level even though the tier looks open.
+                  if (maxSellable < 1) return null;
+
+                  const maxVisible = Math.min(maxSellable, 6);
                   const opts = Array.from({ length: maxVisible }, (_, i) => i + 1);
 
                   return (

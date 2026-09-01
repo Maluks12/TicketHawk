@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"events-db/internal/cache"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/utils"
@@ -95,7 +96,7 @@ func OrgGetTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 //	POST /organiser/events/:id/ticket-types
 //
 // Body: { "types": [ { "name": "VIP", "price": 450.00, "capacity": 50 }, … ] }
-func OrgCreateTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func OrgCreateTicketTypesHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID, _ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -121,6 +122,14 @@ func OrgCreateTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// Bust the cached event payload. Tier writes are the one organiser
+		// mutation that never did this, so a new or edited tier — and the
+		// max_capacity raise that comes with it — stayed invisible to buyers
+		// reading the cached event until the entry aged out.
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
+		}
+
 		c.JSON(http.StatusCreated, gin.H{
 			"message":      "Ticket types created",
 			"ticket_types": types,
@@ -133,7 +142,7 @@ func OrgCreateTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // booking history. Use PATCH on individual types to update live events.
 //
 //	PUT /organiser/events/:id/ticket-types
-func OrgReplaceTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func OrgReplaceTicketTypesHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID, _ := c.Get("user_id")
 		eventID := c.Param("id")
@@ -163,6 +172,14 @@ func OrgReplaceTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// Bust the cached event payload. Tier writes are the one organiser
+		// mutation that never did this, so a new or edited tier — and the
+		// max_capacity raise that comes with it — stayed invisible to buyers
+		// reading the cached event until the entry aged out.
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"message":      "Ticket types replaced",
 			"ticket_types": types,
@@ -174,7 +191,7 @@ func OrgReplaceTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // Safe to call on live events — only updates the fields you send.
 //
 //	PATCH /organiser/ticket-types/:typeId
-func OrgUpdateTicketTypeHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func OrgUpdateTicketTypeHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID, _ := c.Get("user_id")
 		typeID := c.Param("typeId")
@@ -202,6 +219,14 @@ func OrgUpdateTicketTypeHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// Bust the cached event payload. Tier writes are the one organiser
+		// mutation that never did this, so a new or edited tier — and the
+		// max_capacity raise that comes with it — stayed invisible to buyers
+		// reading the cached event until the entry aged out.
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "Ticket type updated",
 			"ticket_type": tt,
@@ -213,7 +238,7 @@ func OrgUpdateTicketTypeHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 // already exist for it — set is_visible = false instead to hide it.
 //
 //	DELETE /organiser/ticket-types/:typeId
-func OrgDeleteTicketTypeHandler(pool *pgxpool.Pool) gin.HandlerFunc {
+func OrgDeleteTicketTypeHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		organizerID, _ := c.Get("user_id")
 		typeID := c.Param("typeId")
@@ -236,6 +261,14 @@ func OrgDeleteTicketTypeHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 			utils.InternalError(c, err, "failed to delete ticket type")
 			return
+		}
+
+		// Bust the cached event payload. Tier writes are the one organiser
+		// mutation that never did this, so a new or edited tier — and the
+		// max_capacity raise that comes with it — stayed invisible to buyers
+		// reading the cached event until the entry aged out.
+		if ec != nil {
+			ec.BustOnEventUpdate(c.Request.Context())
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Ticket type deleted"})
