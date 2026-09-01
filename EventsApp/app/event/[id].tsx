@@ -115,6 +115,11 @@ function formatTime(iso: string) {
   return d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
 
+// Kept in sync with participantAvatar (w-14 h-14) in styles/eventDetail.ts.
+// Duplicated as a number because the image needs its own borderRadius rather
+// than depending on the parent to clip it.
+const AVATAR_SIZE = 56;
+
 // ─── LineupRow ────────────────────────────────────────────────────────────────
 //
 // One act or team. Handles both shapes: a structured `lineup` row with an
@@ -158,7 +163,11 @@ function LineupRow({
         {entry.image_url ? (
           <ExpoImage
             source={{ uri: entry.image_url }}
-            style={{ width: '100%', height: '100%' }}
+            // Explicit size + its own radius. Relying on the parent's
+            // overflow:'hidden' to clip a percentage-sized child leaves the
+            // image's corners visible against the border on iOS, which is what
+            // made this read as a rounded square rather than a circle.
+            style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }}
             contentFit="cover"
             cachePolicy="memory-disk"
             placeholder={IMG_PLACEHOLDER}

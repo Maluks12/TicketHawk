@@ -124,6 +124,16 @@ function purchasableOf(tt: TicketType, event: any): number | null {
   return Math.min(tier, evt);
 }
 
+// Below this many, the count turns red. Matches availLabel's own threshold for
+// switching from "47 available" to "3 left", so the wording and the colour
+// change at the same point instead of two different ones.
+const LOW_STOCK_THRESHOLD = 10;
+
+function isLow(tt: TicketType, event?: any): boolean {
+  const av = purchasableOf(tt, event);
+  return av !== null && av > 0 && av < LOW_STOCK_THRESHOLD;
+}
+
 function availLabel(tt: TicketType, event?: any): string {
   if (isSoldOut(tt)) return 'Sold out';
   const av = purchasableOf(tt, event);
@@ -638,21 +648,34 @@ export default function TicketPurchaseScreen() {
                           {!!tt.description && (
                             <Text style={ss.ticketAvail} numberOfLines={1}>{tt.description}</Text>
                           )}
-                          <Text style={[ss.ticketAvail, sold && ss.ticketNameSoldOut]} numberOfLines={1}>
+                          {/* The count, always rendered and no longer whispered.
+                              It sat in the same muted 12px grey as the
+                              description with a green "Available" chip beneath,
+                              so the chip drew the eye while the number that
+                              actually decides the purchase did not. The chip
+                              also said nothing the list did not: a sold-out tier
+                              is greyed and carries its own badge, so every other
+                              row is available by definition. */}
+                          <Text
+                            style={[
+                              ss.ticketAvailCount,
+                              !sold && isLow(tt, event) && ss.ticketAvailLow,
+                              sold && ss.ticketNameSoldOut,
+                            ]}
+                            numberOfLines={1}
+                          >
                             {availLabel(tt, event)}
                           </Text>
                           {sold ? (
                             <View style={ss.soldBadge}>
                               <Text style={ss.soldBadgeText}>Sold Out</Text>
                             </View>
-                          ) : (
+                          ) : isPremium ? (
                             <View style={[ss.dealBadge, { flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
-                              {isPremium
-                                ? <CrownSimple size={11} color={T.okText} weight="fill" />
-                                : <Check size={11} color={T.okText} weight="bold" />}
-                              <Text style={ss.dealBadgeText}>{isPremium ? 'Premium' : 'Available'}</Text>
+                              <CrownSimple size={11} color={T.okText} weight="fill" />
+                              <Text style={ss.dealBadgeText}>Premium</Text>
                             </View>
-                          )}
+                          ) : null}
                         </View>
                         <View style={ss.ticketPriceCol}>
                           <Text style={[ss.ticketPrice, sold && ss.ticketPriceSoldOut]}>

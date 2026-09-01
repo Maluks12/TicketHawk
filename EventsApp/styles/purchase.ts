@@ -156,6 +156,12 @@ export const makePurchaseSheet = (dark: boolean) => {
   ticketName:         { fontSize: 15, fontWeight: '700', color: T.text, letterSpacing: -0.1 },
   ticketNameSoldOut:  { color: T.faint },
   ticketAvail:        { fontSize: 12, color: T.faint, fontWeight: '500' },
+  // The remaining count, promoted out of the muted description line. It is the
+  // scarcity signal on this screen, and at 12px faint grey it was quieter than
+  // the tier's own description. Sized between the description (12) and the tier
+  // name (15) so it reads as information rather than another heading.
+  ticketAvailCount:   { fontSize: 14, fontWeight: '800', color: T.text, letterSpacing: -0.1 },
+  ticketAvailLow:     { color: T.soldText },
   vipBadge:           { backgroundColor: T.vipBg, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
   vipBadgeText:       { fontSize: 10, fontWeight: '700', color: T.vipText },
   dealBadge:          { backgroundColor: T.okBg, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, alignSelf: 'flex-start' },

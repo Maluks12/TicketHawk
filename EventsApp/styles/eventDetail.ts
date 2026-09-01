@@ -112,8 +112,14 @@ export const s = {
   // ── Participants ──────────────────────────────────────────────────────────────
   participantRow:        'flex-row items-center gap-3.5 py-3.5 border-b border-[#EEEEEE]',
   participantRowLast:    'flex-row items-center gap-3.5 py-3.5',
-  participantAvatar:     'w-10 h-10 rounded-full bg-[#F2F2F2] border border-[#E0E0E0] items-center justify-center',
-  participantAvatarText: 'text-[15px] font-black text-[#333333]',
+  // 56px, up from 40. A performer's face is the only image in this section and
+  // at 40 it read as an icon rather than a portrait. 56 is +40% — enough to
+  // register as a photo, still short of the 64px row height, so nothing below
+  // reflows. Sizing is also set numerically in LineupRow: the border plus a
+  // percentage-sized child let the image's square corners bleed past the
+  // radius, which is why the avatar did not read as a clean circle.
+  participantAvatar:     'w-14 h-14 rounded-full bg-[#F2F2F2] border border-[#E0E0E0] items-center justify-center',
+  participantAvatarText: 'text-[20px] font-black text-[#333333]',
   participantName:       'flex-1 text-[14px] font-semibold text-[#111111]',
   participantArrow:      'text-[20px] text-[#CCCCCC]',
   // Second line under a line-up name: "Main stage · 21:30".
