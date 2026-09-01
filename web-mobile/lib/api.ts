@@ -842,7 +842,10 @@ export async function checkoutBegin(sessionId?: string | null): Promise<Checkout
 
 export async function checkoutConfirm(sessionId?: string | null): Promise<CheckoutConfirmResponse> {
   const headers = makeSessionHeaders(sessionId ?? null);
-  const res = await api.post<CheckoutConfirmResponse>('/v1/checkout/confirm', {}, { headers });
+  // channel=web tags the payment so PAYMENT_CALLBACK_URL comes back as the
+  // self-closing web page. Without it the return 302s to eventsapp://, which
+  // mobile Safari rejects as an invalid address. web-desktop already sends it.
+  const res = await api.post<CheckoutConfirmResponse>('/v1/checkout/confirm', {}, { headers, params: { channel: 'web' } });
   return res.data;
 }
 

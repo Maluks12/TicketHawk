@@ -26,10 +26,9 @@ import (
 //     The webhook remains the source of truth and is idempotent, so applying the
 //     verified result here and again from the webhook later is harmless.
 //
-//  2. Redirects the in-app browser back into the mobile app via the
-//     eventsapp://payment/return deep link. Expo's openAuthSessionAsync watches
-//     for that scheme, closes the browser, and hands control back to the app,
-//     which then polls GET /v1/bookings/:id/payment for the authoritative state.
+//  2. Hands control back to whichever surface started the checkout. There are
+//     three, and they need three different answers — see the dispatch at the
+//     bottom of the handler.
 //
 // PayPal returns carry ?token=<orderID>&PayerID=...; on approval we verify and
 // capture the order here synchronously (the webhook/app poll remain idempotent
@@ -94,11 +93,17 @@ func PaymentReturnHandler(paymentService *services.PaymentService, webBaseURL st
 			}
 		}
 
-		// Web-channel returns: the checkout ran in a browser popup/tab opened by
-		// the web frontend (payments were initialised with ?channel=web). A
-		// deep-link redirect would be rejected by the browser ("address is
-		// invalid" on iOS Safari, where no app scheme handler exists in a plain
-		// web context). Serve a tiny self-closing page instead: it notifies the
+		// ── Hand-back dispatch ───────────────────────────────────────────────
+		// Three surfaces can have opened the gateway, and each needs a
+		// different answer. Order matters: the explicit channel tag is checked
+		// before the User-Agent heuristic, so a tagged request is never
+		// second-guessed by sniffing.
+
+		// 1. Web channel — checkout ran in a browser popup/tab opened by the web
+		// frontend (payments initialised with ?channel=web). A deep-link
+		// redirect would be rejected by the browser ("address is invalid" on
+		// iOS Safari, where no app scheme handler exists in a plain web
+		// context). Serve a tiny self-closing page instead: it notifies the
 		// opener tab via postMessage, closes itself (allowed — the window was
 		// script-opened), and falls back to the web tickets page if closing is
 		// blocked. The opener's status watcher independently confirms the
@@ -108,8 +113,74 @@ func PaymentReturnHandler(paymentService *services.PaymentService, webBaseURL st
 			return
 		}
 
+		// 2. iOS app — EventsApp opens checkout in SFSafariViewController
+		// (lib/payments.ts openViaSafariView), chosen over
+		// ASWebAuthenticationSession because Apple Pay needs a Safari-backed
+		// surface. SFSafariViewController has no redirect-scheme contract: a
+		// 302 to eventsapp:// is a navigation it cannot resolve, so it shows
+		// "Safari cannot open the page because the address is invalid" and the
+		// app's Linking listener never fires. The browser then only closes when
+		// the user taps X, which the app reads as a dismissal and polls for a
+		// mere 9s instead of 150s — a slow Paystack verify can therefore show a
+		// cancellation for money already taken.
+		//
+		// A TAPPED custom-scheme anchor is handed to the system, so serve a page
+		// with a button. It deliberately does NOT auto-navigate: a scripted
+		// location change to eventsapp:// reproduces the same error dialog.
+		if isIOSBrowser(c.GetHeader("User-Agent")) {
+			c.Data(http.StatusOK, "text/html; charset=utf-8",
+				[]byte(iosAppReturnHTML(buildAppReturnURL(reference, paypalToken))))
+			return
+		}
+
+		// 3. Android app — openAuthSessionAsync is watching for this exact URL
+		// and intercepts it before navigation, closing the browser itself.
+		// Serving HTML here instead would leave the session open indefinitely.
 		c.Redirect(http.StatusFound, buildAppReturnURL(reference, paypalToken))
 	}
+}
+
+// isIOSBrowser reports whether the return request came from an iOS browser
+// surface — which, once the web channel has been ruled out above, means
+// EventsApp's SFSafariViewController.
+//
+// This is a heuristic, and worth being honest about: it fails soft in both
+// directions. A missed detection lands on the redirect, i.e. today's behaviour.
+// A false positive shows a return button to someone who does not need one — the
+// deep link simply does nothing and the page still says the payment went
+// through. Neither case can lose a payment, because verification already
+// happened above and the webhook reconciles regardless.
+//
+// iPadOS is the known blind spot: it reports a desktop Macintosh UA by default,
+// so an iPad buyer falls through to the redirect. Replacing this with an
+// explicit ?channel=ios_app tag from the app removes the guesswork entirely,
+// and this branch can stay as-is once that ships — a tagged request never
+// reaches here.
+func isIOSBrowser(ua string) bool {
+	ua = strings.ToLower(ua)
+	if ua == "" || strings.Contains(ua, "android") {
+		return false
+	}
+	return strings.Contains(ua, "iphone") ||
+		strings.Contains(ua, "ipad") ||
+		strings.Contains(ua, "ipod")
+}
+
+// iosAppReturnHTML renders the tap-to-return landing for the iOS in-app browser.
+//
+// The wording avoids asserting an outcome. This page is reached whatever the
+// gateway decided — including a decline — and the authoritative state is the
+// poll the app runs after it regains control.
+func iosAppReturnHTML(deepLink string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Return to TicketHawk</title></head>
+<body style="margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;background:#0a0a0a;color:#eee;gap:18px;padding:24px;text-align:center">
+<div style="font-size:34px">&#10003;</div>
+<div style="font-weight:700;font-size:17px">Checkout complete</div>
+<div style="font-size:13px;color:#999;max-width:300px">Tap below to go back to the app and confirm your tickets.</div>
+<a href="%s" style="display:inline-block;background:#eee;color:#0a0a0a;font-weight:700;font-size:15px;text-decoration:none;padding:14px 28px;border-radius:10px">Return to TicketHawk</a>
+<div style="font-size:11.5px;color:#666;max-width:300px">If nothing happens, close this window with the X — your payment is already recorded and your tickets will appear under Tickets.</div>
+</body></html>`, deepLink)
 }
 
 // webReturnHTML renders the self-closing landing for web-channel checkouts.
@@ -140,7 +211,8 @@ func webReturnHTML(webBaseURL, reference, paypalToken string) string {
 }
 
 // buildAppReturnURL constructs the eventsapp:// deep link the in-app browser is
-// redirected to so Expo's AuthSession can detect the return and close.
+// redirected to (Android) or offered as a tappable link (iOS), so the app can
+// detect the return and close the browser.
 func buildAppReturnURL(reference, paypalToken string) string {
 	q := url.Values{}
 	if reference != "" {
