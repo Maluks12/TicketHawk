@@ -116,20 +116,19 @@ func PaymentReturnHandler(paymentService *services.PaymentService, webBaseURL st
 		// 2. iOS app — EventsApp opens checkout in SFSafariViewController
 		// (lib/payments.ts openViaSafariView), chosen over
 		// ASWebAuthenticationSession because Apple Pay needs a Safari-backed
-		// surface. SFSafariViewController has no redirect-scheme contract: a
-		// 302 to eventsapp:// is a navigation it cannot resolve, so it shows
-		// "Safari cannot open the page because the address is invalid" and the
-		// app's Linking listener never fires. The browser then only closes when
-		// the user taps X, which the app reads as a dismissal and polls for a
-		// mere 9s instead of 150s — a slow Paystack verify can therefore show a
-		// cancellation for money already taken.
+		// surface. That surface will not launch another app from a custom URL
+		// scheme AT ALL — not by 302, not by scripted navigation, not by tapped
+		// link. Every one of those answers with "Safari cannot open the page
+		// because the address is invalid". Only Universal Links can hand off
+		// from here, and Apple ignores those when they arrive via redirect.
 		//
-		// A TAPPED custom-scheme anchor is handed to the system, so serve a page
-		// with a button. It deliberately does NOT auto-navigate: a scripted
-		// location change to eventsapp:// reproduces the same error dialog.
+		// So this response does not try. The app closes the sheet from its own
+		// side once the payment row settles (watchUntilSettled) — that is the
+		// actual hand-back. Something still has to answer this request, and the
+		// only job of that answer is to not be an error dialog while the sheet
+		// is on its way out.
 		if isIOSBrowser(c.GetHeader("User-Agent")) {
-			c.Data(http.StatusOK, "text/html; charset=utf-8",
-				[]byte(iosAppReturnHTML(buildAppReturnURL(reference, paypalToken))))
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(iosAppReturnHTML()))
 			return
 		}
 
@@ -166,21 +165,36 @@ func isIOSBrowser(ua string) bool {
 		strings.Contains(ua, "ipod")
 }
 
-// iosAppReturnHTML renders the tap-to-return landing for the iOS in-app browser.
+// iosAppReturnHTML is a deliberately EMPTY page — a dark background and
+// nothing else.
 //
-// The wording avoids asserting an outcome. This page is reached whatever the
-// gateway decided — including a decline — and the authoritative state is the
-// poll the app runs after it regains control.
-func iosAppReturnHTML(deepLink string) string {
-	return fmt.Sprintf(`<!doctype html>
-<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Return to TicketHawk</title></head>
-<body style="margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;background:#0a0a0a;color:#eee;gap:18px;padding:24px;text-align:center">
-<div style="font-size:34px">&#10003;</div>
-<div style="font-weight:700;font-size:17px">Checkout complete</div>
-<div style="font-size:13px;color:#999;max-width:300px">Tap below to go back to the app and confirm your tickets.</div>
-<a href="%s" style="display:inline-block;background:#eee;color:#0a0a0a;font-weight:700;font-size:15px;text-decoration:none;padding:14px 28px;border-radius:10px">Return to TicketHawk</a>
-<div style="font-size:11.5px;color:#666;max-width:300px">If nothing happens, close this window with the X — your payment is already recorded and your tickets will appear under Tickets.</div>
-</body></html>`, deepLink)
+// It has had three shapes, and the reasoning matters more than the markup:
+//
+//   1. A 302 to eventsapp://. SFSafariViewController answered it with "Safari
+//      cannot open the page because the address is invalid".
+//   2. A "Return to TicketHawk" button pointing at the same deep link, on the
+//      assumption that a TAPPED custom-scheme anchor would be handed to the
+//      system. It is not. The tap produced the identical dialog, on a page
+//      that had just told the customer their payment succeeded — which is a
+//      worse outcome than the redirect, not a better one.
+//   3. This. The sheet is closed by the app once watchUntilSettled sees the
+//      payment settle, so nothing here needs to be read or tapped. Content
+//      would only draw the eye to a screen that is about to disappear, and it
+//      would have to be hedged: this response is served whatever the gateway
+//      decided, declines included, so a tick and the word "complete" can be
+//      wrong.
+//
+// The background matches the app's so the moment reads as a rendering pause
+// rather than a page the customer was sent to. Keep it that way.
+//
+// On an older build with no watcher the customer closes the sheet with the X,
+// as they do today — from a blank screen rather than an error dialog. Their
+// payment is unaffected either way: it was verified above, before this was
+// ever rendered, and the webhook reconciles regardless.
+func iosAppReturnHTML() string {
+	return `<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title></title></head>
+<body style="margin:0;min-height:100vh;background:#0a0a0a"></body></html>`
 }
 
 // webReturnHTML renders the self-closing landing for web-channel checkouts.
@@ -210,9 +224,10 @@ func webReturnHTML(webBaseURL, reference, paypalToken string) string {
 </body></html>`, ref, tok, fallback)
 }
 
-// buildAppReturnURL constructs the eventsapp:// deep link the in-app browser is
-// redirected to (Android) or offered as a tappable link (iOS), so the app can
-// detect the return and close the browser.
+// buildAppReturnURL constructs the eventsapp:// deep link the Android in-app
+// browser is redirected to, so openAuthSessionAsync can detect the return and
+// close itself. ANDROID ONLY — iOS cannot consume this scheme from a browser
+// surface at all (see the dispatch above).
 func buildAppReturnURL(reference, paypalToken string) string {
 	q := url.Values{}
 	if reference != "" {

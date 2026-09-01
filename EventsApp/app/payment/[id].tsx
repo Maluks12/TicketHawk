@@ -14,9 +14,12 @@
  * Flow:
  *   1. On mount, open the authorization_url in the in-app browser.
  *   2. The gateway redirects to the backend /payments/return, which verifies
- *      (Paystack) and bounces to eventsapp://payment/return; the browser closes.
+ *      with Paystack synchronously. Android is bounced to eventsapp://; iOS
+ *      cannot be (SFSafariViewController blocks custom schemes), so there the
+ *      browser watches the payment row and closes itself when it settles.
  *   3. Poll GET /v1/bookings/:id/payment for the authoritative outcome.
- *      - 'returned' (browser hit our scheme → likely paid): poll up to ~150s.
+ *      - 'returned' WITH a status: the watcher already read it — finish now.
+ *      - 'returned' without one: browser hit our scheme → poll up to ~150s.
  *      - 'dismissed' (user closed it): poll briefly in case they paid then
  *        closed; otherwise treat as cancelled.
  */
@@ -143,10 +146,20 @@ export default function PaymentScreen() {
     setPhase('in_browser');
     setMessage('Complete your payment in the secure window…');
 
-    const outcome = await openGatewayCheckout(checkoutUrl);
+    // The watch target is what lets the iOS sheet close itself — see
+    // openViaSafariView. Android ignores it and keeps using the deep link.
+    const outcome = await openGatewayCheckout(checkoutUrl, { bookingId, guest });
 
     setPhase('confirming');
     setMessage('Confirming your payment…');
+
+    // The watcher polled until the payment was terminal, so its status IS the
+    // answer. Polling again would only add a round-trip to a screen the user
+    // is already waiting on.
+    if (outcome.type === 'returned' && outcome.status) {
+      finishFromStatus(outcome.status, false);
+      return;
+    }
 
     if (outcome.type === 'returned') {
       // Gateway redirected back through our scheme — they most likely paid.

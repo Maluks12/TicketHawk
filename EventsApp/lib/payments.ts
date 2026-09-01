@@ -14,10 +14,9 @@
  *   1. startBookingPayment(bookingId, method) → { authorization_url, ... }
  *   2. openGatewayCheckout(authorization_url) opens the in-app browser
  *   3. the gateway redirects to the backend /payments/return, which verifies
- *      (Paystack) and 302-redirects to eventsapp://payment/return. On Android
- *      the auth session detects that scheme and closes itself; on iOS we run
- *      SFSafariViewController and dismiss it from a Linking listener instead
- *      (see openGatewayCheckout for why they differ)
+ *      the payment with Paystack SYNCHRONOUSLY before it answers. How control
+ *      comes back differs by platform — Android is handed the eventsapp://
+ *      scheme, iOS watches the payment status instead (see openGatewayCheckout)
  *   4. pollPayment(bookingId) reads the authoritative status
  *
  * This module is ADDITIVE — it reuses the axios `api` instance from ./api.
@@ -65,8 +64,21 @@ export interface PaymentStatus {
 export const PAYMENT_RETURN_URL = 'eventsapp://payment/return';
 
 export type CheckoutOutcome =
-  | { type: 'returned'; url?: string } // browser hit the return scheme (likely paid)
+  // Browser hit the return scheme, or the status watcher saw the payment
+  // settle. `status` is present only on the watcher path, where we already
+  // hold the authoritative record and the caller can skip polling entirely.
+  | { type: 'returned'; url?: string; status?: PaymentStatus }
   | { type: 'dismissed' };             // user closed the browser themselves
+
+/**
+ * What the iOS status watcher needs to identify the payment. Guests are
+ * addressed by booking number + email, so pass the same GuestRef the screen
+ * already holds.
+ */
+export interface CheckoutWatch {
+  bookingId: string;
+  guest?: GuestRef;
+}
 
 /**
  * openGatewayCheckout opens the gateway's hosted-checkout page in an in-app
@@ -77,7 +89,10 @@ export type CheckoutOutcome =
  * <domain>" system prompt. If you'd rather avoid it, swap to
  * WebBrowser.openBrowserAsync + a Linking listener (see app/payment/[id].tsx).
  */
-export async function openGatewayCheckout(authorizationUrl: string): Promise<CheckoutOutcome> {
+export async function openGatewayCheckout(
+  authorizationUrl: string,
+  watch?: CheckoutWatch,
+): Promise<CheckoutOutcome> {
   // iOS gets SFSafariViewController; everything else keeps the auth session.
   //
   // WHY THE SPLIT. Apple Pay needs a Safari-backed surface, and
@@ -95,7 +110,7 @@ export async function openGatewayCheckout(authorizationUrl: string): Promise<Che
   //
   // TO REVERT: return openViaAuthSession(authorizationUrl) unconditionally.
   if (Platform.OS === 'ios') {
-    return openViaSafariView(authorizationUrl);
+    return openViaSafariView(authorizationUrl, watch);
   }
   return openViaAuthSession(authorizationUrl);
 }
@@ -116,17 +131,35 @@ async function openViaAuthSession(authorizationUrl: string): Promise<CheckoutOut
 }
 
 /**
- * SFSafariViewController. Unlike the auth session it will NOT close itself when
- * the gateway redirects to our scheme, so we listen for the deep link, dismiss
- * the browser ourselves, and resolve.
+ * SFSafariViewController.
  *
- * Two things can finish this: the deep link arriving, or the user tapping Done.
- * Both are wired, and `settled` makes sure whichever lands first wins — without
- * it a Done tap arriving just after the redirect would report 'dismissed' on a
- * payment that actually succeeded, and the caller would show a cancellation for
- * money already taken.
+ * WHY THIS DOES NOT USE THE DEEP LINK. SFSafariViewController refuses to launch
+ * another app from a custom URL scheme — not from a 302, not from a scripted
+ * navigation, not from a tapped link. iOS answers eventsapp:// with "Safari
+ * cannot open the page because the address is invalid" and the Linking listener
+ * never fires. Only Universal Links (https, matched by the AASA file) can hand
+ * off from this surface, and Apple ignores those when they arrive by redirect.
+ *
+ * So the browser is closed from THIS side instead. The backend's
+ * /payments/return verifies with the gateway synchronously before it answers,
+ * which means the booking's payment row is already authoritative by the time
+ * the customer finishes at the gateway. Polling that row while the sheet is
+ * open therefore detects the finished payment within one interval, and we
+ * dismiss the sheet ourselves. No page to read, no button to tap, and the
+ * Safari-backed surface Apple Pay needs is untouched.
+ *
+ * The Linking listener is kept anyway. It costs nothing, and it is what would
+ * carry a Universal Link return if /payment/* is ever added to the AASA file.
+ *
+ * Three things can finish this: the watcher settling, the deep link arriving,
+ * or the user tapping X. `settled` makes sure whichever lands first wins —
+ * without it a Done tap arriving just after a successful payment would report
+ * 'dismissed' on money already taken.
  */
-async function openViaSafariView(authorizationUrl: string): Promise<CheckoutOutcome> {
+async function openViaSafariView(
+  authorizationUrl: string,
+  watch?: CheckoutWatch,
+): Promise<CheckoutOutcome> {
   return new Promise<CheckoutOutcome>((resolve) => {
     let settled = false;
     const finish = (outcome: CheckoutOutcome) => {
@@ -143,6 +176,20 @@ async function openViaSafariView(authorizationUrl: string): Promise<CheckoutOutc
       finish({ type: 'returned', url });
     });
 
+    if (watch) {
+      watchUntilSettled(watch.bookingId, watch.guest, () => settled)
+        .then((status) => {
+          if (!status || settled) return;
+          WebBrowser.dismissBrowser();
+          // The status is already authoritative, so hand it to the caller
+          // rather than making it poll for what we just read.
+          finish({ type: 'returned', status });
+        })
+        // A watcher failure must never break checkout: the user can still
+        // close the sheet themselves and the dismissed path takes over.
+        .catch(() => {});
+    }
+
     WebBrowser.openBrowserAsync(authorizationUrl, {
       showInRecents: false,
       // Keep the sheet visually part of the app rather than a full takeover.
@@ -156,6 +203,54 @@ async function openViaSafariView(authorizationUrl: string): Promise<CheckoutOutc
       })
       .catch(() => finish({ type: 'dismissed' }));
   });
+}
+
+/**
+ * watchUntilSettled polls the booking's payment while the checkout sheet is
+ * open, and resolves with the status the moment it reaches a terminal state.
+ * Resolves null if the caller finishes first or the window elapses.
+ *
+ * The baseline guard covers a payment that was ALREADY terminal when checkout
+ * opened. Every path that opens the browser initialises a fresh pending payment
+ * first — CreatePaymentHandler and RetryPaymentHandler both reset the row — so
+ * this should not happen; if it somehow does, the watcher stands down rather
+ * than yanking the sheet shut the instant it appears, and behaviour falls back
+ * to the user closing it themselves.
+ *
+ * Interval is deliberately unhurried. The payments bucket allows 150 requests
+ * refilling at 3/sec, so one call every 2.5s over a 15-minute checkout is a
+ * rounding error against it.
+ */
+async function watchUntilSettled(
+  bookingId: string,
+  guest: GuestRef | undefined,
+  isFinished: () => boolean,
+  intervalMs = 2500,
+  timeoutMs = 15 * 60_000,
+): Promise<PaymentStatus | null> {
+  const deadline = Date.now() + timeoutMs;
+  let sawBaseline = false;
+  let preSettled = false;
+
+  while (!isFinished() && Date.now() < deadline) {
+    try {
+      const status = await fetchPaymentStatus(bookingId, guest);
+      const terminal =
+        status.payment_status === 'completed' ||
+        status.payment_status === 'failed' ||
+        status.payment_status === 'refunded';
+
+      if (!sawBaseline) {
+        sawBaseline = true;
+        if (terminal) preSettled = true;
+      }
+      if (terminal && !preSettled) return status;
+    } catch {
+      // Transient network/5xx while the user is mid-checkout. Keep watching.
+    }
+    await sleep(intervalMs);
+  }
+  return null;
 }
 
 /**
