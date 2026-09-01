@@ -1427,6 +1427,7 @@ func main() {
 		orgRoutes.GET("/events/:id/edit",          handlers.GetOrganiserEventForEditHandler(pool))
 		orgRoutes.POST("/events/:id/edit-request", handlers.SubmitOrganiserEventEditHandler(pool))
 		orgRoutes.PATCH("/events/:id/ticket-limit", handlers.UpdateEventTicketLimitHandler(pool, eventCache))
+		orgRoutes.PATCH("/events/:id/capacity", handlers.UpdateEventCapacityHandler(pool, eventCache))
 		orgRoutes.POST("/upload",         middleware.ExtendWriteTimeout(5*time.Minute), handlers.UploadOrganiserImageHandler(imgService))
 		// Listing fee — required for events with 20+ ticket capacity
 		orgRoutes.GET("/events/:id/listing-fee",           handlers.GetListingFeeHandler(pool))

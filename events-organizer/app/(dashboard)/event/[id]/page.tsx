@@ -6,6 +6,7 @@ import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import TicketTiersPanel from '../../../../components/TicketTiersPanel';
 import MaxPerAttendeeRow from '../../../../components/MaxPerAttendeeRow';
+import EventCapacityRow from '../../../../components/EventCapacityRow';
 import EventInfoEditor from '../../../../components/eventInfoEditor';
 import LineupBuilder from '../../../../components/lineupBuilder';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
@@ -536,7 +537,17 @@ export default function EventDetailPage() {
             <Panel title="Tickets & pricing">
               <Row label="Base price"        value={ev.price > 0 ? fmtMoney(ev.price, ev.currency) : 'Free'} />
               <Row label="Currency"          value={ev.currency} />
-              <Row label="Capacity"          value={ev.max_capacity ? ev.max_capacity.toLocaleString() : 'Unlimited'} />
+              {/* Was a <Row>. max_capacity is the ceiling every tier is clamped
+                  to, so an organiser who sold out and then added tiers had no
+                  way to reopen sales — the wizard is the only other route and
+                  max_capacity is not in editableWhenPublished. */}
+              <EventCapacityRow
+                eventId={id}
+                status={ev.status}
+                value={ev.max_capacity}
+                ticketsSold={ev.tickets_sold}
+                onChanged={fetchStats}
+              />
               {/* Was a <Row>. The number could only be changed by reopening the
                   create wizard as an editor, which on a live event files a
                   review request for the whole form rather than this one field. */}

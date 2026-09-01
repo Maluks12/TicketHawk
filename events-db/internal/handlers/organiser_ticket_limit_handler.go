@@ -67,6 +67,161 @@ type ticketLimitDTO struct {
 	Reason string `json:"reason"`
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /organiser/events/:id/capacity
+//
+// Edits events.max_capacity. Separate from the ticket limit above because the
+// rules are different, not because the plumbing is.
+//
+// WHY THIS IS NEEDED AT ALL. max_capacity is the hard ceiling on an event:
+// ComputeAvailableTickets works out tier availability first and then clamps it
+// to (max_capacity - tickets_sold), forcing is_sold_out the moment that hits
+// zero. So an organiser who sells out and then adds tiers to sell more sees
+// nothing change — the tiers are real, on sale, and unreachable, because tiers
+// SUBDIVIDE the event's capacity rather than adding to it. Until now the only
+// way to raise the ceiling was the create wizard, and max_capacity is not in
+// editableWhenPublished, so on a live event there was no way at all.
+//
+// WHY THIS APPLIES DIRECTLY EVEN WHEN LIVE, unlike the ticket limit. A capacity
+// change alters nothing about what an existing ticket holder bought — not the
+// price, the date, the venue, or their ticket's validity. It changes how many
+// MORE may be sold, which is the organiser's own commercial decision. Routing
+// it through admin review would mean an organiser who sells out cannot reopen
+// sales until someone approves it, which is the moment they least want to wait.
+// If you would rather it went to review on a live event, the branch structure
+// from UpdateEventTicketLimitHandler drops straight in.
+//
+// The floor is the hard part, and it is enforced server-side: capacity can
+// never be set below what has already been sold. Doing so would make
+// capRemaining negative — clamped to 0 — and instantly mark a live event sold
+// out while its tickets stay valid, with no way to tell from the number alone
+// that it had been oversold rather than filled.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type eventCapacityDTO struct {
+	// nil means unlimited. Absent and explicit null are treated the same, so a
+	// cleared input removes the cap.
+	MaxCapacity *int `json:"max_capacity"`
+}
+
+func UpdateEventCapacityHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("user_id").(string)
+		eventID := c.Param("id")
+		ctx := c.Request.Context()
+
+		var dto eventCapacityDTO
+		if err := c.ShouldBindJSON(&dto); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Validation failed",
+				"details": utils.FormatValidationErrors(err),
+			})
+			return
+		}
+
+		if dto.MaxCapacity != nil && *dto.MaxCapacity < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Capacity must be at least 1, or blank for unlimited",
+			})
+			return
+		}
+
+		// The floor is taken as the GREATER of the counter and the actual
+		// confirmed ticket count. events.tickets_sold is a maintained counter
+		// and has been observed drifting BELOW the truth (seats released on a
+		// declined attempt that later completed), so trusting it alone would let
+		// capacity be set under the number of live tickets.
+		var status string
+		var current *int
+		var countedSold int
+		var confirmedTickets int
+		err := pool.QueryRow(ctx, `
+			SELECT e.status::text,
+			       e.max_capacity,
+			       e.tickets_sold,
+			       COALESCE((
+			           SELECT SUM(b.ticket_quantity)
+			           FROM bookings b
+			           WHERE b.event_id = e.id AND b.booking_status = 'confirmed'
+			       ), 0)
+			FROM events e
+			WHERE e.id = $1 AND e.organizer_id = $2
+		`, eventID, userID).Scan(&status, &current, &countedSold, &confirmedTickets)
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+		if err != nil {
+			utils.InternalError(c, err, "failed to load event capacity")
+			return
+		}
+
+		floor := countedSold
+		if confirmedTickets > floor {
+			floor = confirmedTickets
+		}
+
+		if dto.MaxCapacity != nil && *dto.MaxCapacity < floor {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       fmt.Sprintf("Capacity cannot be lower than the %d ticket(s) already sold", floor),
+				"tickets_sold": floor,
+			})
+			return
+		}
+
+		switch models.EventStatus(status) {
+		case models.EventDraft, models.EventPublished, models.EventPublishedPrivate:
+			tag, uerr := pool.Exec(ctx, `
+				UPDATE events
+				SET max_capacity = $3,
+				    updated_at   = NOW()
+				WHERE id = $1 AND organizer_id = $2
+			`, eventID, userID, dto.MaxCapacity)
+			if uerr != nil {
+				utils.InternalError(c, uerr, "failed to update capacity")
+				return
+			}
+			if tag.RowsAffected() == 0 {
+				c.JSON(http.StatusConflict, gin.H{"error": "Capacity could not be updated"})
+				return
+			}
+
+			// Without this the public event payload keeps the old ceiling and
+			// the event stays sold out to buyers however high the new number is.
+			if ec != nil {
+				ec.BustOnEventUpdate(ctx)
+			}
+
+			log.Info().
+				Str("event_id", eventID).
+				Str("organizer_id", userID).
+				Str("from", describeCapacity(current)).
+				Str("to", describeCapacity(dto.MaxCapacity)).
+				Int("tickets_sold", floor).
+				Msg("organiser updated event capacity")
+
+			c.JSON(http.StatusOK, gin.H{
+				"applied":      true,
+				"max_capacity": dto.MaxCapacity,
+				"tickets_sold": floor,
+			})
+
+		default:
+			c.JSON(http.StatusConflict, gin.H{
+				"error":  "Capacity cannot be changed while the event is in this state",
+				"status": status,
+			})
+		}
+	}
+}
+
+func describeCapacity(v *int) string {
+	if v == nil {
+		return "unlimited"
+	}
+	return fmt.Sprintf("%d", *v)
+}
+
 func describeTicketLimit(v *int) string {
 	if v == nil {
 		return "no limit"
