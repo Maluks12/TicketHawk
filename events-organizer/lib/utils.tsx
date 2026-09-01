@@ -1,6 +1,14 @@
 export function fmtMoney(v: number | null | undefined, cur = 'ZAR') {
   if (v == null) return '—';
-  return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: cur, minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
+  // maximumFractionDigits was 0, which ROUNDED rather than truncated: a R2.50
+  // refund displayed as "R 3" and a R4.50 commission as "R 5". On a page whose
+  // whole job is showing an organiser what they are owed, silently moving
+  // money by up to 50c per figure is not a rounding detail.
+  //
+  // minimum 0 / maximum 2 keeps whole amounts clean — R90 stays "R 90" rather
+  // than "R 90,00" — and only spends the two extra characters where there are
+  // actually cents to show.
+  return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: cur, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
 }
 
 export function fmtDate(d: string | null | undefined) {

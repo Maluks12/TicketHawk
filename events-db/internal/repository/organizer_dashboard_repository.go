@@ -11,6 +11,43 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// ── Settlement arithmetic ─────────────────────────────────────────────────────
+
+// These two fragments mirror CreatePayoutsForCompletedEvents in
+// payout_repository.go EXACTLY. That query is what actually moves money; every
+// figure the organiser dashboard shows is a forecast of it, so the two must
+// agree line for line.
+//
+// They disagreed until now. The payout worker was fixed to include refunded
+// bookings — a partial refund leaves the organiser owed the remainder — but the
+// dashboard kept filtering on booking_status = 'confirmed'. A part-refunded
+// booking therefore vanished from revenue entirely: on a R10 ticket refunded at
+// R2.50, the dashboard dropped the whole R10 instead of deducting R2.50, hiding
+// R7.50 the organiser was still going to be paid.
+//
+// Both expect the bookings table to be aliased `b`.
+const (
+	// refundedAmountSQL is what went back to the buyer. The CASE is a safety
+	// net for rows predating migration 000059: a 'refunded' booking with a
+	// NULL refund_amount is treated as fully refunded, so a legacy row can
+	// never be counted as if the money were still the organiser's.
+	refundedAmountSQL = `CASE WHEN b.booking_status = 'refunded'
+	                          THEN COALESCE(b.refund_amount, b.subtotal)
+	                          ELSE COALESCE(b.refund_amount, 0) END`
+
+	// settlementAmountSQL is what the organiser is actually owed for a booking.
+	// Commission is charged on gross sold and subtracted in full regardless of
+	// how much came back, which is what the payout worker does. GREATEST stops
+	// a fully-refunded booking contributing a negative that would silently eat
+	// into what other bookings earned.
+	settlementAmountSQL = `GREATEST(b.subtotal - ` + refundedAmountSQL + ` - b.organizer_fee, 0)`
+
+	// paidBookingStatuses is the set that carries money. Counts of BOOKINGS
+	// stay confirmed-only — a refunded booking is not a sale — but every
+	// monetary sum spans both.
+	paidBookingStatuses = `('confirmed', 'refunded')`
+)
+
 // ── Overview stats ────────────────────────────────────────────────────────────
 
 // OrganizerStats is the payload for GET /organiser/dashboard/stats.
@@ -27,9 +64,10 @@ type OrganizerStats struct {
 	// Ticket sales
 	TotalBookings     int     `json:"total_bookings"`      // confirmed only
 	TotalTicketsSold  int     `json:"total_tickets_sold"`  // sum of ticket_quantity
-	GrossTicketRevenue float64 `json:"gross_ticket_revenue"` // sum of subtotal (before fees)
+	GrossTicketRevenue float64 `json:"gross_ticket_revenue"` // subtotal over sold + refunded
 	PlatformFeesPaid  float64 `json:"platform_fees_paid"`   // sum of platform_fee
-	NetTicketEarnings float64 `json:"net_ticket_earnings"`  // gross - platform_fee
+	TotalRefunded     float64 `json:"total_refunded"`       // returned to buyers
+	NetTicketEarnings float64 `json:"net_ticket_earnings"`  // gross - fees - refunds
 
 	// Today's ticket sales
 	BookingsToday     int     `json:"bookings_today"`
@@ -72,32 +110,40 @@ func GetOrganizerStats(pool *pgxpool.Pool, organizerID string) (*OrganizerStats,
 		return nil, fmt.Errorf("OrganizerStats events: %w", err)
 	}
 
-	// Ticket revenue — confirmed bookings only, scoped to this organiser's events
+	// Ticket revenue — scoped to this organiser's events. Money spans confirmed
+	// AND refunded bookings (see settlementAmountSQL); booking and ticket COUNTS
+	// stay confirmed-only, because a refunded booking is not a sale and its seat
+	// has already gone back to inventory.
 	err = pool.QueryRow(ctx, `
 		SELECT
-			COUNT(b.id)                         AS total_bookings,
-			COALESCE(SUM(b.ticket_quantity), 0) AS total_tickets_sold,
-			COALESCE(SUM(b.subtotal), 0)        AS gross_ticket_revenue,
-			COALESCE(SUM(b.organizer_fee), 0)   AS platform_fees_paid,
-			COUNT(b.id) FILTER (WHERE b.confirmed_at >= CURRENT_DATE)   AS bookings_today,
-			COALESCE(SUM(b.subtotal - b.organizer_fee)
-				FILTER (WHERE b.confirmed_at >= CURRENT_DATE), 0)       AS revenue_today
+			COUNT(b.id) FILTER (WHERE b.booking_status = 'confirmed')                         AS total_bookings,
+			COALESCE(SUM(b.ticket_quantity) FILTER (WHERE b.booking_status = 'confirmed'), 0) AS total_tickets_sold,
+			COALESCE(SUM(b.subtotal), 0)                                                      AS gross_ticket_revenue,
+			COALESCE(SUM(b.organizer_fee), 0)                                                 AS platform_fees_paid,
+			COALESCE(SUM(`+refundedAmountSQL+`), 0)                                           AS total_refunded,
+			COALESCE(SUM(`+settlementAmountSQL+`), 0)                                         AS net_ticket_earnings,
+			COUNT(b.id) FILTER (
+				WHERE b.confirmed_at >= CURRENT_DATE
+				  AND b.booking_status = 'confirmed')                                         AS bookings_today,
+			COALESCE(SUM(`+settlementAmountSQL+`)
+				FILTER (WHERE b.confirmed_at >= CURRENT_DATE), 0)                             AS revenue_today
 		FROM bookings b
 		JOIN events e ON e.id = b.event_id
-		WHERE e.organizer_id   = $1
-		  AND b.booking_status = 'confirmed'
+		WHERE e.organizer_id    = $1
+		  AND b.booking_status IN `+paidBookingStatuses+`
 	`, organizerID).Scan(
 		&s.TotalBookings,
 		&s.TotalTicketsSold,
 		&s.GrossTicketRevenue,
 		&s.PlatformFeesPaid,
+		&s.TotalRefunded,
+		&s.NetTicketEarnings,
 		&s.BookingsToday,
 		&s.RevenueToday,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("OrganizerStats bookings: %w", err)
 	}
-	s.NetTicketEarnings = s.GrossTicketRevenue - s.PlatformFeesPaid
 
 	// Merch revenue — fulfilled orders only
 	err = pool.QueryRow(ctx, `
@@ -138,10 +184,11 @@ type OrganizerEventRow struct {
 	MaxCapacity *int               `json:"max_capacity,omitempty"`
 	TicketsSold int                `json:"tickets_sold"`
 
-	// Revenue (confirmed bookings only)
+	// Revenue. Counts are confirmed-only; money spans confirmed + refunded.
 	TotalBookings      int     `json:"total_bookings"`
 	GrossTicketRevenue float64 `json:"gross_ticket_revenue"`
 	PlatformFeesPaid   float64 `json:"platform_fees_paid"`
+	TotalRefunded      float64 `json:"total_refunded"`
 	NetTicketEarnings  float64 `json:"net_ticket_earnings"`
 
 	// Merch (fulfilled orders only)
@@ -187,8 +234,10 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 			e.price, e.currency,
 			e.max_capacity, e.tickets_sold, COALESCE(e.views, 0),
 			COALESCE(COUNT(b.id)  FILTER (WHERE b.booking_status = 'confirmed'), 0)::int,
-			COALESCE(SUM(b.subtotal)     FILTER (WHERE b.booking_status = 'confirmed'), 0),
-			COALESCE(SUM(b.organizer_fee) FILTER (WHERE b.booking_status = 'confirmed'), 0),
+			COALESCE(SUM(b.subtotal)      FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0),
+			COALESCE(SUM(b.organizer_fee) FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0),
+			COALESCE(SUM(`+refundedAmountSQL+`)   FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0),
+			COALESCE(SUM(`+settlementAmountSQL+`) FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0),
 			COALESCE(SUM(mo.quantity)    FILTER (WHERE mo.fulfillment_status = 'fulfilled'), 0)::int,
 			COALESCE(SUM(mo.total_amount)FILTER (WHERE mo.fulfillment_status = 'fulfilled'), 0),
 			e.created_at
@@ -210,13 +259,13 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 	var events []OrganizerEventRow
 	for rows.Next() {
 		var ev OrganizerEventRow
-		var grossTicket, platformFee, grossMerch float64
+		var grossTicket, platformFee, refunded, netTicket, grossMerch float64
 		if err := rows.Scan(
 			&ev.ID, &ev.Slug, &ev.Title, &ev.Status, &ev.StartTime, &ev.EndTime,
 			&ev.City, &ev.VenueName, &ev.Address, &ev.Price, &ev.Currency,
 			&ev.MaxCapacity, &ev.TicketsSold, &ev.Views,
 			&ev.TotalBookings,
-			&grossTicket, &platformFee,
+			&grossTicket, &platformFee, &refunded, &netTicket,
 			&ev.MerchUnitsSold, &grossMerch,
 			&ev.CreatedAt,
 		); err != nil {
@@ -224,7 +273,8 @@ func GetOrganizerEventRows(pool *pgxpool.Pool, organizerID, status string, limit
 		}
 		ev.GrossTicketRevenue = grossTicket
 		ev.PlatformFeesPaid = platformFee
-		ev.NetTicketEarnings = grossTicket - platformFee
+		ev.TotalRefunded = refunded
+		ev.NetTicketEarnings = netTicket
 		ev.GrossMerchRevenue = grossMerch
 		ev.TotalNetEarnings = ev.NetTicketEarnings + grossMerch
 		events = append(events, ev)
@@ -399,34 +449,35 @@ func GetOrganizerEventStats(pool *pgxpool.Pool, eventID, organizerID string) (*O
 		s.Availability = -1 // unlimited
 	}
 
-	// Booking breakdown
-	// Note: refunded_amount lives on the payments table, not bookings.
-	// Pull it via a subquery to avoid a column-not-found error.
+	// Booking breakdown.
+	//
+	// total_refunded now reads bookings.refund_amount rather than summing
+	// payments.refunded_amount through a subquery. Both describe the same money,
+	// but the settlement query nets off the bookings column, so taking the figure
+	// from anywhere else lets the panel show a Net that does not reconcile with
+	// Gross - Commission - Refunded. (bookings.refund_amount is set on every
+	// refund path, including SyncGatewayRefund for refunds issued at the
+	// gateway, so nothing is lost by dropping the payments join.)
 	err = pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE booking_status = 'confirmed')                       AS confirmed,
-			COUNT(*) FILTER (WHERE booking_status = 'pending')                         AS pending,
-			COUNT(*) FILTER (WHERE booking_status = 'cancelled')                       AS cancelled,
-			COUNT(*) FILTER (WHERE booking_status = 'refunded')                        AS refunded,
-			COALESCE(SUM(subtotal)     FILTER (WHERE booking_status = 'confirmed'), 0) AS gross_revenue,
-			COALESCE(SUM(organizer_fee) FILTER (WHERE booking_status = 'confirmed'), 0) AS platform_fees,
-			COALESCE((
-				SELECT SUM(p.refunded_amount)
-				FROM payments p
-				JOIN bookings b2 ON p.booking_id = b2.id
-				WHERE b2.event_id = $1 AND p.refunded_amount IS NOT NULL
-			), 0)                                                                    AS total_refunded
-		FROM bookings
-		WHERE event_id = $1
+			COUNT(*) FILTER (WHERE b.booking_status = 'confirmed')                                  AS confirmed,
+			COUNT(*) FILTER (WHERE b.booking_status = 'pending')                                    AS pending,
+			COUNT(*) FILTER (WHERE b.booking_status = 'cancelled')                                  AS cancelled,
+			COUNT(*) FILTER (WHERE b.booking_status = 'refunded')                                   AS refunded,
+			COALESCE(SUM(b.subtotal)      FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS gross_revenue,
+			COALESCE(SUM(b.organizer_fee) FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS platform_fees,
+			COALESCE(SUM(`+refundedAmountSQL+`)   FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS total_refunded,
+			COALESCE(SUM(`+settlementAmountSQL+`) FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS net_earnings
+		FROM bookings b
+		WHERE b.event_id = $1
 	`, eventID).Scan(
 		&s.TotalBookings, &s.PendingBookings, &s.CancelledBookings, &s.RefundedBookings,
 		&s.GrossTicketRevenue, &s.PlatformFeesPaid,
-		&s.TotalRefunded,
+		&s.TotalRefunded, &s.NetTicketEarnings,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetOrganizerEventStats bookings: %w", err)
 	}
-	s.NetTicketEarnings = s.GrossTicketRevenue - s.PlatformFeesPaid
 
 	// Merch breakdown
 	err = pool.QueryRow(ctx, `
@@ -688,21 +739,26 @@ func GetOrganizerPayoutSummary(pool *pgxpool.Pool, organizerID string) (*Organiz
 	var p OrganizerPayoutSummary
 	p.Currency = models.DefaultCurrency
 
+	// b.refunded_amount does not exist. The bookings column is refund_amount
+	// (migration 000059); refunded_amount is on payments (migration 000006).
+	// Postgres answered this query with 42703 undefined_column, so this summary
+	// was erroring rather than returning wrong numbers.
 	err := pool.QueryRow(ctx, `
 		SELECT
-			COALESCE(SUM(b.subtotal)      FILTER (WHERE b.booking_status = 'confirmed'), 0) AS gross_revenue,
-			COALESCE(SUM(b.organizer_fee)  FILTER (WHERE b.booking_status = 'confirmed'), 0) AS platform_fees,
-			COALESCE(SUM(b.refunded_amount) FILTER (
-				WHERE b.booking_status IN ('refunded','cancelled')
-				  AND b.refunded_amount IS NOT NULL), 0)                                    AS refunds_issued
+			COALESCE(SUM(b.subtotal)      FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS gross_revenue,
+			COALESCE(SUM(b.organizer_fee) FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS platform_fees,
+			COALESCE(SUM(`+refundedAmountSQL+`)   FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS refunds_issued,
+			COALESCE(SUM(`+settlementAmountSQL+`) FILTER (WHERE b.booking_status IN `+paidBookingStatuses+`), 0) AS ticket_earnings
 		FROM bookings b
 		JOIN events e ON e.id = b.event_id
 		WHERE e.organizer_id = $1
-	`, organizerID).Scan(&p.TotalGrossRevenue, &p.TotalPlatformFees, &p.TotalRefundsIssued)
+	`, organizerID).Scan(
+		&p.TotalGrossRevenue, &p.TotalPlatformFees,
+		&p.TotalRefundsIssued, &p.TotalTicketEarnings,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("GetOrganizerPayoutSummary tickets: %w", err)
 	}
-	p.TotalTicketEarnings = p.TotalGrossRevenue - p.TotalPlatformFees
 
 	err = pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(mo.total_amount), 0)

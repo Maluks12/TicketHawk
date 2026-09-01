@@ -582,10 +582,17 @@ export default function EventDetailPage() {
 
             {/* ── Financial breakdown ────────────────────────────────────── */}
             <Panel title="Financial breakdown">
+              {/* Ordered so the column reads as arithmetic: gross, minus each
+                  deduction, equals net. "Refunded" used to sit BELOW net as a
+                  loose figure, which hid the fact that net was not accounting
+                  for it at all. Net now mirrors the payout worker exactly, so
+                  this panel forecasts the settlement rather than approximating
+                  it: gross includes refunded bookings at full subtotal, and the
+                  amount returned to the buyer is deducted separately. */}
               <Row label="Gross ticket revenue" value={fmtMoney(stats.gross_ticket_revenue ?? 0, ev.currency)} />
               <Row label="Platform commission"  value={`− ${fmtMoney(stats.platform_fees_paid ?? 0, ev.currency)}`} />
+              <Row label="Refunded to buyers"   value={`− ${fmtMoney(stats.total_refunded ?? 0, ev.currency)}`} />
               <Row label="Net ticket earnings"  value={fmtMoney(stats.net_ticket_earnings ?? 0, ev.currency)} />
-              <Row label="Refunded"             value={fmtMoney(stats.total_refunded ?? 0, ev.currency)} />
               <Row label="Confirmed bookings"   value={String(stats.confirmed_bookings)} />
               <Row label="Pending bookings"     value={String(stats.pending_bookings)} />
               <Row label="Cancelled bookings"   value={String(stats.cancelled_bookings ?? 0)} />
