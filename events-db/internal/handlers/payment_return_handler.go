@@ -122,11 +122,12 @@ func PaymentReturnHandler(paymentService *services.PaymentService, webBaseURL st
 		// because the address is invalid". Only Universal Links can hand off
 		// from here, and Apple ignores those when they arrive via redirect.
 		//
-		// So this response does not try. The app closes the sheet from its own
-		// side once the payment row settles (watchUntilSettled) — that is the
-		// actual hand-back. Something still has to answer this request, and the
-		// only job of that answer is to not be an error dialog while the sheet
-		// is on its way out.
+		// So this page does not try. It exists purely to replace the redirect
+		// with something that is not an error dialog. The app closes the sheet
+		// from its own side once the payment row settles (watchUntilSettled),
+		// which is the actual hand-back; this is what the customer sees in the
+		// second before that happens, on an older build that has no watcher, or
+		// if the watcher's polls fail on a bad connection.
 		if isIOSBrowser(c.GetHeader("User-Agent")) {
 			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(iosAppReturnHTML()))
 			return
@@ -165,36 +166,27 @@ func isIOSBrowser(ua string) bool {
 		strings.Contains(ua, "ipod")
 }
 
-// iosAppReturnHTML is a deliberately EMPTY page — a dark background and
-// nothing else.
+// iosAppReturnHTML renders the landing for the iOS in-app browser.
 //
-// It has had three shapes, and the reasoning matters more than the markup:
+// No button, no link, no script. An earlier version offered a "Return to
+// TicketHawk" button pointing at the deep link on the assumption that a tapped
+// custom-scheme anchor would be handed to the system. It is not — the tap
+// produced the same invalid-address dialog the redirect did. A control that
+// cannot work is worse than none, because the customer taps it, gets an error
+// on a page that just told them their payment went through, and concludes the
+// payment failed.
 //
-//   1. A 302 to eventsapp://. SFSafariViewController answered it with "Safari
-//      cannot open the page because the address is invalid".
-//   2. A "Return to TicketHawk" button pointing at the same deep link, on the
-//      assumption that a TAPPED custom-scheme anchor would be handed to the
-//      system. It is not. The tap produced the identical dialog, on a page
-//      that had just told the customer their payment succeeded — which is a
-//      worse outcome than the redirect, not a better one.
-//   3. This. The sheet is closed by the app once watchUntilSettled sees the
-//      payment settle, so nothing here needs to be read or tapped. Content
-//      would only draw the eye to a screen that is about to disappear, and it
-//      would have to be hedged: this response is served whatever the gateway
-//      decided, declines included, so a tick and the word "complete" can be
-//      wrong.
-//
-// The background matches the app's so the moment reads as a rendering pause
-// rather than a page the customer was sent to. Keep it that way.
-//
-// On an older build with no watcher the customer closes the sheet with the X,
-// as they do today — from a blank screen rather than an error dialog. Their
-// payment is unaffected either way: it was verified above, before this was
-// ever rendered, and the webhook reconciles regardless.
+// The wording avoids asserting an outcome. This page is reached whatever the
+// gateway decided — including a decline — and the authoritative state is the
+// booking's payment row, which the app reads for itself.
 func iosAppReturnHTML() string {
 	return `<!doctype html>
-<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title></title></head>
-<body style="margin:0;min-height:100vh;background:#0a0a0a"></body></html>`
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Checkout complete</title></head>
+<body style="margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;background:#0a0a0a;color:#eee;gap:14px;padding:24px;text-align:center">
+<div style="font-size:34px">&#10003;</div>
+<div style="font-weight:700;font-size:17px">Checkout complete</div>
+<div style="font-size:13px;color:#999;max-width:320px;line-height:1.5">This window will close on its own in a moment. If it doesn&#8217;t, close it with the X &#8212; your payment is recorded either way and your tickets will be under Tickets.</div>
+</body></html>`
 }
 
 // webReturnHTML renders the self-closing landing for web-channel checkouts.
