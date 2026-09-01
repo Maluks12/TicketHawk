@@ -34,7 +34,7 @@ import { useAppTheme } from '../../theme/colors';
 import { isPaymentMethodEnabled } from '../../lib/paymentMethods';
 import { openLegal } from '../../lib/legalLinks';
 import {
-  CaretLeft, CaretDown, ArrowsDownUp, Star, CrownSimple, Check,
+  CaretLeft, CaretDown, ArrowsDownUp, Check,
   CreditCard, AppleLogo, PaypalLogo, Bank,
   SealCheck, ShieldCheck,
   Ticket, X,
@@ -616,10 +616,9 @@ export default function TicketPurchaseScreen() {
                     </Text>
                   </View>
                 ) : (
-                  ticketTypes.map((tt, idx) => {
+                  ticketTypes.map((tt) => {
                     const sold      = isSoldOut(tt);
                     const selected  = tt.id === selectedId;
-                    const isPremium = idx === ticketTypes.length - 1 && ticketTypes.length > 1;
                     return (
                       <TouchableOpacity
                         key={tt.id}
@@ -631,14 +630,14 @@ export default function TicketPurchaseScreen() {
                           {selected && <View style={ss.radioInner} />}
                         </View>
                         <View style={ss.ticketInfo}>
+                          {/* Name only. The VIP chip was positional, not real:
+                              isPremium is just "last tier in the list", so a
+                              cheap tier added after an expensive one wore the
+                              crown. Even when it guessed right it competed with
+                              the tier's own name, which already says VIP if the
+                              organiser named it that. */}
                           <View style={ss.ticketNameRow}>
                             <Text style={[ss.ticketName, sold && ss.ticketNameSoldOut]}>{tt.name}</Text>
-                            {isPremium && !sold && (
-                              <View style={[ss.vipBadge, { flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
-                                <Star size={11} color={T.vipText} weight="fill" />
-                                <Text style={ss.vipBadgeText}>VIP</Text>
-                              </View>
-                            )}
                           </View>
                           {/* Description AND availability, not one or the other.
                               This was `tt.description ?? availLabel(tt)`, so any tier
@@ -654,8 +653,8 @@ export default function TicketPurchaseScreen() {
                               so the chip drew the eye while the number that
                               actually decides the purchase did not. The chip
                               also said nothing the list did not: a sold-out tier
-                              is greyed and carries its own badge, so every other
-                              row is available by definition. */}
+                              is greyed with a struck-through price, so every
+                              other row is available by definition. */}
                           <Text
                             style={[
                               ss.ticketAvailCount,
@@ -666,16 +665,11 @@ export default function TicketPurchaseScreen() {
                           >
                             {availLabel(tt, event)}
                           </Text>
-                          {sold ? (
-                            <View style={ss.soldBadge}>
-                              <Text style={ss.soldBadgeText}>Sold Out</Text>
-                            </View>
-                          ) : isPremium ? (
-                            <View style={[ss.dealBadge, { flexDirection: 'row', alignItems: 'center', gap: 3 }]}>
-                              <CrownSimple size={11} color={T.okText} weight="fill" />
-                              <Text style={ss.dealBadgeText}>Premium</Text>
-                            </View>
-                          ) : null}
+                          {/* No badges at all now. Premium duplicated the VIP
+                              chip, and Sold Out duplicated the greyed-out row,
+                              the struck-through price AND the "Sold out" the
+                              count line above already prints. Three chips were
+                              carrying no information the row did not have. */}
                         </View>
                         <View style={ss.ticketPriceCol}>
                           <Text style={[ss.ticketPrice, sold && ss.ticketPriceSoldOut]}>
@@ -704,8 +698,11 @@ export default function TicketPurchaseScreen() {
                   const left = purchasableOf(selectedType, event);
                   const maxSellable = left === null ? maxPer : Math.min(maxPer, left);
 
-                  // Nothing left at event level even though the tier looks open.
-                  if (maxSellable < 1) return null;
+                  // One or zero sellable — nothing to choose between. A grid of
+                  // exactly one button reads as a broken control: it stretches
+                  // to the full row width and invites a tap that changes
+                  // nothing. Quantity is already 1, so the picker just goes.
+                  if (maxSellable <= 1) return null;
 
                   const maxVisible = Math.min(maxSellable, 6);
                   const opts = Array.from({ length: maxVisible }, (_, i) => i + 1);

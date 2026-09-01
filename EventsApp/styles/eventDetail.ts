@@ -120,10 +120,15 @@ export const s = {
   // radius, which is why the avatar did not read as a clean circle.
   participantAvatar:     'w-14 h-14 rounded-full bg-[#F2F2F2] border border-[#E0E0E0] items-center justify-center',
   participantAvatarText: 'text-[20px] font-black text-[#333333]',
-  participantName:       'flex-1 text-[14px] font-semibold text-[#111111]',
+  // NO flex-1 here. This Text sits in a COLUMN (name over meta), so flex-1 made
+  // it absorb the row's spare height and shoved the meta line to the bottom —
+  // a gap that was invisible beside a 40px avatar and obvious beside a 56px
+  // one. The parent View owns the horizontal flex; the name only needs its own
+  // height. Size nudged 14→15 so the name still leads against the larger image.
+  participantName:       'text-[15px] font-semibold text-[#111111]',
   participantArrow:      'text-[20px] text-[#CCCCCC]',
   // Second line under a line-up name: "Main stage · 21:30".
-  participantMeta:       'text-[12px] font-medium text-[#888888] mt-0.5',
+  participantMeta:       'text-[13px] font-medium text-[#888888] mt-1',
 
   // ── Information ───────────────────────────────────────────────────────────────
   // Stacked, not side-by-side: values run to full sentences ("No glass, no

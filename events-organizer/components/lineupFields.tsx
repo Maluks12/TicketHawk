@@ -276,13 +276,27 @@ export default function LineupFields({
 
 /** Shared warning, so both callers word it identically. */
 export function LineupLiveNotice() {
+  // This used to state that adding or removing an act notifies ticket holders
+  // and followers within a few minutes. It does not. ReplaceEventLineupHandler
+  // writes the line-up, busts the event cache and returns — there is no
+  // notification call in that path, and its own comment says the notification
+  // is not built yet.
+  //
+  // The old wording was worse than saying nothing: an organiser who dropped a
+  // headliner would reasonably believe ticket holders had been told, and skip
+  // announcing it themselves. Until the fan-out exists, the banner has to say
+  // plainly that nobody is told.
+  //
+  // When it IS built, the distinction the old copy drew was the right one —
+  // adds and removes are worth a notification, a stage or set-time or photo
+  // edit is not — so restore that wording then rather than inventing new rules.
   return (
     <div className="alert alert-warning" style={{ marginBottom: 18 }}>
       <Warning size={16} weight="fill" />
       <div>
-        This event is live. Adding or removing an act notifies everyone holding
-        a ticket and everyone following you, within a few minutes. Editing a
-        stage, a set time or a photo does not.
+        This event is live, and line-up changes are published straight away —
+        but nobody is notified. If you add or remove an act, tell your ticket
+        holders and followers yourself.
       </div>
     </div>
   );
