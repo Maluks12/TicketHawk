@@ -248,6 +248,14 @@ func GuestRetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.Payme
 			}
 		}
 
+		// Take the seats back before starting a new payment — same reasoning as
+		// RetryPaymentHandler. If anything released this booking's seats, the
+		// retry's payment will confirm this same booking row regardless.
+		if _, reErr := repository.ReacquireSeats(pool, c.Request.Context(), booking.ID); reErr != nil {
+			log.Error().Err(reErr).Str("booking_id", booking.ID).
+				Msg("guest retry payment: could not reacquire released seats")
+		}
+
 		retryMethod := models.PaymentMethod(c.Query("method"))
 		if retryMethod == "" {
 			retryMethod = models.PaymentCreditCard

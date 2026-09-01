@@ -114,6 +114,121 @@ func ReleaseRefundedSeats(pool *pgxpool.Pool, ctx context.Context, bookingID str
 	return nil
 }
 
+// ReacquireSeats takes a released booking's seats BACK OUT of inventory.
+//
+// The exact inverse of releaseSeatsTx, and it exists because a released booking
+// is not necessarily a dead one.
+//
+// The case that produced it, from production logs: a buyer's card is declined,
+// Paystack sends a failed webhook, syncBookingStatus cancels the booking and
+// releases the seat — and then the buyer pays with Apple Pay on the SAME still
+// open Paystack transaction. The completed webhook arrives against the same
+// reference, the booking is confirmed, and nothing takes the seat back. One
+// checkout, no retry endpoint involved, two webhooks.
+//
+// A genuine ReleaseFailedBooking followed by a retry produces the same hole,
+// which is why the retry handlers call this too. Consequences either way:
+//
+//   - events.tickets_sold under-reports every retried sale
+//   - the capacity guard (tickets_sold + reserved_count) hands that seat to the
+//     NEXT buyer, so the event oversells by one per retry
+//
+// Idempotent in the same way as the release: gated on seats_released_at being
+// NOT NULL and clearing it in the same transaction, so calling it twice cannot
+// double-count. Safe to call on a booking that was never released — that is the
+// common case and it returns false.
+//
+// Deliberately does NOT refuse when the event is now full. By the time this
+// runs the buyer has usually paid, and the ticket is what they bought; refusing
+// would strand paid money with no ticket. It logs loudly instead, so a real
+// oversell is visible before the door staff meet it.
+func ReacquireSeats(pool *pgxpool.Pool, ctx context.Context, bookingID string) (bool, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin seat reacquire tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	taken, err := reacquireSeatsTx(tx, ctx, bookingID)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit seat reacquire: %w", err)
+	}
+	if taken {
+		log.Info().Str("booking_id", bookingID).
+			Msg("booking: released seats taken back out of inventory")
+	}
+	return taken, nil
+}
+
+// reacquireSeatsTx does the work inside an existing transaction. Reports
+// whether it re-took anything; false means the booking still holds its seats
+// and there was nothing to do.
+func reacquireSeatsTx(tx pgx.Tx, ctx context.Context, bookingID string) (bool, error) {
+	var eventID string
+	var ticketTypeID *string
+	var quantity int
+
+	// FOR UPDATE for the same reason the release takes it: two callers (a retry
+	// and the webhook backstop) can arrive together, and both must not observe
+	// seats_released_at as set.
+	err := tx.QueryRow(ctx, `
+		SELECT event_id, ticket_type_id, ticket_quantity
+		FROM bookings
+		WHERE id = $1 AND seats_released_at IS NOT NULL
+		FOR UPDATE
+	`, bookingID).Scan(&eventID, &ticketTypeID, &quantity)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil // never released, or already re-taken
+		}
+		return false, fmt.Errorf("locking booking for seat reacquire: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE bookings SET seats_released_at = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, bookingID); err != nil {
+		return false, fmt.Errorf("clearing seat release stamp: %w", err)
+	}
+
+	var maxCapacity *int
+	var ticketsSold int
+	if err := tx.QueryRow(ctx, `
+		UPDATE events
+		SET tickets_sold = tickets_sold + $1, updated_at = NOW()
+		WHERE id = $2
+		RETURNING max_capacity, tickets_sold
+	`, quantity, eventID).Scan(&maxCapacity, &ticketsSold); err != nil {
+		return false, fmt.Errorf("reacquiring event capacity: %w", err)
+	}
+
+	if ticketTypeID != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE ticket_types
+			SET tickets_sold = tickets_sold + $1, updated_at = NOW()
+			WHERE id = $2
+		`, quantity, *ticketTypeID); err != nil {
+			return false, fmt.Errorf("reacquiring tier capacity: %w", err)
+		}
+	}
+
+	// Not an error condition — see the note on ReacquireSeats about why the
+	// booking still goes through. This is the line to alert on.
+	if maxCapacity != nil && ticketsSold > *maxCapacity {
+		log.Warn().
+			Str("booking_id", bookingID).
+			Str("event_id", eventID).
+			Int("tickets_sold", ticketsSold).
+			Int("max_capacity", *maxCapacity).
+			Msg("booking: event is OVERSOLD after reacquiring released seats — the buyer has paid, so the booking stands")
+	}
+
+	return true, nil
+}
+
 // ReleaseFailedBooking cancels a booking whose payment could not be started and
 // returns its tickets immediately.
 //

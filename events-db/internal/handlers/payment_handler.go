@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // parsePaymentMethod reads the requested method from the `method` query param
@@ -210,6 +211,23 @@ func RetryPaymentHandler(pool *pgxpool.Pool, paymentService *services.PaymentSer
 		if time.Now().After(expiresAt) && booking.BookingStatus == models.BookingPending {
 			c.JSON(http.StatusGone, gin.H{"error": "Booking has expired", "expired_at": expiresAt})
 			return
+		}
+
+		// Take the seats back BEFORE starting a new payment.
+		//
+		// This booking may have lost its seats already — ReleaseFailedBooking on
+		// an initialisation failure, or the expiry worker. The retry creates a
+		// fresh gateway intent against the SAME booking row and the webhook will
+		// confirm it, so without this the sale completes while the counters still
+		// say the seat is available and the next buyer is sold it a second time.
+		// No-op when the booking never lost its seats, which is the common case.
+		//
+		// A failure here is logged, not fatal: the buyer must not be blocked from
+		// paying, and syncBookingStatus re-attempts the same reacquire at
+		// confirmation time as a backstop.
+		if _, reErr := repository.ReacquireSeats(pool, c.Request.Context(), bookingID); reErr != nil {
+			log.Error().Err(reErr).Str("booking_id", bookingID).
+				Msg("retry payment: could not reacquire released seats")
 		}
 
 		method := parsePaymentMethod(c)

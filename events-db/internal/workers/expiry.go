@@ -157,11 +157,25 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	}
 	defer tx.Rollback(ctx)
 
+	// payment_status IN ('pending', 'failed') — not 'pending' alone.
+	//
+	// syncBookingStatus no longer cancels a booking when an attempt is declined,
+	// because Paystack keeps the transaction open and the buyer often pays by
+	// another method on the same reference. That leaves declined bookings
+	// sitting pending with payment_status 'failed', and with the old filter this
+	// worker never collected them — their seats would have been held forever.
+	// This is now the ONLY thing that frees a seat after an abandoned checkout.
+	//
+	// seats_released_at IS NULL keeps this consistent with releaseSeatsTx: the
+	// stamp is the single source of truth for whether a booking currently holds
+	// inventory, and ReacquireSeats reads it to decide whether a late
+	// confirmation needs its seat back.
 	rows, err := tx.Query(ctx, `
 		SELECT id, event_id, ticket_type_id, ticket_quantity
 		FROM bookings
 		WHERE booking_status = 'pending'
-		AND payment_status = 'pending'
+		AND payment_status IN ('pending', 'failed')
+		AND seats_released_at IS NULL
 		AND created_at < NOW() - $1::interval
 		FOR UPDATE SKIP LOCKED
 	`, ttl.String())
@@ -192,9 +206,15 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	}
 
 	for _, b := range expired {
+		// Stamp the release in the same statement. Without it this worker
+		// decremented the counters while leaving seats_released_at NULL, so a
+		// later refund could release the same seats a second time and a late
+		// confirmation had no way to know its seat needed taking back.
 		if _, err = tx.Exec(ctx, `
 			UPDATE bookings
-			SET booking_status = 'cancelled', updated_at = NOW()
+			SET booking_status    = 'cancelled',
+			    seats_released_at = NOW(),
+			    updated_at        = NOW()
 			WHERE id = $1
 		`, b.id); err != nil {
 			return err

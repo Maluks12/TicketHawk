@@ -5,10 +5,21 @@ export function fmtMoney(v: number | null | undefined, cur = 'ZAR') {
   // whole job is showing an organiser what they are owed, silently moving
   // money by up to 50c per figure is not a rounding detail.
   //
-  // minimum 0 / maximum 2 keeps whole amounts clean — R90 stays "R 90" rather
-  // than "R 90,00" — and only spends the two extra characters where there are
-  // actually cents to show.
-  return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: cur, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(v);
+  // The digit count is decided per value rather than by a fixed min/max pair.
+  // A plain minimum of 0 lets Intl drop a TRAILING zero, so R28.20 came out as
+  // "R 28,2" — which reads as a broken number, not an amount. Whole rands get
+  // no decimals (R90 stays "R 90"), anything with cents gets both (R28,20).
+  //
+  // Rounded to cents before the test so float noise — 0.1 + 0.2 landing at
+  // 0.30000000000000004 — cannot make a whole amount look fractional.
+  const rounded = Math.round(v * 100) / 100;
+  const hasCents = Math.round(Math.abs(rounded) * 100) % 100 !== 0;
+  return new Intl.NumberFormat('en-ZA', {
+    style: 'currency',
+    currency: cur,
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(rounded);
 }
 
 export function fmtDate(d: string | null | undefined) {
