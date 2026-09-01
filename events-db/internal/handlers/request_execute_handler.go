@@ -354,6 +354,24 @@ var editableEventFields = map[string]string{
 	"category_id":      "category_id",
 	"timezone":         "timezone",
 
+	// Coordinates travel WITH the address, and used not to.
+	//
+	// venue_name/address/city were writable while latitude, longitude and
+	// place_id were not, so an approved venue change moved the text and left
+	// the pin. Every client builds its map link as place_id first, then
+	// lat/lng, then the address string — so the stale place_id won and "Open
+	// maps" kept opening the OLD venue under the new address. The same
+	// coordinates drive distance sorting, so a moved event also stayed
+	// discoverable where it used to be.
+	//
+	// Explicit nulls are meaningful here: an editor who types a free-text
+	// address without picking a place sends null for all three, which clears
+	// the old pin and lets the clients fall back to searching the new address.
+	// Less precise than a place_id, but not wrong, which the stale pin was.
+	"latitude":         "latitude",
+	"longitude":        "longitude",
+	"place_id":         "place_id",
+
 	// Media and tags — organisers may edit these on a live event.
 	// `tags` is TEXT[]; pgx encodes a []string / []any of strings directly.
 	"image_url":        "cover_image_url",
