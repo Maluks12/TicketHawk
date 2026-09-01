@@ -5,6 +5,7 @@ import { fmtMoney, fmtDate, fmtDateTime, toLocalInput, Badge } from '../../../li
 import { useToast } from '../../../lib/toast';
 import { useStaff } from '../../../lib/permissions';
 import { useConfirm } from '../../../lib/confirm';
+import PlacesAutocomplete, { PlaceResult } from '../../../components/placesAutocomplete';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 interface EventRow { id: string; title: string; slug: string; status: string; start_time: string; price: number; currency: string; tickets_sold: number; max_capacity: number | null; ticket_revenue: number; city: string; }
@@ -106,6 +107,10 @@ const EMPTY_FORM = () => ({
   max_capacity: '', allow_waitlist: false,
   max_tickets_per_user: '',
   venue_name: '', address: '', city: '',
+  // The pin behind the address. Null when the address was typed by hand rather
+  // than picked, which is a real state: the clients then search the address
+  // text instead of opening a stale place_id for the previous venue.
+  place_id: '' as string, latitude: null as number | null, longitude: null as number | null,
   venue_type: 'auto' as 'auto' | 'stadium' | 'auditorium' | 'none',
   refund_policy: '', terms_and_conditions: '',
   tags: [] as string[], performers: [] as string[], teams: [] as string[],
@@ -366,6 +371,9 @@ export default function EventsPage() {
         max_tickets_per_user: String(e.max_tickets_per_user || ''),
         venue_name: String(e.venue_name || ''), address: String(e.address || ''),
         city: String(e.city || ''),
+        place_id: String(e.place_id || ''),
+        latitude: typeof e.latitude === 'number' ? e.latitude : null,
+        longitude: typeof e.longitude === 'number' ? e.longitude : null,
         venue_type: (['stadium','auditorium','none'].includes(e.venue_type as string) ? e.venue_type as 'stadium'|'auditorium'|'none' : 'auto'),
         refund_policy: String(e.refund_policy || ''), terms_and_conditions: String(e.terms_and_conditions || ''),
         tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
@@ -383,6 +391,9 @@ export default function EventsPage() {
         max_tickets_per_user: String(e.max_tickets_per_user || ''),
         venue_name: String(e.venue_name || ''), address: String(e.address || ''),
         city: String(e.city || ''),
+        place_id: String(e.place_id || ''),
+        latitude: typeof e.latitude === 'number' ? e.latitude : null,
+        longitude: typeof e.longitude === 'number' ? e.longitude : null,
         venue_type: (['stadium','auditorium','none'].includes(e.venue_type as string) ? e.venue_type as 'stadium'|'auditorium'|'none' : 'auto'),
         refund_policy: String(e.refund_policy || ''), terms_and_conditions: String(e.terms_and_conditions || ''),
         tags: (e.tags as string[]) || [], performers: (e.performers as string[]) || [],
@@ -409,6 +420,8 @@ export default function EventsPage() {
         price: parseFloat(form.price) || 0, currency: form.currency,
         allow_waitlist: form.allow_waitlist,
         venue_name: form.venue_name.trim(), address: form.address.trim(), city: form.city.trim(),
+        place_id: form.place_id || null,
+        latitude: form.latitude, longitude: form.longitude,
         refund_policy: form.refund_policy.trim() || null,
         terms_and_conditions: form.terms_and_conditions.trim() || null,
         tags: form.tags, performers: form.performers, teams: form.teams,
@@ -439,6 +452,12 @@ export default function EventsPage() {
             ['venue_name', form.venue_name, before.venue_name],
             ['venue_address', form.address, before.address],
             ['city', form.city, before.city],
+            // Sent whenever they move, INCLUDING to null. Omitting a cleared
+            // pin would leave the old coordinates in place, which is the bug
+            // this whole change exists to fix.
+            ['place_id', form.place_id || null, before.place_id || null],
+            ['latitude', form.latitude, before.latitude],
+            ['longitude', form.longitude, before.longitude],
             ['start_time', toISO(form.start_time), toISO(before.start_time)],
             ['end_time', toISO(form.end_time), toISO(before.end_time)],
             ['timezone', form.timezone, before.timezone],
@@ -706,10 +725,39 @@ export default function EventsPage() {
               {/* Location */}
               {activeTab === 1 && (
                 <>
+                  {/* Search first, three fields below. Same component the
+                      organiser dashboard uses, which is the point: this form
+                      had free-text inputs only, so an admin edit could never
+                      produce a place_id or coordinates and every venue change
+                      left the map pin on the previous location. */}
+                  <div className="field">
+                    <label>Find the venue</label>
+                    <PlacesAutocomplete
+                      initialValue={form.venue_name || form.address}
+                      onSelect={(p: PlaceResult) => setF({
+                        venue_name: p.venueName || form.venue_name,
+                        address:    p.address,
+                        city:       p.city,
+                        place_id:   p.placeId,
+                        latitude:   p.latitude,
+                        longitude:  p.longitude,
+                      })}
+                    />
+                    <div style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 6 }}>
+                      {form.place_id
+                        ? 'Pinned to a Google place — map links will open the exact venue.'
+                        : 'No pin. Map links will search the address text instead.'}
+                    </div>
+                  </div>
+
                   <div className="field"><label>Venue Name *</label><input type="text" value={form.venue_name} onChange={e => setF({ venue_name: e.target.value })} placeholder="e.g. FNB Stadium" /></div>
-                  <div className="field"><label>Street Address *</label><input type="text" value={form.address} onChange={e => setF({ address: e.target.value })} placeholder="e.g. 1 Soccer City Ave" /></div>
+                  {/* Editing the address BY HAND clears the pin. Leaving it
+                      would point map links and distance sorting at the old
+                      venue while the page displayed the new address — wrong in
+                      a way nobody would notice until a buyer drove there. */}
+                  <div className="field"><label>Street Address *</label><input type="text" value={form.address} onChange={e => setF({ address: e.target.value, place_id: '', latitude: null, longitude: null })} placeholder="e.g. 1 Soccer City Ave" /></div>
                   <div className="field-row">
-                    <div className="field"><label>City *</label><input type="text" value={form.city} onChange={e => setF({ city: e.target.value })} placeholder="e.g. Johannesburg" /></div>
+                    <div className="field"><label>City *</label><input type="text" value={form.city} onChange={e => setF({ city: e.target.value, place_id: '', latitude: null, longitude: null })} placeholder="e.g. Johannesburg" /></div>
                     <div className="field" />
                   </div>
                   <div className="section-sep">Seating</div>
