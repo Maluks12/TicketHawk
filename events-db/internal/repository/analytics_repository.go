@@ -24,8 +24,18 @@ import (
 //	views        Someone opened the event detail page.
 //	retention    dwell_ms / views, in seconds — "how long a viewer spent on your
 //	             event divided by the views".
-//	psr          Post-split revenue: subtotal - organizer_fee. What the
-//	             organiser keeps after the platform cut.
+//	psr          Post-split revenue: subtotal - refund - organizer_fee, over
+//	             confirmed AND refunded bookings. What the organiser keeps
+//	             after the platform cut — the same arithmetic the payout worker
+//	             uses (CreatePayoutsForCompletedEvents), so this figure and the
+//	             dashboard's Net earnings are the same number by construction.
+//
+//	             It used to be subtotal - organizer_fee over confirmed rows
+//	             only, which silently dropped a part-refunded booking whole: a
+//	             R10 ticket refunded at R2.50 removed all R10 instead of R2.50,
+//	             hiding R6.90 the organiser was still owed. Two cards labelled
+//	             revenue disagreeing by an unexplained amount is worse than
+//	             either definition on its own.
 //	scanned      Tickets admitted at the door (scan_events, verdict 'admitted',
 //	             summing admit_count so a pool admit counts every head).
 //	no_shows     tickets_sold - scanned. Only a fact once the event has ended,
@@ -370,21 +380,25 @@ func eventMetricsFor(ctx context.Context, pool *pgxpool.Pool, eventIDs []string)
 		return m, nil, fmt.Errorf("eventMetricsFor buckets: %w", err)
 	}
 
-	// 2. Sales — confirmed bookings only, matching every other revenue surface.
+	// 2. Sales. COUNTS stay confirmed-only — a refunded booking is not a sale
+	// and its seat went back to inventory — while MONEY spans confirmed and
+	// refunded, because a part-refunded booking still owes the organiser its
+	// remainder. Same split as the organiser dashboard.
 	err = pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*)::bigint,
-			COALESCE(SUM(ticket_quantity), 0)::bigint,
-			COALESCE(SUM(subtotal), 0)::numeric,
-			COALESCE(SUM(organizer_fee), 0)::numeric
-		FROM bookings
-		WHERE event_id = ANY($1::uuid[])
-		  AND booking_status = 'confirmed'
-	`, eventIDs).Scan(&m.Bookings, &m.TicketsSold, &m.GrossRevenue, &m.PlatformFees)
+			COUNT(*) FILTER (WHERE b.booking_status = 'confirmed')::bigint,
+			COALESCE(SUM(b.ticket_quantity)
+				FILTER (WHERE b.booking_status = 'confirmed'), 0)::bigint,
+			COALESCE(SUM(b.subtotal), 0)::numeric,
+			COALESCE(SUM(b.organizer_fee), 0)::numeric,
+			COALESCE(SUM(`+settlementAmountSQL+`), 0)::numeric
+		FROM bookings b
+		WHERE b.event_id = ANY($1::uuid[])
+		  AND b.booking_status IN `+paidBookingStatuses+`
+	`, eventIDs).Scan(&m.Bookings, &m.TicketsSold, &m.GrossRevenue, &m.PlatformFees, &m.PSR)
 	if err != nil {
 		return m, nil, fmt.Errorf("eventMetricsFor sales: %w", err)
 	}
-	m.PSR = m.GrossRevenue - m.PlatformFees
 
 	// 3. Door — admitted scans only. admit_count is SUMMED rather than counting
 	// rows, because one pool admit is a single scan_event that lets several
@@ -523,17 +537,22 @@ func GetEventSeries(
 			  AND bucket_at >= $3::timestamptz AND bucket_at <= $4::timestamptz
 			GROUP BY 1
 		),
+		-- Bucketed by confirmed_at, and a refunded booking keeps the
+		-- confirmed_at of the sale — so its remainder lands in the bucket where
+		-- the money came in, not where the refund happened. That is what makes
+		-- the daily series still sum to the totals above.
 		s AS (
-			SELECT date_trunc($2::text, confirmed_at AT TIME ZONE $5::text) AS b,
-			       COUNT(*)                      AS bookings,
-			       SUM(ticket_quantity)          AS tickets_sold,
-			       SUM(subtotal)                 AS gross_revenue,
-			       SUM(subtotal - organizer_fee) AS psr
-			FROM bookings
-			WHERE event_id = ANY($1::uuid[])
-			  AND booking_status = 'confirmed'
-			  AND confirmed_at IS NOT NULL
-			  AND confirmed_at >= $3::timestamptz AND confirmed_at <= $4::timestamptz
+			SELECT date_trunc($2::text, b.confirmed_at AT TIME ZONE $5::text) AS b,
+			       COUNT(*) FILTER (WHERE b.booking_status = 'confirmed')     AS bookings,
+			       SUM(b.ticket_quantity)
+			           FILTER (WHERE b.booking_status = 'confirmed')          AS tickets_sold,
+			       SUM(b.subtotal)                                            AS gross_revenue,
+			       SUM(`+settlementAmountSQL+`)                               AS psr
+			FROM bookings b
+			WHERE b.event_id = ANY($1::uuid[])
+			  AND b.booking_status IN `+paidBookingStatuses+`
+			  AND b.confirmed_at IS NOT NULL
+			  AND b.confirmed_at >= $3::timestamptz AND b.confirmed_at <= $4::timestamptz
 			GROUP BY 1
 		),
 		sc AS (
