@@ -23,6 +23,15 @@ COPY . .
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
+# Google Places key for the venue search on the event form. Needs BOTH halves
+# of the pattern: the ARG to receive it from compose's build.args, and the ENV
+# so it is present in the environment `npm run build` runs in. With either one
+# missing Next inlines an empty string, the component's key check throws, and
+# the form shows "Address search is not configured" — which is a build-time
+# failure that looks exactly like a runtime one.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_KEY=${NEXT_PUBLIC_GOOGLE_MAPS_KEY}
+
 RUN npm run build
 
 # ── runtime ───────────────────────────────────────────────────────────────────

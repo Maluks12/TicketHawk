@@ -65,6 +65,12 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: "https://api.ticket-hawk.com/v1"
+        # Venue search on the admin event form. Same key the organiser service
+        # uses below — a browser key, inlined into the client bundle, so it is
+        # public by design and protected by HTTP referrer restrictions rather
+        # than secrecy. The admin origin has to be on that referrer list too,
+        # or requests from admin.ticket-hawk.com are rejected.
+        NEXT_PUBLIC_GOOGLE_MAPS_KEY: "AIzaSyCz_LX4j7NGVTeRqKNb9zgeSyWS2pQXmJc"
     restart: unless-stopped
     expose:
       - "3000"

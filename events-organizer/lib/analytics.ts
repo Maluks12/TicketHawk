@@ -204,9 +204,22 @@ export function fmtCompact(n: number | null | undefined): string {
 
 export function fmtMoney(n: number | null | undefined, currency = 'ZAR'): string {
   if (n === null || n === undefined || Number.isNaN(n)) return DASH;
+  // Matches fmtMoney in lib/utils.tsx. maximumFractionDigits: 0 ROUNDED rather
+  // than truncated, so PSR of R244.40 printed as "R 244" — a 40c discrepancy
+  // against the dashboard on a card the organiser reads as their earnings. A
+  // bare minimum of 0 is not the fix either: it drops a trailing zero, turning
+  // R28.20 into "R 28,2". Whole rands print clean, cents print in full.
+  //
+  // fmtMoneyCompact delegates here below 10k, so the k/M abbreviations above
+  // that threshold are unaffected.
+  const rounded = Math.round(n * 100) / 100;
+  const hasCents = Math.round(Math.abs(rounded) * 100) % 100 !== 0;
   return new Intl.NumberFormat('en-ZA', {
-    style: 'currency', currency, maximumFractionDigits: 0,
-  }).format(n);
+    style: 'currency',
+    currency,
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  }).format(rounded);
 }
 
 export function fmtMoneyCompact(n: number | null | undefined, currency = 'ZAR'): string {
