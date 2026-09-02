@@ -40,20 +40,10 @@ export const CROP_COVER = 16 / 9;
 // square by the client anyway.
 export const CROP_LINEUP = 1;
 
-// BANNER — deliberately null, meaning "no cropper, upload as picked".
-//
-// Locking the banner to a wide ratio is safe on web and destructive in the app.
-// EventsApp/app/event/[id].tsx sizes its hero to the ARTWORK's own aspect,
-// clamped between HERO_MIN_H (34% of screen height) and HERO_MAX_H (58%), with
-// HERO_FIT = 'cover'. On a 390x844 phone a 3:1 banner is 130px tall at full
-// width but the frame floor is 287px, so 'cover' scales it 2.2x and crops ~55%
-// of its width — the exact failure the comment above HERO_FIT describes.
-//
-// Set this to a number ONLY alongside a decision about what the app should
-// render instead (a second stored derivative, or a stored crop rect the app
-// ignores). Until then the banner uploads untouched and every surface keeps
-// framing it the way it already does.
-export const CROP_BANNER: number | null = null;
+// There is deliberately NO banner ratio here. The banner is never cropped: it
+// is the one image whose framing is decided per surface at display time, and
+// EventsApp in particular sizes its hero to the artwork's own aspect rather
+// than to a fixed one. Cropping it here would pre-empt that everywhere.
 
 // Stage bounds. Width wins for wide ratios, height for tall ones, so a 1:1 crop
 // does not push the footer off a laptop screen.
@@ -87,6 +77,7 @@ export default function ImageCropper({
   title,
   hint,
   maxOutputWidth = 1600,
+  minOutputWidth = 0,
   onCancel,
   onConfirm,
 }: {
@@ -98,6 +89,19 @@ export default function ImageCropper({
   hint?: string;
   /** Longest edge of the exported image. Never upscales past the source. */
   maxOutputWidth?: number;
+  /**
+   * HARD floor on the exported width — below it, the crop cannot be confirmed.
+   *
+   * This exists because the server has one. UploadEventImage rejects covers and
+   * banners whose long edge is under minHeroLongEdge (1000px), and since we
+   * never upscale, zooming far into a small photo can drop under that. Without
+   * this the crop looked fine, uploaded, and came back a 400.
+   *
+   * 0 means no floor — the generic /organiser/upload path (the wizard and
+   * line-up photos) has no dimension check, so nothing is gained by inventing
+   * one there.
+   */
+  minOutputWidth?: number;
   onCancel: () => void;
   /** Receives a NEW File. The caller uploads it exactly as it uploads any other. */
   onConfirm: (cropped: File) => void;
@@ -237,7 +241,10 @@ export default function ImageCropper({
   // the readout below says so rather than inventing pixels.
   const outW = srcRect ? Math.max(1, Math.min(maxOutputWidth, Math.round(srcRect.w))) : 0;
   const outH = Math.round(outW / aspect);
-  const lowRes = outW > 0 && outW < LOW_RES_W;
+  // tooSmall blocks; lowRes only advises. Keep them distinct — a hard stop for
+  // something the server merely dislikes is as unhelpful as no warning at all.
+  const tooSmall = minOutputWidth > 0 && outW > 0 && outW < minOutputWidth;
+  const lowRes = !tooSmall && outW > 0 && outW < LOW_RES_W;
 
   async function confirm() {
     if (!img || !srcRect) return;
@@ -412,15 +419,22 @@ export default function ImageCropper({
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 6, marginTop: 12,
                 maxWidth: stage.w, marginLeft: 'auto', marginRight: 'auto',
-                fontSize: 12, color: lowRes ? 'var(--warning-fg)' : 'var(--text-3)',
+                fontSize: 12,
+                color: tooSmall
+                  ? 'var(--danger-fg)'
+                  : lowRes ? 'var(--warning-fg)' : 'var(--text-3)',
               }}>
-                {lowRes ? <Warning size={13} weight="fill" /> : <ArrowsOutCardinal size={13} />}
+                {tooSmall || lowRes
+                  ? <Warning size={13} weight="fill" />
+                  : <ArrowsOutCardinal size={13} />}
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {outW === 0
                     ? 'Reading image…'
-                    : lowRes
-                      ? `Exports at ${outW} x ${outH} — small for this slot. Zoom out for a sharper result.`
-                      : `Exports at ${outW} x ${outH}`}
+                    : tooSmall
+                      ? `Exports at ${outW} x ${outH} — the server needs at least ${minOutputWidth}px wide. Zoom out, or start from a larger picture.`
+                      : lowRes
+                        ? `Exports at ${outW} x ${outH} — small for this slot. Zoom out for a sharper result.`
+                        : `Exports at ${outW} x ${outH}`}
                 </span>
               </div>
             </>
@@ -433,7 +447,7 @@ export default function ImageCropper({
             type="button"
             className="btn btn-primary"
             onClick={confirm}
-            disabled={!img || failed || busy}
+            disabled={!img || failed || busy || tooSmall}
           >
             <Check size={15} weight="bold" />
             {busy ? 'Cropping…' : 'Use this crop'}

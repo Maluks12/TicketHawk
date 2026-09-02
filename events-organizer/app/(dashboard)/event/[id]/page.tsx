@@ -22,6 +22,49 @@ type Tab = 'overview' | 'info' | 'lineup' | 'bookings' | 'advanced' | 'merch' | 
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
 const MERCH_ENABLED = false;
 
+// ── Media limits ─────────────────────────────────────────────────────────────
+//
+// These MIRROR the server and exist so a rejection is instant and specific
+// instead of a round trip that ends in a generic failure. The authority is
+// events-db/internal/services/image_service.go — maxCoverSize (5 MB),
+// maxBannerSize (8 MB) and minHeroLongEdge (1000px). If those move, move these.
+//
+// Note the asymmetry that made this bite: the cover goes through the cropper,
+// which re-encodes to a JPEG of at most 1600px, so an oversized source is
+// shrunk on the way through and never trips the limit. The banner is not
+// cropped, so it uploads the ORIGINAL file — which is why the same picture
+// could succeed as a cover and fail as a banner. That asymmetry is permanent,
+// which is exactly why the banner needs its own size check rather than
+// inheriting the cover's luck.
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_COVER_MB = 5;
+const MAX_BANNER_MB = 8;
+const MIN_HERO_LONG_EDGE = 1000;
+
+/** Type and size, checked before anything is sent. Returns a reason, or null. */
+function rejectReason(f: File, maxMB: number): string | null {
+  if (!IMAGE_TYPES.includes(f.type)) {
+    return 'That file type isn\u2019t supported — use JPEG, PNG or WebP';
+  }
+  if (f.size > maxMB * 1024 * 1024) {
+    return `That file is ${(f.size / 1024 / 1024).toFixed(1)} MB — the limit is ${maxMB} MB`;
+  }
+  return null;
+}
+
+/**
+ * The server's own words, not ours.
+ *
+ * Both upload handlers used to `catch { toast('Failed to upload …') }`, which
+ * threw away a 400 that said exactly what was wrong — too large, or under the
+ * 1000px hero minimum. "Failed to upload banner image" is not something an
+ * organiser can act on; "image too small: … must be at least 1000px" is.
+ */
+function uploadError(e: unknown, fallback: string): string {
+  const err = e as { response?: { data?: { error?: string } } };
+  return err.response?.data?.error ?? fallback;
+}
+
 // Mirrors what /organiser/dashboard/events/:id/stats returns for a tier.
 //
 // reserved_count, available_tickets and is_sold_out were all absent here even
@@ -187,7 +230,7 @@ export default function EventDetailPage() {
         event: { ...prev.event, cover_image_url: res.data.cover_image_url },
       } : prev);
       toast('Cover image updated', 'success');
-    } catch { toast('Failed to upload cover image', 'error'); }
+    } catch (e) { toast(uploadError(e, 'Failed to upload cover image'), 'error'); }
     finally { setCoverUploading(false); }
   }
 
@@ -202,8 +245,23 @@ export default function EventDetailPage() {
         event: { ...prev.event, banner_image_url: res.data.banner_image_url },
       } : prev);
       toast('Banner image updated', 'success');
-    } catch { toast('Failed to upload banner image', 'error'); }
+    } catch (e) { toast(uploadError(e, 'Failed to upload banner image'), 'error'); }
     finally { setBannerUploading(false); }
+  }
+
+  /** One gate for both file inputs on each slot: validate, then crop or send. */
+  function pickCover(f: File) {
+    const bad = rejectReason(f, MAX_COVER_MB);
+    if (bad) { toast(bad, 'error'); return; }
+    setCoverCrop(f);
+  }
+
+  // No crop step — the banner uploads as picked. The gate is the size and type
+  // check, which is the part that was missing.
+  function pickBanner(f: File) {
+    const bad = rejectReason(f, MAX_BANNER_MB);
+    if (bad) { toast(bad, 'error'); return; }
+    handleBannerUpload(f);
   }
 
   if (loading) {
@@ -254,13 +312,14 @@ export default function EventDetailPage() {
           a cover already frames it at 16:9, so this removes only pixels that
           were being discarded at display time anyway — and lets the organiser
           choose WHICH pixels, instead of a centre-crop choosing for them.
-          The BANNER has no cropper on purpose: see CROP_BANNER. */}
+          The banner is not cropped at all — it uploads as picked. */}
       {coverCrop && (
         <ImageCropper
           file={coverCrop}
           aspect={CROP_COVER}
           title="Crop cover image"
           hint="This is the card people see in the feed and in search results."
+          minOutputWidth={MIN_HERO_LONG_EDGE}
           onCancel={() => setCoverCrop(null)}
           onConfirm={f => { setCoverCrop(null); handleCoverUpload(f); }}
         />
@@ -410,7 +469,7 @@ export default function EventDetailPage() {
                             fontWeight: 600,
                           }}>
                           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
-                            onChange={e => { const f = e.target.files?.[0]; if (f) { setCoverCrop(f); e.target.value = ''; } }} />
+                            onChange={e => { const f = e.target.files?.[0]; if (f) { pickCover(f); e.target.value = ''; } }} />
                           {coverUploading ? '…' : '✎ Replace'}
                         </label>
                       </>
@@ -422,7 +481,7 @@ export default function EventDetailPage() {
                         fontSize: 11, gap: 4, background: 'var(--surface-2)',
                       }}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
-                          onChange={e => { const f = e.target.files?.[0]; if (f) { setCoverCrop(f); e.target.value = ''; } }} />
+                          onChange={e => { const f = e.target.files?.[0]; if (f) { pickCover(f); e.target.value = ''; } }} />
                         {coverUploading
                           ? <div className="spinner" style={{ width: 18, height: 18 }} />
                           : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload cover</span></>}
@@ -454,7 +513,7 @@ export default function EventDetailPage() {
                             fontWeight: 600,
                           }}>
                           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={bannerUploading}
-                            onChange={e => { const f = e.target.files?.[0]; if (f) { handleBannerUpload(f); e.target.value = ''; } }} />
+                            onChange={e => { const f = e.target.files?.[0]; if (f) { pickBanner(f); e.target.value = ''; } }} />
                           {bannerUploading ? '…' : '✎ Replace'}
                         </label>
                       </>
@@ -466,7 +525,7 @@ export default function EventDetailPage() {
                         fontSize: 11, gap: 4, background: 'var(--surface-2)',
                       }}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={bannerUploading}
-                          onChange={e => { const f = e.target.files?.[0]; if (f) { handleBannerUpload(f); e.target.value = ''; } }} />
+                          onChange={e => { const f = e.target.files?.[0]; if (f) { pickBanner(f); e.target.value = ''; } }} />
                         {bannerUploading
                           ? <div className="spinner" style={{ width: 18, height: 18 }} />
                           : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload banner</span></>}

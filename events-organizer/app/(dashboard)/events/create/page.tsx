@@ -14,7 +14,7 @@ import { validateRequired, validateMinLength, firstError } from '../../../../lib
 import { getKycStatus } from '../../../../lib/kyc';
 import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
 import DateTimePicker from '@/components/dateTimePicker';
-import ImageCropper, { CROP_COVER, CROP_BANNER } from '@/components/imageCropper';
+import ImageCropper, { CROP_COVER } from '@/components/imageCropper';
 import TicketTypeModal from '@/components/ticketTypeModal';
 import Select from '@/components/select';
 import LineupFields from '@/components/lineupFields';
@@ -282,8 +282,8 @@ function ImageUploader({
   label: string; imageUrl: string | null; uploading: boolean;
   onUpload: (f: File) => void; onRemove: () => void; hint?: string;
   /** When set, the file goes through ImageCropper at this ratio before it is
-   *  uploaded. Null or omitted uploads exactly what was picked — which is what
-   *  the banner does, and CROP_BANNER explains why. */
+   *  uploaded. Omitted uploads exactly what was picked, which is what the
+   *  banner does — its framing is decided per surface at display time. */
   aspect?: number | null;
 }) {
   const [isOver, setIsOver] = useState(false);
@@ -1587,10 +1587,6 @@ export default function CreateEventPage() {
                       onUpload={f => uploadImage(f, setBannerUploading, setBannerImageUrl)}
                       onRemove={() => setBannerImageUrl(null)}
                       hint="Wide hero at the top of the event page · max 10 MB"
-                      // Null today. The app sizes its hero to the banner's own
-                      // aspect, so a fixed wide crop here would be cropped
-                      // AGAIN on a phone — see the note on CROP_BANNER.
-                      aspect={CROP_BANNER}
                     />
                   </div>
                 </FormCard>
