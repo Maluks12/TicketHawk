@@ -9,13 +9,14 @@ import MaxPerAttendeeRow from '../../../../components/MaxPerAttendeeRow';
 import EventCapacityRow from '../../../../components/EventCapacityRow';
 import EventInfoEditor from '../../../../components/eventInfoEditor';
 import LineupBuilder from '../../../../components/lineupBuilder';
+import ImageCropper, { CROP_COVER } from '../../../../components/imageCropper';
 import { fmtMoney, fmtDate, fmtDateTime } from '../../../../lib/utils';
 
 // 'preview' is gone. The framed preview loaded the public event page in an
 // iframe, and it never worked reliably — see the note in the manifest. An
 // organiser can open their own event on the site directly, which is the same
 // page without a component in between that can lie about it.
-type Tab = 'overview' | 'info' | 'lineup' | 'bookings' | 'merch' | 'scan';
+type Tab = 'overview' | 'info' | 'lineup' | 'bookings' | 'advanced' | 'merch' | 'scan';
 
 // Launch gate: merch is built but NOT launching — the tab and its section
 // are hidden, not deleted. Keep in sync with MERCH_ENABLED in layout.tsx.
@@ -121,7 +122,7 @@ export default function EventDetailPage() {
   const search = useSearchParams();
   const initialTab: Tab = (() => {
     const t = search.get('tab');
-    return (['overview', 'info', 'lineup', 'bookings'] as const)
+    return (['overview', 'info', 'lineup', 'bookings', 'advanced'] as const)
       .includes(t as never) ? (t as Tab) : 'overview';
   })();
   const justCreated = search.get('created') === '1';
@@ -142,6 +143,9 @@ export default function EventDetailPage() {
   // previous render", and — with no error boundary on the route — took the
   // whole render tree down. That is the browser's "This page couldn't load".
   const [copied, setCopied] = useState(false);
+  // A picked cover file waiting on its crop. Declared HERE with every other
+  // hook for the same reason `copied` is — see the note above.
+  const [coverCrop, setCoverCrop] = useState<File | null>(null);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -246,6 +250,22 @@ export default function EventDetailPage() {
   return (
     <div className="page">
 
+      {/* Cover crops to 16:9 before it is uploaded. Every surface that renders
+          a cover already frames it at 16:9, so this removes only pixels that
+          were being discarded at display time anyway — and lets the organiser
+          choose WHICH pixels, instead of a centre-crop choosing for them.
+          The BANNER has no cropper on purpose: see CROP_BANNER. */}
+      {coverCrop && (
+        <ImageCropper
+          file={coverCrop}
+          aspect={CROP_COVER}
+          title="Crop cover image"
+          hint="This is the card people see in the feed and in search results."
+          onCancel={() => setCoverCrop(null)}
+          onConfirm={f => { setCoverCrop(null); handleCoverUpload(f); }}
+        />
+      )}
+
       {/* ── Page header with breadcrumb ───────────────────────────────── */}
       <div className="page-header">
         <div>
@@ -298,6 +318,12 @@ export default function EventDetailPage() {
           { id: 'info' as Tab, label: 'Information' },
           { id: 'lineup' as Tab, label: 'Line-up' },
           { id: 'bookings' as Tab, label: `Bookings (${stats.total_bookings})` },
+          // Reference rather than workflow: classification, policies, the
+          // financial breakdown and the record trail. All of it used to sit on
+          // Overview, which pushed Schedule, Location and pricing — the things
+          // this page is actually opened for — below several screens of static
+          // detail. Last in the bar because it is the least often needed.
+          { id: 'advanced' as Tab, label: 'Advanced' },
           ...(MERCH_ENABLED ? [{ id: 'merch' as Tab, label: 'Merch' }] : []),
         ]).map(t => (
           <button key={t.id} className={`tab-item${tab === t.id ? ' active' : ''}`}
@@ -377,7 +403,7 @@ export default function EventDetailPage() {
                             fontWeight: 600,
                           }}>
                           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
-                            onChange={e => { const f = e.target.files?.[0]; if (f) { handleCoverUpload(f); e.target.value = ''; } }} />
+                            onChange={e => { const f = e.target.files?.[0]; if (f) { setCoverCrop(f); e.target.value = ''; } }} />
                           {coverUploading ? '…' : '✎ Replace'}
                         </label>
                       </>
@@ -389,7 +415,7 @@ export default function EventDetailPage() {
                         fontSize: 11, gap: 4, background: 'var(--surface-2)',
                       }}>
                         <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={coverUploading}
-                          onChange={e => { const f = e.target.files?.[0]; if (f) { handleCoverUpload(f); e.target.value = ''; } }} />
+                          onChange={e => { const f = e.target.files?.[0]; if (f) { setCoverCrop(f); e.target.value = ''; } }} />
                         {coverUploading
                           ? <div className="spinner" style={{ width: 18, height: 18 }} />
                           : <><span style={{ fontSize: '1.4rem', lineHeight: 1 }}>+</span><span>Upload cover</span></>}
@@ -569,6 +595,16 @@ export default function EventDetailPage() {
                 onChanged={fetchStats}
               />
             </Panel>
+
+          </div>
+        )}
+
+        {tab === 'advanced' && (
+          <div>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>
+              Reference detail for this event. Nothing here changes what
+              attendees see — that lives on Overview, Information and Line-up.
+            </div>
 
             {/* ── Classification ─────────────────────────────────────────── */}
             <Panel title="Classification">

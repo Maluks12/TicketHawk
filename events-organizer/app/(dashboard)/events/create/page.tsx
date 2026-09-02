@@ -14,6 +14,7 @@ import { validateRequired, validateMinLength, firstError } from '../../../../lib
 import { getKycStatus } from '../../../../lib/kyc';
 import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
 import DateTimePicker from '@/components/dateTimePicker';
+import ImageCropper, { CROP_COVER, CROP_BANNER } from '@/components/imageCropper';
 import TicketTypeModal from '@/components/ticketTypeModal';
 import Select from '@/components/select';
 import LineupFields from '@/components/lineupFields';
@@ -276,13 +277,20 @@ function TicketTypeBuilder({ rows, onChange }: { rows: TicketTypeRow[]; onChange
 // drop zone that looks identical whether or not it will accept the file is a
 // guess, not an affordance.
 function ImageUploader({
-  label, imageUrl, uploading, onUpload, onRemove, hint,
+  label, imageUrl, uploading, onUpload, onRemove, hint, aspect,
 }: {
   label: string; imageUrl: string | null; uploading: boolean;
   onUpload: (f: File) => void; onRemove: () => void; hint?: string;
+  /** When set, the file goes through ImageCropper at this ratio before it is
+   *  uploaded. Null or omitted uploads exactly what was picked — which is what
+   *  the banner does, and CROP_BANNER explains why. */
+  aspect?: number | null;
 }) {
   const [isOver, setIsOver] = useState(false);
   const [rejected, setRejected] = useState<string | null>(null);
+  // Held between picking and confirming a crop. Nothing is sent until the crop
+  // is accepted, so cancelling costs no bandwidth and leaves no orphan in R2.
+  const [cropping, setCropping] = useState<File | null>(null);
 
   const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp'];
   const MAX_BYTES = 10 * 1024 * 1024;
@@ -303,16 +311,34 @@ function ImageUploader({
     return true;
   }
 
+  // One route in for both a click and a drop: validate, crop if this slot
+  // crops, then upload. Two copies of that decision is how a drag-and-drop
+  // path quietly skips a step the click path takes.
+  function take(f: File | undefined | null) {
+    if (!f || !accept(f)) return;
+    if (aspect) setCropping(f);
+    else onUpload(f);
+  }
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setIsOver(false);
     if (uploading) return;
-    const f = e.dataTransfer.files?.[0];
-    if (f && accept(f)) onUpload(f);
+    take(e.dataTransfer.files?.[0]);
   }
 
   return (
     <div>
+      {cropping && aspect && (
+        <ImageCropper
+          file={cropping}
+          aspect={aspect}
+          title={`Crop ${label.toLowerCase()}`}
+          onCancel={() => setCropping(null)}
+          onConfirm={f => { setCropping(null); onUpload(f); }}
+        />
+      )}
+
       <label style={{
         display: 'block', fontSize: 11, fontWeight: 700,
         letterSpacing: '.07em', textTransform: 'uppercase',
@@ -364,11 +390,7 @@ function ImageUploader({
             transition: 'border-color .15s ease, color .15s ease, background .15s ease',
           }}>
           <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} disabled={uploading}
-            onChange={e => {
-              const f = e.target.files?.[0];
-              if (f && accept(f)) onUpload(f);
-              e.target.value = '';
-            }} />
+            onChange={e => { take(e.target.files?.[0]); e.target.value = ''; }} />
           {uploading
             ? <div className="spinner" />
             : <>
@@ -1556,6 +1578,7 @@ export default function CreateEventPage() {
                       onUpload={f => uploadImage(f, setCoverUploading, setCoverImageUrl)}
                       onRemove={() => setCoverImageUrl(null)}
                       hint="Event card thumbnail · JPEG · PNG · WebP · max 10 MB"
+                      aspect={CROP_COVER}
                     />
                     <ImageUploader
                       label="Banner image"
@@ -1564,6 +1587,10 @@ export default function CreateEventPage() {
                       onUpload={f => uploadImage(f, setBannerUploading, setBannerImageUrl)}
                       onRemove={() => setBannerImageUrl(null)}
                       hint="Wide hero at the top of the event page · max 10 MB"
+                      // Null today. The app sizes its hero to the banner's own
+                      // aspect, so a fixed wide crop here would be cropped
+                      // AGAIN on a phone — see the note on CROP_BANNER.
+                      aspect={CROP_BANNER}
                     />
                   </div>
                 </FormCard>

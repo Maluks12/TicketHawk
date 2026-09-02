@@ -1,6 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { Info, ShieldCheck, X } from '@phosphor-icons/react';
+import { TimePicker } from './dateTimePicker';
 import type { InfoCatalogueEntry } from '../lib/eventContent';
 
 // Matches the server's own ceiling: chk_event_info_value_len on
@@ -129,8 +130,15 @@ export default function EventInfoFields({
                 {entry.enum_options?.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             ) : entry.value_type === 'time' ? (
-              <input type="time" value={values[key] ?? ''} disabled={isLocked}
-                onChange={e => setValue(key, e.target.value)} />
+              /* The same picker the event's own start and end time use. This
+                 was <input type="time">, so "Doors open" rendered as Chrome's
+                 unlabelled scrolling columns two fields away from the styled
+                 control — in the same form, on the same screen. */
+              <TimePicker
+                value={values[key] ?? ''}
+                disabled={isLocked}
+                onChange={v => setValue(key, v)}
+              />
             ) : (
               <textarea rows={2} maxLength={INFO_VALUE_MAX} value={values[key] ?? ''} disabled={isLocked}
                 placeholder={entry.hint} onChange={e => setValue(key, e.target.value)}

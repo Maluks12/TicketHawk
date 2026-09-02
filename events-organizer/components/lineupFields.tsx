@@ -2,6 +2,8 @@
 import { useRef, useState } from 'react';
 import { X, Warning, UploadSimple } from '@phosphor-icons/react';
 import { useToast } from '../lib/toast';
+import { TimePicker } from './dateTimePicker';
+import ImageCropper, { CROP_LINEUP } from './imageCropper';
 import { uploadLineupImage, type LineupEntry, type LineupKind } from '../lib/eventContent';
 
 /**
@@ -44,6 +46,9 @@ export default function LineupFields({
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [uploadFor, setUploadFor] = useState<number | null>(null);
   const [uploading, setUploading] = useState<number | null>(null);
+  // A picked file waiting to be cropped. Nothing is uploaded until the crop is
+  // confirmed, so cancelling costs no bandwidth and leaves no orphan in R2.
+  const [pendingCrop, setPendingCrop] = useState<{ index: number; file: File } | null>(null);
 
   function mutate(fn: (list: LineupEntry[]) => LineupEntry[]) {
     onChange(fn(entries).map((e, i) => ({ ...e, sort_order: i })));
@@ -94,10 +99,16 @@ export default function LineupFields({
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
-  async function onFile(f: File | null) {
+  /** Picked, not yet uploaded — hand it to the cropper first. */
+  function onFile(f: File | null) {
     const i = uploadFor;
     setUploadFor(null);
     if (!f || i === null) return;
+    setPendingCrop({ index: i, file: f });
+  }
+
+  async function uploadCropped(i: number, f: File) {
+    setPendingCrop(null);
     setUploading(i);
     try {
       const url = await uploadLineupImage(f);
@@ -119,6 +130,22 @@ export default function LineupFields({
         style={{ display: 'none' }}
         onChange={e => { onFile(e.target.files?.[0] ?? null); e.target.value = ''; }}
       />
+
+      {/* Square, because every consumer surface renders these as CIRCLES and a
+          circle is inscribed in a square. Without a crop step the client
+          centre-crops for you, which is how a performer ends up framed by the
+          middle of their own photo rather than by their face. */}
+      {pendingCrop && (
+        <ImageCropper
+          file={pendingCrop.file}
+          aspect={CROP_LINEUP}
+          maxOutputWidth={900}
+          title="Crop photo"
+          hint="Shown as a circle on the event page — keep the face centred."
+          onCancel={() => setPendingCrop(null)}
+          onConfirm={f => uploadCropped(pendingCrop.index, f)}
+        />
+      )}
 
       {notice}
 
@@ -222,10 +249,12 @@ export default function LineupFields({
                       </div>
                       <div className="field" style={{ marginBottom: 14 }}>
                         <label>Set time</label>
-                        <input
-                          type="time"
+                        {/* Same picker as the event's start and end time. Still
+                            emits 'HH:mm', so setTimeFor's day-anchoring maths
+                            below is untouched. */}
+                        <TimePicker
                           value={clockValue(e.set_time)}
-                          onChange={ev => setTimeFor(i, ev.target.value)}
+                          onChange={v => setTimeFor(i, v)}
                         />
                       </div>
                     </>

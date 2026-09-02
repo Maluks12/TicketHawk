@@ -468,11 +468,19 @@ export default function DateTimePicker({
 //   3. Presets first. Most events start on the hour in the evening, so the
 //      common answers are one tap away above the columns.
 function TimeField({
-  selected, invalid, onPick,
+  selected, invalid, onPick, disabled = false, onClear, wrapStyle,
 }: {
   selected: Date | null;
   invalid: boolean;
   onPick: (hours: number, minutes: number) => void;
+  /** Read-only. Used by review-locked information fields on a live event. */
+  disabled?: boolean;
+  /** When given, the popover offers Clear. A standalone time may be blank;
+   *  the time half of a date+time pair may not, which is why DateTimePicker
+   *  does not pass this and keeps its own Clear on the date side. */
+  onClear?: () => void;
+  /** Overrides the fixed 118px column so TimePicker can fill its .field. */
+  wrapStyle?: CSSProperties;
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -542,10 +550,11 @@ function TimeField({
   };
 
   return (
-    <div ref={boxRef} style={{ position: 'relative', width: 118, flexShrink: 0 }}>
+    <div ref={boxRef} style={{ position: 'relative', width: 118, flexShrink: 0, ...wrapStyle }}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
+        disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label="Time"
@@ -555,7 +564,9 @@ function TimeField({
           borderRadius: 'var(--r)',
           background: 'var(--surface-alpha)',
           color: selected ? 'var(--text)' : 'var(--text-faint)',
-          fontSize: 14, fontFamily: 'inherit', cursor: 'pointer',
+          fontSize: 14, fontFamily: 'inherit',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
           fontVariantNumeric: 'tabular-nums',
         }}
@@ -652,17 +663,79 @@ function TimeField({
             </div>
           </div>
 
-          <button type="button" onClick={() => setOpen(false)}
-            style={{
-              width: '100%', marginTop: 12, padding: '7px 0',
-              border: 'none', borderRadius: 'var(--r)',
-              background: 'var(--accent-deep)', color: 'var(--on-accent)',
-              fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
-            }}>
-            Done
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+            {onClear && (
+              <button type="button" onClick={() => { onClear(); setOpen(false); }}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-3)', fontSize: 12.5, textDecoration: 'underline',
+                  fontFamily: 'inherit', padding: 0, flexShrink: 0,
+                }}>
+                Clear
+              </button>
+            )}
+            <button type="button" onClick={() => setOpen(false)}
+              style={{
+                flex: 1, padding: '7px 0',
+                border: 'none', borderRadius: 'var(--r)',
+                background: 'var(--accent-deep)', color: 'var(--on-accent)',
+                fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+              Done
+            </button>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+// ── TimePicker ───────────────────────────────────────────────────────────────
+// The TIME half of DateTimePicker, on its own, for the fields that are a
+// wall-clock time with no date of their own: "Doors open" in the information
+// catalogue, and a line-up act's set time.
+//
+// Both of those were bare <input type="time"> — the browser's two unlabelled
+// scrolling columns, which is exactly what TimeField was written to replace.
+// So the same form carried the good picker on start/end time and Chrome's on
+// every other time in it. This is that gap closed, not a new control: the
+// popover below is the same component the event's start time opens.
+//
+// Contract matches the native input it replaces, so no caller had to change
+// how it stores anything:
+//   value / onChange: 'HH:mm', 24-hour, no date. '' means unset.
+// A stored 'HH:mm:ss' still parses; it is normalised to 'HH:mm' on the next
+// edit. Date arithmetic stays with the caller — LineupFields still decides
+// which DAY a 01:00 closing set belongs to.
+export function TimePicker({
+  value, onChange, invalid = false, disabled = false, style,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  invalid?: boolean;
+  disabled?: boolean;
+  style?: CSSProperties;
+}) {
+  // A scratch Date that never leaves this component — TimeField is written
+  // against one, and only its hours and minutes are read back out on emit.
+  const selected = useMemo(() => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(value ?? '');
+    if (!m) return null;
+    const h = Number(m[1]);
+    const mi = Number(m[2]);
+    if (h > 23 || mi > 59) return null;
+    const d = new Date();
+    d.setHours(h, mi, 0, 0);
+    return d;
+  }, [value]);
+
+  return (
+    <TimeField
+      selected={selected}
+      invalid={invalid}
+      disabled={disabled}
+      onPick={(h, mi) => onChange(`${pad(h)}:${pad(mi)}`)}
+      onClear={() => onChange('')}
+      wrapStyle={{ width: '100%', flexShrink: 1, ...style }}
+    />
   );
 }
