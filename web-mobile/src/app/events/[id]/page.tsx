@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { BadgeCheck, ChevronRight } from 'lucide-react';
+import { ArrowUpRight } from '@phosphor-icons/react';
 import { useRouter, useParams } from 'next/navigation';
 import { api, type Event, type EventInfoItem, type LineupEntry, type PublicOrganizer } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
@@ -415,12 +416,19 @@ export default function EventDetailPage() {
         .lu-row-link { cursor: pointer; }
         .lu-row-link:hover .lu-name { text-decoration: underline; }
         .lu-row-link:hover .lu-arrow { opacity: 1; }
+        /* Circular, not a rounded square. This slot holds a face — the only
+           portrait on the page — and at 46px a 12px radius read as a thumbnail
+           of artwork rather than of a person. The app has always drawn it
+           round; this brings web in line.
+           The radius is repeated on the img rather than left to the parent's
+           overflow:hidden: a clipped raster child leaves a faint square corner
+           against the border in mobile Safari, the same bleed the app hit. */
         .lu-avatar {
-          width: 46px; height: 46px; flex-shrink: 0; border-radius: 12px;
+          width: 46px; height: 46px; flex-shrink: 0; border-radius: 50%;
           background: ${subtle}; border: 1px solid ${border};
           overflow: hidden; display: flex; align-items: center; justify-content: center;
         }
-        .lu-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .lu-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
         .lu-initial { font-size: 16px; font-weight: 700; color: ${colors.subText}; }
         .lu-name {
           display: block; font-size: 14.5px; font-weight: 600; color: ${colors.text};
@@ -719,8 +727,14 @@ export default function EventDetailPage() {
                     </span>
                     {/* Arrow only when there is somewhere to go — the app made
                         the same fix. A chevron on every row promises a page
-                        that does not exist. */}
-                    {href && <span className="lu-arrow">↗</span>}
+                        that does not exist.
+                        A Phosphor icon rather than the ↗ character: iOS promotes
+                        U+2197 to a colour EMOJI, so on an iPhone this arrived as
+                        a blue-grey tile sitting in the row instead of a faint
+                        mark. The svg keeps className="lu-arrow" and Phosphor
+                        fills with currentColor, so the colour and the hover
+                        opacity fade both still come from that rule. */}
+                    {href && <ArrowUpRight size={16} weight="bold" className="lu-arrow" />}
                   </>
                 );
 

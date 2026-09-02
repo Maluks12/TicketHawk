@@ -20,9 +20,11 @@ import { Image as ExpoImage } from 'expo-image';
 // Storefront/CheckCircle are for the new Organiser row. Both are already used
 // elsewhere in this app (see components/), so they are known to exist in
 // phosphor-react-native 3.0.6 — unlike Buildings/SealCheck, which are not.
+// ArrowUpRight replaces the text glyph on a line-up row that links out; it is
+// exported by 3.0.6 (lib/typescript/icons/ArrowUpRight.d.ts), same as the rest.
 // Export stays: the SHARE button was removed from the action card, but the
 // hero still has one at the top right — that is the one being kept.
-import { CalendarDots, Clock, MapPin, Heart, Export, Ticket, Storefront, CheckCircle, type Icon as PhosphorIcon } from 'phosphor-react-native';
+import { CalendarDots, Clock, MapPin, Heart, Export, Ticket, Storefront, CheckCircle, ArrowUpRight, type Icon as PhosphorIcon } from 'phosphor-react-native';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
@@ -192,7 +194,15 @@ function LineupRow({
           </Text>
         )}
       </View>
-      {hasLink && <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>}
+      {/* An icon, not a text glyph. A character here is drawn by whatever
+          font the platform picks — U+2197 in particular is promoted to a
+          colour EMOJI on iOS and lands as a grey tile, which is exactly how
+          it rendered on the web build. An SVG draws the same everywhere and
+          takes the row's own colour.
+          Pointing up-right, not right: this row opens an EXTERNAL url, and
+          the chevron on the organiser row below already means "another
+          screen in this app". s.participantArrow is still that row's style. */}
+      {hasLink && <ArrowUpRight size={17} color={colors.subText} weight="bold" />}
     </>
   );
 
