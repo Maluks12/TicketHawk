@@ -346,8 +346,14 @@ export default function EventDetailPage() {
       {/* ── Tab content ──────────────────────────────────────────────── */}
       <div className="page-content">
 
+        {/* overflow: visible overrides `.card { overflow: hidden }`. That rule
+            exists to clip children to the corner radius, and it also clips any
+            popover raised from inside the card — which is what cut the Doors
+            open time picker off mid-list. The create wizard's FormCard dropped
+            the same rule for the same reason; nothing in these two cards
+            reaches a rounded corner, so there is nothing left to clip. */}
         {tab === 'info' && (
-          <div className="card"><div className="card-body">
+          <div className="card" style={{ overflow: 'visible' }}><div className="card-body">
             {justCreated && (
               <div className="alert alert-success" style={{ marginBottom: 18 }}>
                 <div>
@@ -362,8 +368,9 @@ export default function EventDetailPage() {
           </div></div>
         )}
 
+        {/* Same rule, same reason: set time uses the same picker. */}
         {tab === 'lineup' && (
-          <div className="card"><div className="card-body">
+          <div className="card" style={{ overflow: 'visible' }}><div className="card-body">
             <LineupBuilder
               eventId={id}
               eventStart={ev.start_time}

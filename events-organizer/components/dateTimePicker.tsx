@@ -27,9 +27,70 @@
 // of UTC — which in SAST (UTC+2) would turn a 00:30 event into the previous
 // day. The event's actual timezone is chosen separately in the form's Timezone
 // field and applied server-side.
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import { CalendarBlank, Clock, CaretLeft, CaretRight } from '@phosphor-icons/react';
+
+// ── Popover placement ────────────────────────────────────────────────────────
+//
+// Both popovers here used to be hardcoded to open DOWNWARD, which is fine in
+// the middle of a form and wrong at the bottom of one. "Doors open" is the last
+// row of the information editor, so its popover opened into the space below the
+// card and the hour and minute columns were simply unreachable — you could see
+// COMMON TIMES and nothing under it.
+//
+// Note this is only half the fix. The other half is that `.card` in globals.css
+// sets `overflow: hidden`, which CLIPS an absolutely positioned child no matter
+// where it is placed. The create wizard hit the same thing and solved it by
+// dropping that rule from FormCard; the event page's Information and Line-up
+// cards now do the same. Flipping without unclipping just moves the cut edge.
+//
+// Measured rather than assumed, and re-measured while open, so the same control
+// behaves correctly in a tall card and a short one.
+
+/** Breathing room between the trigger and the popover. */
+const POPOVER_GAP = 6;
+/** Keep the popover off the very edge of the viewport. */
+const VIEWPORT_EDGE = 10;
+/** Under this much room, a side counts as "no room" and the other side wins. */
+const POPOVER_MIN_H = 240;
+
+// useLayoutEffect warns when React renders on the server, and every screen in
+// this dashboard is server-rendered before it hydrates. The measurement can
+// only run in a browser anyway, so pick the effect that suits where we are.
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+function usePlacement(open: boolean, anchorRef: RefObject<HTMLElement | null>) {
+  const [place, setPlace] = useState<{ up: boolean; maxHeight: number }>(
+    { up: false, maxHeight: 0 },
+  );
+
+  useIsoLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom - POPOVER_GAP - VIEWPORT_EDGE;
+      const above = r.top - POPOVER_GAP - VIEWPORT_EDGE;
+      // Prefer downward — that is where a dropdown is expected. Flip only when
+      // down genuinely cannot hold the popover AND up has more room.
+      const up = below < POPOVER_MIN_H && above > below;
+      setPlace({ up, maxHeight: Math.max(160, up ? above : below) });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    // capture: true — the scroll that moves this trigger is .page-content's,
+    // not the window's, and scroll events do not bubble.
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [open, anchorRef]);
+
+  return place;
+}
 
 const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const MONTHS = [
@@ -151,6 +212,7 @@ export default function DateTimePicker({
   const [view, setView] = useState<Date>(() => selected ?? new Date());
 
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const placement = usePlacement(open, boxRef);
 
   // Re-centre the calendar when the value changes from outside (draft restore,
   // or end-time being nudged forward after start-time moves).
@@ -272,7 +334,9 @@ export default function DateTimePicker({
   const popover: CSSProperties = {
     position: 'absolute',
     zIndex: 50,
-    top: 'calc(100% + 6px)',
+    ...(placement.up
+      ? { bottom: `calc(100% + ${POPOVER_GAP}px)` }
+      : { top: `calc(100% + ${POPOVER_GAP}px)` }),
     left: 0,
     background: 'var(--bg-elevated)',
     border: '1px solid var(--border-2)',
@@ -280,6 +344,11 @@ export default function DateTimePicker({
     boxShadow: 'var(--shadow-pop)',
     padding: 12,
     width: 300,
+    // A last resort, not the plan: on a short window even the better side may
+    // not fit the whole month grid, and a scrollable popover beats a truncated
+    // one. maxHeight is 0 until the first measurement, so it is only applied
+    // once there is a real number.
+    ...(placement.maxHeight ? { maxHeight: placement.maxHeight, overflowY: 'auto' as const } : {}),
   };
 
   const navBtn: CSSProperties = {
@@ -468,7 +537,7 @@ export default function DateTimePicker({
 //   3. Presets first. Most events start on the hour in the evening, so the
 //      common answers are one tap away above the columns.
 function TimeField({
-  selected, invalid, onPick, disabled = false, onClear, wrapStyle,
+  selected, invalid, onPick, disabled = false, onClear, wrapStyle, align = 'right',
 }: {
   selected: Date | null;
   invalid: boolean;
@@ -481,10 +550,20 @@ function TimeField({
   onClear?: () => void;
   /** Overrides the fixed 118px column so TimePicker can fill its .field. */
   wrapStyle?: CSSProperties;
+  /**
+   * Which edge of the trigger the popover hangs from.
+   *
+   * 'right' suits the narrow 118px column beside the date button, where the
+   * popover is wider than its trigger. A full-width TimePicker is the other
+   * way round: right-aligning there parks a 244px popover at the far end of a
+   * 900px field, nowhere near the value it belongs to.
+   */
+  align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const hourColRef = useRef<HTMLDivElement | null>(null);
+  const placement = usePlacement(open, boxRef);
 
   useEffect(() => {
     if (!open) return;
@@ -580,10 +659,17 @@ function TimeField({
           role="dialog"
           aria-label="Choose time"
           style={{
-            position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', right: 0,
+            position: 'absolute', zIndex: 60,
+            ...(placement.up
+              ? { bottom: `calc(100% + ${POPOVER_GAP}px)` }
+              : { top: `calc(100% + ${POPOVER_GAP}px)` }),
+            ...(align === 'left' ? { left: 0 } : { right: 0 }),
             background: 'var(--bg-elevated)', border: '1px solid var(--border-2)',
             borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-pop)',
             padding: 12, width: 244,
+            ...(placement.maxHeight
+              ? { maxHeight: placement.maxHeight, overflowY: 'auto' as const }
+              : {}),
           }}
         >
           <div style={colHead}>Common times</div>
@@ -735,6 +821,7 @@ export function TimePicker({
       disabled={disabled}
       onPick={(h, mi) => onChange(`${pad(h)}:${pad(mi)}`)}
       onClear={() => onChange('')}
+      align="left"
       wrapStyle={{ width: '100%', flexShrink: 1, ...style }}
     />
   );

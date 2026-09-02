@@ -71,6 +71,9 @@ const LOW_RES_W = 800;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
+/** Where the image sits in the frame: scale plus a top-left offset in stage px. */
+interface View { scale: number; x: number; y: number }
+
 /** Swap the extension on a filename, keeping the stem. */
 function renameTo(name: string, ext: string): string {
   const dot = name.lastIndexOf('.');
@@ -99,29 +102,36 @@ export default function ImageCropper({
   /** Receives a NEW File. The caller uploads it exactly as it uploads any other. */
   onConfirm: (cropped: File) => void;
 }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [img, setImg] = useState<HTMLImageElement | null>(null);
+  // The object URL and the decoded element land together, from the load
+  // callback, so nothing here sets state synchronously inside an effect and
+  // there is no render pass where one exists without the other.
+  const [loaded, setLoaded] = useState<{ url: string; img: HTMLImageElement } | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Scale is absolute (image px → stage px), not a multiplier, so the clamp
-  // maths below never has to know about a separate "base" figure.
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  // null means "untouched" and falls back to `fit` below. That is what makes
+  // Reset a one-liner and keeps the opening position out of an effect — an
+  // effect that sets state on mount is the cascading-render pattern the
+  // react-hooks rules flag, and here it was never needed.
+  const [view, setView] = useState<View | null>(null);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
+
+  const img = loaded?.img ?? null;
 
   // ── Decode ────────────────────────────────────────────────────────────────
   // Via an <img> rather than createImageBitmap: browsers apply EXIF orientation
   // to <img> by default (image-orientation: from-image), and drawImage then
   // draws what was displayed. createImageBitmap defaults the other way, which
   // is how a portrait phone photo ends up cropped sideways.
+  // The URL is created INSIDE the effect and revoked by its cleanup, so a
+  // StrictMode double-invoke in development gets a fresh URL on the second run
+  // rather than a revoked one.
   useEffect(() => {
     const url = URL.createObjectURL(file);
-    setSrc(url);
     const el = new Image();
-    el.onload = () => setImg(el);
+    el.onload = () => setLoaded({ url, img: el });
     el.onerror = () => setFailed(true);
     el.src = url;
     return () => URL.revokeObjectURL(url);
@@ -141,77 +151,72 @@ export default function ImageCropper({
     return { w: Math.round(STAGE_MAX_H * aspect), h: STAGE_MAX_H };
   }, [aspect]);
 
-  // The smallest scale that still fills the frame. Everything else is clamped
-  // against it, which is what makes gaps at the edges impossible rather than
-  // merely discouraged.
-  const minScale = useMemo(() => {
-    if (!img) return 1;
-    return Math.max(stage.w / img.naturalWidth, stage.h / img.naturalHeight);
-  }, [img, stage]);
-
-  const clampOffset = useCallback((o: { x: number; y: number }, s: number) => {
-    if (!img) return o;
-    const w = img.naturalWidth * s;
-    const h = img.naturalHeight * s;
+  // The opening view: smallest scale that still fills the frame, centred. Also
+  // the floor every other scale is clamped against, which is what makes gaps at
+  // the edges impossible rather than merely discouraged. Derived, not stored —
+  // so "reset" is setView(null) and the opening position needs no effect.
+  const fit = useMemo<View | null>(() => {
+    if (!img) return null;
+    const scale = Math.max(stage.w / img.naturalWidth, stage.h / img.naturalHeight);
     return {
-      x: clamp(o.x, stage.w - w, 0),
-      y: clamp(o.y, stage.h - h, 0),
+      scale,
+      x: (stage.w - img.naturalWidth * scale) / 2,
+      y: (stage.h - img.naturalHeight * scale) / 2,
     };
   }, [img, stage]);
 
-  // Open centred at minimum zoom: the whole picture visible, nothing cropped
-  // that the organiser did not choose to crop.
-  const reset = useCallback(() => {
-    if (!img) return;
-    const s = Math.max(stage.w / img.naturalWidth, stage.h / img.naturalHeight);
-    setScale(s);
-    setOffset({
-      x: (stage.w - img.naturalWidth * s) / 2,
-      y: (stage.h - img.naturalHeight * s) / 2,
-    });
-  }, [img, stage]);
+  const cur = view ?? fit;
 
-  useEffect(() => { reset(); }, [reset]);
+  const clampView = useCallback((v: View): View => {
+    if (!img) return v;
+    const w = img.naturalWidth * v.scale;
+    const h = img.naturalHeight * v.scale;
+    return {
+      scale: v.scale,
+      x: clamp(v.x, stage.w - w, 0),
+      y: clamp(v.y, stage.h - h, 0),
+    };
+  }, [img, stage]);
 
   /** Zoom about the centre of the frame, so the subject stays put. */
   const zoomTo = useCallback((next: number) => {
-    const s = clamp(next, minScale, minScale * MAX_ZOOM);
-    setScale(prev => {
-      setOffset(o => clampOffset({
-        x: stage.w / 2 - (stage.w / 2 - o.x) * (s / prev),
-        y: stage.h / 2 - (stage.h / 2 - o.y) * (s / prev),
-      }, s));
-      return s;
-    });
-  }, [minScale, stage, clampOffset]);
+    if (!fit || !cur) return;
+    const s = clamp(next, fit.scale, fit.scale * MAX_ZOOM);
+    setView(clampView({
+      scale: s,
+      x: stage.w / 2 - (stage.w / 2 - cur.x) * (s / cur.scale),
+      y: stage.h / 2 - (stage.h / 2 - cur.y) * (s / cur.scale),
+    }));
+  }, [fit, cur, stage, clampView]);
 
   // Wheel zoom needs a NON-PASSIVE listener. React's onWheel is registered
   // passively at the root, so preventDefault there is ignored and the modal
   // scrolls behind the crop instead of zooming.
   useEffect(() => {
     const el = stageRef.current;
-    if (!el) return;
+    if (!el || !cur) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      zoomTo(scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
+      zoomTo(cur.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomTo, scale]);
+  }, [zoomTo, cur]);
 
   // ── Drag to pan ───────────────────────────────────────────────────────────
   function onPointerDown(e: React.PointerEvent) {
-    if (!img) return;
+    if (!cur) return;
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    dragRef.current = { px: e.clientX, py: e.clientY, ox: offset.x, oy: offset.y };
+    dragRef.current = { px: e.clientX, py: e.clientY, ox: cur.x, oy: cur.y };
   }
   function onPointerMove(e: React.PointerEvent) {
     const d = dragRef.current;
-    if (!d) return;
-    setOffset(clampOffset({
+    if (!d || !cur) return;
+    setView(clampView({
+      scale: cur.scale,
       x: d.ox + (e.clientX - d.px),
       y: d.oy + (e.clientY - d.py),
-    }, scale));
+    }));
   }
   function onPointerUp() { dragRef.current = null; }
 
@@ -219,14 +224,14 @@ export default function ImageCropper({
   // Source rect in IMAGE pixels: the stage shows image coords from
   // (-offset / scale) across (stage size / scale).
   const srcRect = useMemo(() => {
-    if (!img) return null;
+    if (!img || !cur) return null;
     return {
-      x: -offset.x / scale,
-      y: -offset.y / scale,
-      w: stage.w / scale,
-      h: stage.h / scale,
+      x: -cur.x / cur.scale,
+      y: -cur.y / cur.scale,
+      w: stage.w / cur.scale,
+      h: stage.h / cur.scale,
     };
-  }, [img, offset, scale, stage]);
+  }, [img, cur, stage]);
 
   // Never upscale. Zooming right in on a small photo gives a small file, and
   // the readout below says so rather than inventing pixels.
@@ -272,6 +277,8 @@ export default function ImageCropper({
       setBusy(false);
     }
   }
+
+  const minScale = fit?.scale ?? 1;
 
   const iconBtn: React.CSSProperties = {
     width: 30, height: 30, display: 'grid', placeItems: 'center',
@@ -327,44 +334,49 @@ export default function ImageCropper({
                   borderRadius: 'var(--r-lg)',
                   border: '1px solid var(--border-2)',
                   background: 'var(--surface-2)',
-                  cursor: img ? 'grab' : 'wait',
+                  display: loaded ? 'block' : 'grid',
+                  placeItems: 'center',
+                  cursor: loaded ? 'grab' : 'wait',
                   touchAction: 'none',
                   userSelect: 'none',
                 }}
               >
-                {src && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={src}
-                    alt=""
-                    draggable={false}
-                    style={{
-                      position: 'absolute',
-                      left: offset.x, top: offset.y,
-                      width: img ? img.naturalWidth * scale : 0,
-                      height: img ? img.naturalHeight * scale : 0,
-                      maxWidth: 'none', display: 'block',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                )}
-                {/* Rule-of-thirds guides. Faint and non-interactive — they help
-                    line a face or a logo up without competing with the art. */}
-                {img && (
-                  <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-                    {[1, 2].map(i => (
-                      <div key={`h${i}`} style={{
-                        position: 'absolute', left: 0, right: 0, top: `${(i * 100) / 3}%`,
-                        height: 1, background: 'rgba(255,255,255,.28)',
-                      }} />
-                    ))}
-                    {[1, 2].map(i => (
-                      <div key={`v${i}`} style={{
-                        position: 'absolute', top: 0, bottom: 0, left: `${(i * 100) / 3}%`,
-                        width: 1, background: 'rgba(255,255,255,.28)',
-                      }} />
-                    ))}
-                  </div>
+                {loaded && img && cur ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={loaded.url}
+                      alt=""
+                      draggable={false}
+                      style={{
+                        position: 'absolute',
+                        left: cur.x, top: cur.y,
+                        width: img.naturalWidth * cur.scale,
+                        height: img.naturalHeight * cur.scale,
+                        maxWidth: 'none', display: 'block',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                    {/* Rule-of-thirds guides. Faint and non-interactive — they
+                        help line a face or a logo up without competing with
+                        the art. */}
+                    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                      {[1, 2].map(i => (
+                        <div key={`h${i}`} style={{
+                          position: 'absolute', left: 0, right: 0, top: `${(i * 100) / 3}%`,
+                          height: 1, background: 'rgba(255,255,255,.28)',
+                        }} />
+                      ))}
+                      {[1, 2].map(i => (
+                        <div key={`v${i}`} style={{
+                          position: 'absolute', top: 0, bottom: 0, left: `${(i * 100) / 3}%`,
+                          width: 1, background: 'rgba(255,255,255,.28)',
+                        }} />
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="spinner" />
                 )}
               </div>
 
@@ -373,24 +385,26 @@ export default function ImageCropper({
                 marginTop: 16, maxWidth: stage.w, marginLeft: 'auto', marginRight: 'auto',
               }}>
                 <button type="button" style={iconBtn} aria-label="Zoom out"
-                  onClick={() => zoomTo(scale / 1.2)}>
+                  disabled={!cur} onClick={() => cur && zoomTo(cur.scale / 1.2)}>
                   <MagnifyingGlassMinus size={15} />
                 </button>
                 <input
                   type="range"
                   aria-label="Zoom"
+                  disabled={!cur}
                   min={minScale}
                   max={minScale * MAX_ZOOM}
                   step={minScale / 100}
-                  value={scale}
+                  value={cur?.scale ?? minScale}
                   onChange={e => zoomTo(Number(e.target.value))}
                   style={{ flex: 1, accentColor: 'var(--accent)', cursor: 'pointer' }}
                 />
                 <button type="button" style={iconBtn} aria-label="Zoom in"
-                  onClick={() => zoomTo(scale * 1.2)}>
+                  disabled={!cur} onClick={() => cur && zoomTo(cur.scale * 1.2)}>
                   <MagnifyingGlassPlus size={15} />
                 </button>
-                <button type="button" style={iconBtn} aria-label="Reset crop" onClick={reset}>
+                <button type="button" style={iconBtn} aria-label="Reset crop"
+                  disabled={!cur} onClick={() => setView(null)}>
                   <ArrowCounterClockwise size={15} />
                 </button>
               </div>
@@ -402,9 +416,11 @@ export default function ImageCropper({
               }}>
                 {lowRes ? <Warning size={13} weight="fill" /> : <ArrowsOutCardinal size={13} />}
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {lowRes
-                    ? `Exports at ${outW} x ${outH} — small for this slot. Zoom out for a sharper result.`
-                    : `Exports at ${outW} x ${outH}`}
+                  {outW === 0
+                    ? 'Reading image…'
+                    : lowRes
+                      ? `Exports at ${outW} x ${outH} — small for this slot. Zoom out for a sharper result.`
+                      : `Exports at ${outW} x ${outH}`}
                 </span>
               </div>
             </>
