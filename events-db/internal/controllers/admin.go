@@ -102,7 +102,13 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		var total int
-		err = pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&total)
+		// Deleted accounts are anonymous stubs kept only so the bookings and
+		// events foreign keys stay valid (migration 000065). They are not
+		// users and do not belong in a user listing. The COUNT is filtered
+		// alongside the SELECT below — filtering one and not the other would
+		// hand the console a page count it can never fill.
+		err = pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM users WHERE deleted_at IS NULL`).Scan(&total)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count users"})
 			return
@@ -113,6 +119,7 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		query := `
 			SELECT id, email, role, created_at
 			FROM users
+			WHERE deleted_at IS NULL
 			ORDER BY created_at DESC
 			LIMIT $1 OFFSET $2
 		`
