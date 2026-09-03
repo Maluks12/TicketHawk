@@ -26,8 +26,9 @@ const MERCH_ENABLED = false;
 //
 // These MIRROR the server and exist so a rejection is instant and specific
 // instead of a round trip that ends in a generic failure. The authority is
-// events-db/internal/services/image_service.go — maxCoverSize (5 MB),
-// maxBannerSize (8 MB) and minHeroLongEdge (1000px). If those move, move these.
+// events-db/internal/services/image_service.go — maxCoverSize (5 MB) and
+// maxBannerSize (8 MB). If those move, move these. There is deliberately no
+// minimum dimension any more: the server accepts any size up to those limits.
 //
 // Note the asymmetry that made this bite: the cover goes through the cropper,
 // which re-encodes to a JPEG of at most 1600px, so an oversized source is
@@ -39,7 +40,6 @@ const MERCH_ENABLED = false;
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_COVER_MB = 5;
 const MAX_BANNER_MB = 8;
-const MIN_HERO_LONG_EDGE = 1000;
 
 /** Type and size, checked before anything is sent. Returns a reason, or null. */
 function rejectReason(f: File, maxMB: number): string | null {
@@ -319,7 +319,6 @@ export default function EventDetailPage() {
           aspect={CROP_COVER}
           title="Crop cover image"
           hint="This is the card people see in the feed and in search results."
-          minOutputWidth={MIN_HERO_LONG_EDGE}
           onCancel={() => setCoverCrop(null)}
           onConfirm={f => { setCoverCrop(null); handleCoverUpload(f); }}
         />

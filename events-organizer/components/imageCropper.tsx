@@ -90,16 +90,16 @@ export default function ImageCropper({
   /** Longest edge of the exported image. Never upscales past the source. */
   maxOutputWidth?: number;
   /**
-   * HARD floor on the exported width — below it, the crop cannot be confirmed.
+   * Optional HARD floor on the exported width — below it, the crop cannot be
+   * confirmed.
    *
-   * This exists because the server has one. UploadEventImage rejects covers and
-   * banners whose long edge is under minHeroLongEdge (1000px), and since we
-   * never upscale, zooming far into a small photo can drop under that. Without
-   * this the crop looked fine, uploaded, and came back a 400.
+   * Nothing passes one today. It mirrored the server's 1000px minimum for
+   * covers and banners, which has been removed; no upload path now rejects an
+   * image for being small. Kept because a slot that genuinely cannot use a tiny
+   * image should be able to say so in one prop rather than after the upload.
    *
-   * 0 means no floor — the generic /organiser/upload path (the wizard and
-   * line-up photos) has no dimension check, so nothing is gained by inventing
-   * one there.
+   * 0, the default, means no floor — the LOW_RES_W advisory below still warns
+   * without blocking, which is the right behaviour when nothing will reject it.
    */
   minOutputWidth?: number;
   onCancel: () => void;
