@@ -18,6 +18,7 @@ import { useEventStore } from '../../store/eventStore';
 import { useAppTheme } from '../../theme/colors';
 import { CoverImage } from '../../components/CoverImage';
 import { prefetchFullImages } from '../../lib/img';
+import { fmtRand } from '../../lib/money';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const CARD_IMAGE_H = Math.round(SCREEN_W * 0.52);
@@ -27,7 +28,7 @@ const CARD_RADIUS  = 14;
 
 function formatPrice(price: number) {
   if (!price || price === 0) return 'Free';
-  return `R${Math.round(price).toLocaleString('en-ZA')}`;
+  return fmtRand(price);
 }
 
 function formatCardDate(iso?: string | null) {

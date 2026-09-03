@@ -29,6 +29,7 @@ import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
 import { useAppTheme } from '../../theme/colors';
 import { CoverImage } from '../../components/CoverImage';
+import { fmtRand } from '../../lib/money';
 
 /**
  * Organiser profile.
@@ -51,7 +52,7 @@ const CARD_RADIUS  = 14;
 
 function formatPrice(price: number) {
   if (!price || price === 0) return 'Free';
-  return `R${Math.round(price).toLocaleString('en-ZA')}`;
+  return fmtRand(price);
 }
 
 function formatCardDate(iso?: string | null) {

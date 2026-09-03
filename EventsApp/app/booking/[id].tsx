@@ -58,7 +58,8 @@ const HERO_TEXT_SHADOW = {
 
 const fmt       = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const fmtTime   = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
-const fmtMoney  = (n: number)   => `R${Math.round(n).toLocaleString('en-ZA')}`;
+// lib/money — was Math.round, which overstated any amount carrying cents.
+const fmtMoney  = (n: number)   => fmtRand(n);
 const fmtDT     = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 const STATUS_COLOR: Record<string, string> = {

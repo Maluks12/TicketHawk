@@ -341,6 +341,27 @@ type UpdateEventDTO struct {
 	Tags               *[]string  `json:"tags"`
 	Performers         *[]string  `json:"performers"`
 	Teams              *[]string  `json:"teams"`
+
+	// Sent records which JSON keys the request body actually carried. It is
+	// never unmarshalled from the wire — the handler fills it from a second
+	// pass over the same body.
+	//
+	// A nil pointer above means two different things: "the client left this
+	// field out, leave the column alone" and "the client sent null, clear the
+	// column". For most fields that ambiguity is harmless. For the venue pin
+	// it is not — an admin who types an address by hand instead of picking it
+	// from the autocomplete is deliberately clearing place_id and the
+	// coordinates, and a nil check alone silently keeps the OLD pin.
+	//
+	// Paths that do not populate this (the organiser update) leave it nil, and
+	// WasSent then reports false for everything — i.e. previous behaviour.
+	Sent map[string]bool `json:"-"`
+}
+
+// WasSent reports whether the request body carried the given JSON key at all,
+// regardless of its value. Safe on a nil map.
+func (d *UpdateEventDTO) WasSent(key string) bool {
+	return d.Sent[key]
 }
 
 // Category represents a row from the categories table.

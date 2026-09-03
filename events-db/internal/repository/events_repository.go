@@ -965,15 +965,45 @@ func AdminUpdateEvent(pool *pgxpool.Pool, eventID string, dto *models.UpdateEven
 		args = append(args, *dto.City)
 		argIndex++
 	}
+
+	// The venue pin: place_id first, then the coordinates.
+	//
+	// place_id was missing from this builder entirely. The console sent it,
+	// the DTO parsed it, and this function dropped it on the floor — so no
+	// admin edit could ever move the pin, and every event kept the place_id
+	// it was created with. UpdateEvents (the organiser variant) has always
+	// written it; only the admin path was missing.
+	//
+	// That is why "Open in maps" split by platform after a venue change:
+	// Android reads place_id first and opened the OLD venue, while Apple Maps
+	// has no notion of a Google place_id and used the coordinates — which this
+	// function did update — so iOS looked correct.
+	//
+	// An explicit null clears the column. It means the address was typed by
+	// hand rather than picked from the autocomplete, so there is no pin to
+	// keep; the clients then search the address text, which is less precise
+	// than a place_id but not wrong, which a stale pin is. WasSent is what
+	// separates that from the field simply being absent.
+	if dto.PlaceID != nil {
+		updates = append(updates, fmt.Sprintf("place_id = $%d", argIndex))
+		args = append(args, *dto.PlaceID)
+		argIndex++
+	} else if dto.WasSent("place_id") {
+		updates = append(updates, "place_id = NULL")
+	}
 	if dto.Latitude != nil {
 		updates = append(updates, fmt.Sprintf("latitude = $%d", argIndex))
 		args = append(args, *dto.Latitude)
 		argIndex++
+	} else if dto.WasSent("latitude") {
+		updates = append(updates, "latitude = NULL")
 	}
 	if dto.Longitude != nil {
 		updates = append(updates, fmt.Sprintf("longitude = $%d", argIndex))
 		args = append(args, *dto.Longitude)
 		argIndex++
+	} else if dto.WasSent("longitude") {
+		updates = append(updates, "longitude = NULL")
 	}
 	if dto.MaxCapacity != nil {
 		updates = append(updates, fmt.Sprintf("max_capacity = $%d", argIndex))
