@@ -278,13 +278,32 @@ func AdminUpdateEventHandler(pool *pgxpool.Pool, ec *cache.EventCache) gin.Handl
 	return func(c *gin.Context) {
 		eventID := c.Param("id")
 
+		// ShouldBindBodyWithJSON, not ShouldBindJSON: it caches the body so it
+		// can be read a second time below. ShouldBindJSON consumes the reader
+		// and the second bind would see an empty body.
 		var dto models.UpdateEventDTO
-		if err := c.ShouldBindJSON(&dto); err != nil {
+		if err := c.ShouldBindBodyWithJSON(&dto); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error":   "Validation failed",
 				"details": utils.FormatValidationErrors(err),
 			})
 			return
+		}
+
+		// Which keys were actually SENT. The typed DTO above cannot answer that:
+		// an omitted field and an explicit null both land as a nil pointer. The
+		// venue pin needs the distinction — see UpdateEventDTO.Sent — because
+		// clearing place_id/latitude/longitude is a real instruction the console
+		// sends whenever an address is typed rather than picked.
+		//
+		// A failure here is not fatal: Sent stays nil and every field falls back
+		// to the plain nil check, which is exactly the old behaviour.
+		var rawKeys map[string]any
+		if err := c.ShouldBindBodyWithJSON(&rawKeys); err == nil {
+			dto.Sent = make(map[string]bool, len(rawKeys))
+			for k := range rawKeys {
+				dto.Sent[k] = true
+			}
 		}
 
 		if ec != nil {
