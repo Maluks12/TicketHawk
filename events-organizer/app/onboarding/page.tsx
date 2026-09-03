@@ -84,8 +84,15 @@ export default function OnboardingPage() {
       <div style={{ width: '100%', maxWidth: 460 }}>
         {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 20 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg viewBox="0 0 20 20" fill="white" width="18" height="18">
+          {/* Same bug as the reset-password buttons, in icon form: this tile is
+              painted with --accent, which is near-white in the dark theme, so a
+              white glyph vanished into it. currentColor inherited from
+              --on-accent flips with the theme.
+              currentColor rather than fill="var(--on-accent)" because var() in a
+              presentation attribute is not reliably supported; as an inherited
+              CSS colour it is. */}
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--accent)', color: 'var(--on-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
               <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd"/>
             </svg>
           </div>

@@ -5,7 +5,7 @@ import {
   Article, CalendarBlank, MapPin, Ticket, Tag, ImageSquare,
   Confetti,
   Trash, Plus, X, Check, CheckCircle, Circle, PencilSimple,
-  FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck, EyeSlash,
+  FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck, EyeSlash, Warning,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
 import { api } from '../../../../lib/api';
@@ -71,6 +71,9 @@ interface EventDraft {
   // Optional: drafts saved before this feature existed won't have them.
   placeId?: string; placeLabel?: string;
   latitude?: number | null; longitude?: number | null;
+  // The venue/address/city the pin was captured WITH. Without this a refresh
+  // resets the staleness check and a drifted pin goes quiet again.
+  pinnedAt?: { venueName: string; address: string; city: string } | null;
   venueType: 'auto' | 'stadium' | 'auditorium' | 'none';
   tags: string[]; performers: string[]; teams: string[];
   // Optional: drafts saved before line-up and information existed will not have
@@ -582,10 +585,38 @@ export default function CreateEventPage() {
   const [city,                setCity]                = useState('');
   // Captured by the Places autocomplete alongside the three text fields, so the
   // clients can build an EXACT map link instead of a fuzzy text search.
+  // The venue/address/city the map pin was captured with.
+  //
+  // A pin is only meaningful while it still matches the text beside it. These
+  // three fields are free-text inputs, so an organiser fixing a typo'd street
+  // address leaves place_id and lat/lng pointing at the ORIGINAL place — and
+  // every surface that opens a map prefers coordinates over text, by design,
+  // because a text search once sent buyers to the wrong FNB Stadium.
+  //
+  // The result: the event reads correctly everywhere and navigates to the old
+  // location. iOS hides it (Apple Maps shows the label you pass alongside `ll`,
+  // so the NEW address is displayed over the OLD pin); Android's geo: URI shows
+  // what is actually at those coordinates, so it looks broken there first.
+  // Android is right. Nothing is wrong in the app — the record is contradictory.
+  const [pinnedAt, setPinnedAt] = useState<
+    { venueName: string; address: string; city: string } | null
+  >(null);
   const [placeId,             setPlaceId]             = useState('');
   const [latitude,            setLatitude]            = useState<number | null>(null);
   const [longitude,           setLongitude]           = useState<number | null>(null);
   const [placeLabel,          setPlaceLabel]          = useState('');
+
+  // Has the address text moved away from the place the pin was dropped on?
+  //
+  // Compared trimmed, because trailing whitespace is not a relocation. Only
+  // meaningful while a pin exists — with no pin there is nothing to contradict,
+  // and every map surface falls back to searching the text, which is the safe
+  // degradation rather than a silently wrong one.
+  const pinStale = !!placeId && !!pinnedAt && (
+    venueName.trim() !== pinnedAt.venueName.trim() ||
+    address.trim()   !== pinnedAt.address.trim()   ||
+    city.trim()      !== pinnedAt.city.trim()
+  );
   // Fixed at 'none' while seating maps are disabled; see the note in the
   // Location card where the picker used to be.
   const [venueType,           setVenueType]           = useState<'auto'|'stadium'|'auditorium'|'none'>('none');
@@ -730,6 +761,16 @@ export default function CreateEventPage() {
         setPlaceId(ev.place_id ?? '');
         setLatitude(ev.latitude ?? null);
         setLongitude(ev.longitude ?? null);
+        // Saved text and saved pin are taken to have agreed at save time, so
+        // simply opening an event never reports drift. Editing any of the three
+        // fields from here does.
+        setPinnedAt(ev.place_id
+          ? {
+              venueName: String(ev.venue_name ?? ''),
+              address:   String(ev.address ?? ''),
+              city:      String(ev.city ?? ''),
+            }
+          : null);
         setTags(ev.tags ?? []);
         setPerformers(ev.performers ?? []);
         setTeams(ev.teams ?? []);
@@ -771,7 +812,7 @@ export default function CreateEventPage() {
         savedAt: new Date().toISOString(),
         title, description, categoryId, timezone, startTime, endTime, expiresAt,
         isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
-        venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
+        venueName, address, city, placeId, latitude, longitude, placeLabel, pinnedAt, venueType, tags, performers, teams, ticketTypes,
         coverImageUrl, bannerImageUrl,
         // Included so a refresh mid-form does not lose a line-up somebody has
         // just typed out — the most tedious part of this page to re-enter.
@@ -786,7 +827,7 @@ export default function CreateEventPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
       isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
-      venueName, address, city, placeId, latitude, longitude, placeLabel, venueType, tags, performers, teams, ticketTypes,
+      venueName, address, city, placeId, latitude, longitude, placeLabel, pinnedAt, venueType, tags, performers, teams, ticketTypes,
       coverImageUrl, bannerImageUrl,
       lineup, infoChosen, infoValues, submitting]);
 
@@ -820,6 +861,11 @@ export default function CreateEventPage() {
     setLatitude(typeof d.latitude === 'number' ? d.latitude : null);
     setLongitude(typeof d.longitude === 'number' ? d.longitude : null);
     setPlaceLabel(d.placeLabel ?? '');
+    // Older drafts predate the field; fall back to their own saved text, which
+    // is the same assumption edit mode makes.
+    setPinnedAt(d.pinnedAt ?? (d.placeId
+      ? { venueName: d.venueName ?? '', address: d.address ?? '', city: d.city ?? '' }
+      : null));
     setVenueType(d.venueType ?? 'none');
     setTags(d.tags ?? []);
     setLineup((d as { lineup?: LineupEntry[] }).lineup ?? []);
@@ -1307,28 +1353,51 @@ export default function CreateEventPage() {
                     style={inp}
                     initialValue={placeLabel}
                     onSelect={(p: PlaceResult) => {
-                      if (p.venueName) setVenueName(p.venueName);
-                      if (p.address)   setAddress(p.address);
-                      if (p.city)      setCity(p.city);
+                      // Record what the pin was captured with, using the values
+                      // actually applied — a Place can come back without a
+                      // street number, and those fields keep their old text.
+                      const nextVenue = p.venueName || venueName;
+                      const nextAddr  = p.address   || address;
+                      const nextCity  = p.city      || city;
+                      if (p.venueName) setVenueName(nextVenue);
+                      if (p.address)   setAddress(nextAddr);
+                      if (p.city)      setCity(nextCity);
                       setPlaceId(p.placeId);
                       setLatitude(p.latitude);
                       setLongitude(p.longitude);
                       setPlaceLabel(p.formatted);
+                      setPinnedAt({ venueName: nextVenue, address: nextAddr, city: nextCity });
                     }}
                   />
                   {placeId && (
                     <div style={{
                       display: 'flex', alignItems: 'center', gap: 8, margin: '-4px 0 18px',
-                      fontSize: 12.5, color: 'var(--success-fg)',
+                      fontSize: 12.5,
+                      color: pinStale ? 'var(--warning-fg)' : 'var(--success-fg)',
                     }}>
-                      <SealCheck size={15} weight="fill" />
-                      <span style={{ flex: 1 }}>Pinned to <strong>{placeLabel || 'the selected place'}</strong></span>
+                      {pinStale
+                        ? <Warning size={15} weight="fill" />
+                        : <SealCheck size={15} weight="fill" />}
+                      <span style={{ flex: 1 }}>
+                        {pinStale ? (
+                          <>
+                            Still pinned to <strong>{placeLabel || 'the place you picked'}</strong>,
+                            which no longer matches the address below. Maps open the PIN,
+                            not the text — search again to move it, or remove it and
+                            let maps search the address.
+                          </>
+                        ) : (
+                          <>Pinned to <strong>{placeLabel || 'the selected place'}</strong></>
+                        )}
+                      </span>
                       <button type="button" onClick={() => {
-                        setPlaceId(''); setLatitude(null); setLongitude(null); setPlaceLabel('');
+                        setPlaceId(''); setLatitude(null); setLongitude(null);
+                        setPlaceLabel(''); setPinnedAt(null);
                       }} style={{
                         background: 'none', border: 'none', cursor: 'pointer',
                         color: 'var(--text-3)', fontSize: 12, textDecoration: 'underline',
-                      }}>Clear</button>
+                        flexShrink: 0, alignSelf: 'flex-start',
+                      }}>{pinStale ? 'Remove pin' : 'Clear'}</button>
                     </div>
                   )}
 
