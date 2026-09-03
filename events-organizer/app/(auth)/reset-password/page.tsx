@@ -179,9 +179,11 @@ function ResetPasswordInner() {
                 we&apos;ve sent a link to reset your password. It expires in 30 minutes.
                 Remember to check your spam folder.
               </div>
+              {/* --on-accent, not '#fff' — see the note on the submit button
+                  below. Same button, same bug, same fix. */}
               <button onClick={() => router.replace('/login')} style={{
                 width: '100%', padding: '11px', fontSize: 15, fontWeight: 700,
-                background: 'var(--accent)', color: '#fff', border: 'none',
+                background: 'var(--accent)', color: 'var(--on-accent)', border: 'none',
                 borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
               }}>
                 Back to login
@@ -223,10 +225,18 @@ function ResetPasswordInner() {
                     placeholder="you@example.com" />
                 </div>
 
+                {/* --on-accent, NOT '#fff'. In this palette the accent is a
+                    CONTRAST colour rather than a hue: near-black (#111110) in
+                    the light theme and near-white (#F2F1EE) in dark. A literal
+                    white label is therefore only ever right in one of the two —
+                    in dark mode it rendered white on a near-white button and the
+                    text disappeared. --on-accent is defined as the inverse in
+                    each theme and flips with it; the literal could not.
+                    The login page already carries this exact fix. */}
                 <button type="submit" disabled={submitting} style={{
                   width: '100%', padding: '11px', fontSize: 15, fontWeight: 700,
                   background: submitting ? 'var(--accent-border)' : 'var(--accent)',
-                  color: '#fff', border: 'none', borderRadius: 6,
+                  color: 'var(--on-accent)', border: 'none', borderRadius: 6,
                   cursor: submitting ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
                 }}>
                   {submitting ? 'Sending…' : 'Send reset link'}
