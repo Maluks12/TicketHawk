@@ -651,27 +651,63 @@ export default function EventDetail() {
     // were sent to a completely different place — a mismatched pair like
     // "FNB Stadium, Sandton" (FNB is in Nasrec) can resolve anywhere. It also
     // dropped the street address entirely.
+    //
+    // place_id outranks coordinates, and that ordering is the whole point.
+    // A place_id names a PLACE; coordinates name a POINT. Google Maps, handed a
+    // bare point, reverse-geocodes it and captions the pin with whatever street
+    // address is nearest to it. Inside a 26-hectare complex like Montecasino
+    // that lands on some access road, so the buyer saw an address that appears
+    // nowhere on the event — while the pin itself was perfectly correct.
+    //
+    // This only ever showed on ANDROID. Apple Maps prints the `q` string you
+    // pass alongside `ll` as the pin's caption, so iOS displayed the event's own
+    // address and looked right. Android reverse-geocoded and told the truth.
+    // The place_id was being captured and stored all along; it just never
+    // reached the one platform whose map app understands it, because the geo:
+    // URL below always won canOpenURL and webUrl was never reached.
     const ev        = event as any;
     const label     = [event.venue_name, ev.address, event.city].filter(Boolean).join(', ');
     const query     = encodeURIComponent(label);
     const hasCoords = typeof ev.latitude === 'number' && typeof ev.longitude === 'number';
     const coords    = hasCoords ? `${ev.latitude},${ev.longitude}` : '';
+    const placeId   = typeof ev.place_id === 'string' && ev.place_id ? ev.place_id : '';
 
-    // Native apps take coordinates directly, which removes all ambiguity.
-    const nativeUrl = hasCoords
-      ? (Platform.OS === 'ios' ? `maps://?ll=${coords}&q=${query}` : `geo:${coords}?q=${coords}(${query})`)
-      : (Platform.OS === 'ios' ? `maps://?q=${query}` : `geo:0,0?q=${query}`);
-
-    const webUrl = ev.place_id
-      ? `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${encodeURIComponent(ev.place_id)}`
+    // Google's universal maps link. On Android this is an app link, so the
+    // Google Maps app opens it — it is not a "web fallback" there, it is the
+    // better native route whenever a place_id exists.
+    const googleUrl = placeId
+      ? `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${encodeURIComponent(placeId)}`
       : hasCoords
         ? `https://www.google.com/maps/search/?api=1&query=${coords}`
         : `https://www.google.com/maps/search/?api=1&query=${query}`;
+
+    if (Platform.OS === 'android') {
+      // No canOpenURL guard on this branch. geo: is a custom scheme, and from
+      // Android 11 canOpenURL needs a <queries> entry to see it at all — a
+      // manifest detail that should not decide whether the buyer gets the right
+      // venue. An https link needs no such permission.
+      if (placeId) {
+        await Linking.openURL(googleUrl);
+        return;
+      }
+      const geoUrl = hasCoords ? `geo:${coords}?q=${coords}(${query})` : `geo:0,0?q=${query}`;
+      try {
+        await Linking.openURL(geoUrl);
+      } catch {
+        await Linking.openURL(googleUrl);
+      }
+      return;
+    }
+
+    // iOS. Apple Maps has no notion of a Google place_id, so `ll` plus a label
+    // is the best available — and it is already accurate, because the caption
+    // comes from the event rather than from a reverse geocode.
+    const appleUrl = hasCoords ? `maps://?ll=${coords}&q=${query}` : `maps://?q=${query}`;
     try {
-      const ok = await Linking.canOpenURL(nativeUrl);
-      await Linking.openURL(ok ? nativeUrl : webUrl);
+      const ok = await Linking.canOpenURL(appleUrl);
+      await Linking.openURL(ok ? appleUrl : googleUrl);
     } catch {
-      await Linking.openURL(webUrl);
+      await Linking.openURL(googleUrl);
     }
   };
 
