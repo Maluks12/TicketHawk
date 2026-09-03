@@ -76,6 +76,15 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       "expo-web-browser",
@@ -112,12 +121,12 @@
         }
       ],
       "expo-apple-authentication",
-        [
-          "@react-native-google-signin/google-signin",
-          {
-            "iosUrlScheme": "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
-          }
-        ]
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
+        }
+      ]
     ],
     "extra": {
       "router": {},
