@@ -45,6 +45,7 @@ import { useRouter } from 'expo-router';
 import { api } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useAppTheme } from '../../theme/colors';
+import { fmtRand } from '../../lib/money';
 import {
   signInWithApple, signInWithGoogle,
   SocialAuthCancelled, SocialAuthProviderError,
@@ -62,7 +63,8 @@ interface DeletionPreview {
   unsettled_payouts: number;
 }
 
-const rand = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`;
+// lib/money. This one prints refund amounts, where cents are the whole point.
+const rand = (n: number) => fmtRand(n);
 
 export default function DeleteAccountScreen() {
   const router = useRouter();

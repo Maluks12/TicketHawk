@@ -32,6 +32,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckCircle, Warning, ArrowUUpLeft, HourglassMedium } from 'phosphor-react-native';
 import { useAppTheme } from '../../theme/colors';
+import { fmtCurrency } from '../../lib/money';
 import {
   openGatewayCheckout,
   startBookingPayment,
@@ -222,7 +223,9 @@ export default function PaymentScreen() {
   const fmtAmount = () => {
     const n = parseFloat(amount ?? '0');
     if (Number.isNaN(n)) return currency ?? 'ZAR';
-    return `${currency ?? 'ZAR'} ${Math.round(n).toLocaleString('en-ZA')}`;
+    // lib/money. This is the amount the buyer is about to authorise, so it is
+    // the last place that should disagree with the gateway by 40c.
+    return fmtCurrency(n, currency ?? 'ZAR');
   };
 
   const methodLabel = method ? (METHOD_LABEL[method] ?? '') : '';

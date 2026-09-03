@@ -33,6 +33,7 @@ import { makePurchaseSheet, purchaseTokens, PRIMARY } from '../../styles/purchas
 import { useAppTheme } from '../../theme/colors';
 import { isPaymentMethodEnabled } from '../../lib/paymentMethods';
 import { openLegal } from '../../lib/legalLinks';
+import { fmtPrice as fmtPriceShared, fmtRand } from '../../lib/money';
 import {
   CaretLeft, CaretDown, ArrowsDownUp, Check,
   CreditCard, AppleLogo, PaypalLogo, Bank,
@@ -44,10 +45,10 @@ const { width: SW } = Dimensions.get('window');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtPrice(price: number) {
-  if (price === 0) return 'Free';
-  return `R${Math.round(price).toLocaleString('en-ZA')}`;
-}
+// Re-exported from lib/money so the ticket price, the per-ticket fee and the
+// order total all round the same way. The local Math.round version turned a
+// R3.60 total into "R4" on the Review Order button.
+const fmtPrice = fmtPriceShared;
 
 function fmtDate(iso: string) {
   const d = new Date(iso);

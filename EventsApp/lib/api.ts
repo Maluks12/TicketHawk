@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
+import { fmtRand, fmtPrice } from './money';
 
 function getApiBaseUrl(): string {
   if (process.env.EXPO_PUBLIC_API_URL) {
@@ -831,8 +832,12 @@ export function cartItemSubtitle(item: CartItem): string | null {
   return parts.join(' · ') || null;
 }
 
+// Delegates to lib/money. This was `Math.round(...)`, which rounds to nearest
+// rather than truncating — a R3 ticket plus its 60c service fee printed as
+// "R4", quoting the buyer 40c more than the payment sheet then charged. Kept
+// as a named export so every existing import site is untouched.
 export function fmtZAR(amount: number): string {
-  return `R${Math.round(amount).toLocaleString('en-ZA')}`;
+  return fmtRand(amount);
 }
 
 // ── Checkout ───────────────────────────────────────────────────────────────
@@ -1078,9 +1083,7 @@ export function fmtFollowDate(iso: string): string {
 }
 
 export function fmtFollowPrice(price: number): string {
-  return price === 0
-    ? 'Free'
-    : `R${Math.round(price).toLocaleString('en-ZA')}`;
+  return fmtPrice(price);
 }
 
 export function followAvailPct(

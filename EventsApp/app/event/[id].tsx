@@ -33,6 +33,7 @@ import { toggleFollow, getFollowStatus } from '../../lib/api';
 import { buildEventShare } from '../../lib/shareLinks';
 import { LEGAL_URLS } from '../../lib/legalLinks';
 import { IMG_PLACEHOLDER, thumbUrl } from '../../lib/img';
+import { fmtPrice } from '../../lib/money';
 
 // ─── Hero frame ───────────────────────────────────────────────────────────────
 // The hero no longer forces every image into one tall portrait box. The frame
@@ -91,9 +92,9 @@ const INFO_NOT_GIVEN = 'N/A';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatPrice(price: number, currency: string) {
-  if (price === 0) return 'Free';
-  return `R${Math.round(price).toLocaleString('en-ZA')}`;
+// lib/money. Was Math.round — a R3.60 ticket showed as "R4" on the hero.
+function formatPrice(price: number, _currency: string) {
+  return fmtPrice(price);
 }
 
 function formatDate(iso: string) {
