@@ -50,7 +50,7 @@ export default function StudioScan() {
 
   const busyRef = useRef(false);
   const resultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stopLoop = useRef<(() => void) | null>(null);
+  const collisionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!permission) requestPermission();
@@ -87,20 +87,51 @@ export default function StudioScan() {
     if (eventId) prepare(eventId);
   }, [eventId, prepare]);
 
+  // ── Background sync loop ────────────────────────────────────────────────────
+  //
+  // Tied to the EVENT, not to the scan phase.
+  //
+  // This effect used to list `phase` in its dependencies. phase changes TWICE
+  // per scan (ready -> result -> ready), and every change ran the cleanup and
+  // then re-ran the effect — and startSyncLoop fires a full cycle() the moment
+  // it starts. A gate scanning continuously was therefore doing a push + pull +
+  // exceptions round-trip per ticket instead of one every 20 seconds, on the one
+  // subsystem whose entire purpose is to keep the network out of the scan path.
+  // On venue wifi that is exactly when it hurts most.
+  //
+  // It also lost data: the teardown sets stopped = true inside the loop, so any
+  // cycle still in flight skipped its report() and threw away the pushOnce
+  // verdicts — the collision toast for that batch never fired. Collisions were
+  // being dropped silently during rapid scanning, which is the one moment they
+  // matter.
+  //
+  // eventId alone is correct: the loop should live exactly as long as the screen
+  // is pointed at one event.
   useEffect(() => {
-    if (!eventId || (phase !== 'ready' && phase !== 'result' && phase !== 'pool_headcount' && phase !== 'unknown_confirm')) return;
-    if (stopLoop.current) return;
-    stopLoop.current = startSyncLoop(eventId, setSync, (ex) => {
+    if (!eventId) return;
+
+    const stop = startSyncLoop(eventId, setSync, (ex) => {
       const first = ex[0];
       setCollisionNote(
         ex.length === 1
           ? `Duplicate entry detected${first.name ? `: ${first.name}` : ''}`
           : `${ex.length} scan exceptions detected`,
       );
-      setTimeout(() => setCollisionNote(null), 6000);
+      // Replace rather than stack: back-to-back collisions used to leave
+      // orphaned timers, so the second banner was cleared by the first one's
+      // timeout and vanished early.
+      if (collisionTimer.current) clearTimeout(collisionTimer.current);
+      collisionTimer.current = setTimeout(() => setCollisionNote(null), 6000);
     });
-    return () => { stopLoop.current?.(); stopLoop.current = null; };
-  }, [eventId, phase]);
+
+    return () => {
+      stop();
+      if (collisionTimer.current) {
+        clearTimeout(collisionTimer.current);
+        collisionTimer.current = null;
+      }
+    };
+  }, [eventId]);
 
   useEffect(() => () => { if (resultTimer.current) clearTimeout(resultTimer.current); }, []);
 

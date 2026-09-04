@@ -808,7 +808,7 @@ export interface PaymentStatusResponse {
 }
 
 export async function getPaymentStatus(bookingId: string): Promise<PaymentStatusResponse> {
-  const res = await api.get<PaymentStatusResponse>(`/v1/payments/${bookingId}/status`);
+  const res = await api.get<PaymentStatusResponse>(`/v1/bookings/${bookingId}/payment`);
   return res.data;
 }
 

@@ -1,12 +1,15 @@
 package controllers
 
 import (
-	"events-db/internal/models"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
+	"events-db/internal/models"
+
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -32,10 +35,11 @@ func PromoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		)
 
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":   "User not found or database error",
-				"details": err.Error(),
-			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to promote user"})
 			return
 		}
 
@@ -46,6 +50,22 @@ func PromoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
+// DemoteUserHandler removes admin from an account.
+//
+// It used to write role = 'user'. There is no 'user' label in the user_role
+// enum — it is ('attendee', 'organizer', 'admin') — so every demote failed with
+// 22P02, and the handler returned it as a 404 "User not found or database
+// error". Two of the three states the console can put an account in have never
+// worked. This is the same shape as the organizer_status bug migration 000079
+// fixed, and it hid for the same reason: a 404 on an admin action reads as a
+// stale row, not as a missing enum label.
+//
+// The target is chosen rather than fixed. Demoting straight to 'attendee' would
+// strip organiser access from an admin who also runs events, and every event
+// and payout screen would start 403-ing the moment the demotion landed. An
+// account with an organizers row therefore falls back to 'organizer'; everyone
+// else to 'attendee'. The CASE runs inside the UPDATE, so there is no
+// read-then-write race with a concurrent organiser registration.
 func DemoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -53,10 +73,15 @@ func DemoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		targetUserID := c.Param("id")
 
 		query := `
-			UPDATE users
-			SET role = 'user', updated_at = $2
-			WHERE id = $1
-			RETURNING id, email, role, created_at
+			UPDATE users u
+			SET role = CASE
+			             WHEN EXISTS (SELECT 1 FROM organizers o WHERE o.user_id = u.id)
+			             THEN 'organizer'::user_role
+			             ELSE 'attendee'::user_role
+			           END,
+			    updated_at = $2
+			WHERE u.id = $1
+			RETURNING u.id, u.email, u.role, u.created_at
 		`
 
 		var user models.User
@@ -68,15 +93,19 @@ func DemoteUserHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		)
 
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":   "User not found or database error",
-				"details": err.Error(),
-			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+				return
+			}
+			// Don't hand the raw driver error back to the console. Returning
+			// err.Error() verbatim is how a broken enum label managed to look
+			// like a missing user for months.
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to demote user"})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"message": "User demoted to regular user",
+			"message": "Admin access removed",
 			"user":    user,
 		})
 	}
@@ -144,6 +173,10 @@ func GetAllUsersHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 				continue
 			}
 			users = append(users, user)
+		}
+		if err := rows.Err(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
+			return
 		}
 
 		totalPages := (total + limit - 1) / limit

@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"events-db/internal/models"
+	"events-db/internal/repository"
 	"events-db/internal/services"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // GetRotatingQRTokenHandler godoc
@@ -266,12 +268,18 @@ func ScanRotatingQRHandler(
 		defer cancel()
 
 		// ── Step 2: DB status checks ──────────────────────────────────────────
+		// e.id and ta.booking_id are selected for the scan_events row written at
+		// the end. The ledger foreign-keys both, and reading them costs nothing
+		// because the query already joins both tables.
+		//
 		// Note: ta.qr_scanned_at is intentionally NOT selected here — the
 		// duplicate-entry guard is handled atomically by the UPDATE below
 		// (WHERE qr_scanned_at IS NULL). Fetching it upfront would add a
 		// nullable TIMESTAMPTZ scan that serves no purpose in this path.
 		var (
+			eventID         string
 			assignStatus    string
+			bookingID       string
 			bookingStatus   string
 			startTime       time.Time
 			endTime         time.Time
@@ -283,7 +291,9 @@ func ScanRotatingQRHandler(
 
 		err = pool.QueryRow(ctx, `
 			SELECT
+				e.id,
 				ta.status,
+				ta.booking_id,
 				b.booking_status,
 				e.start_time,
 				e.end_time,
@@ -300,7 +310,9 @@ func ScanRotatingQRHandler(
 			      AND es.status   = 'active'
 			WHERE ta.id = $1
 		`, payload.AssignmentID, scannerUserID).Scan(
+			&eventID,
 			&assignStatus,
+			&bookingID,
 			&bookingStatus,
 			&startTime,
 			&endTime,
@@ -347,12 +359,22 @@ func ScanRotatingQRHandler(
 		// ── Step 4: atomic single-entry mark ──────────────────────────────────
 		// The WHERE qr_scanned_at IS NULL guard makes this race-condition safe:
 		// if two staff members scan simultaneously, only one UPDATE wins.
+		//
+		// The scanner columns are set in the SAME statement. They used to be
+		// written by a fire-and-forget goroutine after the response was sent,
+		// which was wrong twice over: a panic on a non-handler goroutine is not
+		// covered by gin.Recovery() and would take the whole process down, and
+		// one goroutine per scan is unbounded on a busy gate. Folding them in
+		// costs nothing extra, makes the audit atomic with the admission, and
+		// matches what ingestOne already does on the offline path.
 		tag, err := pool.Exec(ctx, `
 			UPDATE ticket_assignments
-			SET qr_scanned_at = NOW()
+			SET qr_scanned_at           = NOW(),
+			    scanned_by_user_id      = $2,
+			    scanned_by_organizer_id = (SELECT id FROM organizers WHERE user_id = $2 LIMIT 1)
 			WHERE id = $1
 			  AND qr_scanned_at IS NULL
-		`, payload.AssignmentID)
+		`, payload.AssignmentID, scannerUserID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record scan"})
 			return
@@ -368,12 +390,40 @@ func ScanRotatingQRHandler(
 				payload.AssignmentID,
 			).Scan(&firstScan)
 
+			// Ledger the refused re-scan too. 'duplicate' is excluded from both
+			// the analytics sum and the exceptions report, so it moves no
+			// figure — but without it a re-scan leaves no trace at all.
+			if lerr := repository.RecordOnlineScan(ctx, pool, eventID,
+				&payload.AssignmentID, &bookingID, payload.AssignmentID,
+				1, scannerUserID, repository.ScanVerdictDuplicate,
+			); lerr != nil {
+				log.Warn().Err(lerr).
+					Str("assignment_id", payload.AssignmentID).
+					Msg("scan: duplicate not written to scan ledger")
+			}
+
 			resp := gin.H{"error": "Ticket already scanned"}
 			if firstScan != nil {
 				resp["first_scan_at"] = *firstScan
 			}
 			c.JSON(http.StatusConflict, resp)
 			return
+		}
+
+		// ── Step 5: append to the scan ledger ─────────────────────────────────
+		// Best-effort by design. The attendee is already admitted by the UPDATE
+		// above, and refusing them because an audit row failed to write would be
+		// the worse failure at a gate. Logged at error level because a persistent
+		// failure here silently under-reports attendance and blocks instant-tier
+		// promotion — which is exactly how this went unnoticed before.
+		if lerr := repository.RecordOnlineScan(ctx, pool, eventID,
+			&payload.AssignmentID, &bookingID, payload.AssignmentID,
+			1, scannerUserID, repository.ScanVerdictAdmitted,
+		); lerr != nil {
+			log.Error().Err(lerr).
+				Str("assignment_id", payload.AssignmentID).
+				Str("event_id", eventID).
+				Msg("scan: admitted but not written to scan ledger — attendance and payout eligibility will under-report")
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -383,21 +433,6 @@ func ScanRotatingQRHandler(
 			"booking_id":    payload.BookingID,
 			"scanned_at":    now,
 		})
-
-		// Best-effort: log the scan with the scanner's user ID for audit trails.
-		// We fire-and-forget since the response is already sent.
-		go func() {
-			auditCtx, auditCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer auditCancel()
-			_, _ = pool.Exec(auditCtx, `
-				UPDATE ticket_assignments
-				SET scanned_by_user_id      = $1,
-				    scanned_by_organizer_id = (
-					SELECT id FROM organizers WHERE user_id = $1 LIMIT 1
-				)
-				WHERE id = $2
-			`, scannerUserID, payload.AssignmentID)
-		}()
 	}
 }
 
