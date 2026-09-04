@@ -12,8 +12,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
-import { STUDIO } from '../../components/studio/theme';
-import { StatCard, Card, Chip, ProgressBar, Loader, Empty } from '../../components/studio/ui';
+import { makeStyles, useStudioTheme, type StudioPalette } from '../../components/studio/theme';
+import { StatCard, Card, Chip, ProgressBar, Loader, Empty, ThemeToggle } from '../../components/studio/ui';
 import {
   getOrgStats,
   getOrgEvents,
@@ -29,13 +29,17 @@ import {
 // Campaigns tab removed for launch — ads are disabled platform-wide.
 type TabId = 'overview' | 'events';
 
-const capColor = (pct: number) =>
-  pct >= 90 ? STUDIO.red : pct >= 70 ? STUDIO.amber : STUDIO.accent;
+// Capacity colour ramp. Takes the palette because the light and dark reds are
+// different colours, not the same colour at a different opacity.
+const capColor = (pct: number, S: StudioPalette) =>
+  pct >= 90 ? S.red : pct >= 70 ? S.amber : S.accent;
 
 export default function StudioHome() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, authReady } = useAuthStore();
+  const { S } = useStudioTheme();
+  const styles = useStyles();
 
   const [tab, setTab] = useState<TabId>('overview');
   const [stats, setStats] = useState<OrgStats | null>(null);
@@ -133,9 +137,14 @@ export default function StudioHome() {
             </Text>
           </View>
         </View>
-        <TouchableOpacity onPress={exit} style={styles.closeBtn} hitSlop={10}>
-          <Feather name="log-out" size={18} color={STUDIO.text} />
-        </TouchableOpacity>
+        <View style={styles.topActions}>
+          {/* Organisers live on this screen; door staff never see it, so the
+              same control is repeated on app/staff/join.tsx. */}
+          <ThemeToggle />
+          <TouchableOpacity onPress={exit} style={styles.closeBtn} hitSlop={10}>
+            <Feather name="log-out" size={18} color={S.text} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (
@@ -143,7 +152,7 @@ export default function StudioHome() {
       ) : error && !stats ? (
         <View style={{ flex: 1 }}>
           <Empty
-            icon={<Feather name="wifi-off" size={26} color={STUDIO.muted} />}
+            icon={<Feather name="wifi-off" size={26} color={S.muted} />}
             title="Couldn't load the dashboard"
             desc="Check your connection and try again."
           />
@@ -160,7 +169,7 @@ export default function StudioHome() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={STUDIO.accent}
+              tintColor={S.accent}
             />
           }
         >
@@ -182,7 +191,7 @@ export default function StudioHome() {
                 onPress={() => router.push('/staff/join' as any)}
               >
                 <View style={styles.staffJoinIcon}>
-                  <Ionicons name="people-outline" size={18} color={STUDIO.accent} />
+                  <Ionicons name="people-outline" size={18} color={S.accent} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.staffJoinTitle}>Join an event as staff</Text>
@@ -190,7 +199,7 @@ export default function StudioHome() {
                     Scanning for another organiser? Redeem their join code here.
                   </Text>
                 </View>
-                <Feather name="chevron-right" size={18} color={STUDIO.muted} />
+                <Feather name="chevron-right" size={18} color={S.muted} />
               </TouchableOpacity>
             </>
           )}
@@ -223,7 +232,7 @@ export default function StudioHome() {
           activeOpacity={0.85}
           onPress={() => router.push('/organiser/scan' as any)}
         >
-          <Ionicons name="qr-code" size={18} color="#fff" />
+          <Ionicons name="qr-code" size={18} color={S.onAccent} />
           <Text style={styles.scanCtaTxt}>Scan</Text>
         </TouchableOpacity>
       </View>
@@ -243,15 +252,17 @@ function NavItem({
   active: boolean;
   onPress: () => void;
 }) {
+  const { S } = useStudioTheme();
+  const styles = useStyles();
   return (
     <TouchableOpacity style={styles.navItem} onPress={onPress} activeOpacity={0.7}>
       <Feather
         name={icon}
         size={20}
-        color={active ? STUDIO.accent : STUDIO.muted}
+        color={active ? S.accent : S.muted}
       />
       <Text
-        style={[styles.navLabel, { color: active ? STUDIO.accent : STUDIO.muted }]}
+        style={[styles.navLabel, { color: active ? S.accent : S.muted }]}
       >
         {label}
       </Text>
@@ -271,6 +282,8 @@ function OverviewTab({
   onOpenEvent: (id: string) => void;
   onSeeEvents: () => void;
 }) {
+  const { S } = useStudioTheme();
+  const styles = useStyles();
   const recent = events.slice(0, 4);
   return (
     <View style={{ gap: 14 }}>
@@ -283,7 +296,7 @@ function OverviewTab({
         <Text style={styles.heroSub}>All-time, after platform fees</Text>
         <View style={styles.heroFooter}>
           <View style={styles.todayPill}>
-            <Feather name="trending-up" size={13} color={STUDIO.green} />
+            <Feather name="trending-up" size={13} color={S.green} />
             <Text style={styles.todayPillTxt}>
               {fmtMoney(stats?.revenue_today ?? 0)} today
             </Text>
@@ -301,14 +314,14 @@ function OverviewTab({
           value={fmtNum(stats?.total_tickets_sold ?? 0)}
           sub={`${fmtNum(stats?.total_bookings ?? 0)} bookings`}
           accent="accent"
-          icon={<Ionicons name="ticket-outline" size={15} color={STUDIO.accent} />}
+          icon={<Ionicons name="ticket-outline" size={15} color={S.accent} />}
         />
         <StatCard
           label="Gross sales"
           value={fmtMoneyCompact(stats?.gross_ticket_revenue ?? 0)}
           sub="ticket revenue"
           accent="green"
-          icon={<Feather name="dollar-sign" size={15} color={STUDIO.green} />}
+          icon={<Feather name="dollar-sign" size={15} color={S.green} />}
         />
       </View>
       <View style={styles.grid}>
@@ -317,14 +330,14 @@ function OverviewTab({
           value={fmtNum(stats?.published_events ?? 0)}
           sub={`of ${fmtNum(stats?.total_events ?? 0)} events`}
           accent="blue"
-          icon={<Feather name="calendar" size={15} color={STUDIO.blue} />}
+          icon={<Feather name="calendar" size={15} color={S.blue} />}
         />
         <StatCard
           label="Tickets sold"
           value={fmtNum(stats?.total_tickets_sold ?? 0)}
           sub={`${fmtNum(stats?.total_bookings ?? 0)} bookings`}
           accent="amber"
-          icon={<Feather name="tag" size={15} color={STUDIO.amber} />}
+          icon={<Feather name="tag" size={15} color={S.amber} />}
         />
       </View>
 
@@ -367,6 +380,8 @@ function EventsTab({
   events: OrgEventRow[];
   onOpenEvent: (id: string) => void;
 }) {
+  const { S } = useStudioTheme();
+  const styles = useStyles();
   const [filter, setFilter] = useState<StatusFilter>('all');
 
   const counts = useMemo(() => {
@@ -410,7 +425,7 @@ function EventsTab({
       <Card noPad>
         {filtered.length === 0 ? (
           <Empty
-            icon={<Feather name="calendar" size={24} color={STUDIO.muted} />}
+            icon={<Feather name="calendar" size={24} color={S.muted} />}
             title="No events here"
             desc="Try a different filter."
           />
@@ -442,6 +457,8 @@ function EventRow({
   onPress: () => void;
   showEarnings?: boolean;
 }) {
+  const { S } = useStudioTheme();
+  const styles = useStyles();
   const pct = capacityPct(ev.tickets_sold, ev.max_capacity);
   return (
     <TouchableOpacity
@@ -466,7 +483,7 @@ function EventRow({
           </Text>
           {showEarnings && (
             <Text style={styles.rowStat}>
-              <Text style={[styles.rowStatStrong, { color: STUDIO.green }]}>
+              <Text style={[styles.rowStatStrong, { color: S.green }]}>
                 {fmtMoney(ev.net_ticket_earnings, ev.currency)}
               </Text>{' '}
               net
@@ -475,16 +492,17 @@ function EventRow({
         </View>
         {pct !== null && (
           <View style={{ marginTop: 2 }}>
-            <ProgressBar pct={pct} color={capColor(pct)} height={5} />
+            <ProgressBar pct={pct} color={capColor(pct, S)} height={5} />
           </View>
         )}
       </View>
-      <Feather name="chevron-right" size={18} color={STUDIO.faint} />
+      <Feather name="chevron-right" size={18} color={S.faint} />
     </TouchableOpacity>
   );
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={{ flex: 1, minWidth: 0 }}>
       <Text style={styles.metricLabel}>{label.toUpperCase()}</Text>
@@ -495,8 +513,8 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: STUDIO.bg },
+const useStyles = makeStyles((S) => ({
+  root: { flex: 1, backgroundColor: S.bg },
 
   // Top bar
   topbar: {
@@ -506,56 +524,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: STUDIO.border,
+    borderBottomColor: S.border,
   },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 11, flex: 1, minWidth: 0 },
   avatar: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: STUDIO.accentDeep,
+    backgroundColor: S.accentDeep,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarTxt: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.5 },
+  avatarTxt: { color: S.onAccent, fontWeight: '800', fontSize: 14, letterSpacing: 0.5 },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  brandWord: { color: STUDIO.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
+  brandWord: { color: S.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
   betaPill: {
-    backgroundColor: STUDIO.accentSoft,
+    backgroundColor: S.accentSoft,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.accentBorder,
+    borderColor: S.accentBorder,
     borderRadius: 5,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  betaTxt: { color: STUDIO.accent, fontSize: 8.5, fontWeight: '800', letterSpacing: 1 },
-  brandSub: { color: STUDIO.muted, fontSize: 12, marginTop: 1 },
+  betaTxt: { color: S.accent, fontSize: 8.5, fontWeight: '800', letterSpacing: 1 },
+  brandSub: { color: S.muted, fontSize: 12, marginTop: 1 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   closeBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   // Hero
   hero: {
-    backgroundColor: STUDIO.bgElevated,
+    backgroundColor: S.bgElevated,
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.accentBorder,
+    borderColor: S.accentBorder,
     padding: 20,
   },
-  heroLabel: { color: STUDIO.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
+  heroLabel: { color: S.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
   heroValue: {
-    color: STUDIO.text,
+    color: S.text,
     fontSize: 40,
     fontWeight: '800',
     letterSpacing: -1.5,
     marginTop: 6,
   },
-  heroSub: { color: STUDIO.muted, fontSize: 13, marginTop: 2 },
+  heroSub: { color: S.muted, fontSize: 13, marginTop: 2 },
   heroFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -566,17 +585,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: STUDIO.greenSoft,
+    backgroundColor: S.greenSoft,
     borderRadius: 999,
     paddingHorizontal: 11,
     paddingVertical: 6,
   },
-  todayPillTxt: { color: STUDIO.green, fontSize: 12.5, fontWeight: '700' },
-  heroFootMuted: { color: STUDIO.muted, fontSize: 12 },
+  todayPillTxt: { color: S.green, fontSize: 12.5, fontWeight: '700' },
+  heroFootMuted: { color: S.muted, fontSize: 12 },
 
   grid: { flexDirection: 'row', gap: 12 },
 
-  linkTxt: { color: STUDIO.accent, fontSize: 13, fontWeight: '600' },
+  linkTxt: { color: S.accent, fontSize: 13, fontWeight: '600' },
 
   // Rows
   row: {
@@ -588,32 +607,32 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: STUDIO.border,
+    borderBottomColor: S.border,
   },
   rowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowTitle: { color: STUDIO.text, fontSize: 14.5, fontWeight: '700', flexShrink: 1 },
-  rowMeta: { color: STUDIO.muted, fontSize: 12 },
+  rowTitle: { color: S.text, fontSize: 14.5, fontWeight: '700', flexShrink: 1 },
+  rowMeta: { color: S.muted, fontSize: 12 },
   rowStatsLine: { flexDirection: 'row', gap: 14, flexWrap: 'wrap' },
-  rowStat: { color: STUDIO.sub, fontSize: 12.5 },
-  rowStatStrong: { color: STUDIO.text, fontWeight: '700' },
+  rowStat: { color: S.sub, fontSize: 12.5 },
+  rowStatStrong: { color: S.text, fontWeight: '700' },
 
   // Campaign metrics
   metricRow: { flexDirection: 'row', gap: 10 },
-  metricLabel: { color: STUDIO.faint, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6 },
-  metricValue: { color: STUDIO.text, fontSize: 14, fontWeight: '700', marginTop: 2 },
+  metricLabel: { color: S.faint, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6 },
+  metricValue: { color: S.text, fontSize: 14, fontWeight: '700', marginTop: 2 },
 
   // Filter pills
   pill: {
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 999,
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.border,
+    borderColor: S.border,
   },
-  pillActive: { backgroundColor: STUDIO.accentSoft, borderColor: STUDIO.accentBorder },
-  pillTxt: { color: STUDIO.sub, fontSize: 13, fontWeight: '600' },
-  pillTxtActive: { color: STUDIO.accent },
+  pillActive: { backgroundColor: S.accentSoft, borderColor: S.accentBorder },
+  pillTxt: { color: S.sub, fontSize: 13, fontWeight: '600' },
+  pillTxtActive: { color: S.accent },
 
   // Bottom nav
   bottomNav: {
@@ -626,9 +645,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 10,
     gap: 4,
-    backgroundColor: 'rgba(8,8,12,0.96)',
+    backgroundColor: S.overlay,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: STUDIO.border,
+    borderTopColor: S.border,
   },
   navItem: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 },
   navLabel: { fontSize: 10.5, fontWeight: '600' },
@@ -637,10 +656,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: STUDIO.border,
+    borderColor: S.border,
     paddingHorizontal: 16,
     paddingVertical: 16,
     marginTop: 20,
@@ -651,31 +670,31 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: STUDIO.accentSoft,
+    backgroundColor: S.accentSoft,
     borderWidth: 1,
-    borderColor: STUDIO.accentBorder,
+    borderColor: S.accentBorder,
   },
-  staffJoinTitle: { color: STUDIO.text, fontSize: 14, fontWeight: '700' },
-  staffJoinSub: { color: STUDIO.sub, fontSize: 12, marginTop: 2, lineHeight: 16 },
+  staffJoinTitle: { color: S.text, fontSize: 14, fontWeight: '700' },
+  staffJoinSub: { color: S.sub, fontSize: 12, marginTop: 2, lineHeight: 16 },
 
   scanCta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: STUDIO.accentDeep,
+    backgroundColor: S.accentDeep,
     borderRadius: 14,
     paddingHorizontal: 18,
     paddingVertical: 11,
     marginLeft: 4,
   },
-  scanCtaTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  scanCtaTxt: { color: S.onAccent, fontSize: 14, fontWeight: '800' },
 
   retryBtn: {
     alignSelf: 'center',
-    backgroundColor: STUDIO.accentDeep,
+    backgroundColor: S.accentDeep,
     borderRadius: 12,
     paddingHorizontal: 24,
     paddingVertical: 12,
   },
-  retryTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
-});
+  retryTxt: { color: S.onAccent, fontWeight: '700', fontSize: 14 },
+}));

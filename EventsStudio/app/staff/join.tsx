@@ -7,7 +7,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { STUDIO } from '../../components/studio/theme';
+import { makeStyles, useStudioTheme } from '../../components/studio/theme';
+import { ThemeToggle } from '../../components/studio/ui';
 import { redeemStaffCode, listMyScanEvents, type ScannableEvent } from '../../lib/staff';
 import { useAuthStore } from '../../store/authStore';
 
@@ -33,6 +34,8 @@ function normaliseCode(raw: string): string | null {
 export default function JoinEventStaff() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { S } = useStudioTheme();
+  const styles = useStyles();
 
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -176,11 +179,13 @@ export default function JoinEventStaff() {
           <Ionicons
             name={router.canGoBack() ? 'chevron-back' : 'log-out-outline'}
             size={22}
-            color={STUDIO.text}
+            color={S.text}
           />
         </TouchableOpacity>
         <Text style={styles.title}>Event staff</Text>
-        <View style={{ width: 34 }} />
+        {/* Door staff never see the organiser dashboard, so the appearance
+            control has to exist here too — this was a dead spacer. */}
+        <ThemeToggle size={34} />
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
@@ -199,7 +204,7 @@ export default function JoinEventStaff() {
                 value={code}
                 onChangeText={setCode}
                 placeholder="7KQ4-M2XR"
-                placeholderTextColor={STUDIO.muted}
+                placeholderTextColor={S.muted}
                 autoCapitalize="characters"
                 autoCorrect={false}
                 maxLength={12}
@@ -213,7 +218,7 @@ export default function JoinEventStaff() {
                 activeOpacity={0.85}
               >
                 {submitting
-                  ? <ActivityIndicator color="#fff" size="small" />
+                  ? <ActivityIndicator color={S.onAccent} size="small" />
                   : <Text style={styles.joinBtnTxt}>Join</Text>}
               </TouchableOpacity>
             </View>
@@ -232,13 +237,13 @@ export default function JoinEventStaff() {
               disabled={submitting}
               activeOpacity={0.85}
             >
-              <Ionicons name="qr-code-outline" size={30} color={STUDIO.accent} />
+              <Ionicons name="qr-code-outline" size={30} color={S.accent} />
               <Text style={styles.scanQrTxt}>Scan QR</Text>
             </TouchableOpacity>
           </View>
 
           {feedback && (
-            <Text style={[styles.feedback, { color: feedback.kind === 'ok' ? STUDIO.green : STUDIO.red }]}>
+            <Text style={[styles.feedback, { color: feedback.kind === 'ok' ? S.green : S.red }]}>
               {feedback.text}
             </Text>
           )}
@@ -247,7 +252,7 @@ export default function JoinEventStaff() {
         {/* Events I can scan */}
         <Text style={styles.sectionLabel}>EVENTS YOU CAN SCAN</Text>
         {loadingEvents ? (
-          <ActivityIndicator color={STUDIO.sub} style={{ marginTop: 24 }} />
+          <ActivityIndicator color={S.sub} style={{ marginTop: 24 }} />
         ) : events.length === 0 ? (
           <Text style={styles.empty}>
             Nothing yet. Enter or scan a join code above, and events you're staffing will appear here.
@@ -269,7 +274,7 @@ export default function JoinEventStaff() {
                 <View style={styles.badge}>
                   <Text style={styles.badgeTxt}>{roleBadge(item.role)}</Text>
                 </View>
-                <Ionicons name="qr-code-outline" size={20} color={STUDIO.accent} style={{ marginLeft: 10 }} />
+                <Ionicons name="qr-code-outline" size={20} color={S.accent} style={{ marginLeft: 10 }} />
               </TouchableOpacity>
             )}
           />
@@ -279,61 +284,61 @@ export default function JoinEventStaff() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: STUDIO.bg, paddingHorizontal: 16 },
+const useStyles = makeStyles((S) => ({
+  root: { flex: 1, backgroundColor: S.bg, paddingHorizontal: 16 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   backBtn: {
     width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
   },
-  title: { color: STUDIO.text, fontSize: 17, fontWeight: '700' },
+  title: { color: S.text, fontSize: 17, fontWeight: '700' },
 
   card: {
-    backgroundColor: STUDIO.surface, borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: STUDIO.border, marginBottom: 22,
+    backgroundColor: S.surface, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: S.border, marginBottom: 22,
   },
-  cardTitle: { color: STUDIO.text, fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  cardSub: { color: STUDIO.sub, fontSize: 12.5, lineHeight: 18, marginBottom: 14 },
+  cardTitle: { color: S.text, fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  cardSub: { color: S.sub, fontSize: 12.5, lineHeight: 18, marginBottom: 14 },
 
   joinRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
   input: {
-    backgroundColor: STUDIO.bgElevated, borderRadius: 10, borderWidth: 1,
-    borderColor: STUDIO.borderStrong, color: STUDIO.text, paddingHorizontal: 14,
+    backgroundColor: S.field, borderRadius: 10, borderWidth: 1,
+    borderColor: S.borderStrong, color: S.text, paddingHorizontal: 14,
     paddingVertical: 12, fontSize: 15, letterSpacing: 1.5, fontWeight: '600',
   },
   joinBtn: {
-    backgroundColor: STUDIO.accentDeep, borderRadius: 10, paddingVertical: 11,
+    backgroundColor: S.accentDeep, borderRadius: 10, paddingVertical: 11,
     alignItems: 'center', justifyContent: 'center', marginTop: 8,
   },
-  joinBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  joinBtnTxt: { color: S.onAccent, fontWeight: '700', fontSize: 15 },
 
   orCol: { alignItems: 'center', justifyContent: 'center', gap: 6 },
-  orLine: { flex: 1, width: 1, backgroundColor: STUDIO.border },
-  orTxt: { color: STUDIO.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  orLine: { flex: 1, width: 1, backgroundColor: S.border },
+  orTxt: { color: S.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
 
   scanQrBtn: {
-    width: 104, borderRadius: 10, borderWidth: 1, borderColor: STUDIO.accentBorder,
-    backgroundColor: STUDIO.accentSoft, alignItems: 'center', justifyContent: 'center', gap: 6,
+    width: 104, borderRadius: 10, borderWidth: 1, borderColor: S.accentBorder,
+    backgroundColor: S.accentSoft, alignItems: 'center', justifyContent: 'center', gap: 6,
   },
-  scanQrTxt: { color: STUDIO.accent, fontWeight: '700', fontSize: 13 },
+  scanQrTxt: { color: S.accent, fontWeight: '700', fontSize: 13 },
 
   feedback: { marginTop: 12, fontSize: 12.5, lineHeight: 18 },
 
-  sectionLabel: { color: STUDIO.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
-  empty: { color: STUDIO.sub, fontSize: 13, lineHeight: 19, marginTop: 6 },
+  sectionLabel: { color: S.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
+  empty: { color: S.sub, fontSize: 13, lineHeight: 19, marginTop: 6 },
 
   eventRow: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: STUDIO.surface,
-    borderRadius: 14, borderWidth: 1, borderColor: STUDIO.border,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: S.surface,
+    borderRadius: 14, borderWidth: 1, borderColor: S.border,
     paddingHorizontal: 14, paddingVertical: 13, marginBottom: 10,
   },
-  eventTitle: { color: STUDIO.text, fontSize: 14.5, fontWeight: '600' },
-  eventMeta: { color: STUDIO.sub, fontSize: 12, marginTop: 3 },
+  eventTitle: { color: S.text, fontSize: 14.5, fontWeight: '600' },
+  eventMeta: { color: S.sub, fontSize: 12, marginTop: 3 },
   badge: {
-    backgroundColor: STUDIO.accentSoft, borderColor: STUDIO.accentBorder, borderWidth: 1,
+    backgroundColor: S.accentSoft, borderColor: S.accentBorder, borderWidth: 1,
     borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, marginLeft: 8,
   },
-  badgeTxt: { color: STUDIO.accent, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+  badgeTxt: { color: S.accent, fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
 
   // Camera capture
   camRoot: { flex: 1, backgroundColor: '#000' },
@@ -356,4 +361,4 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)', fontSize: 13.5, marginTop: 18,
     textAlign: 'center', paddingHorizontal: 40,
   },
-});
+}));

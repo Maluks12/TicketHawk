@@ -7,7 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
-import { STUDIO } from '../../components/studio/theme';
+import { makeStyles, useStudioTheme } from '../../components/studio/theme';
+import { ThemeToggle } from '../../components/studio/ui';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Studio login.
@@ -20,12 +21,20 @@ import { STUDIO } from '../../components/studio/theme';
 // can't evaluate the app) and quietly lost every organiser who found Studio
 // first, so app/auth/signup.tsx now exists and is linked below.
 //
+// The same reasoning applies to a FORGOTTEN password, and that gap was worse:
+// sign-up at least had a workaround (make the account elsewhere), while a
+// staffer locked out at a door had none — no reset link anywhere in the app,
+// and the reset page is a web page they'd have to find on their own. The link
+// under the button now goes to /auth/forgot.
+//
 // After login the auth gate (app/index.tsx) routes by role.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function StudioLogin() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const login = useAuthStore((s) => s.login);
+  const { S } = useStudioTheme();
+  const styles = useStyles();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,6 +63,13 @@ export default function StudioLogin() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* Appearance toggle. Reachable before sign-in on purpose: door staff
+          set this phone up outdoors, and a reviewer should be able to see both
+          modes without an account. */}
+      <View style={styles.topRow}>
+        <ThemeToggle />
+      </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1, justifyContent: 'center' }}
@@ -65,7 +81,8 @@ export default function StudioLogin() {
               square to mask into a rounded rect. Rendering it inside the app
               therefore draws a visible dark tile behind the hawk, which is what
               the black box on this screen was. brand-logo.png is the same mark
-              on transparency, so it sits directly on the screen background. */}
+              on transparency, so it sits directly on the screen background —
+              which is now sometimes light, making this doubly important. */}
           <Image source={require('../../assets/brand-logo.png')} style={styles.logo} />
           <View style={styles.brandLine}>
             <Text style={styles.brandWord}>TicketHawk</Text>
@@ -87,21 +104,36 @@ export default function StudioLogin() {
             value={email}
             onChangeText={setEmail}
             placeholder="you@example.com"
-            placeholderTextColor={STUDIO.muted}
+            placeholderTextColor={S.muted}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="email-address"
             textContentType="emailAddress"
           />
 
-          <Text style={[styles.label, { marginTop: 16 }]}>PASSWORD</Text>
+          <View style={styles.labelRow}>
+            <Text style={styles.label}>PASSWORD</Text>
+            {/* Carries the typed email across so they don't retype it. */}
+            <TouchableOpacity
+              onPress={() =>
+                router.push({
+                  pathname: '/auth/forgot',
+                  params: email.trim() ? { email: email.trim() } : {},
+                } as any)
+              }
+              hitSlop={8}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.forgotTxt}>Forgot password?</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.pwRow}>
             <TextInput
               style={[styles.input, { flex: 1 }]}
               value={password}
               onChangeText={setPassword}
               placeholder="Your password"
-              placeholderTextColor={STUDIO.muted}
+              placeholderTextColor={S.muted}
               secureTextEntry={!showPw}
               autoCapitalize="none"
               textContentType="password"
@@ -109,7 +141,7 @@ export default function StudioLogin() {
               returnKeyType="go"
             />
             <TouchableOpacity onPress={() => setShowPw((v) => !v)} hitSlop={10} style={styles.eye}>
-              <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color={STUDIO.sub} />
+              <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color={S.sub} />
             </TouchableOpacity>
           </View>
 
@@ -117,7 +149,7 @@ export default function StudioLogin() {
 
           <TouchableOpacity style={styles.btn} onPress={submit} disabled={busy} activeOpacity={0.85}>
             {busy ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={S.onAccent} />
             ) : (
               <Text style={styles.btnTxt}>Sign in</Text>
             )}
@@ -138,41 +170,49 @@ export default function StudioLogin() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: STUDIO.bg, paddingHorizontal: 22 },
+const useStyles = makeStyles((S) => ({
+  root: { flex: 1, backgroundColor: S.bg, paddingHorizontal: 22 },
+  topRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingTop: 6 },
   brand: { alignItems: 'center', marginBottom: 30 },
   // No borderRadius: there is no longer a square to round off, and rounding a
   // transparent logo just clips the hawk's outer feathers.
   logo: { width: 72, height: 72, marginBottom: 14, resizeMode: 'contain' },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  brandWord: { color: STUDIO.text, fontSize: 24, fontWeight: '800', letterSpacing: 0.3 },
+  brandWord: { color: S.text, fontSize: 24, fontWeight: '800', letterSpacing: 0.3 },
   pill: {
-    backgroundColor: STUDIO.accentSoft,
-    borderColor: STUDIO.accentBorder,
+    backgroundColor: S.accentSoft,
+    borderColor: S.accentBorder,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 6,
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
-  pillTxt: { color: STUDIO.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
+  pillTxt: { color: S.accent, fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
   tagline: {
-    color: STUDIO.sub, fontSize: 13.5, textAlign: 'center',
+    color: S.sub, fontSize: 13.5, textAlign: 'center',
     marginTop: 10, lineHeight: 19, maxWidth: 300,
   },
   card: {
-    backgroundColor: STUDIO.bgElevated,
-    borderColor: STUDIO.border,
+    backgroundColor: S.bgElevated,
+    borderColor: S.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 20,
     padding: 20,
   },
-  label: { color: STUDIO.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  label: { color: S.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  forgotTxt: { color: S.accent, fontSize: 12, fontWeight: '700', marginBottom: 8 },
   input: {
-    backgroundColor: STUDIO.surface,
-    borderColor: STUDIO.border,
+    backgroundColor: S.field,
+    borderColor: S.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
-    color: STUDIO.text,
+    color: S.text,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === 'ios' ? 13 : 10,
     fontSize: 15,
@@ -180,18 +220,18 @@ const styles = StyleSheet.create({
   pwRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   eye: {
     width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: STUDIO.surface,
-    borderColor: STUDIO.border, borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: S.field,
+    borderColor: S.border, borderWidth: StyleSheet.hairlineWidth,
   },
-  error: { color: STUDIO.red, fontSize: 13, marginTop: 12 },
+  error: { color: S.red, fontSize: 13, marginTop: 12 },
   btn: {
-    backgroundColor: STUDIO.accentDeep,
+    backgroundColor: S.accentDeep,
     borderRadius: 13,
     alignItems: 'center',
     paddingVertical: 14,
     marginTop: 18,
   },
-  btnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
-  hint: { color: STUDIO.muted, fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
-  hintLink: { color: STUDIO.accent, fontWeight: '700' },
-});
+  btnTxt: { color: S.onAccent, fontSize: 15.5, fontWeight: '800' },
+  hint: { color: S.muted, fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
+  hintLink: { color: S.accent, fontWeight: '700' },
+}));

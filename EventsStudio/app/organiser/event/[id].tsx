@@ -9,51 +9,80 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { STUDIO } from '../../../components/studio/theme';
+import {
+  makeStyles,
+  useStudioTheme,
+  type StudioPalette,
+} from '../../../components/studio/theme';
 import { StatCard, Card, Chip, ProgressBar, Loader, Empty } from '../../../components/studio/ui';
 import {
   getOrgEventStats,
   getOrgEventBookings,
+  getOrgEventInfo,
   getOrgCampaigns,
   OrgEventStats,
   OrgBooking,
   OrgCampaign,
+  EventInfoItem,
+  INFO_KEY_DOORS,
+  infoValue,
   fmtMoney,
   fmtNum,
   fmtDate,
   fmtDateTime,
+  fmtClock,
+  fmtDayShort,
+  fmtDoors,
+  fmtDuration,
+  sameDay,
+  scanWindow,
+  scanStatus,
   ctr,
   capacityPct,
 } from '../../../lib/organiser';
 
 type Tab = 'overview' | 'attendees';
 
-const capColor = (pct: number) =>
-  pct >= 90 ? STUDIO.red : pct >= 70 ? STUDIO.amber : STUDIO.accent;
+const capColor = (pct: number, S: StudioPalette) =>
+  pct >= 90 ? S.red : pct >= 70 ? S.amber : S.accent;
+
+// How often the scanning countdown refreshes. 30s is under the smallest unit
+// the label shows (minutes), so it never looks stale, and it costs one setState
+// on a screen that is otherwise idle.
+const TICK_MS = 30_000;
 
 export default function StudioEventDetail() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { S } = useStudioTheme();
+  const styles = useStyles();
 
   const [tab, setTab] = useState<Tab>('overview');
   const [stats, setStats] = useState<OrgEventStats | null>(null);
   const [campaign, setCampaign] = useState<OrgCampaign | null>(null);
+  const [info, setInfo] = useState<EventInfoItem[]>([]);
   const [bookings, setBookings] = useState<OrgBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingTab, setLoadingTab] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [s, camps] = await Promise.all([
+        // Only the stats call is allowed to fail the screen. Campaigns and the
+        // information block are decoration — a 404 on either must not turn a
+        // working event page into "Event not found".
+        const [s, camps, items] = await Promise.all([
           getOrgEventStats(id),
           getOrgCampaigns().catch(() => [] as OrgCampaign[]),
+          getOrgEventInfo(id).catch(() => [] as EventInfoItem[]),
         ]);
         if (!alive) return;
         setStats(s);
+        setInfo(items);
         // active_campaign isn't joined server-side here, so resolve it ourselves
         setCampaign(
           camps.find((c) => c.event_id === id && c.status === 'active') ?? null,
@@ -68,6 +97,12 @@ export default function StudioEventDetail() {
       alive = false;
     };
   }, [id]);
+
+  // Keeps "closes in 4h 12m" honest without a per-second timer.
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), TICK_MS);
+    return () => clearInterval(t);
+  }, []);
 
   const loadTab = useCallback(
     async (t: Tab) => {
@@ -103,12 +138,33 @@ export default function StudioEventDetail() {
     [ev],
   );
 
+  // The admission window the SERVER will enforce, recomputed from the same
+  // inputs (see lib/organiser.ts → scanWindow, mirroring models.ScanWindow).
+  const win = useMemo(
+    () =>
+      ev
+        ? scanWindow(
+            ev.start_time,
+            ev.end_time,
+            ev.scan_open_offset_min,
+            ev.scan_close_offset_min,
+          )
+        : null,
+    [ev],
+  );
+  const winState = useMemo(() => (win ? scanStatus(win, now) : null), [win, now]);
+  const doors = useMemo(() => fmtDoors(infoValue(info, INFO_KEY_DOORS)), [info]);
+
+  const venueLine = ev
+    ? [ev.venue_name, ev.city].filter(Boolean).join(', ')
+    : '';
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={STUDIO.text} />
+          <Feather name="arrow-left" size={20} color={S.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {ev?.title ?? 'Event'}
@@ -120,7 +176,7 @@ export default function StudioEventDetail() {
         <Loader />
       ) : notFound || !ev ? (
         <Empty
-          icon={<Feather name="calendar" size={26} color={STUDIO.muted} />}
+          icon={<Feather name="calendar" size={26} color={S.muted} />}
           title="Event not found"
           desc="It may belong to a different organiser account."
         />
@@ -131,16 +187,17 @@ export default function StudioEventDetail() {
             contentContainerStyle={{ padding: 16, paddingBottom: 110 }}
             showsVerticalScrollIndicator={false}
           >
-            {/* Title block */}
+            {/* Title block. The date used to stand alone here, which is how a
+                screen for people working a door managed not to say what time
+                the door opens. */}
             <View style={{ gap: 8, marginBottom: 16 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={styles.evTitle}>{ev.title}</Text>
                 <Chip status={ev.status} />
               </View>
               <Text style={styles.evMeta}>
-                {fmtDate(ev.start_time)} · {ev.venue_name}
-                {ev.venue_name ? ', ' : ''}
-                {ev.city}
+                {fmtDate(ev.start_time)} · {fmtClock(ev.start_time)}
+                {venueLine ? ` · ${venueLine}` : ''}
               </Text>
             </View>
 
@@ -163,20 +220,63 @@ export default function StudioEventDetail() {
             <View style={{ marginTop: 16 }}>
               {tab === 'overview' && (
                 <View style={{ gap: 14 }}>
+                  {/* ── Schedule & admission ──────────────────────────────
+                      Times first, because someone opening this screen at a
+                      venue is asking one of three questions: when does it
+                      start, when can people come in, and can I scan yet. */}
+                  <Card title="Schedule">
+                    <TimeRow
+                      icon="play-circle"
+                      label="Starts"
+                      value={`${fmtDayShort(ev.start_time)} · ${fmtClock(ev.start_time)}`}
+                    />
+                    <TimeRow
+                      icon="stop-circle"
+                      label="Ends"
+                      value={
+                        sameDay(ev.start_time, ev.end_time)
+                          ? fmtClock(ev.end_time)
+                          : `${fmtDayShort(ev.end_time)} · ${fmtClock(ev.end_time)}`
+                      }
+                    />
+                    {/* Only rendered when the organiser filled the field in —
+                        an absent doors_open is normal, not missing data. */}
+                    {doors && (
+                      <TimeRow icon="log-in" label="Doors open" value={doors} accent />
+                    )}
+
+                    {win && winState && (
+                      <>
+                        <View style={styles.hr} />
+                        <TimeRow
+                          icon="maximize"
+                          label="Scanning"
+                          value={`${fmtClock(win.open)} → ${fmtClock(win.close)}`}
+                        />
+                        <ScanStatusPill state={winState} />
+                        <Text style={styles.windowNote}>
+                          {win.customOpen || win.customClose
+                            ? 'Admission window set by you on the web dashboard.'
+                            : 'Default window: opens 2h before the start, closes 2h after the end.'}
+                        </Text>
+                      </>
+                    )}
+                  </Card>
+
                   <View style={styles.grid}>
                     <StatCard
                       label="Revenue"
                       value={fmtMoney(stats!.total_revenue, ev.currency)}
                       sub="net earnings"
                       accent="green"
-                      icon={<Feather name="dollar-sign" size={15} color={STUDIO.green} />}
+                      icon={<Feather name="dollar-sign" size={15} color={S.green} />}
                     />
                     <StatCard
                       label="Tickets sold"
                       value={fmtNum(ev.tickets_sold)}
                       sub={ev.max_capacity ? `of ${fmtNum(ev.max_capacity)}` : 'no cap'}
                       accent="accent"
-                      icon={<Ionicons name="ticket-outline" size={15} color={STUDIO.accent} />}
+                      icon={<Ionicons name="ticket-outline" size={15} color={S.accent} />}
                     />
                   </View>
                   <View style={styles.grid}>
@@ -185,14 +285,14 @@ export default function StudioEventDetail() {
                       value={fmtNum(stats!.confirmed_bookings)}
                       sub={`${fmtNum(stats!.pending_bookings)} pending`}
                       accent="blue"
-                      icon={<Feather name="check-circle" size={15} color={STUDIO.blue} />}
+                      icon={<Feather name="check-circle" size={15} color={S.blue} />}
                     />
                     <StatCard
                       label="Page views"
                       value={fmtNum(ev.views)}
                       sub="total"
                       accent="amber"
-                      icon={<Feather name="eye" size={15} color={STUDIO.amber} />}
+                      icon={<Feather name="eye" size={15} color={S.amber} />}
                     />
                   </View>
 
@@ -202,11 +302,11 @@ export default function StudioEventDetail() {
                         <Text style={styles.capTxt}>
                           {fmtNum(ev.tickets_sold)} / {fmtNum(ev.max_capacity!)}
                         </Text>
-                        <Text style={[styles.capPct, { color: capColor(pct) }]}>
+                        <Text style={[styles.capPct, { color: capColor(pct, S) }]}>
                           {pct.toFixed(0)}%
                         </Text>
                       </View>
-                      <ProgressBar pct={pct} color={capColor(pct)} height={8} />
+                      <ProgressBar pct={pct} color={capColor(pct, S)} height={8} />
                       {pct >= 90 && (
                         <Text style={styles.capWarn}>⚠ Almost sold out</Text>
                       )}
@@ -237,7 +337,7 @@ export default function StudioEventDetail() {
                 ) : confirmedBookings.length === 0 ? (
                   <Card noPad>
                     <Empty
-                      icon={<Feather name="users" size={24} color={STUDIO.muted} />}
+                      icon={<Feather name="users" size={24} color={S.muted} />}
                       title="No attendees yet"
                       desc="Confirmed bookings will appear here."
                     />
@@ -278,13 +378,14 @@ export default function StudioEventDetail() {
             </View>
           </ScrollView>
 
-          {/* Scan this event's tickets */}
+          {/* Scan this event's tickets.
+              Deliberately still enabled when the window has closed: the phone's
+              clock is not the authority, the server is, and blocking here would
+              turn a wrong device time into a locked gate. The Schedule card
+              above says what to expect; the scanner reports the server's word. */}
           <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
             <TouchableOpacity
-              style={[styles.scanBtn, {
-                backgroundColor: 'rgba(255,255,255,0.08)',
-                marginBottom: 10,
-              }]}
+              style={[styles.scanBtn, styles.scanBtnSecondary]}
               activeOpacity={0.85}
               onPress={() =>
                 router.push({
@@ -293,8 +394,8 @@ export default function StudioEventDetail() {
                 } as any)
               }
             >
-              <Ionicons name="people-outline" size={18} color="#fff" />
-              <Text style={styles.scanBtnTxt}>Manage door staff</Text>
+              <Ionicons name="people-outline" size={18} color={S.text} />
+              <Text style={[styles.scanBtnTxt, { color: S.text }]}>Manage door staff</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.scanBtn}
@@ -306,7 +407,7 @@ export default function StudioEventDetail() {
                 } as any)
               }
             >
-              <Ionicons name="qr-code" size={18} color="#fff" />
+              <Ionicons name="qr-code" size={18} color={S.onAccent} />
               <Text style={styles.scanBtnTxt}>Scan tickets for this event</Text>
             </TouchableOpacity>
           </View>
@@ -316,7 +417,74 @@ export default function StudioEventDetail() {
   );
 }
 
+// ── Schedule rows ─────────────────────────────────────────────────────────────
+
+function TimeRow({
+  icon,
+  label,
+  value,
+  accent,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  const { S } = useStudioTheme();
+  const styles = useStyles();
+  return (
+    <View style={styles.timeRow}>
+      <Feather name={icon} size={14} color={accent ? S.accent : S.muted} />
+      <Text style={styles.timeLabel}>{label}</Text>
+      <Text style={[styles.timeValue, accent && { color: S.accent }]} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ScanStatusPill({
+  state,
+}: {
+  state: { phase: 'before' | 'open' | 'closed'; msRemaining: number };
+}) {
+  const { S } = useStudioTheme();
+  const styles = useStyles();
+
+  const { fg, bg, icon, text } =
+    state.phase === 'open'
+      ? {
+          fg: S.green,
+          bg: S.greenSoft,
+          icon: 'checkmark-circle' as const,
+          text: `Scanning is open · closes in ${fmtDuration(state.msRemaining)}`,
+        }
+      : state.phase === 'before'
+      ? {
+          fg: S.accent,
+          bg: S.accentSoft,
+          icon: 'time-outline' as const,
+          text: `Scanning opens in ${fmtDuration(state.msRemaining)}`,
+        }
+      : {
+          fg: S.red,
+          bg: S.redSoft,
+          icon: 'close-circle' as const,
+          // Same wording as the scanner's own error, so the two screens
+          // obviously describe one thing rather than two unrelated failures.
+          text: "Admission window has ended — scanning is closed",
+        };
+
+  return (
+    <View style={[styles.statusPill, { backgroundColor: bg }]}>
+      <Ionicons name={icon} size={14} color={fg} />
+      <Text style={[styles.statusTxt, { color: fg }]}>{text}</Text>
+    </View>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={{ flex: 1, minWidth: 0 }}>
       <Text style={styles.metricLabel}>{label.toUpperCase()}</Text>
@@ -327,8 +495,8 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: STUDIO.bg },
+const useStyles = makeStyles((S) => ({
+  root: { flex: 1, backgroundColor: S.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -336,7 +504,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: STUDIO.border,
+    borderBottomColor: S.border,
   },
   iconBtn: {
     width: 36,
@@ -344,43 +512,64 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surfaceStrong,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    color: STUDIO.text,
+    color: S.text,
     fontSize: 16,
     fontWeight: '700',
     marginHorizontal: 8,
   },
 
-  evTitle: { color: STUDIO.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.5, flexShrink: 1 },
-  evMeta: { color: STUDIO.muted, fontSize: 13 },
+  evTitle: { color: S.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.5, flexShrink: 1 },
+  evMeta: { color: S.muted, fontSize: 13 },
 
   segment: {
     flexDirection: 'row',
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surfaceStrong,
     borderRadius: 12,
     padding: 4,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.border,
+    borderColor: S.border,
   },
   segItem: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 9 },
-  segItemActive: { backgroundColor: STUDIO.accentDeep },
-  segTxt: { color: STUDIO.sub, fontSize: 13, fontWeight: '700' },
-  segTxtActive: { color: '#fff' },
+  segItemActive: { backgroundColor: S.accentDeep },
+  segTxt: { color: S.sub, fontSize: 13, fontWeight: '700' },
+  segTxtActive: { color: S.onAccent },
 
   grid: { flexDirection: 'row', gap: 12 },
 
+  // Schedule
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 6 },
+  timeLabel: { color: S.sub, fontSize: 13, flex: 1 },
+  timeValue: { color: S.text, fontSize: 13.5, fontWeight: '700', flexShrink: 1 },
+  hr: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: S.border,
+    marginVertical: 8,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderRadius: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    marginTop: 6,
+  },
+  statusTxt: { fontSize: 12.5, fontWeight: '700', flex: 1 },
+  windowNote: { color: S.faint, fontSize: 11.5, lineHeight: 16, marginTop: 8 },
+
   capRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  capTxt: { color: STUDIO.sub, fontSize: 13, fontWeight: '600' },
+  capTxt: { color: S.sub, fontSize: 13, fontWeight: '600' },
   capPct: { fontSize: 13, fontWeight: '800' },
-  capWarn: { color: STUDIO.red, fontSize: 12, fontWeight: '700', marginTop: 8 },
+  capWarn: { color: S.red, fontSize: 12, fontWeight: '700', marginTop: 8 },
 
   metricRow: { flexDirection: 'row', gap: 10 },
-  metricLabel: { color: STUDIO.faint, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6 },
-  metricValue: { color: STUDIO.text, fontSize: 16, fontWeight: '700', marginTop: 3 },
+  metricLabel: { color: S.faint, fontSize: 9.5, fontWeight: '700', letterSpacing: 0.6 },
+  metricValue: { color: S.text, fontSize: 16, fontWeight: '700', marginTop: 3 },
 
   bookingRow: {
     flexDirection: 'row',
@@ -389,10 +578,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
   },
-  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: STUDIO.border },
-  bookName: { color: STUDIO.text, fontSize: 14.5, fontWeight: '700' },
-  bookMeta: { color: STUDIO.muted, fontSize: 12 },
-  bookAmt: { color: STUDIO.green, fontSize: 14, fontWeight: '800' },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: S.border },
+  bookName: { color: S.text, fontSize: 14.5, fontWeight: '700' },
+  bookMeta: { color: S.muted, fontSize: 12 },
+  bookAmt: { color: S.green, fontSize: 14, fontWeight: '800' },
 
   footer: {
     position: 'absolute',
@@ -401,18 +590,26 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: 'rgba(8,8,12,0.96)',
+    backgroundColor: S.overlay,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: STUDIO.border,
+    borderTopColor: S.border,
   },
   scanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 9,
-    backgroundColor: STUDIO.accentDeep,
+    backgroundColor: S.accentDeep,
     borderRadius: 14,
     paddingVertical: 15,
   },
-  scanBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '800' },
-});
+  // Was a hardcoded rgba(255,255,255,0.08) fill with #fff text — invisible on
+  // a light surface. Both halves now come from the palette.
+  scanBtnSecondary: {
+    backgroundColor: S.btnSecondaryBg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: S.border,
+    marginBottom: 10,
+  },
+  scanBtnTxt: { color: S.onAccent, fontSize: 15, fontWeight: '800' },
+}));

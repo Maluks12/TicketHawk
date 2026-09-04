@@ -7,7 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
-import { STUDIO } from '../../../components/studio/theme';
+import { makeStyles, useStudioTheme } from '../../../components/studio/theme';
 import {
   listEventStaff, addEventStaff, revokeEventStaff,
   createStaffCode, listStaffCodes, revokeStaffCode,
@@ -28,6 +28,8 @@ export default function ManageEventStaff() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { eventId, title } = useLocalSearchParams<{ eventId: string; title?: string }>();
+  const { S } = useStudioTheme();
+  const styles = useStyles();
 
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [codes, setCodes] = useState<StaffCode[]>([]);
@@ -127,7 +129,7 @@ export default function ManageEventStaff() {
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={22} color={STUDIO.text} />
+          <Ionicons name="chevron-back" size={22} color={S.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={styles.title}>Door staff</Text>
@@ -137,10 +139,10 @@ export default function ManageEventStaff() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color={STUDIO.sub} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={S.sub} style={{ marginTop: 40 }} />
       ) : error ? (
         <TouchableOpacity onPress={() => { setLoading(true); load(); }}>
-          <Text style={[styles.empty, { color: STUDIO.red }]}>{error} Tap to retry.</Text>
+          <Text style={[styles.empty, { color: S.red }]}>{error} Tap to retry.</Text>
         </TouchableOpacity>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 32 }} showsVerticalScrollIndicator={false}>
@@ -166,22 +168,22 @@ export default function ManageEventStaff() {
                 </Text>
                 <View style={styles.row}>
                   <TouchableOpacity style={styles.secondaryBtn} onPress={() => shareCode(activeCode)}>
-                    <Ionicons name="share-outline" size={15} color={STUDIO.text} />
+                    <Ionicons name="share-outline" size={15} color={S.text} />
                     <Text style={styles.secondaryBtnTxt}>Share</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.secondaryBtn, { borderColor: STUDIO.red }]}
+                    style={[styles.secondaryBtn, { borderColor: S.red }]}
                     onPress={() => killCode(activeCode)}
                   >
-                    <Ionicons name="close-circle-outline" size={15} color={STUDIO.red} />
-                    <Text style={[styles.secondaryBtnTxt, { color: STUDIO.red }]}>Revoke</Text>
+                    <Ionicons name="close-circle-outline" size={15} color={S.red} />
+                    <Text style={[styles.secondaryBtnTxt, { color: S.red }]}>Revoke</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             ) : (
               <TouchableOpacity style={styles.primaryBtn} onPress={makeCode} disabled={creatingCode} activeOpacity={0.85}>
                 {creatingCode
-                  ? <ActivityIndicator color="#fff" size="small" />
+                  ? <ActivityIndicator color={S.onAccent} size="small" />
                   : <Text style={styles.primaryBtnTxt}>Generate join code</Text>}
               </TouchableOpacity>
             )}
@@ -190,7 +192,7 @@ export default function ManageEventStaff() {
               <TouchableOpacity key={c.id} style={styles.codeRow} onPress={() => setActiveCode(c)}>
                 <Text style={styles.codeRowTxt}>{c.code}</Text>
                 <Text style={styles.codeRowMeta}>{c.use_count}/{c.max_uses} used</Text>
-                <Ionicons name="chevron-forward" size={15} color={STUDIO.muted} />
+                <Ionicons name="chevron-forward" size={15} color={S.muted} />
               </TouchableOpacity>
             ))}
           </View>
@@ -208,7 +210,7 @@ export default function ManageEventStaff() {
                 value={email}
                 onChangeText={setEmail}
                 placeholder="their@email.com"
-                placeholderTextColor={STUDIO.muted}
+                placeholderTextColor={S.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
@@ -220,7 +222,7 @@ export default function ManageEventStaff() {
                 onPress={add}
                 disabled={!email.trim() || adding}
               >
-                {adding ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.primaryBtnTxt}>Add</Text>}
+                {adding ? <ActivityIndicator color={S.onAccent} size="small" /> : <Text style={styles.primaryBtnTxt}>Add</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -241,7 +243,7 @@ export default function ManageEventStaff() {
                   </Text>
                 </View>
                 <TouchableOpacity onPress={() => revoke(m)} hitSlop={10} style={styles.removeBtn}>
-                  <Ionicons name="person-remove-outline" size={17} color={STUDIO.red} />
+                  <Ionicons name="person-remove-outline" size={17} color={S.red} />
                 </TouchableOpacity>
               </View>
             ))
@@ -252,63 +254,63 @@ export default function ManageEventStaff() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: STUDIO.bg, paddingHorizontal: 16 },
+const useStyles = makeStyles((S) => ({
+  root: { flex: 1, backgroundColor: S.bg, paddingHorizontal: 16 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   backBtn: {
     width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
   },
-  title: { color: STUDIO.text, fontSize: 17, fontWeight: '700' },
-  subtitle: { color: STUDIO.sub, fontSize: 11.5, marginTop: 2, maxWidth: 220 },
+  title: { color: S.text, fontSize: 17, fontWeight: '700' },
+  subtitle: { color: S.sub, fontSize: 11.5, marginTop: 2, maxWidth: 220 },
 
   card: {
-    backgroundColor: STUDIO.surface, borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: STUDIO.border, marginBottom: 18,
+    backgroundColor: S.surface, borderRadius: 16, padding: 16,
+    borderWidth: 1, borderColor: S.border, marginBottom: 18,
   },
-  cardTitle: { color: STUDIO.text, fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  cardSub: { color: STUDIO.sub, fontSize: 12.5, lineHeight: 18, marginBottom: 14 },
+  cardTitle: { color: S.text, fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  cardSub: { color: S.sub, fontSize: 12.5, lineHeight: 18, marginBottom: 14 },
   row: { flexDirection: 'row', gap: 10, marginTop: 4 },
 
   input: {
-    flex: 1, backgroundColor: STUDIO.bgElevated, borderRadius: 10, borderWidth: 1,
-    borderColor: STUDIO.borderStrong, color: STUDIO.text, paddingHorizontal: 14,
+    flex: 1, backgroundColor: S.field, borderRadius: 10, borderWidth: 1,
+    borderColor: S.borderStrong, color: S.text, paddingHorizontal: 14,
     paddingVertical: 12, fontSize: 14.5,
   },
   primaryBtn: {
-    backgroundColor: STUDIO.accentDeep, borderRadius: 10, paddingVertical: 13,
+    backgroundColor: S.accentDeep, borderRadius: 10, paddingVertical: 13,
     alignItems: 'center', justifyContent: 'center',
   },
-  primaryBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 14.5 },
+  primaryBtnTxt: { color: S.onAccent, fontWeight: '700', fontSize: 14.5 },
   secondaryBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1,
-    borderColor: STUDIO.borderStrong, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 9,
+    borderColor: S.borderStrong, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 9,
   },
-  secondaryBtnTxt: { color: STUDIO.text, fontSize: 13, fontWeight: '600' },
+  secondaryBtnTxt: { color: S.text, fontSize: 13, fontWeight: '600' },
 
   codeBox: { alignItems: 'center', gap: 10, paddingVertical: 6 },
   qrWrap: { backgroundColor: '#fff', borderRadius: 12, padding: 8 },
-  codeBig: { color: STUDIO.text, fontSize: 28, fontWeight: '800', letterSpacing: 4 },
-  codeMeta: { color: STUDIO.sub, fontSize: 12 },
+  codeBig: { color: S.text, fontSize: 28, fontWeight: '800', letterSpacing: 4 },
+  codeMeta: { color: S.sub, fontSize: 12 },
   codeRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12,
-    borderTopWidth: 1, borderTopColor: STUDIO.border, paddingTop: 12,
+    borderTopWidth: 1, borderTopColor: S.border, paddingTop: 12,
   },
-  codeRowTxt: { color: STUDIO.text, fontSize: 14, fontWeight: '700', letterSpacing: 1.5, flex: 1 },
-  codeRowMeta: { color: STUDIO.muted, fontSize: 11.5 },
+  codeRowTxt: { color: S.text, fontSize: 14, fontWeight: '700', letterSpacing: 1.5, flex: 1 },
+  codeRowMeta: { color: S.muted, fontSize: 11.5 },
 
-  sectionLabel: { color: STUDIO.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
-  empty: { color: STUDIO.sub, fontSize: 13, lineHeight: 19 },
+  sectionLabel: { color: S.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 10 },
+  empty: { color: S.sub, fontSize: 13, lineHeight: 19 },
 
   staffRow: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: STUDIO.surface,
-    borderRadius: 14, borderWidth: 1, borderColor: STUDIO.border,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: S.surface,
+    borderRadius: 14, borderWidth: 1, borderColor: S.border,
     paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10,
   },
-  staffName: { color: STUDIO.text, fontSize: 14.5, fontWeight: '600' },
-  staffMeta: { color: STUDIO.sub, fontSize: 12, marginTop: 3 },
+  staffName: { color: S.text, fontSize: 14.5, fontWeight: '600' },
+  staffMeta: { color: S.sub, fontSize: 12, marginTop: 3 },
   removeBtn: {
     width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: STUDIO.redSoft, marginLeft: 10,
+    backgroundColor: S.redSoft, marginLeft: 10,
   },
-});
+}));

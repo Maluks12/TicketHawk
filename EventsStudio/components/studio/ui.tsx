@@ -1,14 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Organiser Studio — shared UI primitives
 // Small, presentational building blocks reused across the Studio screens.
+// Every one of them reads the active palette through makeStyles(), so they
+// repaint with the theme instead of baking in the dark surface.
 // ─────────────────────────────────────────────────────────────────────────────
 import React from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import { STUDIO, ACCENTS, AccentKey, statusChip } from './theme';
+import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  makeStyles,
+  useStudioTheme,
+  accentPair,
+  statusChip,
+  type AccentKey,
+} from './theme';
+import { useThemeStore } from '../../store/themeStore';
 
 // ── Status chip ───────────────────────────────────────────────────────────────
 export function Chip({ status, label }: { status: string; label?: string }) {
-  const c = statusChip(status);
+  const { S } = useStudioTheme();
+  const ui = useUi();
+  const c = statusChip(status, S);
   return (
     <View style={[ui.chip, { backgroundColor: c.bg }]}>
       <View style={[ui.chipDot, { backgroundColor: c.fg }]} />
@@ -20,13 +32,15 @@ export function Chip({ status, label }: { status: string; label?: string }) {
 // ── Progress bar ──────────────────────────────────────────────────────────────
 export function ProgressBar({
   pct,
-  color = STUDIO.accent,
+  color,
   height = 6,
 }: {
   pct: number;
   color?: string;
   height?: number;
 }) {
+  const { S } = useStudioTheme();
+  const ui = useUi();
   const clamped = Math.max(0, Math.min(100, pct));
   return (
     <View style={[ui.track, { height, borderRadius: height }]}>
@@ -34,7 +48,7 @@ export function ProgressBar({
         style={{
           width: `${clamped}%`,
           height: '100%',
-          backgroundColor: color,
+          backgroundColor: color ?? S.accent,
           borderRadius: height,
         }}
       />
@@ -56,7 +70,9 @@ export function StatCard({
   accent?: AccentKey;
   icon?: React.ReactNode;
 }) {
-  const a = ACCENTS[accent];
+  const { S } = useStudioTheme();
+  const ui = useUi();
+  const a = accentPair(S, accent);
   return (
     <View style={ui.statCard}>
       <View style={ui.statTop}>
@@ -91,6 +107,7 @@ export function Card({
   children: React.ReactNode;
   noPad?: boolean;
 }) {
+  const ui = useUi();
   return (
     <View style={ui.card}>
       {(title || action) && (
@@ -106,9 +123,11 @@ export function Card({
 
 // ── Loading / empty ───────────────────────────────────────────────────────────
 export function Loader({ label }: { label?: string }) {
+  const { S } = useStudioTheme();
+  const ui = useUi();
   return (
     <View style={ui.center}>
-      <ActivityIndicator color={STUDIO.accent} />
+      <ActivityIndicator color={S.accent} />
       {label ? <Text style={ui.centerSub}>{label}</Text> : null}
     </View>
   );
@@ -123,6 +142,7 @@ export function Empty({
   title: string;
   desc?: string;
 }) {
+  const ui = useUi();
   return (
     <View style={ui.empty}>
       {icon ? <View style={ui.emptyIcon}>{icon}</View> : null}
@@ -132,7 +152,38 @@ export function Empty({
   );
 }
 
-const ui = StyleSheet.create({
+// ── Appearance toggle ─────────────────────────────────────────────────────────
+//
+// One tap cycles auto → light → dark → auto. The icon states which mode is
+// active rather than which one the tap will bring, and the accessibility label
+// says both, because an icon alone is a guess.
+export function ThemeToggle({ size = 36 }: { size?: number }) {
+  const { S, mode, isDark } = useStudioTheme();
+  const cycleMode = useThemeStore((s) => s.cycleMode);
+  const ui = useUi();
+
+  const icon =
+    mode === 'auto' ? 'phone-portrait-outline'
+    : mode === 'light' ? 'sunny-outline'
+    : 'moon-outline';
+
+  const next = mode === 'auto' ? 'light' : mode === 'light' ? 'dark' : 'automatic';
+
+  return (
+    <TouchableOpacity
+      onPress={cycleMode}
+      hitSlop={10}
+      activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`Appearance: ${mode === 'auto' ? `automatic (${isDark ? 'dark' : 'light'})` : mode}. Tap for ${next}.`}
+      style={[ui.toggle, { width: size, height: size, borderRadius: size / 2 }]}
+    >
+      <Ionicons name={icon} size={Math.round(size * 0.5)} color={S.text} />
+    </TouchableOpacity>
+  );
+}
+
+const useUi = makeStyles((S) => ({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -147,17 +198,17 @@ const ui = StyleSheet.create({
 
   track: {
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: S.track,
     overflow: 'hidden',
   },
 
   statCard: {
     flex: 1,
     minWidth: 0,
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.border,
+    borderColor: S.border,
     padding: 14,
   },
   statTop: {
@@ -170,7 +221,7 @@ const ui = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 1,
-    color: STUDIO.muted,
+    color: S.muted,
     flex: 1,
     marginRight: 6,
   },
@@ -184,16 +235,16 @@ const ui = StyleSheet.create({
   statValue: {
     fontSize: 23,
     fontWeight: '800',
-    color: STUDIO.text,
+    color: S.text,
     letterSpacing: -0.5,
   },
-  statSub: { fontSize: 11.5, color: STUDIO.muted, marginTop: 3 },
+  statSub: { fontSize: 11.5, color: S.muted, marginTop: 3 },
 
   card: {
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surface,
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.border,
+    borderColor: S.border,
     overflow: 'hidden',
   },
   cardHeader: {
@@ -204,7 +255,7 @@ const ui = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 12,
   },
-  cardTitle: { fontSize: 15, fontWeight: '800', color: STUDIO.text },
+  cardTitle: { fontSize: 15, fontWeight: '800', color: S.text },
   cardBody: { paddingHorizontal: 16, paddingBottom: 14 },
 
   center: {
@@ -214,16 +265,16 @@ const ui = StyleSheet.create({
     paddingVertical: 60,
     gap: 12,
   },
-  centerSub: { fontSize: 13, color: STUDIO.muted },
+  centerSub: { fontSize: 13, color: S.muted },
 
   empty: { alignItems: 'center', paddingVertical: 44, paddingHorizontal: 32, gap: 8 },
   emptyIcon: {
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: STUDIO.surface,
+    backgroundColor: S.surfaceStrong,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: STUDIO.border,
+    borderColor: S.border,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
@@ -231,13 +282,21 @@ const ui = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: STUDIO.text,
+    color: S.text,
     textAlign: 'center',
   },
   emptyDesc: {
     fontSize: 13,
-    color: STUDIO.muted,
+    color: S.muted,
     textAlign: 'center',
     lineHeight: 19,
   },
-});
+
+  toggle: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: S.surfaceStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: S.border,
+  },
+}));

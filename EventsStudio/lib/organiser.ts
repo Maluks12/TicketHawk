@@ -102,6 +102,15 @@ export interface OrgEventStats {
     max_capacity: number | null;
     views: number;
     cover_image_url: string | null;
+    // The IANA zone the organiser entered the event in. Carried for
+    // completeness; the Studio renders in DEVICE time, because the phone
+    // holding it is standing at that door.
+    timezone?: string | null;
+    // Per-side admission-window overrides, in MINUTES, exactly as the events
+    // table stores them. NULL on either side means "use the 2h default" —
+    // see scanWindow() below, which mirrors models.ScanWindow on the backend.
+    scan_open_offset_min?: number | null;
+    scan_close_offset_min?: number | null;
   };
   total_revenue: number;
   total_bookings: number;
@@ -121,6 +130,22 @@ export interface OrgBooking {
   attendee_name: string;
   confirmed_at: string | null;
 }
+
+// ── Event information ─────────────────────────────────────────────────────────
+// The organiser's information block: a catalogue-keyed list they fill in on the
+// web dashboard (age_requirement, doors_open, parking, …). Only the fields they
+// actually filled in have rows, so a key being absent is normal, not an error.
+export interface EventInfoItem {
+  key: string;
+  label: string;
+  value: string;
+  // 'text' | 'enum' | 'time'
+  value_type?: string;
+  sort_order?: number;
+}
+
+/** Catalogue key for the organiser-stated doors time. Stored as 'HH:mm'. */
+export const INFO_KEY_DOORS = 'doors_open';
 
 export interface OrgMerchSale {
   merchandise_id: string;
@@ -198,6 +223,26 @@ export const getOrgEventBookings = (eventId: string) =>
       `/v1/organiser/dashboard/events/${eventId}/bookings`,
     )
     .then((r) => r.data.bookings ?? []);
+
+/**
+ * GET /v1/organiser/events/:id/info — the event's information block.
+ *
+ * Separate endpoint, separate failure: the overview must still render if this
+ * 404s or times out, so every caller treats it as optional.
+ */
+export const getOrgEventInfo = (eventId: string) =>
+  api
+    .get<{ items: EventInfoItem[]; is_published: boolean; status: string }>(
+      `/v1/organiser/events/${eventId}/info`,
+    )
+    .then((r) => r.data.items ?? []);
+
+/** Value for a catalogue key, or null when the organiser left it blank. */
+export function infoValue(items: EventInfoItem[], key: string): string | null {
+  const v = items.find((i) => i?.key === key)?.value;
+  const trimmed = (v ?? '').trim();
+  return trimmed.length ? trimmed : null;
+}
 
 export const getOrgEventMerch = (eventId: string) =>
   api
@@ -350,4 +395,130 @@ export function ctr(clicks: number, impressions: number): string {
 export function capacityPct(sold: number, cap?: number | null): number | null {
   if (!cap) return null;
   return Math.min((sold / cap) * 100, 100);
+}
+// ── Admission (scan) window ───────────────────────────────────────────────────
+//
+// Mirrors events-db/internal/models/scan_window.go exactly, so the Studio shows
+// the same window the server enforces. Getting this wrong is worse than not
+// showing it at all: a door that believes it has 20 minutes left when the
+// server thinks otherwise finds out at the gate.
+//
+//   open  = start_time - (scan_open_offset_min  ?? 120 minutes)
+//   close = end_time   + (scan_close_offset_min ?? 120 minutes)
+//
+// A NULL offset means "use the default", which is why `?? DEFAULT` and not a
+// falsy check: an organiser who sets 0 means zero grace, not two hours.
+
+/** models.DefaultScanGrace — 2 hours, in minutes. */
+export const DEFAULT_SCAN_GRACE_MIN = 120;
+
+export interface ScanWindow {
+  open: Date;
+  close: Date;
+  /** True when the organiser overrode the default on that side. */
+  customOpen: boolean;
+  customClose: boolean;
+}
+
+export function scanWindow(
+  startTime: string,
+  endTime: string,
+  openOffsetMin?: number | null,
+  closeOffsetMin?: number | null,
+): ScanWindow | null {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+
+  const openMin = openOffsetMin ?? DEFAULT_SCAN_GRACE_MIN;
+  const closeMin = closeOffsetMin ?? DEFAULT_SCAN_GRACE_MIN;
+
+  return {
+    open: new Date(start.getTime() - openMin * 60_000),
+    close: new Date(end.getTime() + closeMin * 60_000),
+    customOpen: openOffsetMin != null && openOffsetMin !== DEFAULT_SCAN_GRACE_MIN,
+    customClose: closeOffsetMin != null && closeOffsetMin !== DEFAULT_SCAN_GRACE_MIN,
+  };
+}
+
+export type ScanPhase = 'before' | 'open' | 'closed';
+
+export interface ScanStatus {
+  phase: ScanPhase;
+  /** ms until the window opens ('before') or closes ('open'); 0 when closed. */
+  msRemaining: number;
+}
+
+export function scanStatus(w: ScanWindow, now: Date = new Date()): ScanStatus {
+  const t = now.getTime();
+  if (t < w.open.getTime()) return { phase: 'before', msRemaining: w.open.getTime() - t };
+  if (t > w.close.getTime()) return { phase: 'closed', msRemaining: 0 };
+  return { phase: 'open', msRemaining: w.close.getTime() - t };
+}
+
+// ── More formatting helpers ──────────────────────────────────────────────────
+
+/** 24-hour wall clock, no seconds: "20:00". Device timezone. */
+export function fmtClock(d: string | Date | null | undefined): string {
+  if (!d) return '—';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleTimeString('en-ZA', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+/** "Sat 05 Sep" — enough to tell two days apart without the year. */
+export function fmtDayShort(d: string | Date | null | undefined): string {
+  if (!d) return '—';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('en-ZA', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+  });
+}
+
+/** True when the two instants land on the same calendar day, device-local. */
+export function sameDay(a: string | Date, b: string | Date): boolean {
+  const x = typeof a === 'string' ? new Date(a) : a;
+  const y = typeof b === 'string' ? new Date(b) : b;
+  if (Number.isNaN(x.getTime()) || Number.isNaN(y.getTime())) return false;
+  return (
+    x.getFullYear() === y.getFullYear() &&
+    x.getMonth() === y.getMonth() &&
+    x.getDate() === y.getDate()
+  );
+}
+
+/** Coarse duration for countdowns: "3d 4h", "5h 12m", "42m", "under a minute". */
+export function fmtDuration(ms: number): string {
+  if (ms <= 0) return 'under a minute';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return 'under a minute';
+  const days = Math.floor(mins / 1440);
+  const hours = Math.floor((mins % 1440) / 60);
+  const rem = mins % 60;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`;
+  return `${rem}m`;
+}
+
+/**
+ * "19:30" from an organiser-entered 'HH:mm' (or 'HH:mm:ss') doors value.
+ * Anything that isn't a clock time is passed through untouched — the field is
+ * typed 'time' in the catalogue but the column is free text, and showing what
+ * the organiser actually wrote beats showing "—".
+ */
+export function fmtDoors(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(raw.trim());
+  if (!m) return raw.trim();
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  if (h > 23 || mi > 59) return raw.trim();
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
 }

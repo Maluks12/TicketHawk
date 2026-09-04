@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../store/authStore';
-import { STUDIO } from '../components/studio/theme';
+import { useStudioTheme } from '../components/studio/theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth gate.
@@ -20,6 +20,7 @@ export default function Gate() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const authReady = useAuthStore((s) => s.authReady);
+  const { S } = useStudioTheme();
 
   useEffect(() => {
     if (!authReady) return;
@@ -33,8 +34,8 @@ export default function Gate() {
   }, [authReady, user]);
 
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: STUDIO.bg }}>
-      <ActivityIndicator color={STUDIO.accent} />
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: S.bg }}>
+      <ActivityIndicator color={S.accent} />
     </View>
   );
 }

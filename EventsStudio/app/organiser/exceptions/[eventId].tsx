@@ -5,7 +5,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { STUDIO } from '../../../components/studio/theme';
+import { makeStyles, useStudioTheme } from '../../../components/studio/theme';
 import { api } from '../../../lib/api';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,6 +35,8 @@ export default function ScanExceptions() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { eventId, title } = useLocalSearchParams<{ eventId: string; title?: string }>();
+  const { S } = useStudioTheme();
+  const styles = useStyles();
 
   const [items, setItems] = useState<ScanException[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,11 +61,17 @@ export default function ScanExceptions() {
 
   const fmt = (s: string) => new Date(s).toLocaleTimeString();
 
+  // The two verdicts have their own colour. Resolved from the palette rather
+  // than the hardcoded '#ffb830' this file used to carry — that amber is a
+  // highlighter pen on a white card.
+  const verdictColor = (v: string) => (v === 'collision' ? S.red : S.amber);
+  const verdictSoft = (v: string) => (v === 'collision' ? S.redSoft : S.amberSoft);
+
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} hitSlop={12} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={22} color={STUDIO.text} />
+          <Ionicons name="chevron-back" size={22} color={S.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center' }}>
           <Text style={styles.title}>Scan exceptions</Text>
@@ -73,10 +81,10 @@ export default function ScanExceptions() {
       </View>
 
       {loading ? (
-        <ActivityIndicator color={STUDIO.sub} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={S.sub} style={{ marginTop: 40 }} />
       ) : error ? (
         <TouchableOpacity onPress={() => { setLoading(true); load(); }}>
-          <Text style={[styles.empty, { color: STUDIO.red }]}>{error} Tap to retry.</Text>
+          <Text style={[styles.empty, { color: S.red }]}>{error} Tap to retry.</Text>
         </TouchableOpacity>
       ) : (
         <FlatList
@@ -84,19 +92,19 @@ export default function ScanExceptions() {
           keyExtractor={(e) => e.id}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} tintColor={STUDIO.sub}
+            <RefreshControl refreshing={refreshing} tintColor={S.sub}
               onRefresh={() => { setRefreshing(true); load(); }} />
           }
           ListEmptyComponent={
             <View style={{ alignItems: 'center', marginTop: 48, gap: 10 }}>
-              <Ionicons name="shield-checkmark-outline" size={36} color={STUDIO.green} />
+              <Ionicons name="shield-checkmark-outline" size={36} color={S.green} />
               <Text style={styles.empty}>No exceptions — every admission checks out.</Text>
             </View>
           }
           renderItem={({ item }) => (
-            <View style={[styles.row, { borderLeftColor: item.verdict === 'collision' ? STUDIO.red : '#ffb830' }]}>
-              <View style={styles.badge(item.verdict)}>
-                <Text style={styles.badgeTxt(item.verdict)}>
+            <View style={[styles.row, { borderLeftColor: verdictColor(item.verdict) }]}>
+              <View style={[styles.badge, { backgroundColor: verdictSoft(item.verdict) }]}>
+                <Text style={[styles.badgeTxt, { color: verdictColor(item.verdict) }]}>
                   {item.verdict === 'collision' ? 'DUPLICATE ENTRY' : 'PROVISIONAL'}
                 </Text>
               </View>
@@ -122,28 +130,25 @@ export default function ScanExceptions() {
   );
 }
 
-const styles = {
-  ...StyleSheet.create({
-    root: { flex: 1, backgroundColor: STUDIO.bg, paddingHorizontal: 16 },
-    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-    backBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: STUDIO.surface },
-    title: { color: STUDIO.text, fontSize: 17, fontWeight: '700' },
-    subtitle: { color: STUDIO.sub, fontSize: 11.5, marginTop: 2, maxWidth: 220 },
-    empty: { color: STUDIO.sub, fontSize: 13, lineHeight: 19, textAlign: 'center' },
-    row: {
-      backgroundColor: STUDIO.surface, borderRadius: 14, borderWidth: 1, borderColor: STUDIO.border,
-      borderLeftWidth: 3, padding: 14, marginBottom: 10, gap: 5,
-    },
-    name: { color: STUDIO.text, fontSize: 14.5, fontWeight: '700' },
-    meta: { color: STUDIO.sub, fontSize: 12, lineHeight: 17 },
-  }),
-  badge: (v: string) => ({
-    alignSelf: 'flex-start' as const,
-    backgroundColor: v === 'collision' ? STUDIO.redSoft : 'rgba(255,184,48,0.15)',
+const useStyles = makeStyles((S) => ({
+  root: { flex: 1, backgroundColor: S.bg, paddingHorizontal: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+  backBtn: {
+    width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: S.surfaceStrong,
+  },
+  title: { color: S.text, fontSize: 17, fontWeight: '700' },
+  subtitle: { color: S.sub, fontSize: 11.5, marginTop: 2, maxWidth: 220 },
+  empty: { color: S.sub, fontSize: 13, lineHeight: 19, textAlign: 'center' },
+  row: {
+    backgroundColor: S.surface, borderRadius: 14, borderWidth: 1, borderColor: S.border,
+    borderLeftWidth: 3, padding: 14, marginBottom: 10, gap: 5,
+  },
+  name: { color: S.text, fontSize: 14.5, fontWeight: '700' },
+  meta: { color: S.sub, fontSize: 12, lineHeight: 17 },
+  badge: {
+    alignSelf: 'flex-start',
     borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
-  }),
-  badgeTxt: (v: string) => ({
-    color: v === 'collision' ? STUDIO.red : '#ffb830',
-    fontSize: 10, fontWeight: '800' as const, letterSpacing: 0.6,
-  }),
-};
+  },
+  badgeTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+}));

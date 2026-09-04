@@ -2,19 +2,20 @@ import React from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
-import { STUDIO } from '../../components/studio/theme';
+import { useStudioTheme } from '../../components/studio/theme';
 
 // The Organiser Studio runs inside its own stack so it feels like a separate
-// app: a fixed dark surface, its own screens, and no consumer tab bar. The
-// section is mounted from the root layout as a full-screen modal.
+// app: its own screens and no consumer tab bar. The surface follows the
+// appearance preference (auto / light / dark) rather than being pinned dark.
 export default function StudioLayout() {
+  const { S, isDark } = useStudioTheme();
   return (
-    <View style={{ flex: 1, backgroundColor: STUDIO.bg }}>
-      <StatusBar style="light" />
+    <View style={{ flex: 1, backgroundColor: S.bg }}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: STUDIO.bg },
+          contentStyle: { backgroundColor: S.bg },
           animation: 'slide_from_right',
         }}
       >
