@@ -58,6 +58,9 @@ export default function StudioScan() {
   const [sync, setSync] = useState<SyncState | null>(null);
   const [collisionNote, setCollisionNote] = useState<string | null>(null);
   const [prepareErr, setPrepareErr] = useState<string>('');
+  // True when the prepare failed for a reason retrying cannot change — today
+  // that is exactly one case: the admission window has closed.
+  const [prepareFatal, setPrepareFatal] = useState(false);
 
   const busyRef = useRef(false);
   const resultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,10 +71,17 @@ export default function StudioScan() {
   // not out of the scanner entirely.
   const cameFromPicker = !params.eventId;
 
+  // What "back" actually means here, so the button can say it. Reaching the
+  // scanner through the in-screen picker means the picker is this screen's own
+  // history; otherwise we came from the event page and that is where we return.
+  const backLabel =
+    cameFromPicker && eventId ? 'Choose another event' : 'Back to event';
+
   const goBack = useCallback(() => {
     if (cameFromPicker && eventId) {
       setEventId(null);
       setPrepareErr('');
+      setPrepareFatal(false);
       setPhase('pick_event');
       return;
     }
@@ -96,19 +106,40 @@ export default function StudioScan() {
   // ── Prepare: credential + full manifest, then start the sync loop ───────────
   const prepare = useCallback(async (evId: string) => {
     setPhase('preparing');
+    setPrepareFatal(false);
     try {
       // If a valid credential + manifest for this event is already on-device,
       // preparing again just refreshes both — cheap, and handles date changes.
       await prepareEvent(evId);
       setPhase('ready');
     } catch (e: any) {
+      const status = e?.response?.status;
+      const msg: string | undefined = e?.response?.data?.error;
+
+      // MintScannerCredentialHandler answers 409 (and only 409) when
+      // models.ScanCloses(end_time, scan_close_offset_min) is already in the
+      // past. Everything else on the prepare path — 400, 403, 404, 500, or no
+      // response at all — is either transient or fixable, so those still get
+      // a Retry. Matching on the message too keeps this working if the status
+      // ever moves.
+      const windowClosed =
+        status === 409 || /admission window has ended/i.test(msg ?? '');
+
       // Offline at open: if a previous prepare covered this event, scan anyway.
-      if (await credentialValid(evId)) {
+      //
+      // Deliberately skipped for a closed window. The cached credential's
+      // expiry IS the window close (the handler mints it with exp = ScanCloses),
+      // so it has already lapsed — but relying on that coincidence to enforce
+      // the rule would be an accident waiting to break. A closed window is a
+      // verdict, and no local state overrides it.
+      if (!windowClosed && (await credentialValid(evId))) {
         setPhase('ready');
-      } else {
-        setPrepareErr(e?.response?.data?.error ?? 'Could not prepare. Connect to the internet once for this event.');
-        setPhase('prepare_failed');
+        return;
       }
+
+      setPrepareFatal(windowClosed);
+      setPrepareErr(msg ?? 'Could not prepare. Connect to the internet once for this event.');
+      setPhase('prepare_failed');
     }
   }, []);
 
@@ -258,6 +289,22 @@ export default function StudioScan() {
                 Downloading the attendee list so scanning works with no signal.
               </Text>
             </>
+          ) : prepareFatal ? (
+            /* Admission window closed. There is nothing to retry — the server
+               is not failing, it is answering. A Retry button here promises a
+               different result that can never come, so the only way out is
+               the way out: back to the event. The offline-cloud icon goes too;
+               it blamed the network for something the clock decided. */
+            <>
+              <Ionicons name="time-outline" size={40} color={S.red} />
+              <Text style={styles.prepTitle}>Scanning has closed</Text>
+              <Text style={[styles.sub, { textAlign: 'center' }]}>{prepareErr}</Text>
+              <View style={styles.failActions}>
+                <TouchableOpacity style={styles.primaryBtn} onPress={goBack} activeOpacity={0.85}>
+                  <Text style={styles.primaryBtnTxt}>{backLabel}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
           ) : (
             <>
               <Ionicons name="cloud-offline-outline" size={40} color={S.red} />
@@ -265,9 +312,7 @@ export default function StudioScan() {
               <Text style={[styles.sub, { textAlign: 'center' }]}>{prepareErr}</Text>
               <View style={styles.failActions}>
                 <TouchableOpacity style={styles.secondaryBtn} onPress={goBack} activeOpacity={0.85}>
-                  <Text style={styles.secondaryBtnTxt}>
-                    {cameFromPicker && eventId ? 'Choose another event' : 'Go back'}
-                  </Text>
+                  <Text style={styles.secondaryBtnTxt}>{backLabel}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.primaryBtn}
