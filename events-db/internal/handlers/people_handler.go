@@ -107,6 +107,24 @@ func GetScopedPeopleHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			staffFilter = "u.staff_role IS NOT NULL"
 		}
 
+		// Deleted accounts are excluded from both tabs.
+		//
+		// SoftDeleteUser keeps the row — bookings.user_id and
+		// events.organizer_id are ON DELETE RESTRICT, so the financial records
+		// need something to point at — but it destroys every identifying field
+		// first. What survives is a stub: first_name 'Deleted', last_name
+		// 'User', and deleted-<uuid>@deleted.invalid in the email column.
+		//
+		// Listing those is worse than useless. There is no person behind the
+		// row to contact, action or promote, and the roster fills with
+		// identical 'Deleted User' entries that push real accounts down the
+		// page. Migration 000065 states the rule plainly: a non-null deleted_at
+		// must be treated as "this account does not exist".
+		//
+		// The staff tab needs this too. Deletion does not clear staff_role, so
+		// a departed admin who deleted their own account would otherwise sit in
+		// the staff roster indefinitely.
+
 		rows, err := pool.Query(ctx, `
 			SELECT
 				u.id::text,
@@ -123,6 +141,7 @@ func GetScopedPeopleHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			FROM users u
 			LEFT JOIN organizers o ON o.user_id = u.id
 			WHERE `+staffFilter+`
+			  AND u.deleted_at IS NULL
 			  AND ($1::text = '' OR u.email ILIKE '%'||$1||'%'
 			       OR TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) ILIKE '%'||$1||'%')
 			ORDER BY u.created_at DESC
@@ -261,7 +280,13 @@ func SetStaffRoleHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if body.StaffRole == nil || *body.StaffRole != string(models.StaffAdmin) {
 			var admins int
 			if err := pool.QueryRow(ctx,
-				`SELECT COUNT(*) FROM users WHERE staff_role = 'admin' AND id <> $1`,
+				// deleted_at IS NULL matters here, not just for tidiness. An admin
+				// who deletes their own account keeps staff_role = 'admin' on the
+				// stub row, so without this clause the guard would count a
+				// destroyed account as cover and allow the last REAL admin to be
+				// demoted — the exact lockout it exists to prevent.
+				`SELECT COUNT(*) FROM users
+				  WHERE staff_role = 'admin' AND deleted_at IS NULL AND id <> $1`,
 				targetID,
 			).Scan(&admins); err != nil {
 				utils.InternalError(c, err, "could not verify admin count")

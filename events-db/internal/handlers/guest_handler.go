@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -411,25 +412,36 @@ func GuestRefundHandler(
 			return
 		}
 
-		// Gateway first, database second. If the refund fails the booking stays
-		// confirmed and the guest keeps a valid ticket — the safe direction to
-		// fail in. The reverse order would void their ticket without paying them.
-		//
-		// A zero-value booking skips the gateway entirely: there may be no
-		// payments row at all, and the amount rounds to zero minor units, so
-		// ProcessRefund fails on its own guards. Attempting it would block the
-		// cancellation of a free ticket and leave the seat held — see the same
-		// case in booking_handler.go.
-		if quote.RefundAmount > 0 {
-			if err := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); err != nil {
-				utils.InternalError(c, err, "guest refund: gateway refund failed")
-				return
-			}
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := pool.Exec(ctx, `
+
+		// ── Claim the refund BEFORE calling the gateway ───────────────────────
+		//
+		// This used to run gateway-first, on the reasoning that a failed refund
+		// should leave the guest holding a valid ticket rather than a voided one.
+		// The order is right in spirit and wrong in effect: the eligibility check
+		// above is a plain read, and the write that followed the gateway call was
+		// `WHERE id = $3` with no status condition. Two requests arriving together
+		// — a double-tapped button, a client retry, a flaky mobile connection —
+		// both read 'confirmed', both passed the check, and both issued a refund
+		// at Paystack. Real money, twice, recoverable only by hand.
+		//
+		// The authed path already got this right: RequestRefundWithCascade flips
+		// the row inside a transaction with AND b.booking_status = $5 and checks
+		// RowsAffected() == 0, so a second caller can never reach the gateway.
+		// This is the same latch. The claim is a compare-and-swap on
+		// booking_status, so exactly one request can ever move a booking out of
+		// 'confirmed', and every other request is turned away at the 409 below
+		// without touching the gateway.
+		//
+		// The fail-safe direction is preserved by releasing the latch if the
+		// gateway then fails (see below) — the booking goes back to 'confirmed',
+		// the ticket stays valid, and the guest can retry. Trading a brief window
+		// where a ticket is provisionally voided for the elimination of double
+		// refunds is the right trade: the first is reversible in code, the second
+		// is not.
+		var claimedAt time.Time
+		err = pool.QueryRow(ctx, `
 			UPDATE bookings
 			SET booking_status      = 'refunded',
 			    refund_amount       = $1,
@@ -439,16 +451,62 @@ func GuestRefundHandler(
 			    refund_reason       = 'Guest requested refund',
 			    updated_at          = CURRENT_TIMESTAMP
 			WHERE id = $3
-		`, quote.RefundAmount, quote.Rate, booking.ID); err != nil {
-			// Money is already back with the guest; this is bookkeeping only.
-			utils.InternalError(c, err, "guest refund: refunded at gateway but booking not updated")
+			  AND booking_status = 'confirmed'
+			RETURNING refunded_at
+		`, quote.RefundAmount, quote.Rate, booking.ID).Scan(&claimedAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Lost the race, or the booking moved on between the read above
+				// and here. Either way it is no longer ours to refund.
+				c.JSON(http.StatusConflict, gin.H{"error": "This booking is not eligible for a refund"})
+				return
+			}
+			utils.InternalError(c, err, "guest refund: could not claim booking")
 			return
+		}
+
+		// ── Gateway ───────────────────────────────────────────────────────────
+		//
+		// A zero-value booking skips the gateway entirely: there may be no
+		// payments row at all, and the amount rounds to zero minor units, so
+		// ProcessRefund fails on its own guards. Attempting it would block the
+		// cancellation of a free ticket and leave the seat held — see the same
+		// case in booking_handler.go.
+		if quote.RefundAmount > 0 {
+			if refErr := paymentService.ProcessRefund(booking.ID, quote.RefundAmount); refErr != nil {
+				// Release the latch so the guest is not left with a voided
+				// ticket and no money. Guarded on the exact refunded_at this
+				// request wrote, so it can only ever undo its own claim.
+				if _, rbErr := pool.Exec(ctx, `
+					UPDATE bookings
+					SET booking_status      = 'confirmed',
+					    refund_amount       = NULL,
+					    refund_rate         = NULL,
+					    refunded_at         = NULL,
+					    refund_requested_at = NULL,
+					    refund_reason       = NULL,
+					    updated_at          = CURRENT_TIMESTAMP
+					WHERE id = $1
+					  AND booking_status = 'refunded'
+					  AND refunded_at = $2
+				`, booking.ID, claimedAt); rbErr != nil {
+					// The guest now holds a booking marked refunded that was
+					// never paid out. Loud, because it needs a human.
+					log.Error().Err(rbErr).
+						Str("booking_id", booking.ID).
+						Str("booking_number", booking.BookingNumber).
+						Msg("guest refund: gateway failed AND latch release failed — booking is marked refunded with no payout")
+				}
+				utils.InternalError(c, refErr, "guest refund: gateway refund failed")
+				return
+			}
 		}
 
 		if _, err := pool.Exec(ctx, `
 			UPDATE ticket_assignments SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
 			WHERE booking_id = $1 AND status <> 'cancelled'
 		`, booking.ID); err != nil {
+			// Money is already back with the guest; this is bookkeeping only.
 			utils.InternalError(c, err, "guest refund: could not void ticket assignments")
 			return
 		}

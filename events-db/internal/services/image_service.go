@@ -73,13 +73,6 @@ const (
 	// balance between visual fidelity and file size (~60–70 % smaller than
 	// a typical camera JPEG at 95+ quality).
 	jpegQuality = 82
-
-	// minHeroLongEdge is the minimum long-edge (px) accepted for covers and
-	// banners. Both render as the full-screen hero on the event detail page,
-	// which needs ~1080–1980 physical pixels on modern phones — anything much
-	// smaller upscales into visible pixelation. 1000px keeps the bar practical
-	// for organizers while ruling out card-sized images.
-	minHeroLongEdge = 1000
 )
 
 // ── Allowed MIME types ────────────────────────────────────────────────────────
@@ -364,24 +357,11 @@ func (s *ImageService) UploadEventImage(
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Reject covers/banners that are too small to render sharply as the
-	// full-screen hero on the event detail page. DecodeConfig reads only the
-	// header — no full decode. WebP has no stdlib decoder, so it is skipped
-	// here (compressImage passes WebP through untouched anyway).
-	if imgType == ImageTypeCover || imgType == ImageTypeBanner {
-		if imgCfg, _, cfgErr := image.DecodeConfig(bytes.NewReader(data)); cfgErr == nil {
-			longEdge := imgCfg.Width
-			if imgCfg.Height > longEdge {
-				longEdge = imgCfg.Height
-			}
-			if longEdge < minHeroLongEdge {
-				return "", fmt.Errorf(
-					"image too small: covers and banners must be at least %dpx on the longest side (got %dx%d) — small images look pixelated on the event page",
-					minHeroLongEdge, imgCfg.Width, imgCfg.Height,
-				)
-			}
-		}
-	}
+	// No minimum dimension is enforced. Covers and banners were once rejected
+	// below a 1000px long edge, because both render as the full-screen hero and
+	// a small source upscales into visible pixelation. That is still true — but
+	// it is a quality judgement for the organiser to make, not grounds for the
+	// server to refuse the upload. maxImageDimension still caps the upper bound.
 
 	// Keep the original bytes/type so the thumbnail is generated from the source
 	// rather than the already-recompressed full image.

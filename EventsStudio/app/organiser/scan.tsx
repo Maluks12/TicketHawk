@@ -61,25 +61,7 @@ export default function StudioScan() {
 
   const busyRef = useRef(false);
   const resultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const collisionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // The screen was opened WITHOUT an event, so the picker is a real step in
-  // this screen's own history and "back" from a failed prepare belongs there,
-  // not out of the scanner entirely.
-  const cameFromPicker = !params.eventId;
-
-  const goBack = useCallback(() => {
-    if (cameFromPicker && eventId) {
-      setEventId(null);
-      setPrepareErr('');
-      setPhase('pick_event');
-      return;
-    }
-    // Deep links and replace() can leave nothing behind us; the gate is the
-    // right landing spot in that case, never a dead button.
-    if (router.canGoBack()) router.back();
-    else router.replace('/' as any);
-  }, [cameFromPicker, eventId, router]);
+  const stopLoop = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!permission) requestPermission();

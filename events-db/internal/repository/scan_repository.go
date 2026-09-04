@@ -336,6 +336,12 @@ func ingestOne(
 
 	outcome := &ScanOutcome{ID: sc.ID}
 
+	// The ledger row was inserted above with the CLAIMED admit_count. A pool
+	// admit can go through for fewer heads than were claimed, and the analytics
+	// door figure is SUM(admit_count) over admitted rows — so the claimed count
+	// has to be corrected to the actual one before the row is finalised.
+	admitCount := sc.AdmitCount
+
 	switch {
 	case bookingID != nil && !bookingConfirmed:
 		// Resolved to a real booking that is cancelled, refunded, or still
@@ -377,16 +383,25 @@ func ingestOne(
 
 	case isPool && bookingID != nil:
 		// Pool: admit up to admit_count from the booking's unadmitted pool.
-		// SKIP LOCKED keeps concurrent gates from deadlocking; a shortfall means
-		// another gate got there first → the overflow is a collision, recorded,
-		// never silently clamped.
+		//
+		// FOR UPDATE, not FOR UPDATE SKIP LOCKED. SKIP LOCKED skips any row a
+		// concurrent transaction merely holds a lock on, not only rows that are
+		// genuinely spent — so two gates scanning the same pass in the same
+		// instant produced a PHANTOM shortfall: the rows that did come back were
+		// marked scanned and committed, while the verdict said 'collision'. The
+		// party was told entry failed and their slots were burned anyway.
+		//
+		// ORDER BY slot_number gives every transaction the same lock order, so
+		// blocking here cannot deadlock. Two scans of the SAME booking now
+		// serialise, which is exactly the double-entry case that must serialise;
+		// different bookings never contend for the same rows.
 		rows, err := tx.Query(ctx, `
 			WITH picked AS (
 				SELECT id FROM ticket_assignments
 				WHERE booking_id = $1 AND status = 'unassigned' AND qr_scanned_at IS NULL
 				ORDER BY slot_number
 				LIMIT $2
-				FOR UPDATE SKIP LOCKED
+				FOR UPDATE
 			)
 			UPDATE ticket_assignments ta
 			SET qr_scanned_at = $3,
@@ -407,10 +422,22 @@ func ingestOne(
 			return nil, err
 		}
 		outcome.AdmittedN = n
-		if n == sc.AdmitCount {
-			outcome.Verdict = "admitted"
+
+		if n == 0 {
+			// Nothing left in the pool — every head on this pass is already
+			// inside. THAT is the real exception, and it belongs in the
+			// organiser's report. admit_count keeps the claimed value here
+			// because scan_events carries CHECK (admit_count > 0).
+			outcome.Verdict = "collision"
 		} else {
-			outcome.Verdict = "collision" // partial or zero: over-admission across gates
+			// n heads went through the door, so the ledger says n. A shortfall
+			// (0 < n < claimed) is a pass that has been partly used already —
+			// normal, not an exception. Calling it a collision under-reported
+			// attendance by n while still burning the slots; calling it admitted
+			// with the CLAIMED count would over-report it. The device still gets
+			// AdmittedN, so the gate can show "3 of 5 admitted".
+			outcome.Verdict = "admitted"
+			admitCount = n
 		}
 
 	default:
@@ -420,8 +447,8 @@ func ingestOne(
 	}
 
 	if _, err := tx.Exec(ctx, `
-		UPDATE scan_events SET verdict = $2, conflict_with = $3 WHERE id = $1
-	`, sc.ID, outcome.Verdict, outcome.ConflictWith); err != nil {
+		UPDATE scan_events SET verdict = $2, conflict_with = $3, admit_count = $4 WHERE id = $1
+	`, sc.ID, outcome.Verdict, outcome.ConflictWith, admitCount); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

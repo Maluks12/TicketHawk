@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 // withinAdmissionWindow mirrors the single-ticket scan gate: entry is allowed
@@ -81,7 +82,9 @@ func scanIndividual(
 	payload *services.RotatingQRPayload,
 ) {
 	var (
+		eventID         string
 		assignStatus    string
+		bookingID       string
 		bookingStatus   string
 		startTime       time.Time
 		endTime         time.Time
@@ -91,10 +94,13 @@ func scanIndividual(
 		// denormalised at booking time on purpose — the door needs the name the
 		// buyer actually paid for, and it must survive the organiser later
 		// renaming or deleting the tier.
-		ticketTypeName  *string
+		ticketTypeName *string
 	)
+	// e.id and ta.booking_id are selected for the scan_events row written
+	// below; the ledger foreign-keys both.
 	err := pool.QueryRow(ctx, `
-		SELECT ta.status, b.booking_status, e.start_time, e.end_time, e.organizer_id,
+		SELECT e.id, ta.status, ta.booking_id, b.booking_status,
+		       e.start_time, e.end_time, e.organizer_id,
 		       (es.user_id IS NOT NULL) AS is_staff,
 		       b.ticket_type_name
 		FROM ticket_assignments ta
@@ -103,7 +109,8 @@ func scanIndividual(
 		LEFT JOIN event_staff es
 		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE ta.id = $1
-	`, payload.AssignmentID, scannerUserID).Scan(&assignStatus, &bookingStatus, &startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
+	`, payload.AssignmentID, scannerUserID).Scan(&eventID, &assignStatus, &bookingID, &bookingStatus,
+		&startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
 		return
@@ -125,10 +132,15 @@ func scanIndividual(
 		return
 	}
 
+	// Scanner columns are set in the same atomic statement rather than in a
+	// fire-and-forget goroutine — see the note in ScanRotatingQRHandler.
 	tag, err := pool.Exec(ctx, `
-		UPDATE ticket_assignments SET qr_scanned_at = NOW()
+		UPDATE ticket_assignments
+		SET qr_scanned_at           = NOW(),
+		    scanned_by_user_id      = $2,
+		    scanned_by_organizer_id = (SELECT id FROM organizers WHERE user_id = $2 LIMIT 1)
 		WHERE id = $1 AND qr_scanned_at IS NULL
-	`, payload.AssignmentID)
+	`, payload.AssignmentID, scannerUserID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record scan"})
 		return
@@ -136,12 +148,32 @@ func scanIndividual(
 	if tag.RowsAffected() == 0 {
 		var firstScan *time.Time
 		_ = pool.QueryRow(ctx, `SELECT qr_scanned_at FROM ticket_assignments WHERE id = $1`, payload.AssignmentID).Scan(&firstScan)
+
+		if lerr := repository.RecordOnlineScan(ctx, pool, eventID,
+			&payload.AssignmentID, &bookingID, payload.AssignmentID,
+			1, scannerUserID, repository.ScanVerdictDuplicate,
+		); lerr != nil {
+			log.Warn().Err(lerr).Str("assignment_id", payload.AssignmentID).
+				Msg("scan: duplicate not written to scan ledger")
+		}
+
 		resp := gin.H{"error": "Ticket already scanned"}
 		if firstScan != nil {
 			resp["first_scan_at"] = *firstScan
 		}
 		c.JSON(http.StatusConflict, resp)
 		return
+	}
+
+	// Best-effort ledger append — the attendee is already admitted, and an
+	// audit failure must never become a refusal at the door.
+	if lerr := repository.RecordOnlineScan(ctx, pool, eventID,
+		&payload.AssignmentID, &bookingID, payload.AssignmentID,
+		1, scannerUserID, repository.ScanVerdictAdmitted,
+	); lerr != nil {
+		log.Error().Err(lerr).Str("assignment_id", payload.AssignmentID).
+			Str("event_id", eventID).
+			Msg("scan: admitted but not written to scan ledger — attendance and payout eligibility will under-report")
 	}
 
 	// "General Admission" rather than an empty string when the event is flat-
@@ -161,18 +193,6 @@ func scanIndividual(
 		"booking_id":       payload.BookingID,
 		"ticket_type_name": tier,
 	})
-
-	// Best-effort audit (fire-and-forget; response already sent).
-	go func() {
-		auditCtx, auditCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer auditCancel()
-		_, _ = pool.Exec(auditCtx, `
-			UPDATE ticket_assignments
-			SET scanned_by_user_id      = $1,
-			    scanned_by_organizer_id = (SELECT id FROM organizers WHERE user_id = $1 LIMIT 1)
-			WHERE id = $2
-		`, scannerUserID, payload.AssignmentID)
-	}()
 }
 
 // scanPool peeks or admits N heads from a booking's group pool.
@@ -186,6 +206,7 @@ func scanPool(
 	idemKey string,
 ) {
 	var (
+		eventID         string
 		bookingStatus   string
 		bookingNumber   string
 		eventTitle      string
@@ -194,10 +215,12 @@ func scanPool(
 		organizerUserID string
 		isStaff         bool
 		// A pool covers one booking, so every head under it shares one tier.
-		ticketTypeName  *string
+		ticketTypeName *string
 	)
+	// e.id is selected for the scan_events row written after a successful
+	// admit — the ledger foreign-keys it.
 	err := pool.QueryRow(ctx, `
-		SELECT b.booking_status, b.booking_number, e.title, e.start_time, e.end_time, e.organizer_id,
+		SELECT e.id, b.booking_status, b.booking_number, e.title, e.start_time, e.end_time, e.organizer_id,
 		       (es.user_id IS NOT NULL) AS is_staff,
 		       b.ticket_type_name
 		FROM bookings b
@@ -205,7 +228,7 @@ func scanPool(
 		LEFT JOIN event_staff es
 		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE b.id = $1
-	`, payload.BookingID, scannerUserID).Scan(&bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
+	`, payload.BookingID, scannerUserID).Scan(&eventID, &bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 		return
@@ -251,12 +274,15 @@ func scanPool(
 		c.JSON(http.StatusBadRequest, gin.H{"error": "idempotency_key is required to admit"})
 		return
 	}
+	// Idempotent replay: this returns the ORIGINAL admission, which is already
+	// in the scan ledger. Deliberately does NOT write another ledger row —
+	// doing so would double-count those heads in the analytics door figure.
 	if found, prevAdmitted, ierr := repository.GetScanIdempotency(ctx, pool, idemKey); ierr == nil && found {
 		c.JSON(http.StatusOK, gin.H{
-			"type":           "pool",
-			"message":        "Admitted",
-			"admitted":       prevAdmitted,
-			"remaining":      remaining,
+			"type":             "pool",
+			"message":          "Admitted",
+			"admitted":         prevAdmitted,
+			"remaining":        remaining,
 			"idempotent":       true,
 			"booking_number":   bookingNumber,
 			"event_title":      eventTitle,
@@ -266,6 +292,15 @@ func scanPool(
 	}
 
 	if remaining == 0 {
+		// Every head on this pass is already inside. Ledger it so an online
+		// gate leaves the same trail an offline one would.
+		if lerr := repository.RecordOnlineScan(ctx, pool, eventID,
+			nil, &payload.BookingID, payload.BookingID,
+			count, scannerUserID, repository.ScanVerdictDuplicate,
+		); lerr != nil {
+			log.Warn().Err(lerr).Str("booking_id", payload.BookingID).
+				Msg("scan: pool duplicate not written to scan ledger")
+		}
 		c.JSON(http.StatusConflict, gin.H{
 			"error":          "All tickets in this pass have already been admitted",
 			"remaining":      0,
@@ -286,11 +321,27 @@ func scanPool(
 	admitted := len(slots)
 	_ = repository.SaveScanIdempotency(ctx, pool, idemKey, payload.BookingID, admitted, scannerUserID)
 
+	// One ledger row for the whole pool admit, carrying the number of heads
+	// ACTUALLY admitted. The analytics door figure is SUM(admit_count), so
+	// writing the REQUESTED count here would over-report a partial admit.
+	// assignment_id is nil: a pool scan admits N slots, not one named
+	// assignment — the same shape ingestOne writes on the offline path.
+	if admitted > 0 {
+		if lerr := repository.RecordOnlineScan(ctx, pool, eventID,
+			nil, &payload.BookingID, payload.BookingID,
+			admitted, scannerUserID, repository.ScanVerdictAdmitted,
+		); lerr != nil {
+			log.Error().Err(lerr).Str("booking_id", payload.BookingID).
+				Str("event_id", eventID).Int("admitted", admitted).
+				Msg("scan: pool admitted but not written to scan ledger — attendance and payout eligibility will under-report")
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"type":           "pool",
-		"message":        "Admitted",
-		"admitted":       admitted,
-		"remaining":      remaining - admitted,
+		"type":             "pool",
+		"message":          "Admitted",
+		"admitted":         admitted,
+		"remaining":        remaining - admitted,
 		"slot_numbers":     slots,
 		"booking_number":   bookingNumber,
 		"event_title":      eventTitle,

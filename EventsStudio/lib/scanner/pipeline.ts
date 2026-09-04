@@ -15,6 +15,26 @@ import {
 import { uuid } from './sync';
 import { Buffer } from 'buffer';
 
+// Must match QRWindowSeconds in rotating_ar_service.go.
+const QR_WINDOW_SECONDS = 30;
+
+// How stale a ROTATING token may be and still scan at an offline gate, in
+// windows. 20 x 30s = 10 minutes, in either direction — a future-dated window
+// means clock skew or a crafted payload and is refused the same way.
+//
+// The window used to be ignored offline entirely, which meant a screenshot of
+// a live QR taken at any point earlier admitted successfully. The server does
+// not check the window on ingest either — IngestScans resolves the assignment
+// id and admits if unscanned — so nothing downstream caught it. The 30-second
+// rotation bought nothing the moment a gate went offline.
+//
+// It is still not enforced to the second, because a legitimate holder may be
+// showing a code a little older than the server itself would accept. But they
+// should not be showing a ROTATING code at all with no signal: RotatingQR.tsx
+// falls back to the self-contained OFFLINE token as soon as a refresh fails. A
+// rotating code ten minutes stale is a replay, not a straggler.
+const ROTATING_STALE_WINDOWS = 20;
+
 // Token payload shape shared by rotating, pool, and offline token families
 // (see rotating_ar_service.go). Base64url JSON before the last '.'.
 interface TokenPayload {
@@ -23,7 +43,7 @@ interface TokenPayload {
   bid?: string;  // booking id
   eid?: string;  // event id
   sn?: number;   // slot
-  w?: number;    // rotating window (ignored offline)
+  w?: number;    // rotating window
   off?: boolean; // offline token
   exp?: number;  // absolute expiry (offline tokens)
   v?: number;
@@ -66,11 +86,17 @@ export async function processScan(eventId: string, raw: string): Promise<ScanOut
   if (p.eid && p.eid !== eventId) {
     return { kind: 'invalid', reason: 'Ticket is for a different event' };
   }
-  // Offline tokens carry an absolute expiry; honour it. Rotating tokens carry
-  // a 30s window we deliberately SKIP offline — refusing a legitimate attendee
-  // whose app happens to show the live QR would be the worse failure.
+  // Offline tokens carry an absolute expiry; honour it.
   if (p.off && p.exp && Date.now() / 1000 > p.exp + 300) {
     return { kind: 'invalid', reason: 'Ticket expired' };
+  }
+  // Rotating tokens carry a 30s window. See ROTATING_STALE_WINDOWS above for
+  // why this is checked loosely rather than not at all.
+  if (!p.off && typeof p.w === 'number') {
+    const currentWindow = Math.floor(Date.now() / 1000 / QR_WINDOW_SECONDS);
+    if (Math.abs(currentWindow - p.w) > ROTATING_STALE_WINDOWS) {
+      return { kind: 'invalid', reason: 'QR is out of date — ask them to refresh their ticket' };
+    }
   }
 
   // ── Pool pass ───────────────────────────────────────────────────────────────

@@ -150,13 +150,63 @@ func flushViewCounts(pool *pgxpool.Pool, ec *cache.EventCache, ctx context.Conte
 	log.Info().Int("events_updated", len(counts)).Msg("view flush: complete")
 }
 
-func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
+// expiryBatchSize caps how many rows one expiry statement touches.
+//
+// expireBookings used to select EVERY expired pending booking in one
+// transaction under FOR UPDATE SKIP LOCKED and then issue two or three
+// sequential tx.Exec round-trips per row inside it. After any period of
+// downtime that became a very long transaction holding locks across the whole
+// backlog, on the one path that frees seats after an abandoned checkout.
+// reconcileStuckPayments already caps itself at 50; this one did not.
+const expiryBatchSize = 200
 
+// expiryMaxBatches bounds a single pass so a pathological backlog cannot spin
+// the worker forever. 200 x 50 = 10,000 rows per tick, and whatever is left is
+// picked up on the next one.
+const expiryMaxBatches = 50
+
+// expireBookings cancels abandoned pending bookings and returns their seats to
+// inventory, in bounded batches.
+func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) error {
+	total := 0
+	for batch := 0; batch < expiryMaxBatches; batch++ {
+		n, err := expireBookingsBatch(pool, ctx, ttl, expiryBatchSize)
+		if err != nil {
+			if total > 0 {
+				log.Info().Int("count", total).Msg("expiry worker: cancelled expired bookings before error")
+			}
+			return err
+		}
+		total += n
+		if n < expiryBatchSize {
+			break
+		}
+	}
+	if total > 0 {
+		log.Info().Int("count", total).Msg("expiry worker: cancelled expired bookings")
+	}
+	return nil
+}
+
+// expireBookingsBatch handles one bounded batch.
+//
+// It is a SINGLE statement rather than a read loop plus N updates inside an
+// explicit transaction. Three things follow from that:
+//
+//   - The implicit transaction is exactly one statement long, so the locks
+//     taken by FOR UPDATE SKIP LOCKED are held for as short a time as possible.
+//   - The counter decrements are aggregated per event and per tier by SQL, so
+//     two expired bookings on the same event are one UPDATE, not two. The old
+//     per-row loop could not do this: a single UPDATE cannot touch the same row
+//     twice, which is exactly why the aggregation has to happen in the CTE.
+//   - The row loop that dropped errors on the floor is gone, and with it the
+//     missing rows.Err() check that let a mid-stream failure look like an
+//     empty backlog.
+//
+// Postgres runs data-modifying CTEs exactly once and always to completion,
+// whether or not the primary query reads their output, so ev and tt both apply
+// even though only cancelled is selected from.
+func expireBookingsBatch(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration, limit int) (int, error) {
 	// payment_status IN ('pending', 'failed') — not 'pending' alone.
 	//
 	// syncBookingStatus no longer cancels a booking when an attempt is declined,
@@ -169,134 +219,119 @@ func expireBookings(pool *pgxpool.Pool, ctx context.Context, ttl time.Duration) 
 	// seats_released_at IS NULL keeps this consistent with releaseSeatsTx: the
 	// stamp is the single source of truth for whether a booking currently holds
 	// inventory, and ReacquireSeats reads it to decide whether a late
-	// confirmation needs its seat back.
-	rows, err := tx.Query(ctx, `
-		SELECT id, event_id, ticket_type_id, ticket_quantity
-		FROM bookings
-		WHERE booking_status = 'pending'
-		AND payment_status IN ('pending', 'failed')
-		AND seats_released_at IS NULL
-		AND created_at < NOW() - $1::interval
-		FOR UPDATE SKIP LOCKED
-	`, ttl.String())
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type expiredBooking struct {
-		id           string
-		eventID      string
-		ticketTypeID *string
-		quantity     int
-	}
-
-	var expired []expiredBooking
-	for rows.Next() {
-		var b expiredBooking
-		if err := rows.Scan(&b.id, &b.eventID, &b.ticketTypeID, &b.quantity); err != nil {
-			return err
-		}
-		expired = append(expired, b)
-	}
-	rows.Close()
-
-	if len(expired) == 0 {
-		return nil
-	}
-
-	for _, b := range expired {
-		// Stamp the release in the same statement. Without it this worker
-		// decremented the counters while leaving seats_released_at NULL, so a
-		// later refund could release the same seats a second time and a late
-		// confirmation had no way to know its seat needed taking back.
-		if _, err = tx.Exec(ctx, `
-			UPDATE bookings
+	// confirmation needs its seat back. It is set in the same statement here, so
+	// a later refund cannot release the same seats a second time.
+	var cancelled int
+	err := pool.QueryRow(ctx, `
+		WITH victims AS (
+			SELECT id, event_id, ticket_type_id, ticket_quantity
+			FROM bookings
+			WHERE booking_status = 'pending'
+			  AND payment_status IN ('pending', 'failed')
+			  AND seats_released_at IS NULL
+			  AND created_at < NOW() - $1::interval
+			ORDER BY created_at
+			LIMIT $2
+			FOR UPDATE SKIP LOCKED
+		),
+		ev AS (
+			UPDATE events e
+			SET tickets_sold = GREATEST(0, e.tickets_sold - agg.qty),
+			    updated_at   = NOW()
+			FROM (
+				SELECT event_id, SUM(ticket_quantity)::int AS qty
+				FROM victims GROUP BY event_id
+			) agg
+			WHERE e.id = agg.event_id
+		),
+		tt AS (
+			UPDATE ticket_types t
+			SET tickets_sold = GREATEST(0, t.tickets_sold - agg.qty),
+			    updated_at   = NOW()
+			FROM (
+				SELECT ticket_type_id, SUM(ticket_quantity)::int AS qty
+				FROM victims
+				WHERE ticket_type_id IS NOT NULL
+				GROUP BY ticket_type_id
+			) agg
+			WHERE t.id = agg.ticket_type_id
+		),
+		cancelled AS (
+			UPDATE bookings b
 			SET booking_status    = 'cancelled',
 			    seats_released_at = NOW(),
 			    updated_at        = NOW()
-			WHERE id = $1
-		`, b.id); err != nil {
-			return err
-		}
-		if _, err = tx.Exec(ctx, `
-			UPDATE events
-			SET tickets_sold = GREATEST(0, tickets_sold - $1), updated_at = NOW()
-			WHERE id = $2
-		`, b.quantity, b.eventID); err != nil {
-			return err
-		}
-		// Release the tier's capacity too — createBookingTx incremented
-		// ticket_types.tickets_sold when the booking targeted a tier.
-		if b.ticketTypeID != nil {
-			if _, err = tx.Exec(ctx, `
-				UPDATE ticket_types
-				SET tickets_sold = GREATEST(0, tickets_sold - $1), updated_at = NOW()
-				WHERE id = $2
-			`, b.quantity, *b.ticketTypeID); err != nil {
-				return err
+			FROM victims v
+			WHERE b.id = v.id
+			RETURNING b.id
+		)
+		SELECT count(*)::int FROM cancelled
+	`, ttl.String(), limit).Scan(&cancelled)
+	if err != nil {
+		return 0, fmt.Errorf("expireBookingsBatch: %w", err)
+	}
+	return cancelled, nil
+}
+
+// expireReservations releases expired ticket reservations in bounded batches,
+// for the same reasons expireBookings does — see the note above it.
+func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
+	total := 0
+	for batch := 0; batch < expiryMaxBatches; batch++ {
+		n, err := expireReservationsBatch(pool, ctx, expiryBatchSize)
+		if err != nil {
+			if total > 0 {
+				log.Info().Int("count", total).Msg("expiry worker: released expired reservations before error")
 			}
+			return err
+		}
+		total += n
+		if n < expiryBatchSize {
+			break
 		}
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
+	if total > 0 {
+		log.Info().Int("count", total).Msg("expiry worker: released expired reservations")
 	}
-
-	log.Info().Int("count", len(expired)).Msg("expiry worker: cancelled expired bookings")
 	return nil
 }
 
-func expireReservations(pool *pgxpool.Pool, ctx context.Context) error {
-	tx, err := pool.Begin(ctx)
+// expireReservationsBatch handles one bounded batch. Single statement, so the
+// reserved_count decrement and the DELETE are atomic per batch without an
+// explicit transaction.
+func expireReservationsBatch(pool *pgxpool.Pool, ctx context.Context, limit int) (int, error) {
+	var released int
+	err := pool.QueryRow(ctx, `
+		WITH victims AS (
+			SELECT id, event_id, quantity
+			FROM ticket_reservations
+			WHERE expires_at < NOW()
+			ORDER BY expires_at
+			LIMIT $1
+			FOR UPDATE SKIP LOCKED
+		),
+		ev AS (
+			UPDATE events e
+			SET reserved_count = GREATEST(0, e.reserved_count - agg.qty),
+			    updated_at     = NOW()
+			FROM (
+				SELECT event_id, SUM(quantity)::int AS qty
+				FROM victims GROUP BY event_id
+			) agg
+			WHERE e.id = agg.event_id
+		),
+		del AS (
+			DELETE FROM ticket_reservations r
+			USING victims v
+			WHERE r.id = v.id
+			RETURNING r.id
+		)
+		SELECT count(*)::int FROM del
+	`, limit).Scan(&released)
 	if err != nil {
-		return err
+		return 0, fmt.Errorf("expireReservationsBatch: %w", err)
 	}
-	defer tx.Rollback(ctx)
-
-	rows, err := tx.Query(ctx, `
-		SELECT id, event_id, quantity FROM ticket_reservations
-		WHERE expires_at < NOW()
-		FOR UPDATE SKIP LOCKED
-	`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type expiredRes struct {
-		id, eventID string
-		qty         int
-	}
-	var expired []expiredRes
-	for rows.Next() {
-		var r expiredRes
-		if err := rows.Scan(&r.id, &r.eventID, &r.qty); err != nil {
-			return err
-		}
-		expired = append(expired, r)
-	}
-	rows.Close()
-	if len(expired) == 0 {
-		return nil
-	}
-
-	for _, r := range expired {
-		if _, err := tx.Exec(ctx,
-			`UPDATE events SET reserved_count = GREATEST(0, reserved_count - $1), updated_at = NOW()
-			 WHERE id = $2`, r.qty, r.eventID); err != nil {
-			return fmt.Errorf("expireReservations: decrement reserved_count for event %s: %w", r.eventID, err)
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM ticket_reservations WHERE id = $1`, r.id); err != nil {
-			return fmt.Errorf("expireReservations: delete reservation %s: %w", r.id, err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	log.Info().Int("count", len(expired)).Msg("expiry worker: released expired reservations")
-	return nil
+	return released, nil
 }
 
 func cleanupStaleCarts(pool *pgxpool.Pool, ctx context.Context) error {
