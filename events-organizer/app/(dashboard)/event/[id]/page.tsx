@@ -608,7 +608,7 @@ export default function EventDetailPage() {
                      : 'Default window'} />
               <Row label="Scanning closes"
                    value={ev.scan_close_offset_min != null
-                     ? `${ev.scan_close_offset_min} min after end`
+                     ? `${ev.scan_close_offset_min} min after start`
                      : 'Default window'} />
             </Panel>
 

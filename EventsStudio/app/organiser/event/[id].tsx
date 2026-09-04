@@ -257,7 +257,7 @@ export default function StudioEventDetail() {
                         <Text style={styles.windowNote}>
                           {win.customOpen || win.customClose
                             ? 'Admission window set by you on the web dashboard.'
-                            : 'Default window: opens 2h before the start, closes 2h after the end.'}
+                            : 'Default window: opens 2h before the start, closes 2h after the start (or 30 min before the end, whichever is sooner).'}
                         </Text>
                       </>
                     )}

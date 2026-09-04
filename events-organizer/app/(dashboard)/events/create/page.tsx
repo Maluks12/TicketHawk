@@ -565,11 +565,13 @@ export default function CreateEventPage() {
   const [startTime,           setStartTime]           = useState('');
   const [endTime,             setEndTime]             = useState('');
   const [expiresAt,           setExpiresAt]           = useState('');
-  // Scan (admission) window. 'default' keeps the 2h-before / 2h-after grace.
-  // 'custom' exposes minute offsets for all-day or tight-door events.
+  // Scan (admission) window. Both offsets are measured from START time.
+  // 'default' = opens 2h before start, closes 2h after start or 30 min before
+  // the end, whichever comes first. 'custom' exposes the minute offsets for
+  // all-day or tight-door events, and a custom close is NOT capped.
   const [scanWindowMode, setScanWindowMode] = useState<'default' | 'custom'>('default');
   const [scanOpenMin,  setScanOpenMin]  = useState('120');   // minutes before start
-  const [scanCloseMin, setScanCloseMin] = useState('120');   // minutes after end
+  const [scanCloseMin, setScanCloseMin] = useState('120');   // minutes after start
   const [isFree,              setIsFree]              = useState(true);
   // Event class — drives visibility + what verification tier is needed.
   // private_free is the only class every organiser (tier 1) can publish.
@@ -998,8 +1000,16 @@ export default function CreateEventPage() {
         visibility:           eventType === 'public' ? 'public' : 'private_link',
       };
       if (scanWindowMode === 'custom') {
-        body.scan_open_offset_min  = parseInt(scanOpenMin, 10)  || 0;
-        body.scan_close_offset_min = parseInt(scanCloseMin, 10) || 0;
+        // A blank or unparseable field means "not chosen" — omit it, so the
+        // column stays NULL and the default rule applies. It must NOT coerce
+        // to 0 the way it used to: now that the close is anchored to the
+        // START, 0 means "shut the doors the moment the event begins", which
+        // is not a window anyone clears a field to ask for. An organiser who
+        // actually types 0 still gets 0.
+        const openMin  = parseInt(scanOpenMin, 10);
+        const closeMin = parseInt(scanCloseMin, 10);
+        if (Number.isFinite(openMin))  body.scan_open_offset_min  = openMin;
+        if (Number.isFinite(closeMin)) body.scan_close_offset_min = closeMin;
       }
       // Note: backend DTO spells this "max_capicity" (typo kept intentionally to match backend)
       if (maxCapacity)       body.max_capicity          = parseInt(maxCapacity);
@@ -1312,7 +1322,7 @@ export default function CreateEventPage() {
                         value={scanWindowMode}
                         onChange={(v) => setScanWindowMode(v as 'default' | 'custom')}
                         options={[
-                          { value: 'default', label: 'Default', hint: '2h before, 2h after' },
+                          { value: 'default', label: 'Default', hint: '2h before start \u2192 2h after start' },
                           { value: 'custom', label: 'Custom', hint: 'Set my own window' },
                         ]}
                       />
@@ -1330,11 +1340,11 @@ export default function CreateEventPage() {
                         <div className="field-hint">e.g. 120 = 2 hours</div>
                       </div>
                       <div className="field" style={{ marginBottom: 0 }}>
-                        <label>Closes after end (minutes)</label>
+                        <label>Closes after start (minutes)</label>
                         <input type="number" min={0} max={10080} value={scanCloseMin}
                           onChange={e => setScanCloseMin(e.target.value)} style={inp}
                           placeholder="120" />
-                        <div className="field-hint">e.g. 720 = 12 hours (all-day)</div>
+                        <div className="field-hint">Measured from the START, e.g. 840 = 14 hours (all-day)</div>
                       </div>
                     </div>
                   )}

@@ -403,14 +403,25 @@ export function capacityPct(sold: number, cap?: number | null): number | null {
 // showing it at all: a door that believes it has 20 minutes left when the
 // server thinks otherwise finds out at the gate.
 //
-//   open  = start_time - (scan_open_offset_min  ?? 120 minutes)
-//   close = end_time   + (scan_close_offset_min ?? 120 minutes)
+// BOTH sides are anchored to start_time:
 //
-// A NULL offset means "use the default", which is why `?? DEFAULT` and not a
-// falsy check: an organiser who sets 0 means zero grace, not two hours.
+//   open  = start_time - (scan_open_offset_min ?? 120 minutes)
+//   close = scan_close_offset_min != null
+//             ? start_time + scan_close_offset_min          (taken literally)
+//             : min(end_time - 30min, start_time + 2h)      (the default rule)
+//
+// The close used to be end_time + 120min. It is now start-anchored and, when
+// left at the default, capped: nobody is admitted more than two hours into an
+// event, and a short event shuts its doors 30 minutes before it ends.
+//
+// A NULL offset means "use the default", which is why every check is `!= null`
+// and not a falsy test: an organiser who sets 0 means zero grace, not two hours.
 
 /** models.DefaultScanGrace — 2 hours, in minutes. */
 export const DEFAULT_SCAN_GRACE_MIN = 120;
+
+/** models.DefaultScanCloseLead — 30 minutes, in minutes. */
+export const DEFAULT_SCAN_CLOSE_LEAD_MIN = 30;
 
 export interface ScanWindow {
   open: Date;
@@ -431,13 +442,24 @@ export function scanWindow(
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
 
   const openMin = openOffsetMin ?? DEFAULT_SCAN_GRACE_MIN;
-  const closeMin = closeOffsetMin ?? DEFAULT_SCAN_GRACE_MIN;
+
+  // Close: an explicit offset is start-anchored and taken at face value; the
+  // default is the earlier of (end - 30min) and (start + 2h).
+  const close =
+    closeOffsetMin != null
+      ? new Date(start.getTime() + closeOffsetMin * 60_000)
+      : new Date(
+          Math.min(
+            end.getTime() - DEFAULT_SCAN_CLOSE_LEAD_MIN * 60_000,
+            start.getTime() + DEFAULT_SCAN_GRACE_MIN * 60_000,
+          ),
+        );
 
   return {
     open: new Date(start.getTime() - openMin * 60_000),
-    close: new Date(end.getTime() + closeMin * 60_000),
+    close,
     customOpen: openOffsetMin != null && openOffsetMin !== DEFAULT_SCAN_GRACE_MIN,
-    customClose: closeOffsetMin != null && closeOffsetMin !== DEFAULT_SCAN_GRACE_MIN,
+    customClose: closeOffsetMin != null,
   };
 }
 
