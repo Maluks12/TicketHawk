@@ -250,8 +250,9 @@ func formatStaffCode(code string) string {
 }
 
 // CreateStaffCode mints a join code for the event. expiresAt of zero defaults
-// to the event's admission-window end (end_time + 2h) so forgotten codes die
-// with the event.
+// to models.StaffCodeExpiry — the admission close, floored at the event's own
+// end_time — so forgotten codes die with the event without locking out a
+// staffer who joins after the doors have shut.
 func CreateStaffCode(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -264,18 +265,18 @@ func CreateStaffCode(
 		maxUses = 10
 	}
 	if expiresAt.IsZero() {
-		var endTime time.Time
+		var startTime, endTime time.Time
 		var scanCloseOff *int
 		if err := pool.QueryRow(ctx,
-			`SELECT end_time, scan_close_offset_min FROM events WHERE id = $1`, eventID,
-		).Scan(&endTime, &scanCloseOff); err != nil {
+			`SELECT start_time, end_time, scan_close_offset_min FROM events WHERE id = $1`, eventID,
+		).Scan(&startTime, &endTime, &scanCloseOff); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, ErrEventNotFound
 			}
 			return nil, err
 		}
-		// Join codes expire when the (possibly custom) admission window closes.
-		expiresAt = models.ScanCloses(endTime, scanCloseOff)
+		// Join codes outlive the gate on purpose — see models.StaffCodeExpiry.
+		expiresAt = models.StaffCodeExpiry(startTime, endTime, scanCloseOff)
 	}
 
 	// Retry on the (astronomically unlikely) unique collision.

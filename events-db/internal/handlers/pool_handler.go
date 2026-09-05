@@ -16,11 +16,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// withinAdmissionWindow mirrors the single-ticket scan gate: entry is allowed
-// from 2h before the event starts to 2h after it ends.
-func withinAdmissionWindow(start, end time.Time) bool {
+// withinAdmissionWindow defers to models.ScanWindow, the single source of
+// truth for the gate.
+//
+// It used to hardcode "start-2h to end+2h" and read neither offset column, so
+// this endpoint silently ignored every custom window an organiser set — the
+// rotating-QR gate honoured them and this one did not, on the same event.
+// Taking the offsets as arguments is what keeps the two paths in step.
+func withinAdmissionWindow(start, end time.Time, openOffsetMin, closeOffsetMin *int) bool {
+	open, close := models.ScanWindow(start, end, openOffsetMin, closeOffsetMin)
 	now := time.Now()
-	return !now.Before(start.Add(-2*time.Hour)) && !now.After(end.Add(2*time.Hour))
+	return !now.Before(open) && !now.After(close)
 }
 
 // ScanHandler is the unified door-scan endpoint. It accepts any rotating QR
@@ -88,6 +94,8 @@ func scanIndividual(
 		bookingStatus   string
 		startTime       time.Time
 		endTime         time.Time
+		scanOpenOff     *int
+		scanCloseOff    *int
 		organizerUserID string
 		isStaff         bool
 		// Tier the holder bought. Read from bookings.ticket_type_name, which is
@@ -100,7 +108,9 @@ func scanIndividual(
 	// below; the ledger foreign-keys both.
 	err := pool.QueryRow(ctx, `
 		SELECT e.id, ta.status, ta.booking_id, b.booking_status,
-		       e.start_time, e.end_time, e.organizer_id,
+		       e.start_time, e.end_time,
+		       e.scan_open_offset_min, e.scan_close_offset_min,
+		       e.organizer_id,
 		       (es.user_id IS NOT NULL) AS is_staff,
 		       b.ticket_type_name
 		FROM ticket_assignments ta
@@ -110,7 +120,8 @@ func scanIndividual(
 		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE ta.id = $1
 	`, payload.AssignmentID, scannerUserID).Scan(&eventID, &assignStatus, &bookingID, &bookingStatus,
-		&startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
+		&startTime, &endTime, &scanOpenOff, &scanCloseOff,
+		&organizerUserID, &isStaff, &ticketTypeName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Ticket not found"})
 		return
@@ -127,7 +138,7 @@ func scanIndividual(
 		c.JSON(http.StatusConflict, gin.H{"error": "Booking is no longer valid", "booking_status": bookingStatus})
 		return
 	}
-	if !withinAdmissionWindow(startTime, endTime) {
+	if !withinAdmissionWindow(startTime, endTime, scanOpenOff, scanCloseOff) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Outside event admission window"})
 		return
 	}
@@ -212,6 +223,8 @@ func scanPool(
 		eventTitle      string
 		startTime       time.Time
 		endTime         time.Time
+		scanOpenOff     *int
+		scanCloseOff    *int
 		organizerUserID string
 		isStaff         bool
 		// A pool covers one booking, so every head under it shares one tier.
@@ -220,7 +233,10 @@ func scanPool(
 	// e.id is selected for the scan_events row written after a successful
 	// admit — the ledger foreign-keys it.
 	err := pool.QueryRow(ctx, `
-		SELECT e.id, b.booking_status, b.booking_number, e.title, e.start_time, e.end_time, e.organizer_id,
+		SELECT e.id, b.booking_status, b.booking_number, e.title,
+		       e.start_time, e.end_time,
+		       e.scan_open_offset_min, e.scan_close_offset_min,
+		       e.organizer_id,
 		       (es.user_id IS NOT NULL) AS is_staff,
 		       b.ticket_type_name
 		FROM bookings b
@@ -228,7 +244,9 @@ func scanPool(
 		LEFT JOIN event_staff es
 		       ON es.event_id = e.id AND es.user_id = $2 AND es.status = 'active'
 		WHERE b.id = $1
-	`, payload.BookingID, scannerUserID).Scan(&eventID, &bookingStatus, &bookingNumber, &eventTitle, &startTime, &endTime, &organizerUserID, &isStaff, &ticketTypeName)
+	`, payload.BookingID, scannerUserID).Scan(&eventID, &bookingStatus, &bookingNumber, &eventTitle,
+		&startTime, &endTime, &scanOpenOff, &scanCloseOff,
+		&organizerUserID, &isStaff, &ticketTypeName)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 		return
@@ -246,7 +264,7 @@ func scanPool(
 		c.JSON(http.StatusConflict, gin.H{"error": "Booking is no longer valid", "booking_status": bookingStatus})
 		return
 	}
-	if !withinAdmissionWindow(startTime, endTime) {
+	if !withinAdmissionWindow(startTime, endTime, scanOpenOff, scanCloseOff) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Outside event admission window"})
 		return
 	}

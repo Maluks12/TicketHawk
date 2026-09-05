@@ -15,9 +15,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// offlineAdmissionGrace mirrors the scan gate: entry is allowed up to 2h after
-// the event ends, so offline tokens stay valid across the whole admission window.
-const offlineAdmissionGrace = 2 * time.Hour
+// The attendee's cached entry pass expires exactly when the gate closes —
+// models.ScanCloses, the same call the door makes.
+//
+// This used to be a local `const offlineAdmissionGrace = 2 * time.Hour` applied
+// to end_time, which read neither offset column. On an event with a long custom
+// window that handed the attendee a pass that died BEFORE the gate did: a
+// cached QR refused at a door that was still open, with no network to refresh
+// it. That is the exact failure the offline bundle exists to prevent.
 
 // offlineAssignment is one individually-assigned ticket in the offline bundle.
 type offlineAssignment struct {
@@ -67,19 +72,21 @@ func GetOfflineTicketsHandler(
 			bookingStatus string
 			startTime     *time.Time
 			endTime       *time.Time
+			scanCloseOff  *int
 		)
 		err := pool.QueryRow(ctx, `
-			SELECT b.event_id, b.booking_status, e.start_time, e.end_time
+			SELECT b.event_id, b.booking_status, e.start_time, e.end_time, e.scan_close_offset_min
 			FROM bookings b
 			LEFT JOIN events e ON b.event_id = e.id
 			WHERE b.id = $1 AND b.user_id = $2
-		`, bookingID, userID).Scan(&eventID, &bookingStatus, &startTime, &endTime)
+		`, bookingID, userID).Scan(&eventID, &bookingStatus, &startTime, &endTime, &scanCloseOff)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
 		}
 
-		respondOfflineBundle(c, ctx, pool, rotatingQR, bookingID, eventID, bookingStatus, endTime)
+		respondOfflineBundle(c, ctx, pool, rotatingQR, bookingID, eventID, bookingStatus,
+			startTime, endTime, scanCloseOff)
 	}
 }
 
@@ -109,19 +116,21 @@ func GetGuestOfflineTicketsHandler(
 			bookingStatus string
 			startTime     *time.Time
 			endTime       *time.Time
+			scanCloseOff  *int
 		)
 		err := pool.QueryRow(ctx, `
-			SELECT b.id, b.event_id, b.booking_status, e.start_time, e.end_time
+			SELECT b.id, b.event_id, b.booking_status, e.start_time, e.end_time, e.scan_close_offset_min
 			FROM bookings b
 			LEFT JOIN events e ON b.event_id = e.id
 			WHERE b.booking_number = $1 AND b.is_guest = true AND lower(b.attendee_email) = lower($2)
-		`, bookingNumber, email).Scan(&bookingID, &eventID, &bookingStatus, &startTime, &endTime)
+		`, bookingNumber, email).Scan(&bookingID, &eventID, &bookingStatus, &startTime, &endTime, &scanCloseOff)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
 		}
 
-		respondOfflineBundle(c, ctx, pool, rotatingQR, bookingID, eventID, bookingStatus, endTime)
+		respondOfflineBundle(c, ctx, pool, rotatingQR, bookingID, eventID, bookingStatus,
+			startTime, endTime, scanCloseOff)
 	}
 }
 
@@ -137,7 +146,9 @@ func respondOfflineBundle(
 	bookingID string,
 	eventID *string,
 	bookingStatus string,
+	startTime *time.Time,
 	endTime *time.Time,
+	scanCloseOff *int,
 ) {
 	// Only confirmed bookings have valid entry passes.
 	if bookingStatus != string(models.BookingConfirmed) {
@@ -148,9 +159,10 @@ func respondOfflineBundle(
 		return
 	}
 
-	// Offline entry passes only make sense for event bookings with a known end
-	// time — merch-only bookings have neither an event nor a gate.
-	if eventID == nil || endTime == nil {
+	// Offline entry passes only make sense for event bookings with a known
+	// start AND end time — merch-only bookings have neither an event nor a gate,
+	// and the close is anchored to the start, so both are required.
+	if eventID == nil || startTime == nil || endTime == nil {
 		c.JSON(http.StatusOK, offlineBundle{
 			BookingID:     bookingID,
 			GeneratedAt:   time.Now(),
@@ -163,7 +175,7 @@ func respondOfflineBundle(
 	}
 
 	eid := *eventID
-	exp := endTime.Add(offlineAdmissionGrace)
+	exp := models.ScanCloses(*startTime, *endTime, scanCloseOff)
 
 	bundle := offlineBundle{
 		BookingID:   bookingID,

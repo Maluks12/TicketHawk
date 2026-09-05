@@ -222,7 +222,8 @@ func GetGuestRotatingQRTokenHandler(
 // Verification order:
 //  1. HMAC + window check (crypto only, no DB).
 //  2. Assignment and booking status checks (must be claimed/confirmed).
-//  3. Event admission window check (±2h around event).
+//  3. Event admission window check (models.ScanWindow — both sides anchored
+//     to start_time; see internal/models/scan_window.go).
 //  4. Atomic single-entry mark — sets qr_scanned_at WHERE qr_scanned_at IS NULL.
 //     A race-safe 0-rows-affected means the ticket was already used.
 //

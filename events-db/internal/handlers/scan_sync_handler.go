@@ -22,9 +22,9 @@ import (
 // sync within one interval. The scanner credential these mint is for the
 // device's LOCAL offline gating only; it never substitutes for auth here.
 
-// Credential expiry now derives from models.ScanCloses (event end + the
-// event's custom close offset, defaulting to models.DefaultScanGrace = 2h),
-// so a lost scanner phone is bounded by the same window the organiser set.
+// Credential expiry derives from models.ScanCloses — the same start-anchored
+// admission close every scan path uses — so a lost scanner phone is bounded by
+// exactly the window the organiser set, and never outlives the gate.
 
 // requireCanScan resolves the event and enforces owner/staff/admin scanning
 // access. Returns (eventID, role) or writes the error and returns "".
@@ -75,16 +75,17 @@ func MintScannerCredentialHandler(
 			return
 		}
 
-		var endTime time.Time
+		var startTime, endTime time.Time
 		var scanCloseOff *int
 		if err := pool.QueryRow(ctx,
-			`SELECT end_time, scan_close_offset_min FROM events WHERE id = $1`, eventID,
-		).Scan(&endTime, &scanCloseOff); err != nil {
+			`SELECT start_time, end_time, scan_close_offset_min FROM events WHERE id = $1`, eventID,
+		).Scan(&startTime, &endTime, &scanCloseOff); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
 		}
 		// Credential lifetime tracks the (possibly custom) admission-close time.
-		exp := models.ScanCloses(endTime, scanCloseOff)
+		// start_time is needed too now that the close is anchored to the start.
+		exp := models.ScanCloses(startTime, endTime, scanCloseOff)
 		if time.Now().After(exp) {
 			c.JSON(http.StatusConflict, gin.H{"error": "This event's admission window has ended"})
 			return
