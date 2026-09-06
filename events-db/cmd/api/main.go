@@ -881,6 +881,34 @@ func main() {
 	eventStaff.GET("/:id/scan-exceptions", handlers.ScanExceptionsHandler(pool))
 
 	// ==========================================
+	// RFID / NFC tags (Phase 1: online)
+	// ==========================================
+	// Registered on the SAME scanSync group so tag routes inherit its auth and
+	// its rate limit. That limit (capacity 240, refill 4/s) was sized for scan
+	// sync and comfortably covers a tap-per-second gate; revisit it in Phase 3
+	// when vendor POS traffic joins the same group.
+	//
+	// An unset TAG_MASTER_KEY is not an error — it means this deployment is not
+	// running an RFID programme. The routes are simply never registered, so a
+	// stray tap 404s instead of panicking at a gate. A key that is PRESENT but
+	// malformed is fatal: that is a misconfiguration, and failing at boot beats
+	// discovering it on a Friday night.
+	if cfg.TagMasterKey != "" {
+		tagCrypto, tagErr := services.NewTagCryptoService(cfg)
+		if tagErr != nil {
+			log.Fatal().Err(tagErr).Msg("TAG_MASTER_KEY is present but invalid")
+		}
+
+		scanSync.POST("/:id/tag-batches",   handlers.CreateTagBatchHandler(pool))
+		scanSync.GET("/:id/tag-batches",    handlers.ListTagBatchesHandler(pool))
+		scanSync.POST("/:id/tags/register", handlers.RegisterTagsHandler(pool))
+		scanSync.GET("/:id/tags",           handlers.ListTagsHandler(pool))
+		scanSync.POST("/:id/tags/bind",     handlers.BindTagHandler(pool))
+		scanSync.POST("/:id/tags/status",   handlers.SetTagStatusHandler(pool))
+		scanSync.POST("/:id/tags/tap",      handlers.TapTagHandler(pool, tagCrypto))
+	}
+
+	// ==========================================
 	// Home Feed
 	// ==========================================
 	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))

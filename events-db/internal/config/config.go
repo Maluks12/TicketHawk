@@ -37,6 +37,20 @@ type Config struct {
 	VerifyNowMode    string // "sandbox" (default) | "production"
 	QRHMACSecret    string // HMAC-SHA256 secret for rotating in-app QR tokens
 
+	// TagMasterKey is the root of the RFID/NFC key hierarchy. Every per-event
+	// and per-tag key is DERIVED from it (see services.TagCryptoService) and
+	// none are ever persisted, so the database holds no tag key material at all
+	// and rotation is a version bump rather than re-encoding the estate.
+	//
+	// Hex-encoded, decoding to 16, 24 or 32 bytes. Deliberately NOT the QR
+	// secret: a compromised tag key must not also forge QR tickets, and the two
+	// rotate on different clocks.
+	//
+	// Generate with: openssl rand -hex 32
+	//
+	// There is no recovery path if this is lost — back it up like a signing key.
+	TagMasterKey string
+
 	R2AccountID string
 	R2AccessKey string
 	R2SecretKey string
@@ -149,6 +163,7 @@ func Load() (*Config, error) {
 		VerifyNowAPIKey:  os.Getenv("VERIFYNOW_API_KEY"),
 		VerifyNowMode:    os.Getenv("VERIFYNOW_MODE"),
 		QRHMACSecret:    os.Getenv("QR_HMAC_SECRET"),
+		TagMasterKey:    os.Getenv("TAG_MASTER_KEY"),
 
 		R2AccountID: os.Getenv("R2_ACCOUNT_ID"),
 		R2AccessKey: os.Getenv("R2_ACCESS_KEY"),
@@ -275,6 +290,15 @@ func (c *Config) validate() error {
 	}
 	if len(c.QRHMACSecret) < 32 {
 		missing = append(missing, "QR_HMAC_SECRET (must be at least 32 chars — generate with: openssl rand -hex 32)")
+	}
+
+	// TAG_MASTER_KEY is OPTIONAL: a deployment with no RFID programme must still
+	// boot. But a key that is present and too short is a misconfiguration, and
+	// the right place to find out is startup rather than a gate. Format is
+	// checked again in services.NewTagCryptoService, which rejects anything that
+	// does not decode to a valid AES key length.
+	if c.TagMasterKey != "" && len(c.TagMasterKey) < 32 {
+		missing = append(missing, "TAG_MASTER_KEY (must be at least 32 hex chars — generate with: openssl rand -hex 32)")
 	}
 
 	if len(missing) > 0 {

@@ -87,6 +87,30 @@ type Manifest struct {
 	Cursor      time.Time            `json:"cursor"` // pass back as ?since= for deltas
 	Assignments []ManifestAssignment `json:"assignments"`
 	Pools       []ManifestPool       `json:"pools"`
+
+	// Tags is the RFID/NFC wristband mapping. Empty for events with no tag
+	// programme, so a scanner that ignores the field behaves exactly as before.
+	Tags []ManifestTag `json:"tags"`
+}
+
+// ManifestTag maps one wristband to what it admits, for offline resolution on
+// the handset.
+//
+// Under the manifest-authoritative trust model the device holds no verification
+// keys, so this mapping IS the offline check: UID present, status active, and
+// the assignment it points at not yet admitted. Everything the device cannot
+// know — a band revoked or re-bound since this snapshot — is caught server-side
+// at sync by ClassifyTagScan.
+//
+// Status ships as a plain string rather than a boolean because the device shows
+// door staff WHY a band was refused, and "this band was reported lost" is a
+// different conversation at the gate from "this ticket is already inside".
+type ManifestTag struct {
+	TagUID       string  `json:"tag_uid"`
+	Status       string  `json:"status"`
+	AssignmentID *string `json:"assignment_id"`
+	BookingID    *string `json:"booking_id"`
+	ChipType     string  `json:"chip_type"`
 }
 
 // BuildManifest returns the event's attendee manifest — full when since is
@@ -100,7 +124,8 @@ func BuildManifest(
 	eventID string,
 	since time.Time,
 ) (*Manifest, error) {
-	m := &Manifest{EventID: eventID, Assignments: []ManifestAssignment{}, Pools: []ManifestPool{}}
+	m := &Manifest{EventID: eventID, Assignments: []ManifestAssignment{},
+		Pools: []ManifestPool{}, Tags: []ManifestTag{}}
 
 	err := pool.QueryRow(ctx, `
 		SELECT title, start_time, end_time FROM events WHERE id = $1
@@ -179,7 +204,40 @@ func BuildManifest(
 		}
 		m.Pools = append(m.Pools, p)
 	}
-	return m, prows.Err()
+	if err := prows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Tags ride the SAME cursor as assignments and pools, so the scanner keeps
+	// one sync loop and one "since" value. Revocations propagate through this
+	// delta the way other gates' admissions already do: SetTagStatus bumps
+	// updated_at, so a band reported lost at the box office reaches every
+	// handset on its next sync without any device-to-device channel.
+	//
+	// Deactivated and lost bands are shipped rather than filtered out. A device
+	// that simply stopped seeing a UID would treat the next tap as an unknown
+	// band and admit it as a provisional; shipping the revocation lets it
+	// refuse at the gate and say why.
+	trows, err := pool.Query(ctx, `
+		SELECT rt.tag_uid, rt.status::text, rt.assignment_id, rt.booking_id, rt.chip_type::text
+		FROM rfid_tags rt
+		WHERE rt.event_id = $1
+		  AND ($2::timestamptz IS NULL OR rt.updated_at > $2)
+		ORDER BY rt.tag_uid
+	`, eventID, nullableTime(since))
+	if err != nil {
+		return nil, err
+	}
+	defer trows.Close()
+	for trows.Next() {
+		var t ManifestTag
+		if err := trows.Scan(&t.TagUID, &t.Status, &t.AssignmentID,
+			&t.BookingID, &t.ChipType); err != nil {
+			return nil, err
+		}
+		m.Tags = append(m.Tags, t)
+	}
+	return m, trows.Err()
 }
 
 func nullableTime(t time.Time) *time.Time {
@@ -200,6 +258,17 @@ type IncomingScan struct {
 	AdmitCount   int       `json:"admit_count"`           // pool: heads admitted at the gate
 	Mode         string    `json:"mode"`                  // "online" | "offline"
 	ScannedAt    time.Time `json:"scanned_at" binding:"required"`
+
+	// Medium is how the credential was presented: "qr" (default) or "nfc".
+	// Orthogonal to Mode, which is transport — a tap and a QR scan can each
+	// arrive online or offline. Empty is treated as "qr" so devices running
+	// older builds keep ingesting unchanged.
+	Medium string `json:"medium,omitempty"`
+
+	// TagUID is the wristband the device read, for "nfc" scans. It is the
+	// device's CLAIM: the server re-resolves it against rfid_tags and may
+	// override the admission entirely (see ClassifyTagScan).
+	TagUID string `json:"tag_uid,omitempty"`
 }
 
 // ScanOutcome is the server's verdict for one incoming scan.
@@ -209,6 +278,11 @@ type ScanOutcome struct {
 	AdmittedN    int        `json:"admitted_n,omitempty"`
 	FirstScanAt  *time.Time `json:"first_scan_at,omitempty"`
 	ConflictWith *string    `json:"conflict_with,omitempty"`
+
+	// TagReason explains a tag-driven refusal ("tag_rebound_since_sync", ...)
+	// so the handset can tell door staff why a band was turned away rather than
+	// showing a bare verdict. Empty for every non-tag scan.
+	TagReason string `json:"tag_reason,omitempty"`
 }
 
 // IngestScans applies a device's batch. Exactly-once per scan via the
@@ -239,6 +313,13 @@ func IngestScans(
 // the value is fixed by the booking_status enum in migration 000001.
 const bookingStatusConfirmed = "confirmed"
 
+// Scan media, mirroring the scan_medium enum added in migration 000085. Local
+// literals for the same reason as bookingStatusConfirmed above.
+const (
+	scanMediumQR  = "qr"
+	scanMediumNFC = "nfc"
+)
+
 func ingestOne(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -253,6 +334,12 @@ func ingestOne(
 	}
 	if sc.AdmitCount <= 0 {
 		sc.AdmitCount = 1
+	}
+	// An absent medium means qr: devices on older builds send no field, and
+	// their scans are exactly what they always were.
+	if sc.Medium != scanMediumNFC {
+		sc.Medium = scanMediumQR
+		sc.TagUID = ""
 	}
 
 	tx, err := pool.Begin(ctx)
@@ -307,16 +394,54 @@ func ingestOne(
 		}
 	}
 
+	// Tag reconciliation, for nfc scans only.
+	//
+	// Resolved BEFORE the ledger insert so the verdict is settled by the time
+	// the row is finalised, and read from the DB rather than trusted from the
+	// device — the same rule migration 000051 sets out and that bookingConfirmed
+	// above already follows. A handset offline through an outage can be holding
+	// a mapping that was revoked hours ago.
+	tagVerdict, tagReason := TagScanOK, ""
+	var tagUID *string
+	if sc.Medium == scanMediumNFC && sc.TagUID != "" {
+		uid := sc.TagUID
+		tagUID = &uid
+
+		var st TagScanState
+		err := tx.QueryRow(ctx, `
+			SELECT status::text, assignment_id, booking_id
+			FROM rfid_tags WHERE event_id = $1 AND tag_uid = $2
+		`, eventID, uid).Scan(&st.Status, &st.BoundAssignmentID, &st.BoundBookingID)
+		switch {
+		case err == nil:
+			st.Found = true
+		case errors.Is(err, pgx.ErrNoRows):
+			st.Found = false
+		default:
+			return nil, err
+		}
+
+		var claimed *string
+		if !isPool && sc.AssignmentID != "" {
+			claimed = &sc.AssignmentID
+		}
+		tagVerdict, tagReason = ClassifyTagScan(st, TagScanClaim{
+			TagUID: uid, AssignmentID: claimed,
+		})
+	}
+
 	// Idempotency gate: insert the ledger row first with a provisional verdict;
 	// if the id already exists this batch item was processed before — return
 	// the stored outcome and touch nothing.
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO scan_events (id, event_id, assignment_id, booking_id, raw_ref,
-		                         admit_count, scanned_by, device_id, mode, verdict, scanned_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'provisional', $10)
+		                         admit_count, scanned_by, device_id, mode, verdict, scanned_at,
+		                         medium, tag_uid)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'provisional', $10, $11::scan_medium, $12)
 		ON CONFLICT (id) DO NOTHING
 	`, sc.ID, eventID, assignID, bookingID, rawRef,
-		sc.AdmitCount, scannedBy, deviceID, sc.Mode, sc.ScannedAt)
+		sc.AdmitCount, scannedBy, deviceID, sc.Mode, sc.ScannedAt,
+		sc.Medium, tagUID)
 	if err != nil {
 		return nil, err
 	}
@@ -343,6 +468,13 @@ func ingestOne(
 	admitCount := sc.AdmitCount
 
 	switch {
+	case tagVerdict != TagScanOK:
+		// The band itself is the problem — revoked, re-bound, or unknown. Takes
+		// precedence over every other check because it is the one the device
+		// had no way to evaluate, and admitting nothing is the point.
+		outcome.Verdict = tagVerdict
+		outcome.TagReason = tagReason
+
 	case bookingID != nil && !bookingConfirmed:
 		// Resolved to a real booking that is cancelled, refunded, or still
 		// pending. Record the attempt and admit nothing. 'rejected' is a
