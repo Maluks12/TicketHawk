@@ -11,7 +11,7 @@ import (
 )
 
 // ErrTopupNotFound is returned when a top-up reference can't be matched.
-var ErrTopupNotFound = errors.New("top-up not found")
+//var ErrTopupNotFound = errors.New("top-up not found")
 
 // AdWallet is one organiser's pre-paid ad balance (keyed by users.id, matching
 // ad_campaigns.organizer_id).

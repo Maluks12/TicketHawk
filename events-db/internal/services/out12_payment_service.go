@@ -485,6 +485,48 @@ func (s *PaymentService) CreateAdTopupIntent(organizerID string, amount float64)
 	return res.RedirectURL, res.Reference, nil
 }
 
+// CreateCashlessTopupIntent starts a card top-up for an ATTENDEE's event wallet.
+//
+// Note the reference prefix. models.CashlessTopupRefPrefix is "ctop_", NOT the
+// "topup_" used by CreateAdTopupIntent above — that prefix is claimed by the
+// organiser ad wallet in ApplyVerifiedPayment, and reusing it would route a
+// festival-goer's R200 into an organiser's advertising balance. Neither
+// feature's own tests would catch that; only the shared router below would.
+//
+// amountCents is int64 on purpose: the caller has already converted from the
+// float64 that arrived over JSON, and the gateway wants minor units anyway, so
+// there is no point re-introducing a float in between.
+func (s *PaymentService) CreateCashlessTopupIntent(
+	eventID, walletID, userID string, amountCents int64,
+) (redirectURL string, reference string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ref := newRef(models.CashlessTopupRefPrefix)
+	res, err := s.paystack.Initialize(ctx, InitInput{
+		Reference:   ref,
+		AmountCents: amountCents,
+		Currency:    models.DefaultCurrency,
+		Email:       s.userEmail(ctx, userID),
+		Description: "Event wallet top-up",
+		CallbackURL: s.cfg.PaymentCallbackURL,
+		Channels:    []string{"card"},
+		Metadata: map[string]string{
+			"event_id": eventID, "wallet_id": walletID, "kind": "cashless_topup",
+		},
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("CreateCashlessTopupIntent: %w", err)
+	}
+
+	// Recorded as pending only. Nothing is credited until the webhook confirms
+	// — the ledger must never contain money the gateway has not settled.
+	if err := repository.CreatePendingCardTopup(ctx, s.pool, eventID, walletID, amountCents, 0, res.Reference); err != nil {
+		return "", "", fmt.Errorf("recording pending cashless top-up: %w", err)
+	}
+	return res.RedirectURL, res.Reference, nil
+}
+
 // createPaymentRecord upserts the payments row for a booking/cart.
 func (s *PaymentService) createPaymentRecord(ctx context.Context, booking *models.Booking, gateway PaymentGatewayName, reference string, redirectURL *string, method models.PaymentMethod, cartID *string) error {
 	_, err := s.pool.Exec(ctx, `
@@ -591,7 +633,22 @@ func (s *PaymentService) ProcessRefund(bookingID string, amount float64) error {
 // the Paystack and PayPal webhook handlers after they re-fetch the truth from
 // the provider.
 func (s *PaymentService) ApplyVerifiedPayment(ctx context.Context, v *VerifyResult) error {
-	// Wallet top-ups (Paystack only) are routed by reference prefix.
+	// Attendee cashless wallet top-ups. MUST be tested before the "topup_"
+	// branch below — "ctop_" does not collide with it, but keeping the more
+	// specific prefix first makes the ordering requirement explicit rather than
+	// accidental, in case either prefix is ever changed.
+	if strings.HasPrefix(v.Reference, models.CashlessTopupRefPrefix) {
+		switch v.Status {
+		case models.PaymentCompleted:
+			return repository.ConfirmCardTopup(ctx, s.pool, v.Reference)
+		case models.PaymentFailed:
+			return repository.FailCardTopup(ctx, s.pool, v.Reference)
+		default:
+			return nil
+		}
+	}
+
+	// Organiser AD wallet top-ups (Paystack only) are routed by reference prefix.
 	if strings.HasPrefix(v.Reference, "topup_") {
 		switch v.Status {
 		case models.PaymentCompleted:

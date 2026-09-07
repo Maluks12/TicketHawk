@@ -909,6 +909,39 @@ func main() {
 	}
 
 	// ==========================================
+	// Cashless wallets & vendors (Phase 3: online)
+	// ==========================================
+	// Staff-side routes join the scanSync group so they inherit its auth and rate
+	// limit, and so a person authorised to work a gate is authorised to work a
+	// till — revoking them cuts off both at once.
+	//
+	// Registered unconditionally, unlike the tag routes above: a wallet does not
+	// require TAG_MASTER_KEY. An event can run cash-only top-ups and manual
+	// lookups with no RFID programme at all, and the purchase path refuses a band
+	// with no wallet on its own terms.
+	{
+		scanSync.POST("/:id/vendors",          handlers.CreateVendorHandler(pool))
+		scanSync.GET("/:id/vendors",           handlers.ListVendorsHandler(pool))
+		scanSync.POST("/:id/vendor-products",  handlers.CreateVendorProductHandler(pool))
+		scanSync.POST("/:id/pos-devices",      handlers.ProvisionPOSDeviceHandler(pool))
+
+		scanSync.POST("/:id/cashless/wallets",     handlers.CreateWalletHandler(pool))
+		scanSync.GET("/:id/cashless/balance",      handlers.GetWalletByTagHandler(pool))
+		scanSync.GET("/:id/cashless/statement",    handlers.GetWalletStatementHandler(pool))
+		scanSync.POST("/:id/cashless/topups/cash", handlers.CashTopupHandler(pool))
+		scanSync.POST("/:id/cashless/purchase",    handlers.PurchaseHandler(pool))
+	}
+
+	// Attendee-facing card top-up. Separate group because the caller is the
+	// wallet holder, not staff: it needs ordinary auth and must NOT sit behind
+	// the event-staff check the scanSync group applies.
+	cashless := v1.Group("/cashless")
+	cashless.Use(middleware.AuthMiddleware(cfg))
+	{
+		cashless.POST("/events/:id/topups/card", handlers.CardTopupHandler(pool, paymentService))
+	}
+
+	// ==========================================
 	// Home Feed
 	// ==========================================
 	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))
