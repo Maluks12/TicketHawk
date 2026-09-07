@@ -221,50 +221,18 @@ func AuthorizeOfflineSpend(
 }
 
 // ── Shortfall reconciliation ─────────────────────────────────────────────────
-
-// Shortfall actions, mapping to the shortfall_state enum in 000087.
-const (
-	ShortfallNone          = "none"
-	ShortfallAutoCharge    = "auto_charge"
-	ShortfallManualReview  = "manual_review"
-	ShortfallInvestigate   = "investigate"
-)
-
-// ShortfallInput is a wallet found negative at reconciliation.
-type ShortfallInput struct {
-	BalanceCents  int64 // negative when there is a shortfall
-	WalletFunding string
-	CardOnFile    bool
-	Attempts      int
-	MaxAttempts   int
-}
-
-// ClassifyShortfall decides what to do about a negative wallet.
 //
-// The cash-only branch is the one worth understanding. §5 spells it out: a
-// correctly enforced zero offline cap on a cash-funded wallet CANNOT produce a
-// negative balance. So one existing is not a routine shortfall to retry and
-// write off — it is proof that a control was bypassed, by a compromised device
-// or by a bug, and the useful response is an investigation rather than a
-// write-off. Treating it as ordinary would mean the platform quietly absorbs
-// exactly the losses that indicate its defences are broken.
-func ClassifyShortfall(in ShortfallInput) (action, reason string) {
-	if in.BalanceCents >= 0 {
-		return ShortfallNone, ""
-	}
-
-	// No card behind the wallet: nothing to charge, and its presence is itself
-	// the signal.
-	if !in.CardOnFile {
-		return ShortfallInvestigate, "negative balance on a wallet with no card — offline cap was bypassed"
-	}
-
-	if in.Attempts < in.MaxAttempts {
-		return ShortfallAutoCharge, "attempting recovery against the card on file"
-	}
-
-	return ShortfallManualReview, "card recovery exhausted"
-}
+// Moved to cashless_mandate.go as ClassifyRecovery.
+//
+// The placeholder that lived here assumed a card on file was enough to justify
+// a recovery charge. It is not — card_on_file records only that a top-up once
+// succeeded, which is not permission to charge that card again weeks later, and
+// acting on it invites the "I didn't authorise this" dispute that 3DS liability
+// shift does not cover. ClassifyRecovery requires a recorded mandate instead.
+//
+// Deleted rather than deprecated on purpose: two recovery ladders in a payments
+// system is an invitation to call the wrong one, and the wrong one here charges
+// somebody's card without permission.
 
 // ── Cross-check ──────────────────────────────────────────────────────────────
 

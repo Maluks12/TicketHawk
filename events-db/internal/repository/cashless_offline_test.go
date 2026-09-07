@@ -340,62 +340,10 @@ func TestOfflineScenarioLongOutage(t *testing.T) {
 }
 
 // ─── Shortfall classification ────────────────────────────────────────────────
-
-func TestShortfallHealthyWallet(t *testing.T) {
-	for _, bal := range []int64{0, 1, 100000} {
-		action, _ := ClassifyShortfall(ShortfallInput{
-			BalanceCents: bal, CardOnFile: true, MaxAttempts: 3,
-		})
-		assert.Equal(t, ShortfallNone, action)
-	}
-}
-
-func TestShortfallRecoveryLadder(t *testing.T) {
-	in := ShortfallInput{
-		BalanceCents: -2500, WalletFunding: "card", CardOnFile: true, MaxAttempts: 3,
-	}
-
-	for attempts := 0; attempts < 3; attempts++ {
-		in.Attempts = attempts
-		action, _ := ClassifyShortfall(in)
-		assert.Equal(t, ShortfallAutoCharge, action, "attempt %d", attempts)
-	}
-
-	in.Attempts = 3
-	action, _ := ClassifyShortfall(in)
-	assert.Equal(t, ShortfallManualReview, action,
-		"retries exhausted — a human owns it, and it is NOT auto-written-off")
-}
-
-func TestShortfallCashWalletIsAlwaysInvestigated(t *testing.T) {
-	// §5, and the reason the cash zero cap exists. A correctly enforced zero cap
-	// on a cash-funded wallet CANNOT produce a negative balance — so one
-	// existing proves a control was bypassed. Retrying and writing it off would
-	// mean quietly absorbing exactly the losses that signal broken defences.
-	action, reason := ClassifyShortfall(ShortfallInput{
-		BalanceCents: -100, WalletFunding: "cash", CardOnFile: false, MaxAttempts: 3,
-	})
-	assert.Equal(t, ShortfallInvestigate, action)
-	assert.Contains(t, reason, "bypassed")
-
-	t.Run("no number of retries turns it into a write-off", func(t *testing.T) {
-		for _, attempts := range []int{0, 3, 99} {
-			action, _ := ClassifyShortfall(ShortfallInput{
-				BalanceCents: -100, CardOnFile: false, Attempts: attempts, MaxAttempts: 3,
-			})
-			assert.Equal(t, ShortfallInvestigate, action)
-		}
-	})
-}
-
-func TestShortfallZeroMaxAttemptsGoesStraightToHuman(t *testing.T) {
-	// An organiser who disables auto-recovery must get manual review, not a
-	// silent write-off.
-	action, _ := ClassifyShortfall(ShortfallInput{
-		BalanceCents: -500, CardOnFile: true, Attempts: 0, MaxAttempts: 0,
-	})
-	assert.Equal(t, ShortfallManualReview, action)
-}
+//
+// Moved to cashless_mandate_test.go (TestRecovery*), which covers the same
+// ground against ClassifyRecovery — the mandate-gated ladder that replaced
+// ClassifyShortfall. See the note in cashless_offline.go.
 
 // ─── Server/device agreement ─────────────────────────────────────────────────
 
