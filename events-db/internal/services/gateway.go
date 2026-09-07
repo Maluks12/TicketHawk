@@ -75,6 +75,31 @@ type VerifyResult struct {
 	TransactionID string // provider transaction/capture id, for refunds
 	AmountCents   int64
 	Currency      string
+
+	// ── Reusable authorization (Paystack only, for now) ─────────────────────
+	//
+	// Populated when the gateway returns a token that can charge the same card
+	// again later without the holder present. Empty for gateways that do not
+	// offer one, and empty for one-off methods (EFT, mobile money) even on a
+	// gateway that does.
+	//
+	// This exists for shortfall recovery in the cashless wallet: a mandate
+	// (payment_mandates, migration 000088) is a recorded permission to charge,
+	// and without a token to charge against it is a consent record with nothing
+	// to act on.
+	//
+	// TREAT AS A CREDENTIAL. An authorization code charges a real card. It
+	// belongs in payment_mandates and nowhere else — not in logs, not in
+	// webhook audit rows, not echoed to a client.
+	AuthorizationCode string
+	CardLast4         string
+	CardBrand         string
+
+	// Reusable reports whether the gateway says this authorization may be
+	// charged again. Stored rather than inferred from AuthorizationCode being
+	// non-empty, because Paystack returns a code for single-use authorizations
+	// too and charging one of those simply fails at the worst moment.
+	Reusable bool
 }
 
 // RefundResult is the normalized result of a refund request.

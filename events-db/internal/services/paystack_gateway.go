@@ -224,6 +224,13 @@ type paystackVerifyData struct {
 		Channel  string `json:"channel"`   // card | apple_pay | ...
 		Brand    string `json:"brand"`     // visa | mastercard | ...
 		CardType string `json:"card_type"` // debit | credit
+
+		// Reusable authorization. Paystack returns these on every card
+		// transaction; whether the code may actually be re-charged is what
+		// Reusable says, and it is false for a good number of them.
+		AuthorizationCode string `json:"authorization_code"`
+		Last4             string `json:"last4"`
+		Reusable          bool   `json:"reusable"`
 	} `json:"authorization"`
 }
 
@@ -233,7 +240,7 @@ func (g *PaystackGateway) Verify(ctx context.Context, reference string) (*Verify
 		return nil, fmt.Errorf("paystack verify: %w", err)
 	}
 
-	return &VerifyResult{
+	res := &VerifyResult{
 		Gateway:       GatewayPaystack,
 		Reference:     data.Reference,
 		Status:        paystackStatusToInternal(data.Status),
@@ -241,7 +248,20 @@ func (g *PaystackGateway) Verify(ctx context.Context, reference string) (*Verify
 		TransactionID: fmt.Sprintf("%d", data.ID),
 		AmountCents:   data.Amount,
 		Currency:      data.Currency,
-	}, nil
+		CardBrand:     data.Authorization.Brand,
+		CardLast4:     data.Authorization.Last4,
+		Reusable:      data.Authorization.Reusable,
+	}
+
+	// Only carry the code when it is genuinely re-chargeable. Paystack returns
+	// one for single-use authorizations as well, and storing those would
+	// produce mandates that look valid and fail at the moment they are needed —
+	// which for shortfall recovery is weeks later, with an attendee already
+	// gone.
+	if data.Authorization.Reusable {
+		res.AuthorizationCode = data.Authorization.AuthorizationCode
+	}
+	return res, nil
 }
 
 // ── Refund ──────────────────────────────────────────────────────────────────
