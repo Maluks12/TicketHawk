@@ -54,6 +54,7 @@ func goodHardware(t *testing.T) *HardwareKeyClaims {
 		ChainVerified: true,
 		RootOfTrustOK: true,
 		PublicKey:     &k.PublicKey,
+		KeyAlgorithm:  "rsa",
 	}
 }
 
@@ -210,8 +211,32 @@ func TestAttestHardwareFailures(t *testing.T) {
 	t.Run("no public key", func(t *testing.T) {
 		hw := goodHardware(t)
 		hw.PublicKey = nil
+		hw.KeyAlgorithm = ""
 		v, _ := EvaluateAttestation(goodPolicy(), testNonce, goodIntegrity(), hw, attestNow)
 		assert.Equal(t, AttestFailedHardware, v)
+	})
+
+	t.Run("typed nil pointer is still no key", func(t *testing.T) {
+		// The Go trap this field exists to avoid: an interface holding a typed
+		// nil pointer is NOT nil, so a PublicKey == nil check would pass here
+		// and let a device with no usable key through.
+		hw := goodHardware(t)
+		var nilKey *rsa.PublicKey
+		hw.PublicKey = nilKey
+		hw.KeyAlgorithm = ""
+		v, _ := EvaluateAttestation(goodPolicy(), testNonce, goodIntegrity(), hw, attestNow)
+		assert.Equal(t, AttestFailedHardware, v)
+	})
+
+	t.Run("EC key is extracted but reported as unusable", func(t *testing.T) {
+		// EvaluateAttestation passes it — key ALGORITHM policy is the enrolment
+		// handler's call, since only it knows the key is destined for wrapping.
+		// What matters here is that the algorithm is visible rather than lost.
+		hw := goodHardware(t)
+		hw.KeyAlgorithm = "ec"
+		v, _ := EvaluateAttestation(goodPolicy(), testNonce, goodIntegrity(), hw, attestNow)
+		assert.Equal(t, AttestPassed, v)
+		assert.Equal(t, "ec", hw.KeyAlgorithm)
 	})
 }
 

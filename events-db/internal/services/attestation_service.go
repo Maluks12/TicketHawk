@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -86,10 +87,27 @@ type HardwareKeyClaims struct {
 	// that the app is genuine, the other that THIS key lives in hardware.
 	Challenge string
 
-	SecurityLevel  string
-	ChainVerified  bool // verified to a pinned Google hardware attestation root
-	PublicKey      *rsa.PublicKey
-	RootOfTrustOK  bool // verified boot state is green
+	SecurityLevel string
+	ChainVerified bool // verified to a pinned Google hardware attestation root
+	RootOfTrustOK bool // verified boot state is green
+
+	// PublicKey is the attested key, whatever algorithm the device generated.
+	//
+	// Deliberately crypto.PublicKey rather than *rsa.PublicKey. Only RSA can be
+	// USED — Android's SECURE_KEY_IMPORT requires an RSA wrapping key, and
+	// RSA-OAEP is the fallback wrap — but the verifier must still be able to
+	// REPORT that a device presented an EC key. Narrowing this to *rsa.PublicKey
+	// makes an EC leaf indistinguishable from a missing attestation extension,
+	// and the enrolling device gets an opaque failure instead of an instruction
+	// it can act on.
+	PublicKey crypto.PublicKey
+
+	// KeyAlgorithm is "rsa", "ec", or "" when no key was extracted.
+	//
+	// Checked instead of PublicKey == nil, because an interface holding a typed
+	// nil pointer is NOT nil. That is the classic Go trap, and here it would let
+	// a device with no usable key past the policy gate.
+	KeyAlgorithm string
 }
 
 // IntegrityVerifier verifies a Play Integrity token.
@@ -182,7 +200,7 @@ func EvaluateAttestation(
 	if !hardware.RootOfTrustOK {
 		return AttestFailedHardware, "verified boot state is not green"
 	}
-	if hardware.PublicKey == nil {
+	if hardware.KeyAlgorithm == "" {
 		return AttestFailedHardware, "no attested public key in the chain"
 	}
 	switch hardware.SecurityLevel {

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/asn1"
@@ -135,15 +136,30 @@ func (v *KeystoreVerifier) Verify(ctx context.Context, chain [][]byte) (*Hardwar
 	claims.ChainVerified = true
 
 	// ── Attested public key ──────────────────────────────────────────────────
-	pub, ok := leaf.PublicKey.(*rsa.PublicKey)
-	if !ok {
-		// Only RSA is handled because WrapKeyForDevice uses RSA-OAEP. An EC
-		// attestation key is legitimate and common; supporting it means adding
-		// an ECIES wrap, which is a deliberate omission rather than an
-		// oversight. Devices should be provisioned with an RSA key.
+	//
+	// Extract WHATEVER the device generated and record its algorithm. Only RSA
+	// is usable — Android's SECURE_KEY_IMPORT requires an RSA wrapping key —
+	// but refusing to extract an EC key here would leave the enrolment handler
+	// unable to tell an EC leaf from a certificate with no attestation
+	// extension at all, and the device would get an opaque failure rather than
+	// "regenerate the key as RSA".
+	//
+	// Note the root and intermediates may legitimately be EC — Key Attestation
+	// CA1, the Remote Key Provisioning root, is EC P-384. Root key type says
+	// nothing about leaf key type; the leaf is whatever the app asked Keystore
+	// to generate.
+	switch pub := leaf.PublicKey.(type) {
+	case *rsa.PublicKey:
+		claims.PublicKey = pub
+		claims.KeyAlgorithm = "rsa"
+	case *ecdsa.PublicKey:
+		claims.PublicKey = pub
+		claims.KeyAlgorithm = "ec"
+	default:
+		// Unknown algorithm: leave KeyAlgorithm empty so EvaluateAttestation
+		// refuses rather than proceeding with a key nothing can use.
 		return claims, nil
 	}
-	claims.PublicKey = pub
 
 	// ── The extension ────────────────────────────────────────────────────────
 	var raw []byte
@@ -241,4 +257,39 @@ func EncodeRootsPEM(certs []*x509.Certificate) []byte {
 		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})...)
 	}
 	return out
+}
+
+// ChainSerials extracts every certificate serial from a DER chain, normalised
+// to the form Google's revocation list publishes.
+//
+// EVERY certificate, not just the leaf. Google lists intermediates too, and a
+// compromised intermediate taints every device beneath it — checking only the
+// leaf would miss a whole batch revoked together.
+func ChainSerials(chain [][]byte) ([]string, error) {
+	certs, err := ParseAttestationChain(chain)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(certs))
+	for _, c := range certs {
+		// big.Int renders without leading zeros, which is what Google uses, but
+		// NormaliseSerial is applied anyway so there is exactly one place that
+		// decides the canonical form.
+		out = append(out, NormaliseSerial(c.SerialNumber.Text(16)))
+	}
+	return out, nil
+}
+
+// EncodePublicKeyB64 serialises a device's attested public key for storage in
+// vendor_pos_devices.signing_pubkey, as base64 PKIX DER.
+//
+// Stored so an offline transaction's device signature can be verified later.
+// That verification is what makes tampering DETECTABLE after the fact — it
+// cannot be prevented on hardware a vendor physically controls.
+func EncodePublicKeyB64(pub any) string {
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(der)
 }

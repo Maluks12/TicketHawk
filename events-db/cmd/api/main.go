@@ -906,6 +906,53 @@ func main() {
 		scanSync.POST("/:id/tags/bind",     handlers.BindTagHandler(pool))
 		scanSync.POST("/:id/tags/status",   handlers.SetTagStatusHandler(pool))
 		scanSync.POST("/:id/tags/tap",      handlers.TapTagHandler(pool, tagCrypto))
+
+		// ==========================================
+		// POS attestation & key delivery (Phase 4c)
+		// ==========================================
+		// Nested inside the tag block because tagCrypto must be in scope — the
+		// whole purpose of enrolment is releasing an EVENT TAG KEY derived from it.
+		//
+		// Gated on all three of TAG_MASTER_KEY, ATTESTATION_ROOTS_PATH and
+		// PLAY_INTEGRITY_SA_JSON. Absent means a deployment that cannot enable
+		// offline spend at all, which is the safe default and needs no explanation
+		// to an operator who never wanted it. Present-but-invalid is FATAL: that is
+		// a misconfiguration, and a boot failure beats discovering it when a vendor
+		// cannot enrol a till on a Friday night.
+		if cfg.AttestationRootsPath != "" && cfg.PlayIntegritySAJSON != "" {
+			keystoreVerifier, kErr := services.NewKeystoreVerifier(cfg.AttestationRootsPath)
+			if kErr != nil {
+				log.Fatal().Err(kErr).Msg("ATTESTATION_ROOTS_PATH is set but the roots are invalid")
+			}
+			integrityVerifier, iErr := services.NewPlayIntegrityVerifier(
+				cfg.PlayIntegritySAJSON, cfg.PlayIntegrityPackage)
+			if iErr != nil {
+				log.Fatal().Err(iErr).Msg("PLAY_INTEGRITY_SA_JSON is set but invalid")
+			}
+
+			// Revocation catches what chain verification cannot: a device whose
+			// attestation key was EXTRACTED from its hardware still produces a
+			// chain that verifies perfectly, because Google really did issue it.
+			// The refresh runs once immediately so a freshly deployed server is not
+			// sitting on an empty cache refusing every enrolment.
+			revocation := services.NewRevocationChecker(services.NewPgRevocationStore(pool))
+			services.StartRevocationRefresh(context.Background(), revocation, time.Hour)
+
+			attestPolicy := services.AttestationPolicy{
+				ExpectedPackage: cfg.PlayIntegrityPackage,
+				MaxTokenAge:     5 * time.Minute,
+				// RequireStrongBox stays false: most mid-range Android is TEE, and
+				// at a South African festival that is most of what vendors own.
+				// The level is recorded either way, so an estate that drifts is
+				// visible without excluding anyone up front.
+			}
+
+			scanSync.POST("/:id/pos/attestation/nonce",  handlers.IssueAttestationNonceHandler(pool))
+			scanSync.POST("/:id/pos/attestation/enroll", handlers.EnrollDeviceHandler(
+				pool, integrityVerifier, keystoreVerifier, revocation, tagCrypto, attestPolicy))
+			scanSync.POST("/:id/pos/attestation/revoke", handlers.RevokeDeviceOfflineHandler(pool))
+			scanSync.GET("/:id/pos/attestations",        handlers.ListAttestationsHandler(pool))
+		}
 	}
 
 	// ==========================================
