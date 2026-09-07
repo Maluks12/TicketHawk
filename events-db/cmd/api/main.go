@@ -223,6 +223,27 @@ func main() {
 	// See internal/workers/reconcile_worker.go for why both gaps existed.
 	workers.StartReconcileWorker(pool, paymentService, bookingJobs, ctx, 2*time.Minute)
 
+	// ==========================================
+	// Cashless shortfall recovery (Phase 4d)
+	// ==========================================
+	// Detection runs often and is a cheap query: a wallet that has gone negative
+	// and is not noticed for an hour is an hour in which the band keeps spending.
+	// Recovery is the slow, careful half and runs every 15 minutes.
+	//
+	// Both are no-ops for any event that never enabled offline spend, which is
+	// most events — only offline approvals can take a wallet negative.
+	workers.StartShortfallDetector(pool, ctx)
+
+	// nil charger = REPORT-ONLY, and that is the intended setting for now.
+	// Cases that qualify for a mandate charge are logged with the amount and
+	// left alone, so enabling offline spend does NOT implicitly enable charging
+	// anybody's card. Run it this way through at least one real event and read
+	// the logs before wiring a charger: you will see the actual volume and size
+	// of shortfalls, which is worth knowing before automating anything that
+	// touches a card. The no-mandate-no-charge guarantee lives in
+	// repository.ClassifyRecovery, not here.
+	workers.StartRecoveryWorker(pool, ctx, nil)
+
 	// Ads/campaigns DISABLED for launch — the ad worker, ad-account, campaign
 	// and ad-wallet routes are unregistered below. Feed placement is fully
 	// organic. Re-enable by restoring these blocks (handlers/repos still exist).
@@ -977,6 +998,11 @@ func main() {
 		scanSync.GET("/:id/cashless/statement",    handlers.GetWalletStatementHandler(pool))
 		scanSync.POST("/:id/cashless/topups/cash", handlers.CashTopupHandler(pool))
 		scanSync.POST("/:id/cashless/purchase",    handlers.PurchaseHandler(pool))
+
+		// Offline sync & recovery (Phase 4d). The sync endpoint does not care what
+		// wrote the batch, so it is testable with curl long before a till exists.
+		scanSync.POST("/:id/pos/offline/sync",   handlers.SyncOfflineTxnsHandler(pool))
+		scanSync.GET("/:id/cashless/shortfalls", handlers.ListShortfallsHandler(pool))
 	}
 
 	// Attendee-facing card top-up. Separate group because the caller is the
@@ -986,6 +1012,13 @@ func main() {
 	cashless.Use(middleware.AuthMiddleware(cfg))
 	{
 		cashless.POST("/events/:id/topups/card", handlers.CardTopupHandler(pool, paymentService))
+
+		// Mandates are ATTENDEE-facing and deliberately not behind the staff
+		// check: a staff member cannot consent on somebody else's behalf, which is
+		// the entire point of recording a mandate rather than relying on
+		// card_on_file.
+		cashless.POST("/events/:id/mandate",        handlers.CreateMandateHandler(pool))
+		cashless.POST("/events/:id/mandate/revoke", handlers.RevokeMandateHandler(pool))
 	}
 
 	// ==========================================
