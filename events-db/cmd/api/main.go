@@ -244,6 +244,11 @@ func main() {
 	// repository.ClassifyRecovery, not here.
 	workers.StartRecoveryWorker(pool, ctx, nil)
 
+	// Balance snapshots keep the §5 3-second transaction target reachable as
+	// wallets accumulate history. A pure read optimisation — every snapshot
+	// could be deleted and no money would be lost.
+	workers.StartSnapshotWorker(pool, ctx)
+
 	// Ads/campaigns DISABLED for launch — the ad worker, ad-account, campaign
 	// and ad-wallet routes are unregistered below. Feed placement is fully
 	// organic. Re-enable by restoring these blocks (handlers/repos still exist).
@@ -1545,6 +1550,17 @@ func main() {
 	}
 	{
 		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
+
+		// Offline spend configuration. ORGANISER-owned rather than staff: turning
+		// this on decides that vendor devices may hold a forgery-capable key and
+		// that wallets may go negative. That is a commercial risk decision, and a
+		// scanner supervisor should not be able to make it.
+		//
+		// Without these, every safe default in Phase 4 assumed a config row that
+		// nothing could create — enabling offline spend meant raw SQL in prod.
+		orgRoutes.GET("/events/:id/cashless/offline-config",          handlers.GetOfflineConfigHandler(pool))
+		orgRoutes.PUT("/events/:id/cashless/offline-config",          handlers.UpdateOfflineConfigHandler(pool))
+		orgRoutes.POST("/events/:id/cashless/offline-config/disable", handlers.DisableOfflineSpendHandler(pool))
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
