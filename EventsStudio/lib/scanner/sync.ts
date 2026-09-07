@@ -15,7 +15,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { AppState } from 'react-native';
 import { api } from '../api';
 import {
-  metaGet, metaSet, wipeManifest, upsertAssignments, upsertPools,
+  metaGet, metaSet, wipeManifest, upsertAssignments, upsertPools, upsertTags,
   unsyncedScans, markSynced, queuedCount, counts,
 } from './db';
 
@@ -82,6 +82,10 @@ export async function prepareEvent(eventId: string): Promise<{
   const mRes = await api.get(`/v1/staff/events/${eventId}/manifest`);
   await upsertAssignments(mRes.data.assignments ?? []);
   await upsertPools(mRes.data.pools ?? []);
+  // Tags ride the same manifest and the same cursor — no second sync loop and
+  // no second cursor to keep consistent. An event with no RFID programme sends
+  // an empty array and nothing here changes.
+  await upsertTags(mRes.data.tags ?? []);
   await metaSet('cursor', mRes.data.cursor);
 
   const c = await counts();
@@ -112,10 +116,22 @@ async function pushOnce(eventId: string): Promise<Record<string, string>> {
       admit_count: s.admit_count,
       mode: 'offline',
       scanned_at: s.scanned_at,
+      // Omitted entirely for QR so the payload is byte-identical to what this
+      // app sent before Phase 2b. The server defaults a missing medium to 'qr'.
+      ...(s.medium === 'nfc' ? { medium: 'nfc', tag_uid: s.tag_uid ?? undefined } : {}),
     })),
   });
   const verdicts: Record<string, string> = {};
   for (const r of res.data.results ?? []) verdicts[r.id] = r.verdict;
+  // A tag-driven refusal is the one case where the server knows something the
+  // gate could not: the band was revoked or re-bound after this handset's last
+  // sync. Logged so it is visible in a bug report, and surfaced to managers via
+  // the collision callback below.
+  for (const r of res.data.results ?? []) {
+    if (r.tag_reason) {
+      console.warn(`[scan-sync] ${r.id} refused server-side: ${r.tag_reason}`);
+    }
+  }
   await markSynced(pending.map((s) => s.id), verdicts);
   return verdicts;
 }
@@ -127,6 +143,10 @@ async function pullOnce(eventId: string): Promise<void> {
   });
   await upsertAssignments(res.data.assignments ?? []);
   await upsertPools(res.data.pools ?? []);
+  // How a band revoked at the box office reaches a gate: SetTagStatus bumps
+  // rfid_tags.updated_at, so the revocation arrives on the next delta with no
+  // device-to-device channel — the same route other gates' admissions take.
+  await upsertTags(res.data.tags ?? []);
   await metaSet('cursor', res.data.cursor);
 }
 

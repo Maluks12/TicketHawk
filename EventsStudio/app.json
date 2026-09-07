@@ -25,7 +25,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.tickethawk.studio",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.NFC"
       ]
     },
     "plugins": [
@@ -46,6 +47,13 @@
           "imageWidth": 220,
           "resizeMode": "contain",
           "backgroundColor": "#08080C"
+        }
+      ],
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermissionString": "Allow $(PRODUCT_NAME) to read attendee wristbands at the door.",
+          "includeNdefEntitlement": false
         }
       ]
     ],

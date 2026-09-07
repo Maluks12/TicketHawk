@@ -10,7 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import {
   findAssignment, findPool, admitIndividual, admitPool as dbAdmitPool,
-  admitProvisional,
+  admitProvisional, findTag,
 } from './db';
 import { uuid } from './sync';
 import { Buffer } from 'buffer';
@@ -143,6 +143,91 @@ export async function confirmPoolAdmit(
   eventId: string, bookingId: string, count: number,
 ): Promise<void> {
   await dbAdmitPool(uuid(), eventId, bookingId, count);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NFC tap — offline path.
+//
+// Same manifest-authoritative rule as QR above, one step longer: resolve the
+// band's UID to an assignment through the synced tag table, then run the exact
+// checks processScan already runs. Sharing the outcome type is deliberate —
+// the screen must not need to know which medium admitted somebody, or the two
+// paths will drift and door staff will get different answers depending on
+// whether they tapped or scanned.
+//
+// The device does NOT verify the band's cryptogram here, and cannot: that would
+// need the event's tag key on the handset, and possessing a verification key
+// for symmetric crypto means possessing a forgery key. Offline, a cloned band
+// therefore gets through this gate. What contains it is that the server
+// re-checks the mapping at sync (ClassifyTagScan) and refuses anything revoked
+// or re-bound since this handset last synced — so a clone cannot survive
+// reconciliation, and lands in the organiser's exceptions report.
+//
+// Online the screen should prefer tapOnline() below, which forwards the SDM
+// cryptogram for real server-side verification.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function processTap(eventId: string, uid: string): Promise<ScanOutcome> {
+  const tag = await findTag(uid);
+
+  if (!tag) {
+    // Not in the manifest. Could be a band encoded after our last sync, or a
+    // band from another event, or junk. The device cannot tell — same position
+    // as an unknown QR ref, so the same manager-confirmable prompt. The server
+    // resolves it as a provisional at sync.
+    return { kind: 'unknown_prompt', assignmentId: null, bookingId: null, isPool: false };
+  }
+
+  if (tag.status !== 'active') {
+    // Revoked bands are shipped in the manifest rather than filtered out
+    // precisely so this branch can exist: the gate says WHY, instead of
+    // treating a band reported lost ten minutes ago as an unknown one.
+    return { kind: 'invalid', reason: reasonForStatus(tag.status) };
+  }
+
+  if (!tag.assignment_id) {
+    // Pool-bound or unbound. Refused offline for the same reason TapTagHandler
+    // refuses it online — one band admitting several people is not a product
+    // that has been designed, and the two paths must agree.
+    return { kind: 'invalid', reason: 'This band is not linked to a ticket' };
+  }
+
+  const a = await findAssignment(tag.assignment_id);
+  if (!a) {
+    return { kind: 'unknown_prompt', assignmentId: tag.assignment_id, bookingId: null, isPool: false };
+  }
+  if (!a.booking_ok) {
+    return { kind: 'invalid', reason: 'Booking was cancelled or refunded' };
+  }
+  if (a.scanned) {
+    // Covers a band tapped twice AND a ticket already admitted by QR — both
+    // land on the same assignment row, which is what makes the two media share
+    // one single-entry guard instead of each having their own.
+    return { kind: 'duplicate', name: a.name || `Slot ${a.slot}`, firstScanAt: a.scanned_at };
+  }
+
+  await admitIndividual(uuid(), eventId, a, 'nfc', uid);
+  return { kind: 'admitted', name: a.name || `Slot ${a.slot}`, tier: a.tier, slot: a.slot };
+}
+
+function reasonForStatus(status: string): string {
+  switch (status) {
+    case 'lost':        return 'This band was reported lost — do not admit';
+    case 'deactivated': return 'This band has been deactivated';
+    case 'destroyed':   return 'This band was written off';
+    case 'provisioned':
+    case 'encoded':     return 'This band was never issued to anyone';
+    default:            return 'This band is not active';
+  }
+}
+
+/** Manager confirmed a provisional from a TAP rather than a QR, so the tag UID
+ *  is carried through to the ledger. Without it the exceptions report shows an
+ *  unexplained provisional with nothing to investigate. */
+export async function confirmTapProvisional(
+  eventId: string, uid: string, assignmentId: string | null,
+): Promise<void> {
+  await admitProvisional(uuid(), eventId, 'individual', assignmentId, null, 'nfc', uid);
 }
 
 /** Manager confirmed a provisional (unknown ref — likely sold after last sync).
