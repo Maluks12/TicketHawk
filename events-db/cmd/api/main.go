@@ -1561,6 +1561,15 @@ func main() {
 		orgRoutes.GET("/events/:id/cashless/offline-config",          handlers.GetOfflineConfigHandler(pool))
 		orgRoutes.PUT("/events/:id/cashless/offline-config",          handlers.UpdateOfflineConfigHandler(pool))
 		orgRoutes.POST("/events/:id/cashless/offline-config/disable", handlers.DisableOfflineSpendHandler(pool))
+
+		// Vendor settlement & float reconciliation. Organiser-owned: deciding what
+		// a vendor is paid, and reading how much of the float is actually theirs,
+		// are commercial decisions.
+		orgRoutes.POST("/events/:id/cashless/settlements/calculate", handlers.CalculateSettlementsHandler(pool))
+		orgRoutes.GET("/events/:id/cashless/settlements",            handlers.ListSettlementsHandler(pool))
+		orgRoutes.POST("/events/:id/cashless/settlements/status",    handlers.UpdateSettlementStatusHandler(pool))
+		orgRoutes.GET("/events/:id/cashless/float",                  handlers.FloatReconciliationHandler(pool, false))
+		orgRoutes.POST("/events/:id/cashless/float",                 handlers.FloatReconciliationHandler(pool, true))
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
