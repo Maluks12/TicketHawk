@@ -1008,6 +1008,14 @@ func main() {
 		// wrote the batch, so it is testable with curl long before a till exists.
 		scanSync.POST("/:id/pos/offline/sync",   handlers.SyncOfflineTxnsHandler(pool))
 		scanSync.GET("/:id/cashless/shortfalls", handlers.ListShortfallsHandler(pool))
+
+		// Refunds and manual adjustments. Deliberately different authorisation:
+		// a refund comes from the TILL (device token, and only for that vendor's
+		// own sales), while an adjustment is MANAGER-only because it moves money
+		// on somebody's word alone with no sale behind it.
+		scanSync.GET("/:id/cashless/refundable",  handlers.LookupRefundableHandler(pool))
+		scanSync.POST("/:id/cashless/refund",     handlers.RefundHandler(pool))
+		scanSync.POST("/:id/cashless/adjustment", handlers.AdjustmentHandler(pool))
 	}
 
 	// Attendee-facing card top-up. Separate group because the caller is the
