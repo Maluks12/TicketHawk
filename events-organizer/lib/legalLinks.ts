@@ -10,15 +10,25 @@
 // The organiser agreement is the one document that is organiser-specific: it
 // covers the commission split, settlement timing, chargeback liability and the
 // refund policy an organiser is bound by. Buyers never see it.
+//
+// IT DOES NOT HAVE ITS OWN PAGE. The content is Section 1 of /legal
+// ("1. Organizer Agreement" in web-desktop/src/app/legal/page.tsx) — there was
+// never a standalone /legal/organiser-agreement route, so that URL 404'd for
+// every organiser who opened it from the KYC gate, the login footer, or the
+// KYC page, which all read from this file. Pointed at the real page instead,
+// with a fragment so the reader lands on the section rather than the top of a
+// five-document page. The anchor id is added by web-desktop/web-mobile's
+// legal-doc.tsx, which slugifies each section heading — "1. Organizer
+// Agreement" becomes "organizer-agreement", matching the fragment below.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const WEB_ORIGIN = 'https://ticket-hawk.com';
 
 export const LEGAL_URLS = {
-  terms:             `${WEB_ORIGIN}/terms`,
-  privacy:           `${WEB_ORIGIN}/privacy`,
-  legal:             `${WEB_ORIGIN}/legal`,
-  organiserAgreement: `${WEB_ORIGIN}/legal/organiser-agreement`,
+  terms:              `${WEB_ORIGIN}/terms`,
+  privacy:            `${WEB_ORIGIN}/privacy`,
+  legal:              `${WEB_ORIGIN}/legal`,
+  organiserAgreement: `${WEB_ORIGIN}/legal#organizer-agreement`,
 } as const;
 
 export type LegalDoc = keyof typeof LEGAL_URLS;

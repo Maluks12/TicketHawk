@@ -39,6 +39,25 @@ export interface LegalDocProps {
 }
 
 /**
+ * Turns a section heading into a URL-safe anchor id, so a section can be
+ * deep-linked as e.g. /legal#organizer-agreement rather than only reachable by
+ * landing on the page and scrolling.
+ *
+ * "1. Organizer Agreement" -> "organizer-agreement": the leading "N. " section
+ * number is presentation, not part of the section's identity, and stripping it
+ * is what lets events-organizer's lib/legalLinks.ts build the exact fragment
+ * without having to hand-maintain a parallel slug list that would drift the
+ * first time a heading's wording changed.
+ */
+function slugify(heading: string): string {
+  return heading
+    .replace(/^\d+\.\s*/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
  * Renders **bold** spans inline.
  *
  * The source text uses bold heavily for defined terms and for the emphasis CPA
@@ -184,7 +203,12 @@ export default function LegalDoc({ title, intro, sections, seeAlso }: LegalDocPr
         )}
 
         {sections.map((section, i) => (
-          <section key={i} className="mb-9">
+          // id + scroll-mt-24 is what makes a #fragment link (the Organiser
+          // Agreement link from events-organizer, for one) land on the right
+          // section rather than the top of the page — scroll-mt-24 clears the
+          // sticky h-16 nav (navBar.tsx) so the heading isn't hidden under it
+          // after the jump.
+          <section key={i} id={slugify(section.heading)} className="mb-9 scroll-mt-24">
             <h2
               className="text-[19px] font-bold tracking-[-0.01em] mb-4"
               style={{ color: colors.text }}

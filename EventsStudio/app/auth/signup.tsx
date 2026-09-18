@@ -34,10 +34,14 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import { applyAsOrganiser } from '../../lib/api';
-import { makeStyles, useStudioTheme } from '../../components/studio/theme';
+import { STUDIO } from '../../components/studio/theme';
 
-const TERMS_URL   = 'https://ticket-hawk.com/legal/terms';
-const PRIVACY_URL = 'https://ticket-hawk.com/legal/privacy';
+// Wrong path until now: /legal/terms and /legal/privacy do not exist on
+// web-desktop or web-mobile, only /terms and /privacy do (same routes
+// events-organizer's lib/legalLinks.ts already points at). Every organiser
+// who tapped either link during sign-up hit a 404.
+const TERMS_URL   = 'https://ticket-hawk.com/terms';
+const PRIVACY_URL = 'https://ticket-hawk.com/privacy';
 
 // Mirrors the backend's `strong_password` binding. Validated here so the user
 // finds out while typing rather than after a round trip.
@@ -65,8 +69,6 @@ export default function StudioSignup() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const register = useAuthStore((s) => s.register);
-  const { S } = useStudioTheme();
-  const styles = useStyles();
 
   const [firstName, setFirstName] = useState('');
   const [lastName,  setLastName]  = useState('');
@@ -157,7 +159,7 @@ export default function StudioSignup() {
           {/* Header */}
           <View style={styles.headerRow}>
             <TouchableOpacity onPress={() => router.back()} hitSlop={10} style={styles.back}>
-              <Ionicons name="arrow-back" size={20} color={S.text} />
+              <Ionicons name="arrow-back" size={20} color={STUDIO.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Create account</Text>
             <View style={{ width: 40 }} />
@@ -177,7 +179,7 @@ export default function StudioSignup() {
                   value={firstName}
                   onChangeText={setFirstName}
                   placeholder="Thabo"
-                  placeholderTextColor={S.muted}
+                  placeholderTextColor={STUDIO.muted}
                   autoCapitalize="words"
                   textContentType="givenName"
                 />
@@ -189,7 +191,7 @@ export default function StudioSignup() {
                   value={lastName}
                   onChangeText={setLastName}
                   placeholder="Mokoena"
-                  placeholderTextColor={S.muted}
+                  placeholderTextColor={STUDIO.muted}
                   autoCapitalize="words"
                   textContentType="familyName"
                 />
@@ -202,7 +204,7 @@ export default function StudioSignup() {
               value={email}
               onChangeText={(v) => { setEmail(v); setError(null); }}
               placeholder="you@example.com"
-              placeholderTextColor={S.muted}
+              placeholderTextColor={STUDIO.muted}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
@@ -215,7 +217,7 @@ export default function StudioSignup() {
               value={phone}
               onChangeText={setPhone}
               placeholder="082 123 4567"
-              placeholderTextColor={S.muted}
+              placeholderTextColor={STUDIO.muted}
               keyboardType="phone-pad"
               textContentType="telephoneNumber"
             />
@@ -230,13 +232,13 @@ export default function StudioSignup() {
                 value={password}
                 onChangeText={setPassword}
                 placeholder="Choose a strong password"
-                placeholderTextColor={S.muted}
+                placeholderTextColor={STUDIO.muted}
                 secureTextEntry={!showPw}
                 autoCapitalize="none"
                 textContentType="newPassword"
               />
               <TouchableOpacity onPress={() => setShowPw((v) => !v)} hitSlop={10} style={styles.eye}>
-                <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color={S.sub} />
+                <Ionicons name={showPw ? 'eye-off-outline' : 'eye-outline'} size={20} color={STUDIO.sub} />
               </TouchableOpacity>
             </View>
             {password.length > 0 && pwProblems.length > 0 && (
@@ -249,17 +251,17 @@ export default function StudioSignup() {
                 moment to discover they can't sign in. */}
             <Text style={[styles.label, { marginTop: 16 }]}>CONFIRM PASSWORD</Text>
             <TextInput
-              style={[styles.input, pwMismatch && { borderColor: S.red }]}
+              style={[styles.input, pwMismatch && { borderColor: STUDIO.red }]}
               value={confirmPw}
               onChangeText={setConfirmPw}
               placeholder="Re-enter your password"
-              placeholderTextColor={S.muted}
+              placeholderTextColor={STUDIO.muted}
               secureTextEntry={!showPw}
               autoCapitalize="none"
               textContentType="newPassword"
             />
             {pwMismatch && (
-              <Text style={[styles.fieldHint, { color: S.red }]}>
+              <Text style={[styles.fieldHint, { color: STUDIO.red }]}>
                 Passwords don't match.
               </Text>
             )}
@@ -271,7 +273,7 @@ export default function StudioSignup() {
               activeOpacity={0.7}
             >
               <View style={[styles.check, wantsOrganiser && styles.checkOn]}>
-                {wantsOrganiser && <Ionicons name="checkmark" size={13} color={S.onAccent} />}
+                {wantsOrganiser && <Ionicons name="checkmark" size={13} color="#fff" />}
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.checkLabel}>I want to sell tickets to my own events</Text>
@@ -290,7 +292,7 @@ export default function StudioSignup() {
               activeOpacity={0.7}
             >
               <View style={[styles.check, agreed && styles.checkOn]}>
-                {agreed && <Ionicons name="checkmark" size={13} color={S.onAccent} />}
+                {agreed && <Ionicons name="checkmark" size={13} color="#fff" />}
               </View>
               <Text style={[styles.checkLabel, { flex: 1 }]}>
                 I agree to the{' '}
@@ -309,7 +311,7 @@ export default function StudioSignup() {
               activeOpacity={0.85}
             >
               {busy
-                ? <ActivityIndicator color={S.onAccent} />
+                ? <ActivityIndicator color="#fff" />
                 : <Text style={styles.btnTxt}>Create account</Text>}
             </TouchableOpacity>
 
@@ -324,59 +326,59 @@ export default function StudioSignup() {
   );
 }
 
-const useStyles = makeStyles((S) => ({
-  root: { flex: 1, backgroundColor: S.bg, paddingHorizontal: 22 },
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: STUDIO.bg, paddingHorizontal: 22 },
   headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   back: { width: 40, height: 44, alignItems: 'flex-start', justifyContent: 'center' },
-  headerTitle: { flex: 1, color: S.text, fontSize: 20, fontWeight: '800', textAlign: 'center' },
+  headerTitle: { flex: 1, color: STUDIO.text, fontSize: 20, fontWeight: '800', textAlign: 'center' },
   tagline: {
-    color: S.sub, fontSize: 13.5, textAlign: 'center',
+    color: STUDIO.sub, fontSize: 13.5, textAlign: 'center',
     marginBottom: 20, lineHeight: 19, paddingHorizontal: 10,
   },
   card: {
-    backgroundColor: S.bgElevated,
-    borderColor: S.border,
+    backgroundColor: STUDIO.bgElevated,
+    borderColor: STUDIO.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 20,
     padding: 20,
   },
   row2: { flexDirection: 'row', gap: 12 },
-  label: { color: S.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
+  label: { color: STUDIO.muted, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8 },
   input: {
-    backgroundColor: S.field,
-    borderColor: S.border,
+    backgroundColor: STUDIO.surface,
+    borderColor: STUDIO.border,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 12,
-    color: S.text,
+    color: STUDIO.text,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === 'ios' ? 13 : 10,
     fontSize: 15,
   },
-  fieldHint: { color: S.amber, fontSize: 12, marginTop: 7, lineHeight: 17 },
+  fieldHint: { color: STUDIO.amber, fontSize: 12, marginTop: 7, lineHeight: 17 },
   pwRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   eye: {
     width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: S.field,
-    borderColor: S.border, borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: STUDIO.surface,
+    borderColor: STUDIO.border, borderWidth: StyleSheet.hairlineWidth,
   },
   checkRow: { flexDirection: 'row', gap: 11, alignItems: 'flex-start', marginTop: 20 },
   check: {
     width: 20, height: 20, borderRadius: 6, marginTop: 1,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: S.borderStrong,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: STUDIO.borderStrong,
     alignItems: 'center', justifyContent: 'center',
   },
-  checkOn: { backgroundColor: S.accentDeep, borderColor: S.accentDeep },
-  checkLabel: { color: S.text, fontSize: 13.5, lineHeight: 19 },
-  checkSub: { color: S.sub, fontSize: 12.5, lineHeight: 18, marginTop: 5 },
-  link: { color: S.accent, fontWeight: '700' },
-  error: { color: S.red, fontSize: 13, marginTop: 16, lineHeight: 18 },
+  checkOn: { backgroundColor: STUDIO.accentDeep, borderColor: STUDIO.accentDeep },
+  checkLabel: { color: STUDIO.text, fontSize: 13.5, lineHeight: 19 },
+  checkSub: { color: STUDIO.sub, fontSize: 12.5, lineHeight: 18, marginTop: 5 },
+  link: { color: STUDIO.accent, fontWeight: '700' },
+  error: { color: STUDIO.red, fontSize: 13, marginTop: 16, lineHeight: 18 },
   btn: {
-    backgroundColor: S.accentDeep,
+    backgroundColor: STUDIO.accentDeep,
     borderRadius: 13,
     alignItems: 'center',
     paddingVertical: 14,
     marginTop: 20,
   },
-  btnTxt: { color: S.onAccent, fontSize: 15.5, fontWeight: '800' },
-  hint: { color: S.muted, fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
-}));
+  btnTxt: { color: '#fff', fontSize: 15.5, fontWeight: '800' },
+  hint: { color: STUDIO.muted, fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
+});
