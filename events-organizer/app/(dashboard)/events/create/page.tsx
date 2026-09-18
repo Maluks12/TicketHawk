@@ -63,6 +63,11 @@ interface EventDraft {
   savedAt: string;
   title: string; description: string; categoryId: string;
   timezone: string; startTime: string; endTime: string; expiresAt: string;
+  // Optional: drafts saved before this fix won't have it, and must fall back
+  // to 'private_free' on restore rather than throw. Without saving this, a
+  // draft always came back as private_free regardless of what was chosen —
+  // silently turning a "Public event" into a private one on restore.
+  eventType?: 'private_free' | 'private_paid' | 'public';
   isFree: boolean; price: string; currency: string;
   maxCapacity: string; maxTicketsPerUser: string; allowWaitlist: boolean;
   venueName: string; address: string; city: string;
@@ -751,6 +756,17 @@ export default function CreateEventPage() {
         // refund_policy and terms_and_conditions.
         setExpiresAt(ev.expires_at ? toLocalInput(ev.expires_at) : '');
         setOriginalStartDate(ev.start_time ? toLocalInput(ev.start_time).slice(0, 10) : null);
+        // eventType was never restored here, so the selector always showed
+        // its initial default — "Private free event" — no matter what the
+        // event actually was. Editing a public draft and saving (mode
+        // 'draft' PUTs `visibility: eventType === 'public' ? ... :
+        // 'private_link'`, see below) then silently flipped it to private,
+        // even though nothing on screen looked touched. Rebuild it from the
+        // same two signals the event was saved with: visibility, and whether
+        // anything about it is priced.
+        const paidTier = tiers.some((t: Record<string, unknown>) => Number(t.price ?? 0) > 0);
+        const freeEvent = (!ev.price || Number(ev.price) === 0) && !paidTier;
+        setEventType(ev.visibility === 'public' ? 'public' : freeEvent ? 'private_free' : 'private_paid');
         setIsFree(!ev.price || Number(ev.price) === 0);
         setPrice(ev.price != null ? String(ev.price) : '0');
         setCurrency(ev.currency ?? 'ZAR');
@@ -813,6 +829,7 @@ export default function CreateEventPage() {
       const draft: EventDraft = {
         savedAt: new Date().toISOString(),
         title, description, categoryId, timezone, startTime, endTime, expiresAt,
+        eventType,
         isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
         venueName, address, city, placeId, latitude, longitude, placeLabel, pinnedAt, venueType, tags, performers, teams, ticketTypes,
         coverImageUrl, bannerImageUrl,
@@ -828,6 +845,7 @@ export default function CreateEventPage() {
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
+      eventType,
       isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
       venueName, address, city, placeId, latitude, longitude, placeLabel, pinnedAt, venueType, tags, performers, teams, ticketTypes,
       coverImageUrl, bannerImageUrl,
@@ -850,6 +868,11 @@ export default function CreateEventPage() {
     setStartTime(d.startTime ?? '');
     setEndTime(d.endTime ?? '');
     setExpiresAt(d.expiresAt ?? '');
+    // Older drafts predate this field and default to private_free, same as a
+    // brand-new form — but a draft saved after this fix carries forward
+    // whatever the organiser actually picked (including 'public'), instead of
+    // silently reverting to private on restore.
+    setEventType(d.eventType ?? 'private_free');
     setIsFree(d.isFree ?? true);
     setPrice(d.price ?? '0');
     setCurrency(d.currency ?? 'ZAR');
