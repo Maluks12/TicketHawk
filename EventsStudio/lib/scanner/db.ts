@@ -34,6 +34,14 @@ export interface LocalPool {
   booking_ok: number;
 }
 
+export interface LocalTag {
+  tag_uid: string;
+  status: string;              // active / lost / deactivated / ...
+  assignment_id: string | null;
+  booking_id: string | null;
+  chip_type: string;
+}
+
 export interface LocalScan {
   id: string;
   event_id: string;
@@ -44,6 +52,8 @@ export interface LocalScan {
   scanned_at: string;
   synced: number;
   verdict: string; // local verdict; server may upgrade to collision on sync
+  medium: string;  // 'qr' | 'nfc'
+  tag_uid: string | null;
 }
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -90,6 +100,14 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
           verdict TEXT NOT NULL DEFAULT 'admitted'
         );
         CREATE INDEX IF NOT EXISTS idx_scanlog_unsynced ON scan_log (event_id, synced);
+        CREATE TABLE IF NOT EXISTS tags (
+          tag_uid TEXT PRIMARY KEY,
+          status TEXT NOT NULL,
+          assignment_id TEXT,
+          booking_id TEXT,
+          chip_type TEXT NOT NULL DEFAULT 'ntag424'
+        );
+        CREATE INDEX IF NOT EXISTS idx_tags_assignment ON tags (assignment_id);
       `);
 
       // ── Migrations ───────────────────────────────────────────────────────
@@ -105,6 +123,25 @@ export function getDb(): Promise<SQLite.SQLiteDatabase> {
       // the intended control flow here, not a silenced bug.
       try {
         await db.execAsync(`ALTER TABLE pools ADD COLUMN tier TEXT NOT NULL DEFAULT 'General Admission'`);
+      } catch {
+        // already present
+      }
+
+      // NFC (Phase 2b). Same reasoning as the `tier` column above: an existing
+      // install already has scan_log, so CREATE TABLE IF NOT EXISTS does
+      // nothing for it and the columns have to be added explicitly. Without
+      // this, upgrading a handset that already worked a gate would fail every
+      // push with "no such column: medium" — offline, mid-event.
+      //
+      // Defaulting medium to 'qr' means every scan already in the queue keeps
+      // its correct meaning; only taps write 'nfc'.
+      try {
+        await db.execAsync(`ALTER TABLE scan_log ADD COLUMN medium TEXT NOT NULL DEFAULT 'qr'`);
+      } catch {
+        // already present
+      }
+      try {
+        await db.execAsync(`ALTER TABLE scan_log ADD COLUMN tag_uid TEXT`);
       } catch {
         // already present
       }
@@ -132,7 +169,7 @@ export async function metaSet(k: string, v: string): Promise<void> {
 /** Wipe manifest tables — called when preparing a DIFFERENT event. */
 export async function wipeManifest(): Promise<void> {
   const db = await getDb();
-  await db.execAsync('DELETE FROM assignments; DELETE FROM pools;');
+  await db.execAsync('DELETE FROM assignments; DELETE FROM pools; DELETE FROM tags;');
 }
 
 export async function upsertAssignments(rows: Array<{
@@ -189,6 +226,35 @@ export async function upsertPools(rows: Array<{
   });
 }
 
+export async function upsertTags(rows: Array<{
+  tag_uid: string; status: string;
+  assignment_id: string | null; booking_id: string | null;
+  chip_type?: string;
+}>): Promise<void> {
+  if (!rows.length) return;
+  const db = await getDb();
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    for (const r of rows) {
+      // Unlike assignments and pools, nothing here ratchets. A tag's status and
+      // binding are wholly server-owned: the device never changes them, so the
+      // newest value the server sent is always right. A band reported lost at
+      // the box office MUST be able to move from 'active' back to nothing —
+      // that is the entire point of shipping revoked bands in the manifest
+      // rather than filtering them out.
+      await txn.runAsync(
+        `INSERT INTO tags (tag_uid, status, assignment_id, booking_id, chip_type)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(tag_uid) DO UPDATE SET
+           status = excluded.status,
+           assignment_id = excluded.assignment_id,
+           booking_id = excluded.booking_id,
+           chip_type = excluded.chip_type`,
+        r.tag_uid, r.status, r.assignment_id, r.booking_id, r.chip_type || 'ntag424',
+      );
+    }
+  });
+}
+
 // ── lookups ───────────────────────────────────────────────────────────────────
 
 export async function findAssignment(assignmentId: string): Promise<LocalAssignment | null> {
@@ -203,6 +269,12 @@ export async function findPool(bookingId: string): Promise<LocalPool | null> {
     'SELECT * FROM pools WHERE booking_id = ?', bookingId)) ?? null;
 }
 
+export async function findTag(tagUid: string): Promise<LocalTag | null> {
+  const db = await getDb();
+  return (await db.getFirstAsync<LocalTag>(
+    'SELECT * FROM tags WHERE tag_uid = ?', tagUid)) ?? null;
+}
+
 export async function counts(): Promise<{ total: number; scanned: number }> {
   const db = await getDb();
   const a = await db.getFirstAsync<{ t: number; s: number }>(
@@ -212,7 +284,11 @@ export async function counts(): Promise<{ total: number; scanned: number }> {
 
 // ── admits (transactional: mark + log together) ───────────────────────────────
 
-export async function admitIndividual(scanId: string, eventId: string, a: LocalAssignment): Promise<void> {
+export async function admitIndividual(
+  scanId: string, eventId: string, a: LocalAssignment,
+  // Set for an NFC tap. Defaults keep every existing QR call site unchanged.
+  medium: 'qr' | 'nfc' = 'qr', tagUid: string | null = null,
+): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
   await db.withExclusiveTransactionAsync(async (txn) => {
@@ -220,9 +296,9 @@ export async function admitIndividual(scanId: string, eventId: string, a: LocalA
       'UPDATE assignments SET scanned = 1, scanned_at = ? WHERE assignment_id = ?',
       now, a.assignment_id);
     await txn.runAsync(
-      `INSERT INTO scan_log (id, event_id, kind, assignment_id, booking_id, admit_count, scanned_at, synced, verdict)
-       VALUES (?, ?, 'individual', ?, ?, 1, ?, 0, 'admitted')`,
-      scanId, eventId, a.assignment_id, a.booking_id, now);
+      `INSERT INTO scan_log (id, event_id, kind, assignment_id, booking_id, admit_count, scanned_at, synced, verdict, medium, tag_uid)
+       VALUES (?, ?, 'individual', ?, ?, 1, ?, 0, 'admitted', ?, ?)`,
+      scanId, eventId, a.assignment_id, a.booking_id, now, medium, tagUid);
   });
 }
 
@@ -234,8 +310,8 @@ export async function admitPool(scanId: string, eventId: string, bookingId: stri
       'UPDATE pools SET pool_admitted = pool_admitted + ? WHERE booking_id = ?',
       count, bookingId);
     await txn.runAsync(
-      `INSERT INTO scan_log (id, event_id, kind, assignment_id, booking_id, admit_count, scanned_at, synced, verdict)
-       VALUES (?, ?, 'pool', NULL, ?, ?, ?, 0, 'admitted')`,
+      `INSERT INTO scan_log (id, event_id, kind, assignment_id, booking_id, admit_count, scanned_at, synced, verdict, medium, tag_uid)
+       VALUES (?, ?, 'pool', NULL, ?, ?, ?, 0, 'admitted', 'qr', NULL)`,
       scanId, eventId, bookingId, count, now);
   });
 }
@@ -245,13 +321,14 @@ export async function admitPool(scanId: string, eventId: string, bookingId: stri
 export async function admitProvisional(
   scanId: string, eventId: string,
   kind: 'individual' | 'pool', assignmentId: string | null, bookingId: string | null,
+  medium: 'qr' | 'nfc' = 'qr', tagUid: string | null = null,
 ): Promise<void> {
   const db = await getDb();
   const now = new Date().toISOString();
   await db.runAsync(
-    `INSERT INTO scan_log (id, event_id, kind, assignment_id, booking_id, admit_count, scanned_at, synced, verdict)
-     VALUES (?, ?, ?, ?, ?, 1, ?, 0, 'provisional')`,
-    scanId, eventId, kind, assignmentId, bookingId, now);
+    `INSERT INTO scan_log (id, event_id, kind, assignment_id, booking_id, admit_count, scanned_at, synced, verdict, medium, tag_uid)
+     VALUES (?, ?, ?, ?, ?, 1, ?, 0, 'provisional', ?, ?)`,
+    scanId, eventId, kind, assignmentId, bookingId, now, medium, tagUid);
 }
 
 // ── sync queue ────────────────────────────────────────────────────────────────

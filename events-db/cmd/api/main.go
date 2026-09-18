@@ -223,6 +223,32 @@ func main() {
 	// See internal/workers/reconcile_worker.go for why both gaps existed.
 	workers.StartReconcileWorker(pool, paymentService, bookingJobs, ctx, 2*time.Minute)
 
+	// ==========================================
+	// Cashless shortfall recovery (Phase 4d)
+	// ==========================================
+	// Detection runs often and is a cheap query: a wallet that has gone negative
+	// and is not noticed for an hour is an hour in which the band keeps spending.
+	// Recovery is the slow, careful half and runs every 15 minutes.
+	//
+	// Both are no-ops for any event that never enabled offline spend, which is
+	// most events — only offline approvals can take a wallet negative.
+	workers.StartShortfallDetector(pool, ctx)
+
+	// nil charger = REPORT-ONLY, and that is the intended setting for now.
+	// Cases that qualify for a mandate charge are logged with the amount and
+	// left alone, so enabling offline spend does NOT implicitly enable charging
+	// anybody's card. Run it this way through at least one real event and read
+	// the logs before wiring a charger: you will see the actual volume and size
+	// of shortfalls, which is worth knowing before automating anything that
+	// touches a card. The no-mandate-no-charge guarantee lives in
+	// repository.ClassifyRecovery, not here.
+	workers.StartRecoveryWorker(pool, ctx, nil)
+
+	// Balance snapshots keep the §5 3-second transaction target reachable as
+	// wallets accumulate history. A pure read optimisation — every snapshot
+	// could be deleted and no money would be lost.
+	workers.StartSnapshotWorker(pool, ctx)
+
 	// Ads/campaigns DISABLED for launch — the ad worker, ad-account, campaign
 	// and ad-wallet routes are unregistered below. Feed placement is fully
 	// organic. Re-enable by restoring these blocks (handlers/repos still exist).
@@ -881,6 +907,134 @@ func main() {
 	eventStaff.GET("/:id/scan-exceptions", handlers.ScanExceptionsHandler(pool))
 
 	// ==========================================
+	// RFID / NFC tags (Phase 1: online)
+	// ==========================================
+	// Registered on the SAME scanSync group so tag routes inherit its auth and
+	// its rate limit. That limit (capacity 240, refill 4/s) was sized for scan
+	// sync and comfortably covers a tap-per-second gate; revisit it in Phase 3
+	// when vendor POS traffic joins the same group.
+	//
+	// An unset TAG_MASTER_KEY is not an error — it means this deployment is not
+	// running an RFID programme. The routes are simply never registered, so a
+	// stray tap 404s instead of panicking at a gate. A key that is PRESENT but
+	// malformed is fatal: that is a misconfiguration, and failing at boot beats
+	// discovering it on a Friday night.
+	if cfg.TagMasterKey != "" {
+		tagCrypto, tagErr := services.NewTagCryptoService(cfg)
+		if tagErr != nil {
+			log.Fatal().Err(tagErr).Msg("TAG_MASTER_KEY is present but invalid")
+		}
+
+		scanSync.POST("/:id/tag-batches",   handlers.CreateTagBatchHandler(pool))
+		scanSync.GET("/:id/tag-batches",    handlers.ListTagBatchesHandler(pool))
+		scanSync.POST("/:id/tags/register", handlers.RegisterTagsHandler(pool))
+		scanSync.GET("/:id/tags",           handlers.ListTagsHandler(pool))
+		scanSync.POST("/:id/tags/bind",     handlers.BindTagHandler(pool))
+		scanSync.POST("/:id/tags/status",   handlers.SetTagStatusHandler(pool))
+		scanSync.POST("/:id/tags/tap",      handlers.TapTagHandler(pool, tagCrypto))
+
+		// ==========================================
+		// POS attestation & key delivery (Phase 4c)
+		// ==========================================
+		// Nested inside the tag block because tagCrypto must be in scope — the
+		// whole purpose of enrolment is releasing an EVENT TAG KEY derived from it.
+		//
+		// Gated on all three of TAG_MASTER_KEY, ATTESTATION_ROOTS_PATH and
+		// PLAY_INTEGRITY_SA_JSON. Absent means a deployment that cannot enable
+		// offline spend at all, which is the safe default and needs no explanation
+		// to an operator who never wanted it. Present-but-invalid is FATAL: that is
+		// a misconfiguration, and a boot failure beats discovering it when a vendor
+		// cannot enrol a till on a Friday night.
+		if cfg.AttestationRootsPath != "" && cfg.PlayIntegritySAJSON != "" {
+			keystoreVerifier, kErr := services.NewKeystoreVerifier(cfg.AttestationRootsPath)
+			if kErr != nil {
+				log.Fatal().Err(kErr).Msg("ATTESTATION_ROOTS_PATH is set but the roots are invalid")
+			}
+			integrityVerifier, iErr := services.NewPlayIntegrityVerifier(
+				cfg.PlayIntegritySAJSON, cfg.PlayIntegrityPackage)
+			if iErr != nil {
+				log.Fatal().Err(iErr).Msg("PLAY_INTEGRITY_SA_JSON is set but invalid")
+			}
+
+			// Revocation catches what chain verification cannot: a device whose
+			// attestation key was EXTRACTED from its hardware still produces a
+			// chain that verifies perfectly, because Google really did issue it.
+			// The refresh runs once immediately so a freshly deployed server is not
+			// sitting on an empty cache refusing every enrolment.
+			revocation := services.NewRevocationChecker(services.NewPgRevocationStore(pool))
+			services.StartRevocationRefresh(context.Background(), revocation, time.Hour)
+
+			attestPolicy := services.AttestationPolicy{
+				ExpectedPackage: cfg.PlayIntegrityPackage,
+				MaxTokenAge:     5 * time.Minute,
+				// RequireStrongBox stays false: most mid-range Android is TEE, and
+				// at a South African festival that is most of what vendors own.
+				// The level is recorded either way, so an estate that drifts is
+				// visible without excluding anyone up front.
+			}
+
+			scanSync.POST("/:id/pos/attestation/nonce",  handlers.IssueAttestationNonceHandler(pool))
+			scanSync.POST("/:id/pos/attestation/enroll", handlers.EnrollDeviceHandler(
+				pool, integrityVerifier, keystoreVerifier, revocation, tagCrypto, attestPolicy))
+			scanSync.POST("/:id/pos/attestation/revoke", handlers.RevokeDeviceOfflineHandler(pool))
+			scanSync.GET("/:id/pos/attestations",        handlers.ListAttestationsHandler(pool))
+		}
+	}
+
+	// ==========================================
+	// Cashless wallets & vendors (Phase 3: online)
+	// ==========================================
+	// Staff-side routes join the scanSync group so they inherit its auth and rate
+	// limit, and so a person authorised to work a gate is authorised to work a
+	// till — revoking them cuts off both at once.
+	//
+	// Registered unconditionally, unlike the tag routes above: a wallet does not
+	// require TAG_MASTER_KEY. An event can run cash-only top-ups and manual
+	// lookups with no RFID programme at all, and the purchase path refuses a band
+	// with no wallet on its own terms.
+	{
+		scanSync.POST("/:id/vendors",          handlers.CreateVendorHandler(pool))
+		scanSync.GET("/:id/vendors",           handlers.ListVendorsHandler(pool))
+		scanSync.POST("/:id/vendor-products",  handlers.CreateVendorProductHandler(pool))
+		scanSync.POST("/:id/pos-devices",      handlers.ProvisionPOSDeviceHandler(pool))
+
+		scanSync.POST("/:id/cashless/wallets",     handlers.CreateWalletHandler(pool))
+		scanSync.GET("/:id/cashless/balance",      handlers.GetWalletByTagHandler(pool))
+		scanSync.GET("/:id/cashless/statement",    handlers.GetWalletStatementHandler(pool))
+		scanSync.POST("/:id/cashless/topups/cash", handlers.CashTopupHandler(pool))
+		scanSync.POST("/:id/cashless/purchase",    handlers.PurchaseHandler(pool))
+
+		// Offline sync & recovery (Phase 4d). The sync endpoint does not care what
+		// wrote the batch, so it is testable with curl long before a till exists.
+		scanSync.POST("/:id/pos/offline/sync",   handlers.SyncOfflineTxnsHandler(pool))
+		scanSync.GET("/:id/cashless/shortfalls", handlers.ListShortfallsHandler(pool))
+
+		// Refunds and manual adjustments. Deliberately different authorisation:
+		// a refund comes from the TILL (device token, and only for that vendor's
+		// own sales), while an adjustment is MANAGER-only because it moves money
+		// on somebody's word alone with no sale behind it.
+		scanSync.GET("/:id/cashless/refundable",  handlers.LookupRefundableHandler(pool))
+		scanSync.POST("/:id/cashless/refund",     handlers.RefundHandler(pool))
+		scanSync.POST("/:id/cashless/adjustment", handlers.AdjustmentHandler(pool))
+	}
+
+	// Attendee-facing card top-up. Separate group because the caller is the
+	// wallet holder, not staff: it needs ordinary auth and must NOT sit behind
+	// the event-staff check the scanSync group applies.
+	cashless := v1.Group("/cashless")
+	cashless.Use(middleware.AuthMiddleware(cfg))
+	{
+		cashless.POST("/events/:id/topups/card", handlers.CardTopupHandler(pool, paymentService))
+
+		// Mandates are ATTENDEE-facing and deliberately not behind the staff
+		// check: a staff member cannot consent on somebody else's behalf, which is
+		// the entire point of recording a mandate rather than relying on
+		// card_on_file.
+		cashless.POST("/events/:id/mandate",        handlers.CreateMandateHandler(pool))
+		cashless.POST("/events/:id/mandate/revoke", handlers.RevokeMandateHandler(pool))
+	}
+
+	// ==========================================
 	// Home Feed
 	// ==========================================
 	v1.GET("/home", middleware.OptionalAuth(cfg), handlers.HomeSectionsHandler(pool, eventCache))
@@ -1404,6 +1558,26 @@ func main() {
 	}
 	{
 		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
+
+		// Offline spend configuration. ORGANISER-owned rather than staff: turning
+		// this on decides that vendor devices may hold a forgery-capable key and
+		// that wallets may go negative. That is a commercial risk decision, and a
+		// scanner supervisor should not be able to make it.
+		//
+		// Without these, every safe default in Phase 4 assumed a config row that
+		// nothing could create — enabling offline spend meant raw SQL in prod.
+		orgRoutes.GET("/events/:id/cashless/offline-config",          handlers.GetOfflineConfigHandler(pool))
+		orgRoutes.PUT("/events/:id/cashless/offline-config",          handlers.UpdateOfflineConfigHandler(pool))
+		orgRoutes.POST("/events/:id/cashless/offline-config/disable", handlers.DisableOfflineSpendHandler(pool))
+
+		// Vendor settlement & float reconciliation. Organiser-owned: deciding what
+		// a vendor is paid, and reading how much of the float is actually theirs,
+		// are commercial decisions.
+		orgRoutes.POST("/events/:id/cashless/settlements/calculate", handlers.CalculateSettlementsHandler(pool))
+		orgRoutes.GET("/events/:id/cashless/settlements",            handlers.ListSettlementsHandler(pool))
+		orgRoutes.POST("/events/:id/cashless/settlements/status",    handlers.UpdateSettlementStatusHandler(pool))
+		orgRoutes.GET("/events/:id/cashless/float",                  handlers.FloatReconciliationHandler(pool, false))
+		orgRoutes.POST("/events/:id/cashless/float",                 handlers.FloatReconciliationHandler(pool, true))
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
 		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))

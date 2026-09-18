@@ -297,9 +297,11 @@ type CreateEventDTO struct {
 	// Visibility: 'public' (default, discoverable, admin-reviewed) or
 	// 'private_link' (link-only, skips review, hidden from feed/search).
 	Visibility         *string `json:"visibility" binding:"omitempty,oneof=public private_link"`
-	// Scan (admission) window overrides, in MINUTES. nil = default 2h grace on
-	// that side. ScanOpenOffsetMin = minutes before start_time scanning opens;
-	// ScanCloseOffsetMin = minutes after end_time it closes. Ceiling 7 days.
+	// Scan (admission) window overrides, in MINUTES. BOTH are measured from
+	// start_time. ScanOpenOffsetMin = minutes BEFORE start_time that scanning
+	// opens (default 120). ScanCloseOffsetMin = minutes AFTER start_time that it
+	// closes; nil means the default rule — 30 min before end_time, capped at 2h
+	// after the start. Ceiling 7 days. See internal/models/scan_window.go.
 	ScanOpenOffsetMin  *int `json:"scan_open_offset_min" binding:"omitempty,min=0,max=10080"`
 	ScanCloseOffsetMin *int `json:"scan_close_offset_min" binding:"omitempty,min=0,max=10080"`
 	// RightsDeclarationAccepted: organizer confirms they hold the rights to

@@ -37,6 +37,49 @@ type Config struct {
 	VerifyNowMode    string // "sandbox" (default) | "production"
 	QRHMACSecret    string // HMAC-SHA256 secret for rotating in-app QR tokens
 
+	// TagMasterKey is the root of the RFID/NFC key hierarchy. Every per-event
+	// and per-tag key is DERIVED from it (see services.TagCryptoService) and
+	// none are ever persisted, so the database holds no tag key material at all
+	// and rotation is a version bump rather than re-encoding the estate.
+	//
+	// Hex-encoded, decoding to 16, 24 or 32 bytes. Deliberately NOT the QR
+	// secret: a compromised tag key must not also forge QR tickets, and the two
+	// rotate on different clocks.
+	//
+	// Generate with: openssl rand -hex 32
+	//
+	// There is no recovery path if this is lost — back it up like a signing key.
+	TagMasterKey string
+
+	// ── POS attestation (Phase 4c) ──────────────────────────────────────────
+	//
+	// All three optional. Absent means this deployment cannot enable offline
+	// spend — no till ever receives an event key — which is the safe default
+	// and needs no action from an operator who never wanted the feature.
+	// Present-but-invalid is fatal at boot: the constructors refuse, and a
+	// startup failure beats a vendor unable to enrol a till mid-event.
+
+	// AttestationRootsPath points at Google's hardware attestation root
+	// certificates, PEM, concatenated. Public certificates, not a secret — the
+	// security property is that they are PINNED, not hidden, so commit them
+	// rather than hiding them.
+	//
+	// TWO roots are required, not one: the classic factory root
+	// (f92009e853b6b045) and the Remote Key Provisioning root (Key Attestation
+	// CA1). Modern handsets chain to the latter, so pinning only the former
+	// rejects every recent device.
+	AttestationRootsPath string // ATTESTATION_ROOTS_PATH
+
+	// PlayIntegritySAJSON is the Google service-account key used to decode Play
+	// Integrity tokens. It can mint integrity verdicts for the Studio app —
+	// treat it exactly like TagMasterKey.
+	PlayIntegritySAJSON string // PLAY_INTEGRITY_SA_JSON
+
+	// PlayIntegrityPackage is the Studio app's package name. A genuine
+	// integrity verdict for a DIFFERENT app proves nothing about ours, so this
+	// is compared rather than assumed.
+	PlayIntegrityPackage string // PLAY_INTEGRITY_PACKAGE
+
 	R2AccountID string
 	R2AccessKey string
 	R2SecretKey string
@@ -149,6 +192,10 @@ func Load() (*Config, error) {
 		VerifyNowAPIKey:  os.Getenv("VERIFYNOW_API_KEY"),
 		VerifyNowMode:    os.Getenv("VERIFYNOW_MODE"),
 		QRHMACSecret:    os.Getenv("QR_HMAC_SECRET"),
+		TagMasterKey:    os.Getenv("TAG_MASTER_KEY"),
+		AttestationRootsPath: os.Getenv("ATTESTATION_ROOTS_PATH"),
+		PlayIntegritySAJSON:  os.Getenv("PLAY_INTEGRITY_SA_JSON"),
+		PlayIntegrityPackage: os.Getenv("PLAY_INTEGRITY_PACKAGE"),
 
 		R2AccountID: os.Getenv("R2_ACCOUNT_ID"),
 		R2AccessKey: os.Getenv("R2_ACCESS_KEY"),
@@ -275,6 +322,29 @@ func (c *Config) validate() error {
 	}
 	if len(c.QRHMACSecret) < 32 {
 		missing = append(missing, "QR_HMAC_SECRET (must be at least 32 chars — generate with: openssl rand -hex 32)")
+	}
+
+	// TAG_MASTER_KEY is OPTIONAL: a deployment with no RFID programme must still
+	// boot. But a key that is present and too short is a misconfiguration, and
+	// the right place to find out is startup rather than a gate. Format is
+	// checked again in services.NewTagCryptoService, which rejects anything that
+	// does not decode to a valid AES key length.
+	if c.TagMasterKey != "" && len(c.TagMasterKey) < 32 {
+		missing = append(missing, "TAG_MASTER_KEY (must be at least 32 hex chars — generate with: openssl rand -hex 32)")
+	}
+
+	// Attestation is all-or-nothing. A half-configured setup is worse than an
+	// unconfigured one: the routes register on the strength of two variables
+	// and then fail at the third, which reads as a broken feature rather than
+	// an unfinished one. Caught here so it surfaces at boot with a name.
+	attestSet := 0
+	for _, v := range []string{c.AttestationRootsPath, c.PlayIntegritySAJSON, c.PlayIntegrityPackage} {
+		if v != "" {
+			attestSet++
+		}
+	}
+	if attestSet > 0 && attestSet < 3 {
+		missing = append(missing, "ATTESTATION_ROOTS_PATH, PLAY_INTEGRITY_SA_JSON and PLAY_INTEGRITY_PACKAGE (set all three, or none — offline spend needs every one)")
 	}
 
 	if len(missing) > 0 {
