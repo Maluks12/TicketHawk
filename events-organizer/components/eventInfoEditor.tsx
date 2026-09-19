@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
+import { Bell } from '@phosphor-icons/react';
 import { useToast } from '../lib/toast';
 import EventInfoFields from './eventInfoFields';
 import {
@@ -94,6 +95,22 @@ export default function EventInfoEditor({ eventId }: { eventId: string }) {
 
   return (
     <div>
+      {/* Saving on a live event reaches ticket holders through the event
+          details worker in events-db: in-app and push for accounts, email
+          for everyone, guests included. It waits until the details have
+          been still for five minutes, so a run of saves goes out as one
+          update. The copy says so, or an organiser who saves three times
+          expects three messages. */}
+      {isPublished && (
+        <div className="alert alert-info" style={{ marginBottom: 18 }}>
+          <Bell size={16} weight="fill" />
+          <div>
+            This event is live, so ticket holders are told what changed — in
+            the app and by email — about five minutes after you stop editing.
+            Edits made close together go out as one update.
+          </div>
+        </div>
+      )}
       <EventInfoFields
         catalogue={catalogue}
         chosen={chosen}
