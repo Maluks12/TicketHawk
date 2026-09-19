@@ -62,7 +62,9 @@ func PushChannel(t NotificationType) string {
 		return "tickets"
 	case NotifEventReminder:
 		return "reminders"
-	case NotifTicketsSellingFast, NotifEventSoldOut, NotifEventCancelled:
+	case NotifTicketsSellingFast, NotifEventSoldOut, NotifEventCancelled, NotifEventDetailsChanged:
+		// A changed date, time or venue belongs with a cancellation: something
+		// happened to an event the user holds a ticket for.
 		return "alerts"
 	default:
 		return "default"
@@ -76,7 +78,10 @@ func PushChannel(t NotificationType) string {
 // "normal" so they don't punch through Doze mode at 3am for a discount.
 func PushPriority(t NotificationType) string {
 	switch t {
-	case NotifBookingConfirmed, NotifRefundProcessed, NotifEventCancelled, NotifKYCApproved:
+	case NotifBookingConfirmed, NotifRefundProcessed, NotifEventCancelled, NotifKYCApproved,
+		NotifEventDetailsChanged:
+		// An event change can be time-critical ("doors now 17:00" on the day),
+		// so it must not wait out Doze batching.
 		return "high"
 	default:
 		return "normal"

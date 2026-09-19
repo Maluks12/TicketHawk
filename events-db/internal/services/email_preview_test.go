@@ -31,6 +31,10 @@ package services
 //
 //   go test ./internal/services/ -run "TestEmailPreviewAll/password_reset" -v
 //
+// ── Send just the event-update emails (all three variants) ───────────────────
+//
+//   go test ./internal/services/ -run "TestEmailPreviewAll/event_update" -v
+//
 // =============================================================================
 
 import (
@@ -154,6 +158,91 @@ func previewOrganizer() *models.Organizer {
 	}
 }
 
+// ─── Event update fixtures ────────────────────────────────────────────────────
+//
+// Built the way the event details worker builds a notice: two snapshots of the
+// event run through models.DiffEventDetails. The previews therefore show the
+// real labels, ordering and push-body quoting, not a hand-written guess at them.
+
+// previewInfoCatalogue is the part of event_info_catalogue (migration 000080)
+// the fixtures touch, with its real labels and display order.
+func previewInfoCatalogue() map[string]models.EventInfoCatalogueEntry {
+	return map[string]models.EventInfoCatalogueEntry{
+		"age_requirement": {Key: "age_requirement", Label: "Age requirement", DisplayOrder: 10},
+		"doors_open":      {Key: "doors_open", Label: "Doors open", DisplayOrder: 20},
+		"dress_code":      {Key: "dress_code", Label: "Dress code", DisplayOrder: 40},
+		"parking":         {Key: "parking", Label: "Parking", DisplayOrder: 50},
+		"bag_policy":      {Key: "bag_policy", Label: "Bag policy", DisplayOrder: 90},
+	}
+}
+
+// previewWhen mirrors formatEventWhen in workers/event_details_change_worker.go.
+// Copied, not imported: workers imports services, so importing workers from a
+// services test would be an import cycle.
+func previewWhen(start, end time.Time, tz string) (full, short string) {
+	loc := utils.EventLocation(tz)
+	s, e := start.In(loc), end.In(loc)
+
+	var endText string
+	switch {
+	case s.Year() == e.Year() && s.YearDay() == e.YearDay():
+		endText = e.Format("15:04")
+	case s.Year() == e.Year():
+		endText = e.Format(utils.EventDayLayout + " at 15:04")
+	default:
+		endText = e.Format(utils.EventDateTimeLayout)
+	}
+	return s.Format(utils.EventDateTimeLayout) + " – " + endText, s.Format("Mon 2 Jan, 15:04")
+}
+
+// previewSnapshot is previewEvent as its ticket holders were last told it.
+func previewSnapshot() models.EventDetailsSnapshot {
+	ev := previewEvent()
+	return models.EventDetailsSnapshot{
+		Title:    ev.Title,
+		DescHash: "announced",
+		Start:    ev.StartTime.Unix(),
+		End:      ev.EndTime.Unix(),
+		Timezone: ev.Timezone,
+		Venue:    ev.VenueName,
+		Address:  ev.Address,
+		City:     ev.City,
+		Info: map[string]string{
+			"age_requirement": "All ages",
+			"doors_open":      "18:00",
+			"parking":         "Free parking in the P3 basement",
+			"bag_policy":      "Small bags only (A4 size)",
+		},
+	}
+}
+
+// previewEventUpdate diffs before → after and builds the email the way the
+// worker's email drain does, for the given kind of recipient.
+func previewEventUpdate(before, after models.EventDetailsSnapshot, linkKind, toName string) EventUpdateEmail {
+	whenFull, _ := previewWhen(time.Unix(after.Start, 0), time.Unix(after.End, 0), after.Timezone)
+	return EventUpdateEmail{
+		ToEmail:       testRecipient(),
+		ToName:        toName,
+		EventID:       previewEvent().ID,
+		EventTitle:    after.Title,
+		WhenText:      whenFull,
+		VenueText:     models.VenueText(after.Venue, after.Address, after.City),
+		Changes:       models.DiffEventDetails(before, after, previewInfoCatalogue(), previewWhen),
+		LinkKind:      linkKind,
+		BookingID:     previewBooking().ID,
+		BookingNumber: previewBooking().BookingNumber,
+	}
+}
+
+// logEventUpdate records what was sent, plus the push that goes with it in
+// production, so the email and the notification can be checked side by side.
+func logEventUpdate(t *testing.T, variant string, m EventUpdateEmail) {
+	t.Helper()
+	t.Logf("event update (%s) sent to %s", variant, testRecipient())
+	t.Logf("  subject: %s", m.Changes.EmailSubject(m.EventTitle))
+	t.Logf("  push:    %s — %s", m.Changes.NotificationTitle(), m.Changes.NotificationBody(m.EventTitle))
+}
+
 // ─── The suite ────────────────────────────────────────────────────────────────
 
 // TestEmailPreviewAll sends every email template, in a stable order, with a
@@ -198,6 +287,62 @@ func TestEmailPreviewAll(t *testing.T) {
 	t.Run("event_cancellation", func(t *testing.T) {
 		require.NoError(t, svc.SendEventCancellation(previewEvent(), previewUser(), previewBooking()))
 		t.Logf("event cancellation sent to %s", testRecipient())
+		pause()
+	})
+
+	t.Run("event_update_date_time_and_venue", func(t *testing.T) {
+		// Account holder. Date, time AND venue moved, so the red panel and the
+		// "can no longer attend" line appear. Every kind of row is on show:
+		// changed, added (new), removed, a multi-line value and the description.
+		before, after := previewSnapshot(), previewSnapshot()
+		shift := int64(25 * time.Hour / time.Second) // next day, an hour later
+		after.Start += shift
+		after.End += shift
+		after.Venue = "Ticketpro Dome"
+		after.Address = "Cnr Olievenhout Ave & Northumberland Ave, Northgate"
+		after.DescHash = "edited"
+		after.Info = map[string]string{
+			"age_requirement": "18+",
+			"doors_open":      "18:00",
+			"dress_code":      "Smart casual",
+			"parking":         "Paid parking, R50 cash only.\nUse the north entrance off Northumberland Ave.",
+		}
+		m := previewEventUpdate(before, after, "account", "Sipho Dlamini")
+		require.NoError(t, svc.SendEventUpdate(m))
+		logEventUpdate(t, "date, time & venue — account link", m)
+		pause()
+	})
+
+	t.Run("event_update_info_only_guest", func(t *testing.T) {
+		// Guest booking: the button carries ?bn=&email= because there is no
+		// account to sign in to. A rename plus Information edits and nothing
+		// about time or place, so no red panel and no "can no longer attend"
+		// line: the calm version of the email.
+		before, after := previewSnapshot(), previewSnapshot()
+		after.Title = before.Title + ": Day One"
+		after.Info = map[string]string{
+			"age_requirement": "All ages",
+			"doors_open":      "17:30",
+			"parking":         "Free parking in the P3 basement. Overflow parking at Sandton City, level P6.",
+			"bag_policy":      "Small bags only (A4 size)",
+		}
+		m := previewEventUpdate(before, after, "guest", "Thandi Nkosi")
+		require.NoError(t, svc.SendEventUpdate(m))
+		logEventUpdate(t, "information only — guest link", m)
+		pause()
+	})
+
+	t.Run("event_update_venue_claimant", func(t *testing.T) {
+		// Holds a ticket assigned from someone else's booking: the button opens
+		// THEIR ticket (/claim-ticket?assignment=&email=), and the can't-attend
+		// line points them at whoever gave it to them. An address-only move, so
+		// the push says "Venue updated" instead of quoting the unchanged name.
+		before, after := previewSnapshot(), previewSnapshot()
+		after.Address = "165 Maude St, Sandown (entrance on Alice Lane)"
+		m := previewEventUpdate(before, after, "claimant", "Thandi Nkosi")
+		m.AssignmentID = "8b1e2c34-0000-4000-8000-000000000001"
+		require.NoError(t, svc.SendEventUpdate(m))
+		logEventUpdate(t, "venue only — claimant ticket link", m)
 		pause()
 	})
 
