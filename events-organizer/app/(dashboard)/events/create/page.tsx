@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react';
 import { api } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
+import { useConfirm } from '../../../../lib/confirm';
 import { validateRequired, validateMinLength, firstError } from '../../../../lib/validation';
 import { getKycStatus } from '../../../../lib/kyc';
 import PlacesAutocomplete, { PlaceResult } from '@/components/placesAutocomplete';
@@ -492,6 +493,7 @@ function LockedFieldset({
 export default function CreateEventPage() {
   const router  = useRouter();
   const toast   = useToast();
+  const confirm = useConfirm();
 
   // ── Edit mode ───────────────────────────────────────────────────────────
   //
@@ -525,7 +527,10 @@ export default function CreateEventPage() {
   }, [mode, editableFields]);
 
   const [categories, setCategories]   = useState<{ id: number; name: string; slug: string }[]>([]);
-  const [submitting, setSubmitting]   = useState(false);
+  // false when idle; otherwise which action is in flight, so "Save draft" and
+  // "Submit for review" can each show their own spinner instead of a generic
+  // one appearing on whichever button the organiser did not click.
+  const [submitting, setSubmitting]   = useState<false | 'save' | 'publish'>(false);
   const [pendingDraft, setPendingDraft] = useState<EventDraft | null>(null);
 
   // ── Why a ref and not state ─────────────────────────────────────────────
@@ -960,7 +965,7 @@ export default function CreateEventPage() {
     if (eventType === 'private_free') setIsFree(true);
   }, [eventType]);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.SyntheticEvent, intent: 'save' | 'publish') {
     e.preventDefault();
     const err = validate();
     if (err) { toast(err, 'error'); return; }
@@ -995,8 +1000,11 @@ export default function CreateEventPage() {
       return;
     }
 
-    setSubmitting(true);
-    try {
+    // Shared by the draft-save and create paths below. The published/
+    // edit-request branch builds its own `changes` straight from component
+    // state instead — visibility, price and the like are not editable on a
+    // live event, so most of this body would not apply there anyway.
+    function buildBody(): Record<string, unknown> {
       const body: Record<string, unknown> = {
         title:        title.trim(),
         description:  description.trim(),
@@ -1047,22 +1055,17 @@ export default function CreateEventPage() {
           ...(t.description ? { description: t.description }       : {}),
         }));
       }
+      return body;
+    }
 
-      if (mode === 'draft' && editId) {
-        // Draft: saved straight through. Tiers go to the existing replace
-        // route, which already refuses to drop a tier that has sales.
-        const { ticket_types, ...eventBody } = body as Record<string, unknown>;
-        await api.put(`/organiser/events/${editId}`, eventBody);
-        if (Array.isArray(ticket_types) && ticket_types.length) {
-          await api.put(`/organiser/events/${editId}/ticket-types`, { types: ticket_types });
-        }
-        toast('Draft saved', 'success');
-        router.push('/events');
-
-      } else if (mode === 'published' && editId) {
-        // Published: nothing is written to the event now. Only the fields the
-        // backend marked editable are sent; it strips anything else anyway,
-        // but filing a diff an admin cannot action just wastes their time.
+    if (mode === 'published' && editId) {
+      // Published: nothing is written to the event now. Only the fields the
+      // backend marked editable are sent; it strips anything else anyway,
+      // but filing a diff an admin cannot action just wastes their time.
+      // There is no draft/publish split here — a live event only ever files
+      // an edit-request — so `intent` does not apply to this branch.
+      setSubmitting('publish');
+      try {
         const changes: Record<string, unknown> = {};
         if (editableFields.has('title'))            changes.title            = title.trim();
         if (editableFields.has('description'))      changes.description      = description.trim();
@@ -1086,89 +1089,158 @@ export default function CreateEventPage() {
         });
         toast(res.data?.message ?? 'Sent for review', 'success');
         router.push('/events');
+      } catch (e: unknown) {
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+          ?? 'Failed to create event';
+        toast(msg, 'error');
+      } finally { setSubmitting(false); }
+      return;
+    }
 
-      } else {
-        // ── Land on the new event, not the list ──────────────────────────
-        //
-        // The wizard deliberately does NOT collect information or line-up.
-        // Both are edit-time by nature: an organiser has a date and a venue
-        // before they have a confirmed line-up, and blocking event creation on
-        // a headliner who has not signed yet would be the wrong trade.
-        //
-        // But dropping them back on /events made those tabs invisible — there
-        // was nothing telling them the event has an Information block or a
-        // Line-up at all. Routing straight to the event's Information tab puts
-        // the next step in front of them instead of hoping they find it.
-        //
-        // The create endpoint returns the full event, so the id is already
-        // here; ?created=1 lets the event page show a first-time prompt.
-        const res = await api.post('/organiser/events/create', body);
-        toast('Event submitted for review', 'success');
+    // ── Draft (brand new, or an existing one being edited) ──────────────────
+    //
+    // Saving always happens. Publishing is a second, optional step gated
+    // behind an explicit confirmation below — never bundled silently into the
+    // same click as saving, and never the thing that requires a *second*
+    // click on a *different* page to actually take effect.
+    const doSave = async (alsoPublish: boolean) => {
+      setSubmitting(alsoPublish ? 'publish' : 'save');
+      let resultId: string | undefined;
+      try {
+        const body = buildBody();
 
-        // BEFORE anything that can throw or await. If the line-up write below
-        // fails, the event still exists and its draft must still be gone.
-        submittedRef.current = true;
-        localStorage.removeItem(DRAFT_KEY);
-        setPendingDraft(null);
-
-        const newId = (res.data as { event?: { id?: string } })?.event?.id;
-
-        if (newId) {
-          // ── Line-up and information, written now the event has an id ─────
-          //
-          // Sequential rather than parallel: both hit the same event row and
-          // failing one should not obscure which. Each is caught separately so
-          // a line-up failure does not lose the information block too.
-          //
-          // Neither failure undoes the event. It exists, it is in review, and
-          // both of these are editable on its own page — so the honest
-          // outcome is a warning plus a route to where they can be fixed, not
-          // an error implying nothing was created.
-          const cleanedLineup = lineup
-            .map(l => ({ ...l, name: l.name.trim() }))
-            .filter(l => l.name.length > 0)
-            .map(({ id: _id, ...rest }, i) => ({ ...rest, sort_order: i }));
-
-          if (cleanedLineup.length > 0) {
-            try {
-              await replaceEventLineup(newId, cleanedLineup);
-            } catch {
-              toast('Event created, but the line-up did not save — add it on the event page', 'error');
-            }
+        if (mode === 'draft' && editId) {
+          // Draft: saved straight through. Tiers go to the existing replace
+          // route, which already refuses to drop a tier that has sales.
+          const { ticket_types, ...eventBody } = body;
+          await api.put(`/organiser/events/${editId}`, eventBody);
+          if (Array.isArray(ticket_types) && ticket_types.length) {
+            await api.put(`/organiser/events/${editId}/ticket-types`, { types: ticket_types });
           }
+          resultId = editId;
 
-          const infoItems = infoChosen
-            .map(key => ({ key, value: (infoValues[key] ?? '').trim() }))
-            .filter(i => i.value.length > 0);
-
-          if (infoItems.length > 0) {
-            try {
-              await replaceEventInfo(newId, infoItems);
-            } catch {
-              toast('Event created, but the information did not save — add it on the event page', 'error');
-            }
-          }
-
-          // Back to the events list, as expected after creating something.
-          //
-          // This briefly routed to the new event's Information tab instead, on
-          // the reasoning that it put the next step in front of the organiser.
-          // But it is surprising — "create" should land where the thing you
-          // created now lives — and the line-up and information are collected
-          // in this form now anyway, so there is no next step to point at.
-          router.push('/events');
         } else {
-          // Older API build, or a shape change. The event WAS created, so
-          // falling back to the list is right — failing here would suggest it
-          // was not.
-          router.push('/events');
+          // The create endpoint always comes back as a draft — see the note
+          // above OrgCreateEventHandler on the backend — so on its own this is
+          // really just "save"; alsoPublish below is what actually submits it.
+          const res = await api.post('/organiser/events/create', body);
+
+          // BEFORE anything that can throw or await. If the line-up write
+          // below fails, the event still exists and its local draft must
+          // still be gone.
+          submittedRef.current = true;
+          localStorage.removeItem(DRAFT_KEY);
+          setPendingDraft(null);
+
+          resultId = (res.data as { event?: { id?: string } })?.event?.id;
+
+          if (resultId) {
+            // ── Line-up and information, written now the event has an id ──
+            //
+            // Sequential rather than parallel: both hit the same event row
+            // and failing one should not obscure which. Each is caught
+            // separately so a line-up failure does not lose the information
+            // block too. Neither failure undoes the event — it exists, and
+            // both are editable on its own page — so the honest outcome is a
+            // warning plus a route to where they can be fixed, not an error
+            // implying nothing was saved.
+            const cleanedLineup = lineup
+              .map(l => ({ ...l, name: l.name.trim() }))
+              .filter(l => l.name.length > 0)
+              .map(({ id: _id, ...rest }, i) => ({ ...rest, sort_order: i }));
+
+            if (cleanedLineup.length > 0) {
+              try {
+                await replaceEventLineup(resultId, cleanedLineup);
+              } catch {
+                toast('Event saved, but the line-up did not save — add it on the event page', 'error');
+              }
+            }
+
+            const infoItems = infoChosen
+              .map(key => ({ key, value: (infoValues[key] ?? '').trim() }))
+              .filter(i => i.value.length > 0);
+
+            if (infoItems.length > 0) {
+              try {
+                await replaceEventInfo(resultId, infoItems);
+              } catch {
+                toast('Event saved, but the information did not save — add it on the event page', 'error');
+              }
+            }
+          }
         }
+      } catch (e: unknown) {
+        // The save itself failed, so nothing (or nothing new) was written —
+        // stay on the form rather than routing away from data the organiser
+        // has not actually managed to save yet.
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+          ?? 'Failed to save event';
+        toast(msg, 'error');
+        setSubmitting(false);
+        return;
       }
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
-        ?? 'Failed to create event';
-      toast(msg, 'error');
-    } finally { setSubmitting(false); }
+
+      if (!alsoPublish) {
+        toast('Draft saved', 'success');
+        setSubmitting(false);
+        router.push('/events');
+        return;
+      }
+      if (!resultId) {
+        // Defensive only: the try block above either set resultId or threw,
+        // which already returned above. Kept so publish is never called
+        // with an empty id if that ever stops being true.
+        toast('Draft saved', 'success');
+        setSubmitting(false);
+        router.push('/events');
+        return;
+      }
+
+      // The save above already succeeded, so the event safely exists either
+      // way from here on — a failure now must not be reported as if nothing
+      // was saved, and must not route back through 'create', which would
+      // create a duplicate event.
+      try {
+        const res = await api.post(`/organiser/events/${resultId}/publish`, {
+          rights_declaration_accepted: true,
+        });
+        // Private events go live instantly; public ones go to admin review.
+        // The backend already words this correctly — surface its message
+        // rather than always claiming "submitted for review".
+        toast(res.data?.message ?? 'Event published', 'success');
+      } catch (e: unknown) {
+        const detail = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        toast(
+          detail
+            ? `Saved as a draft, but couldn't submit it — ${detail}`
+            : "Saved as a draft, but couldn't submit it for review",
+          'error',
+        );
+      } finally {
+        setSubmitting(false);
+      }
+      router.push('/events');
+    };
+
+    if (intent === 'publish') {
+      // A rights declaration is a legal attestation, so it must be an
+      // explicit act by the organiser — never a hardcoded `true` posted on
+      // their behalf, and never folded into the same click as saving.
+      // Confirming BEFORE anything is written also means Cancel leaves the
+      // form exactly as it was: nothing saved, nothing sent.
+      confirm(
+        'Confirm you hold the rights',
+        'You confirm that you hold the rights to host this event and to sell '
+        + 'tickets for it, and that the details you have provided are accurate. '
+        + 'TicketHawk may remove events and withhold payouts where these rights '
+        + 'cannot be evidenced.',
+        () => doSave(true),
+      );
+      return;
+    }
+
+    await doSave(false);
   }
 
   // ── Checklist ─────────────────────────────────────────────────────────────
@@ -1194,7 +1266,7 @@ export default function CreateEventPage() {
     // the scroller in the middle means the bar is simply the LAST FLEX CHILD —
     // it sits at the bottom because there is nowhere else for it to be, with no
     // sticky maths involved.
-    <form onSubmit={handleSubmit} noValidate className="page">
+    <form onSubmit={(e) => handleSubmit(e, 'save')} noValidate className="page">
       <div className="page-header">
         <div style={{ minWidth: 0 }}>
           <button type="button" onClick={() => router.push('/events')}
@@ -1814,16 +1886,33 @@ export default function CreateEventPage() {
           maxWidth: 1440, margin: '0 auto',
           display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
         }}>
-          <button type="submit" className="btn btn-primary" disabled={submitting}>
-            {submitting
-              ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Submitting…</>
-              : mode === 'draft'
-                ? <><FloppyDisk size={15} weight="bold" /> Save draft</>
-              : mode === 'published'
-                ? <><NotePencil size={15} weight="bold" /> Send for review</>
-              : <><Confetti size={15} weight="bold" /> {eventType === 'public' ? 'Submit for review' : 'Create event'}</>}
-          </button>
-          <button type="button" className="btn" disabled={submitting}
+          {mode === 'published' ? (
+            <button type="button" className="btn btn-primary" disabled={!!submitting}
+              onClick={(e) => handleSubmit(e, 'publish')}>
+              {submitting
+                ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Submitting…</>
+                : <><NotePencil size={15} weight="bold" /> Send for review</>}
+            </button>
+          ) : (
+            <>
+              {/* Saving never asks for the rights-declaration confirmation —
+                  only Submit does, below — so this always completes in one
+                  click with nothing further to confirm. */}
+              <button type="button" className="btn" disabled={!!submitting}
+                onClick={(e) => handleSubmit(e, 'save')}>
+                {submitting === 'save'
+                  ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Saving…</>
+                  : <><FloppyDisk size={15} weight="bold" /> Save draft</>}
+              </button>
+              <button type="button" className="btn btn-primary" disabled={!!submitting}
+                onClick={(e) => handleSubmit(e, 'publish')}>
+                {submitting === 'publish'
+                  ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Submitting…</>
+                  : <><Confetti size={15} weight="bold" /> {eventType === 'public' ? 'Submit for review' : 'Publish event'}</>}
+              </button>
+            </>
+          )}
+          <button type="button" className="btn" disabled={!!submitting}
             onClick={() => router.push('/events')}>Cancel</button>
 
           <span style={{ flex: 1 }} />
