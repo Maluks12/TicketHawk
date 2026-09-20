@@ -62,6 +62,31 @@ const fmtTime   = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { h
 const fmtMoney  = (n: number)   => fmtRand(n);
 const fmtDT     = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+// "Monday, 21 September 2026 at 07:00 – 12:00", or with the end date when the
+// event runs past midnight. Only the start was shown before, and an event
+// without an end time on the ticket leaves buyers guessing about lifts home.
+// An end that isn't after the start (the zero time an unhydrated event carries)
+// is ignored rather than printed.
+const fmtWhen = (start: string, end?: string) => {
+  const base = `${fmt(start)} at ${fmtTime(start)}`;
+  if (!end) return base;
+  const s = new Date(start), e = new Date(end);
+  if (isNaN(e.getTime()) || e.getTime() <= s.getTime()) return base;
+  return s.toDateString() === e.toDateString()
+    ? `${base} – ${fmtTime(end)}`
+    : `${base} – ${fmt(end)} at ${fmtTime(end)}`;
+};
+
+// "Headliner · Main stage · 21:30" — whichever parts the organiser filled in,
+// the same order the event page uses.
+const lineupDetail = (l: { subtitle?: string | null; stage?: string | null; set_time?: string | null }) => {
+  const bits: string[] = [];
+  if (l.subtitle) bits.push(l.subtitle);
+  if (l.stage && l.stage !== l.subtitle) bits.push(l.stage);
+  if (l.set_time) bits.push(fmtTime(l.set_time));
+  return bits.join(' · ');
+};
+
 const STATUS_COLOR: Record<string, string> = {
   confirmed: '#00e5a0', pending: '#ffb830', cancelled: '#ff4d4d', refunded: '#888',
 };
@@ -482,6 +507,7 @@ export default function BookingDetailScreen() {
   const [booking, setBooking]               = useState<BookingDetail | null>(null);
   const [assignments, setAssignments]       = useState<TicketAssignment[]>([]);
   const [loading, setLoading]               = useState(true);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [refundOpen, setRefundOpen]         = useState(false);
   const [refunded, setRefunded]             = useState(false);
   const [refundedAmount, setRefundedAmount] = useState<number | null>(null);
@@ -931,7 +957,7 @@ export default function BookingDetailScreen() {
           <Text className={s.sectionLabel}>EVENT DETAILS</Text>
           {booking.event?.start_time && (
             <InfoRow icon={<Ionicons name="calendar-outline" size={15} color={t.icon} />}
-              label="Date & time" value={`${fmt(booking.event.start_time)} at ${fmtTime(booking.event.start_time)}`} />
+              label="Date & time" value={fmtWhen(booking.event.start_time, booking.event.end_time)} />
           )}
           {booking.event && (
             <InfoRow icon={<Ionicons name="location-outline" size={15} color={t.icon} />}
@@ -941,7 +967,60 @@ export default function BookingDetailScreen() {
             <InfoRow icon={<Feather name="map-pin" size={15} color={t.icon} />}
               label="Address" value={booking.event.address} />
           )}
+          {booking.event?.organizer?.business_name && (
+            <InfoRow icon={<Ionicons name="business-outline" size={15} color={t.icon} />}
+              label="Organiser" value={booking.event.organizer.business_name} />
+          )}
         </View>
+
+        {/* Event information — the organiser's Information block (doors,
+            parking, age requirement, ...). Cached with the booking for offline
+            use, so it's there at the gate without signal too. */}
+        {(booking.event?.info_items?.length ?? 0) > 0 && (
+          <View style={sheet.card}>
+            <Text className={s.sectionLabel}>EVENT INFORMATION</Text>
+            {booking.event!.info_items!.map((item) => (
+              <View key={item.key}>
+                <Text className={s.infoLabel}>{item.label}</Text>
+                <Text className={s.infoValue} style={{ textAlign: 'left', flex: 0, marginTop: 3 }}>{item.value}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Line-up */}
+        {(booking.event?.lineup?.length ?? 0) > 0 && (
+          <View style={sheet.card}>
+            <Text className={s.sectionLabel}>
+              {booking.event!.lineup!.every((l) => l.kind === 'team') ? 'TEAMS' : 'LINE-UP'}
+            </Text>
+            {booking.event!.lineup!.map((entry, i) => {
+              const detail = lineupDetail(entry);
+              return (
+                <View key={entry.id ?? String(i)}>
+                  <Text className={s.infoValue} style={{ textAlign: 'left', flex: 0 }}>{entry.name}</Text>
+                  {detail ? <Text className={s.infoLabel} style={{ marginTop: 2 }}>{detail}</Text> : null}
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* About this event — clamped, with Read more for long descriptions. */}
+        {!!booking.event?.description && (
+          <View style={sheet.card}>
+            <Text className={s.sectionLabel}>ABOUT THIS EVENT</Text>
+            <Text className={s.infoValue} style={{ textAlign: 'left', flex: 0, fontWeight: '400', lineHeight: 20 }}
+              numberOfLines={aboutOpen ? undefined : 5}>
+              {booking.event.description}
+            </Text>
+            {booking.event.description.length > 280 && (
+              <TouchableOpacity onPress={() => setAboutOpen((v) => !v)} hitSlop={8}>
+                <Text style={{ color: '#ff3c6e', fontSize: 13, fontWeight: '700' }}>{aboutOpen ? 'Show less' : 'Read more'}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Ticket Info */}
         <View style={sheet.card}>

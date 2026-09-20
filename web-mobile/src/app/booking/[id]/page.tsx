@@ -9,7 +9,7 @@ import { RotatingQR } from '@/components/rotatingQR';
 import {
   WarningCircle, ArrowLeft, Users, Check, EnvelopeSimple, X, PaperPlaneTilt,
   Calendar, MapPin, MapTrifold, Ticket, CheckCircle, Clock, User, ArrowBendUpLeft,
-  HourglassMedium,
+  HourglassMedium, Storefront,
 } from '@phosphor-icons/react';
 
 interface BookingDetail {
@@ -20,7 +20,13 @@ interface BookingDetail {
   attendee_first_name?: string; attendee_last_name?: string; attendee_email?: string;
   created_at: string; confirmed_at?: string; refunded_at?: string;
   refunded_reason?: string; refunded_amount?: number;
-  event?: { title: string; start_time: string; venue_name: string; city: string; cover_image_url?: string; address?: string };
+  event?: {
+    title: string; start_time: string; end_time?: string; venue_name: string; city: string;
+    cover_image_url?: string; address?: string; description?: string; slug?: string;
+    organizer?: { business_name: string; slug?: string; verified?: boolean } | null;
+    info_items?: { key: string; label: string; value: string; value_type?: string }[];
+    lineup?: { id?: string; kind?: string; name: string; subtitle?: string | null; stage?: string | null; set_time?: string | null }[];
+  };
 }
 
 interface TicketAssignment { id: string; slot_number: number; status: string; assignee_name?: string; assignee_email?: string; qr_scanned_at?: string | null; }
@@ -34,6 +40,31 @@ const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-ZA', { weekday
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 const fmtMoney = (n: number) => `R${Math.round(n).toLocaleString('en-ZA')}`;
 const fmtDT = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+// "Monday, 21 September 2026 at 07:00 – 12:00", or with the end date when the
+// event runs past midnight. Only the start was shown before, and an event
+// without an end time on the ticket leaves buyers guessing about lifts home.
+// An end that isn't after the start (the zero time an unhydrated event carries)
+// is ignored rather than printed.
+const fmtWhen = (start: string, end?: string) => {
+  const base = `${fmt(start)} at ${fmtTime(start)}`;
+  if (!end) return base;
+  const s = new Date(start), e = new Date(end);
+  if (isNaN(e.getTime()) || e.getTime() <= s.getTime()) return base;
+  return s.toDateString() === e.toDateString()
+    ? `${base} – ${fmtTime(end)}`
+    : `${base} – ${fmt(end)} at ${fmtTime(end)}`;
+};
+
+// "Headliner · Main stage · 21:30" — whichever parts the organiser filled in,
+// the same order the event page uses.
+const lineupDetail = (l: { subtitle?: string | null; stage?: string | null; set_time?: string | null }) => {
+  const bits: string[] = [];
+  if (l.subtitle) bits.push(l.subtitle);
+  if (l.stage && l.stage !== l.subtitle) bits.push(l.stage);
+  if (l.set_time) bits.push(fmtTime(l.set_time));
+  return bits.join(' · ');
+};
 
 function InfoRow({ icon, label, value, valueColor }: { icon: ReactNode; label: string; value: string; valueColor?: string }) {
   const { colors } = useAppTheme();
@@ -72,6 +103,7 @@ export default function BookingDetailPage() {
   const [assignments, setAssignments] = useState<TicketAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [refundReason, setRefundReason] = useState('');
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
   const [refundLoading, setRefundLoading] = useState(false);
   const [refundErr, setRefundErr] = useState('');
@@ -361,10 +393,63 @@ export default function BookingDetailPage() {
         {/* Event Details */}
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
           <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>EVENT DETAILS</p>
-          {booking.event?.start_time && <InfoRow icon={<Calendar size={14} weight="regular" />} label="Date & time" value={`${fmt(booking.event.start_time)} at ${fmtTime(booking.event.start_time)}`} />}
+          {booking.event?.start_time && <InfoRow icon={<Calendar size={14} weight="regular" />} label="Date & time" value={fmtWhen(booking.event.start_time, booking.event.end_time)} />}
           {booking.event && <InfoRow icon={<MapPin size={14} weight="regular" />} label="Venue" value={`${booking.event.venue_name}, ${booking.event.city}`} />}
           {booking.event?.address && <InfoRow icon={<MapTrifold size={14} weight="regular" />} label="Address" value={booking.event.address} />}
+          {booking.event?.organizer?.business_name && <InfoRow icon={<Storefront size={14} weight="regular" />} label="Organiser" value={booking.event.organizer.business_name} />}
         </div>
+
+        {/* Event information — the organiser's Information block (doors,
+            parking, age requirement, dress code, ...). Stacked rather than
+            label | value: these are free text up to 600 characters. */}
+        {(booking.event?.info_items?.length ?? 0) > 0 && (
+          <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>EVENT INFORMATION</p>
+            {booking.event!.info_items!.map((item) => (
+              <div key={item.key} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.dividerColor}` }}>
+                <p style={{ margin: 0, fontSize: 12.5, color: colors.subText }}>{item.label}</p>
+                <p style={{ margin: '3px 0 0', fontSize: 13.5, fontWeight: 600, color: colors.text, whiteSpace: 'pre-line' }}>{item.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Line-up */}
+        {(booking.event?.lineup?.length ?? 0) > 0 && (
+          <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>
+              {booking.event!.lineup!.every((l) => l.kind === 'team') ? 'TEAMS' : 'LINE-UP'}
+            </p>
+            {booking.event!.lineup!.map((entry, i) => {
+              const detail = lineupDetail(entry);
+              return (
+                <div key={entry.id ?? i} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.dividerColor}` }}>
+                  <p style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: colors.text }}>{entry.name}</p>
+                  {detail && <p style={{ margin: '2px 0 0', fontSize: 12.5, color: colors.subText }}>{detail}</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* About this event — clamped, with Read more for long descriptions. */}
+        {booking.event?.description && (
+          <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
+            <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 800, letterSpacing: 1.1, color: colors.subText }}>ABOUT THIS EVENT</p>
+            <p style={{
+              margin: 0, fontSize: 13.5, lineHeight: 1.55, color: colors.text, whiteSpace: 'pre-line',
+              ...(aboutOpen ? {} : { display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }),
+            }}>
+              {booking.event.description}
+            </p>
+            {booking.event.description.length > 280 && (
+              <button type="button" onClick={() => setAboutOpen((v) => !v)}
+                style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: colors.ctaBg, fontSize: 12.5, fontWeight: 700 }}>
+                {aboutOpen ? 'Show less' : 'Read more'}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Ticket Info */}
         <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 16, padding: 16, marginTop: 10 }}>
