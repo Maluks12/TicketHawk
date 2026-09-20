@@ -177,6 +177,15 @@ func main() {
 	workers.StartLineupChangeWorker(pool, ctx)
 	log.Info().Msg("line-up change worker started")
 
+	// Tells ticket holders when a live event's details change — date and
+	// time, venue, name, description or anything in its Information block.
+	// Accounts get an in-app notification and push; everyone holding a
+	// ticket, including guests and people with an assigned ticket, gets an
+	// email. Compares state rather than hooking a handler, so it covers the
+	// organiser's info edits, approved edit requests and takedown edits alike.
+	workers.StartEventDetailsChangeWorker(pool, cfg, ctx)
+	log.Info().Msg("event details change worker started")
+
 	bookingRepo    := repository.NewPgxBookingQuerier(pool)
 	eventRepo      := repository.NewPgxEventQuerier(pool)
 	cartQuerier    := repository.NewPgxCartQuerier(pool)
