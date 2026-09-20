@@ -8,9 +8,54 @@ export function validateEmail(email: string): string | null {
   return null;
 }
 
+// ── Password policy ───────────────────────────────────────────────────────────
+// Mirrors the backend's `strong_password` binding tag verbatim
+// (events-db/internal/utils/security.go → ValidatePassword): at least 8 runes,
+// one uppercase, one digit, one special character, and at most 128 runes.
+//
+// This used to check length only, which meant "password" passed the form and
+// then came back as a 400 from /auth/register that the user could do nothing
+// with. A client check that is more lenient than the server is worse than no
+// check at all — it turns a fixable form error into a dead end.
+
+export const PASSWORD_MAX = 128;
+
+export interface PasswordCheck {
+  label: string;
+  ok: boolean;
+}
+
+/** Counts code points, matching Go's len([]rune(pw)) rather than UTF-16 units. */
+function runeLength(value: string): number {
+  return [...value].length;
+}
+
+/**
+ * The live requirement list rendered under the password field at signup.
+ * validatePassword() below is built from the same array, so the ticks the user
+ * sees can never drift from what the form actually rejects.
+ *
+ * "Special" is anything that is not a letter, a digit or whitespace. The server
+ * tests unicode.IsPunct || unicode.IsSymbol, which is the same set in practice
+ * and — the part that matters — does not count a plain space.
+ */
+export function passwordChecks(password: string): PasswordCheck[] {
+  return [
+    { label: 'At least 8 characters',              ok: runeLength(password) >= 8 },
+    { label: 'One capital letter (A\u2013Z)',      ok: /[A-Z]/.test(password) },
+    { label: 'One number (0\u20139)',              ok: /[0-9]/.test(password) },
+    { label: 'One special character (! ? @ # $)',  ok: /[^A-Za-z0-9\s]/.test(password) },
+  ];
+}
+
 export function validatePassword(password: string): string | null {
   if (!password) return 'Password is required';
-  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (runeLength(password) > PASSWORD_MAX) {
+    return `Password must not exceed ${PASSWORD_MAX} characters`;
+  }
+  if (passwordChecks(password).some(c => !c.ok)) {
+    return 'Password does not meet all of the requirements below';
+  }
   return null;
 }
 
