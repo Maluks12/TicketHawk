@@ -139,6 +139,19 @@ function phoneToLocal(raw: string): string {
   return d ? `0${d}` : '';
 }
 
+// The 32 printable ASCII punctuation/symbol characters, listed explicitly.
+//
+// This was /[^A-Za-z0-9\s]/, a negated class that counts an accented LETTER as
+// a special character. The server tests unicode.IsPunct || unicode.IsSymbol
+// (events-db internal/utils/security.go), and 'e-acute' is neither — so
+// "Sebastien1", "Cafe1234" and friends passed this screen and came back from
+// /auth/register as a 400 the user could do nothing with. Every character
+// below is punct-or-symbol in Go, so the screen can now only ever be stricter
+// than the server, never more permissive.
+const SPECIAL_CHAR = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
+const PASSWORD_MAX = 128;
+
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -212,11 +225,12 @@ export default function AuthScreen() {
 
 
   // Live password requirements shown under the Password field.
+  // Lengths count runes to match Go's len([]rune(pw)) rather than UTF-16 units.
   const passChecks = [
-    { label: 'At least 8 characters',              ok: regPassword.length >= 8 },
+    { label: 'At least 8 characters',              ok: [...regPassword].length >= 8 },
     { label: 'One capital letter (A–Z)',           ok: /[A-Z]/.test(regPassword) },
     { label: 'One number (0–9)',                   ok: /[0-9]/.test(regPassword) },
-    { label: 'One special character (e.g. !@#$)',  ok: /[^A-Za-z0-9\s]/.test(regPassword) },
+    { label: 'One special character (e.g. !@#$)',  ok: SPECIAL_CHAR.test(regPassword) },
   ];
   const passAllOk = passChecks.every(c => c.ok);
 
@@ -269,6 +283,7 @@ export default function AuthScreen() {
     if (!phone.trim())     errs.phone     = 'Required';
     else if (!phoneIsValid(phone)) errs.phone = 'Enter a valid number';
     if (!regPassword)      errs.regPassword = 'Required';
+    else if ([...regPassword].length > PASSWORD_MAX) errs.regPassword = `Password must be at most ${PASSWORD_MAX} characters`;
     else if (!passAllOk)   errs.regPassword = 'Password does not meet all requirements';
     if (confirmPass !== regPassword) errs.confirmPass = "Passwords don't match";
     if (!agreed)           errs.agreed    = 'You must agree to continue';

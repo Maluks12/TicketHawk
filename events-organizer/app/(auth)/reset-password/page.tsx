@@ -3,7 +3,8 @@
 import { Suspense, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '../../../lib/api';
-import { validatePasswordMatch, firstError } from '../../../lib/validation';
+import { validatePassword, validatePasswordMatch, firstError } from '../../../lib/validation';
+import PasswordChecklist from '../../../components/passwordChecklist';
 
 /**
  * /reset-password — organiser dashboard
@@ -28,16 +29,13 @@ import { validatePasswordMatch, firstError } from '../../../lib/validation';
  *   (token must be a bare uuid4; 400 with details on weak passwords)
  */
 
-// Mirrors the backend's password policy so users get instant feedback
-// instead of a round-trip rejection.
-function passwordProblem(pw: string): string | null {
-  if (!pw) return 'Password is required';
-  if (pw.length < 8) return 'Password must be at least 8 characters';
-  if (!/[A-Z]/.test(pw)) return 'Password needs an uppercase letter';
-  if (!/[0-9]/.test(pw)) return 'Password needs a digit';
-  if (!/[^A-Za-z0-9]/.test(pw)) return 'Password needs a special character';
-  return null;
-}
+// The password rule lives in lib/validation.validatePassword(), shared with
+// the signup form. It used to be duplicated here, and the copy had drifted:
+// it tested /[^A-Za-z0-9]/ for the special character, which counts a plain
+// space — the server's unicode.IsPunct || unicode.IsSymbol does not. So
+// "Passwor1 " passed this form and came back a 400. It also never checked the
+// 128-character ceiling the binding enforces. Two copies of a rule is one copy
+// too many; there is now one.
 
 function ResetPasswordInner() {
   const router = useRouter();
@@ -77,7 +75,7 @@ function ResetPasswordInner() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const err = firstError({
-      password: passwordProblem(password),
+      password: validatePassword(password),
       confirm: validatePasswordMatch(password, confirm),
     });
     if (err) { setError(err); return; }
@@ -260,8 +258,7 @@ function ResetPasswordInner() {
                 Set your password
               </div>
               <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16, lineHeight: 1.5 }}>
-                Choose a password for your TicketHawk organiser account. It needs at
-                least 8 characters, an uppercase letter, a digit, and a special character.
+                Choose a password for your TicketHawk organiser account.
               </div>
 
               {error && (
@@ -297,6 +294,11 @@ function ResetPasswordInner() {
                     </button>
                   </div>
                 </div>
+
+                {/* Same component, same rules as the signup form — this page
+                    and /login?mode=register both post to endpoints bound to
+                    strong_password, so they must show the same list. */}
+                <PasswordChecklist password={password} style={{ marginBottom: 12 }} />
 
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 5 }}>

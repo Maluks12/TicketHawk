@@ -8,9 +8,9 @@ import {
   validatePassword,
   validatePasswordMatch,
   validateRequired,
-  passwordChecks,
   firstError,
 } from '../../../lib/validation';
+import PasswordChecklist from '../../../components/passwordChecklist';
 import { ThemeToggle } from '../../../lib/theme';
 import { ORGANISER_LEGAL_DOCS, legalLinkProps, CURRENT_LEGAL_VERSION } from '../../../lib/legalLinks';
 
@@ -423,67 +423,6 @@ function EyeIcon({ show }: { show: boolean }) {
     <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
       <path fillRule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.450l1.514 1.514a4 4 0 00-5.478-5.478z" clipRule="evenodd"/>
       <path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.064 7 9.542 7 .847 0 1.669-.105 2.454-.303z"/>
-    </svg>
-  );
-}
-
-// ── Live password requirements ────────────────────────────────────────────────
-// The rules come from lib/validation.passwordChecks(), which is also what
-// validatePassword() runs on submit — one source of truth, so a tick can never
-// mean something the form will then reject.
-function PasswordChecklist({ password }: { password: string }) {
-  const checks = passwordChecks(password);
-  const allMet = checks.every(c => c.ok);
-  // Until they type, everything is grey and neutral — a wall of red crosses on
-  // an empty field reads as failure before they've done anything wrong.
-  const touched = password.length > 0;
-
-  return (
-    <div style={{
-      padding: '11px 13px', marginBottom: 16,
-      background: 'var(--surface-alpha)',
-      border: `1px solid ${touched && allMet ? 'var(--success-border)' : 'var(--border)'}`,
-      borderRadius: 'var(--r-lg)',
-      transition: 'border-color .15s ease',
-    }}>
-      <div style={{
-        fontSize: 11.5, fontWeight: 700, letterSpacing: .4, textTransform: 'uppercase',
-        color: 'var(--text-3)', marginBottom: 8,
-      }}>
-        Password must contain
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {checks.map(c => (
-          <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <CheckIcon met={touched && c.ok} />
-            <span style={{
-              fontSize: 12.5, lineHeight: 1.35,
-              color: touched && c.ok ? 'var(--success-fg)' : 'var(--text-2)',
-              transition: 'color .15s ease',
-            }}>
-              {c.label}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Inline rather than an icon-package import, matching EyeIcon above. Ticked is
-// a filled check; unmet is a hollow ring, not a red cross — an unfinished
-// requirement is not an error yet.
-function CheckIcon({ met }: { met: boolean }) {
-  return met ? (
-    <svg viewBox="0 0 20 20" fill="var(--success)" width="15" height="15"
-      style={{ flexShrink: 0 }} aria-hidden="true">
-      <path fillRule="evenodd" clipRule="evenodd"
-        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 20 20" fill="none" width="15" height="15"
-      style={{ flexShrink: 0 }} aria-hidden="true">
-      <circle cx="10" cy="10" r="7" stroke="var(--text-faint)" strokeWidth="1.5" />
     </svg>
   );
 }

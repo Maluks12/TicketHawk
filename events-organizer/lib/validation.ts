@@ -18,6 +18,13 @@ export function validateEmail(email: string): string | null {
 // with. A client check that is more lenient than the server is worse than no
 // check at all — it turns a fixable form error into a dead end.
 
+// The 32 printable ASCII punctuation/symbol characters, listed explicitly
+// rather than as /[^A-Za-z0-9\s]/. That negated form counts an accented LETTER
+// as a special character; the server tests unicode.IsPunct || unicode.IsSymbol,
+// and 'e-acute' is neither — so "Sebastien1" and "Cafe1234" passed the client
+// and came back a 400. Every character below is punct-or-symbol in Go.
+const SPECIAL_CHAR = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
 export const PASSWORD_MAX = 128;
 
 export interface PasswordCheck {
@@ -44,7 +51,7 @@ export function passwordChecks(password: string): PasswordCheck[] {
     { label: 'At least 8 characters',              ok: runeLength(password) >= 8 },
     { label: 'One capital letter (A\u2013Z)',      ok: /[A-Z]/.test(password) },
     { label: 'One number (0\u20139)',              ok: /[0-9]/.test(password) },
-    { label: 'One special character (! ? @ # $)',  ok: /[^A-Za-z0-9\s]/.test(password) },
+    { label: 'One special character (! ? @ # $)',  ok: SPECIAL_CHAR.test(password) },
   ];
 }
 

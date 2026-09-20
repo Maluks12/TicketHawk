@@ -49,6 +49,29 @@ function Field({ placeholder, value, onChange, type = 'text', error, autoComplet
   );
 }
 
+// The 32 printable ASCII punctuation/symbol characters, listed explicitly.
+//
+// This was /[^A-Za-z0-9\s]/, a negated class that counts an accented LETTER as
+// a special character. The server tests unicode.IsPunct || unicode.IsSymbol
+// (events-db internal/utils/security.go), and 'e-acute' is neither — so
+// "Sebastien1", "Cafe1234" and friends passed this form and came back from
+// /auth/register as a 400 the user could do nothing with. Every character
+// below is punct-or-symbol in Go, so the form can now only ever be stricter
+// than the server, never more permissive.
+const SPECIAL_CHAR = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
+// One array, read by both the live checklist and the submit-time validator, so
+// a ticked row can never mean something the form will then reject. Lengths
+// count runes to match Go's len([]rune(pw)) rather than UTF-16 units.
+const PASSWORD_RULES = [
+  { label: 'At least 8 characters',             test: (pw: string) => [...pw].length >= 8 },
+  { label: 'One capital letter (A\u2013Z)',       test: (pw: string) => /[A-Z]/.test(pw) },
+  { label: 'One number (0\u20139)',               test: (pw: string) => /[0-9]/.test(pw) },
+  { label: 'One special character (e.g. !@#$)', test: (pw: string) => SPECIAL_CHAR.test(pw) },
+];
+
+const PASSWORD_MAX = 128;
+
 export default function AuthPage() {
   const router = useRouter();
   const { login, register } = useAuthStore();
@@ -120,7 +143,8 @@ export default function AuthPage() {
     if (!phone.trim()) errs.phone = 'Required';
     else if (phone.replace(/\D/g, '').length < 10) errs.phone = 'Enter a valid number';
     if (!regPassword) errs.regPassword = 'Required';
-    else if (!(regPassword.length >= 8 && /[A-Z]/.test(regPassword) && /[0-9]/.test(regPassword) && /[^A-Za-z0-9\s]/.test(regPassword))) errs.regPassword = 'Password does not meet all requirements';
+    else if ([...regPassword].length > PASSWORD_MAX) errs.regPassword = `Password must be at most ${PASSWORD_MAX} characters`;
+    else if (PASSWORD_RULES.some((r) => !r.test(regPassword))) errs.regPassword = 'Password does not meet all requirements';
     if (confirmPass !== regPassword) errs.confirmPass = "Passwords don't match";
     if (!agreed) errs.agreed = 'You must agree to continue';
     if (Object.keys(errs).length) { setErrors(errs); return; }
@@ -218,17 +242,15 @@ export default function AuthPage() {
             <Field placeholder="Password" value={regPassword} onChange={(v) => { setRegPassword(v); clearErr('regPassword'); }} type="password" error={errors.regPassword} autoComplete="new-password" />
             {/* Live password requirements */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 4px', marginTop: -2, marginBottom: 4 }}>
-              {[
-                { label: 'At least 8 characters',             ok: regPassword.length >= 8 },
-                { label: 'One capital letter (A\u2013Z)',        ok: /[A-Z]/.test(regPassword) },
-                { label: 'One number (0\u20139)',                ok: /[0-9]/.test(regPassword) },
-                { label: 'One special character (e.g. !@#$)', ok: /[^A-Za-z0-9\s]/.test(regPassword) },
-              ].map((c) => (
-                <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <CheckCircle2 size={15} color={c.ok ? '#22c55e' : (isDark ? 'rgba(255,255,255,0.28)' : 'rgba(10,10,10,0.25)')} />
-                  <span style={{ fontSize: 12.5, color: c.ok ? '#22c55e' : colors.subText }}>{c.label}</span>
-                </div>
-              ))}
+              {PASSWORD_RULES.map((r) => {
+                const ok = r.test(regPassword);
+                return (
+                  <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <CheckCircle2 size={15} color={ok ? '#22c55e' : (isDark ? 'rgba(255,255,255,0.28)' : 'rgba(10,10,10,0.25)')} />
+                    <span style={{ fontSize: 12.5, color: ok ? '#22c55e' : colors.subText }}>{r.label}</span>
+                  </div>
+                );
+              })}
             </div>
             <Field placeholder="Confirm password" value={confirmPass} onChange={(v) => { setConfirmPass(v); clearErr('confirmPass'); }} type="password" error={errors.confirmPass} autoComplete="new-password" />
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
