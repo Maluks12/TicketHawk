@@ -170,7 +170,7 @@ func GetUserBookingsHandler(bookings repository.BookingQuerier) gin.HandlerFunc 
 	}
 }
 
-func GetBookingDetailsHandler(bookings repository.BookingQuerier) gin.HandlerFunc {
+func GetBookingDetailsHandler(bookings repository.BookingQuerier, pool *pgxpool.Pool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, _ := c.Get("user_id")
 		bookingID := c.Param("id")
@@ -190,6 +190,11 @@ func GetBookingDetailsHandler(bookings repository.BookingQuerier) gin.HandlerFun
 			c.JSON(http.StatusNotFound, gin.H{"error": "Booking not found"})
 			return
 		}
+
+		// End time, organiser, Information block and line-up — what the event
+		// page shows, on the ticket the buyer carries to the door. Only after
+		// the ownership check, so nothing extra is loaded for a refused request.
+		repository.HydrateBookingEvent(pool, booking)
 
 		c.JSON(http.StatusOK, booking)
 	}
