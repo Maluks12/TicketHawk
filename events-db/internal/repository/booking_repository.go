@@ -322,7 +322,7 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 			b.platform_fee, b.organizer_fee, b.total_amount, b.currency,
 			b.booking_status, b.payment_status, b.qr_code_url, b.tickets_sent,
 			b.attendee_first_name, b.attendee_last_name, b.attendee_email,
-			b.created_at, b.confirmed_at,
+			b.created_at, b.confirmed_at, b.ticket_type_name,
 			e.title, e.start_time, COALESCE(e.timezone, ''), e.venue_name, e.city, e.address, e.cover_image_url
 		FROM bookings b
 		LEFT JOIN events e ON b.event_id = e.id
@@ -338,7 +338,7 @@ func GetBookingByID(pool *pgxpool.Pool, bookingID string) (*models.Booking, erro
 		&booking.PlatformFee, &booking.OrganizerFee, &booking.TotalAmount, &booking.Currency,
 		&booking.BookingStatus, &booking.PaymentStatus, &booking.QRCodeURL, &booking.TicketsSent,
 		&booking.AttendeeFirstName, &booking.AttendeeLastName, &booking.AttendeeEmail,
-		&booking.CreatedAt, &booking.ConfirmedAt,
+		&booking.CreatedAt, &booking.ConfirmedAt, &booking.TicketTypeName,
 		&event.Title, &event.StartTime, &event.Timezone, &event.VenueName, &event.City, &event.Address, &event.CoverImageURL,
 	)
 
@@ -364,7 +364,7 @@ func GetGuestBooking(pool *pgxpool.Pool, bookingNumber string, email string) (*m
 			b.platform_fee, b.organizer_fee, b.total_amount, b.currency,
 			b.booking_status, b.payment_status, b.qr_code_url,
 			b.attendee_first_name, b.attendee_last_name, b.attendee_email,
-			b.created_at, b.confirmed_at,
+			b.created_at, b.confirmed_at, b.ticket_type_name,
 			e.title, e.start_time, e.venue_name, e.city, e.address, e.cover_image_url
 		FROM bookings b
 		LEFT JOIN events e ON b.event_id = e.id
@@ -379,7 +379,7 @@ func GetGuestBooking(pool *pgxpool.Pool, bookingNumber string, email string) (*m
 		&booking.PlatformFee, &booking.OrganizerFee, &booking.TotalAmount, &booking.Currency,
 		&booking.BookingStatus, &booking.PaymentStatus, &booking.QRCodeURL,
 		&booking.AttendeeFirstName, &booking.AttendeeLastName, &booking.AttendeeEmail,
-		&booking.CreatedAt, &booking.ConfirmedAt,
+		&booking.CreatedAt, &booking.ConfirmedAt, &booking.TicketTypeName,
 		&event.Title, &event.StartTime, &event.VenueName, &event.City, &event.Address, &event.CoverImageURL,
     )
 
@@ -416,7 +416,7 @@ func GetUserBookings(pool *pgxpool.Pool, userID string, limit int, cursor *utils
 			b.id, b.booking_number, b.event_id,
 			b.ticket_quantity, b.total_amount, b.currency,
 			b.booking_status, b.payment_status, b.qr_code_url,
-			b.created_at, b.confirmed_at,
+			b.created_at, b.confirmed_at, b.ticket_type_name,
 			e.title, e.start_time, e.venue_name, e.city, e.cover_image_url
 		FROM bookings b
 		LEFT JOIN events e ON b.event_id = e.id
@@ -448,7 +448,7 @@ func GetUserBookings(pool *pgxpool.Pool, userID string, limit int, cursor *utils
 			&booking.PaymentStatus,
 			&booking.QRCodeURL,
 			&booking.CreatedAt,
-			&booking.ConfirmedAt,
+			&booking.ConfirmedAt, &booking.TicketTypeName,
 			&event.Title,
 			&event.StartTime,
 			&event.VenueName,
