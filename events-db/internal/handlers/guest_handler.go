@@ -152,6 +152,9 @@ func GetGuestBookingHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// Same event details an account holder's booking screen gets.
+		repository.HydrateBookingEvent(pool, booking)
+
 		c.JSON(http.StatusOK, booking)
 	}
 }
