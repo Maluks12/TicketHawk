@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../lib/toast';
 import { useConfirm } from '../lib/confirm';
+import Select, { SelectOption } from './select';
+import { PRESET_GROUPS, CUSTOM } from './ticketTypeModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ticket tier management.
@@ -74,7 +76,17 @@ function availabilityOf(t: TicketTier): { available: number | null; soldOut: boo
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '7px 9px', border: '1px solid var(--border)',
   borderRadius: 6, fontSize: 13, fontFamily: 'inherit',
+  // Without border-box, width 100% plus padding and border made every input
+  // 20px wider than its grid column.
+  boxSizing: 'border-box',
 };
+
+// The same tier names the create-event modal offers (ticketTypeModal),
+// imported rather than copied so the two lists can never drift apart.
+const NAME_OPTIONS: SelectOption[] = [
+  ...PRESET_GROUPS.flatMap(g => g.options.map(o => ({ value: o, label: o, group: g.group }))),
+  { value: CUSTOM, label: 'Custom', hint: 'Type your own name', group: 'Other' },
+];
 
 export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onChanged }: Props) {
   const toast = useToast();
@@ -84,6 +96,8 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
   const [draft, setDraft] = useState<Partial<TicketTier>>({});
   const [adding, setAdding] = useState(false);
   const [newTier, setNewTier] = useState({ name: '', price: '', capacity: '', description: '' });
+  // Which option the name dropdown shows: a preset, CUSTOM, or '' (none yet).
+  const [newPreset, setNewPreset] = useState('');
   const [busy, setBusy] = useState(false);
 
   // Close the editor whenever the parent hands us a fresh list, so a successful
@@ -132,6 +146,12 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
 
   const addTier = useCallback(async () => {
     if (!newTier.name.trim()) { toast('Name is required', 'error'); return; }
+    // Presets make a duplicate one click away; two tiers with the same name
+    // would be indistinguishable to a buyer at checkout.
+    const wanted = newTier.name.trim().toLowerCase();
+    if (tiers.some((t) => t.name.trim().toLowerCase() === wanted)) {
+      toast(`There is already a tier called "${newTier.name.trim()}"`, 'error'); return;
+    }
     const price = Number(newTier.price || 0);
     if (Number.isNaN(price) || price < 0) { toast('Price must be 0 or more', 'error'); return; }
     const cap = newTier.capacity.trim() === '' ? null : Number(newTier.capacity);
@@ -151,6 +171,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
       });
       toast('Tier added', 'success');
       setNewTier({ name: '', price: '', capacity: '', description: '' });
+      setNewPreset('');
       setAdding(false);
       onChanged();
     } catch (e: any) {
@@ -158,7 +179,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
     } finally {
       setBusy(false);
     }
-  }, [newTier, eventId, tiers.length, onChanged, toast]);
+  }, [newTier, eventId, tiers, onChanged, toast]);
 
   const removeTier = (t: TicketTier) => {
     // A tier with sales cannot simply vanish — the bookings reference it and the
@@ -195,7 +216,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
   const sorted = [...tiers].sort((a, b) => a.sort_order - b.sort_order);
 
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 14, minWidth: 0 }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8,
       }}>
@@ -216,6 +237,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
       )}
 
       {sorted.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
         <table className="meta-table" style={{ width: '100%' }}>
           <thead>
             <tr>
@@ -232,7 +254,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                 return (
                   <tr key={t.id}>
                     <td colSpan={7} style={{ background: 'var(--surface-2)', padding: 12 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
                           <input style={inputStyle} value={String(draft.name ?? '')}
@@ -319,16 +341,30 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
             })}
           </tbody>
         </table>
+        </div>
       )}
 
       {adding && (
         <div style={{ marginTop: 12, padding: 12, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 10 }}>New tier</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
-            <div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
+            <div style={{ minWidth: 0 }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
-              <input style={inputStyle} value={newTier.name} placeholder="e.g. Early Bird"
-                onChange={(e) => setNewTier({ ...newTier, name: e.target.value })} />
+              <Select
+                ariaLabel="Ticket name"
+                value={newPreset}
+                placeholder="Choose a ticket type"
+                onChange={(v) => {
+                  setNewPreset(v);
+                  setNewTier({ ...newTier, name: v === CUSTOM ? '' : v });
+                }}
+                options={NAME_OPTIONS}
+              />
+              {newPreset === CUSTOM && (
+                <input style={{ ...inputStyle, marginTop: 6 }} value={newTier.name}
+                  placeholder="e.g. Sunrise Session" maxLength={60} autoFocus
+                  onChange={(e) => setNewTier({ ...newTier, name: e.target.value })} />
+              )}
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Price</label>

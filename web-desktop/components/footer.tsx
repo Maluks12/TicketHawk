@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import { useAppTheme } from '@/themes/colors';
 import { COMPANY } from '@/lib/legal';
 
@@ -33,9 +34,81 @@ const HIDE_FOOTER_PATTERNS: RegExp[] = [
   /^\/payment\/[^/]+$/,           // hosted gateway return — transient
 ];
 
+// ── Contact ──────────────────────────────────────────────────────────────────
+//
+// Contact used to be a bare mailto: link. A browser hands mailto: to the
+// computer's default mail APP — and most desktop visitors don't have one set
+// up; they use Gmail or Outlook in a browser tab. For them the click did
+// nothing at all, which reads as a broken link.
+//
+// So Contact opens a small menu instead: the address itself (with Copy, which
+// always works), compose links for the two webmail services most people use,
+// and the original mailto: for anyone who does have a mail app.
+const CONTACT_SUBJECT = 'TicketHawk support';
+
+function contactLinks(email: string) {
+  const to = encodeURIComponent(email);
+  const subject = encodeURIComponent(CONTACT_SUBJECT);
+  return [
+    { label: 'Open in Gmail', href: `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${subject}`, newTab: true },
+    { label: 'Open in Outlook.com', href: `https://outlook.live.com/mail/0/deeplink/compose?to=${to}&subject=${subject}`, newTab: true },
+    { label: 'Use my email app', href: `mailto:${email}?subject=${subject}`, newTab: false },
+  ];
+}
+
 export default function Footer() {
   const { colors } = useAppTheme();
   const pathname = usePathname() || '';
+
+  // Hooks run before the early return below, on every render.
+  const [contactOpen, setContactOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const contactRef = useRef<HTMLDivElement>(null);
+  const addressRef = useRef<HTMLSpanElement>(null);
+
+  // Close on Escape or on a click anywhere outside the menu.
+  useEffect(() => {
+    if (!contactOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (contactRef.current && !contactRef.current.contains(e.target as Node)) {
+        setContactOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContactOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [contactOpen]);
+
+  // "Copied" reverts after a moment so a second copy still gets feedback.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  const copyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(COMPANY.supportEmail);
+      setCopied(true);
+    } catch {
+      // Clipboard API refused (older browser, or not a secure context):
+      // select the address so Ctrl+C works instead.
+      const node = addressRef.current;
+      const selection = typeof window !== 'undefined' ? window.getSelection() : null;
+      if (node && selection) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+  };
 
   // Normalise a trailing slash so /cart/ and /cart both match.
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
@@ -94,13 +167,75 @@ export default function Footer() {
             {link.label}
           </Link>
         ))}
-        <a
-          href={`mailto:${COMPANY.supportEmail}`}
-          className="text-[12.5px] no-underline transition-opacity hover:opacity-100"
-          style={{ color: colors.text, opacity: 0.65 }}
-        >
-          Contact
-        </a>
+
+        <div ref={contactRef} className="relative inline-block">
+          <button
+            type="button"
+            onClick={() => setContactOpen((open) => !open)}
+            aria-haspopup="dialog"
+            aria-expanded={contactOpen}
+            aria-controls="footer-contact-menu"
+            className="text-[12.5px] transition-opacity hover:opacity-100 cursor-pointer"
+            style={{
+              color: colors.text,
+              opacity: contactOpen ? 1 : 0.65,
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              font: 'inherit',
+              fontSize: '12.5px',
+            }}
+          >
+            Contact
+          </button>
+
+          {contactOpen && (
+            <div
+              id="footer-contact-menu"
+              role="dialog"
+              aria-label="Contact TicketHawk support"
+              className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-[260px] rounded-xl border p-3 shadow-lg z-50 text-left"
+              style={{ backgroundColor: colors.cardBg, borderColor: colors.dividerColor }}
+            >
+              <p className="text-[11px] mb-1" style={{ color: colors.subText }}>
+                Email us at
+              </p>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <span
+                  ref={addressRef}
+                  className="text-[13px] font-semibold select-all break-all"
+                  style={{ color: colors.text }}
+                >
+                  {COMPANY.supportEmail}
+                </span>
+                <button
+                  type="button"
+                  onClick={copyAddress}
+                  className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold cursor-pointer"
+                  style={{ backgroundColor: colors.sectionCardBg, color: copied ? colors.ctaBg : colors.text, border: 'none' }}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+
+              <div className="border-t pt-2 flex flex-col" style={{ borderColor: colors.dividerColor }}>
+                {contactLinks(COMPANY.supportEmail).map((link) => (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    {...(link.newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    onClick={() => setContactOpen(false)}
+                    className="rounded-md px-2 py-1.5 text-[12.5px] no-underline transition-opacity hover:opacity-80"
+                    style={{ color: colors.text }}
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         <a
           href={ORGANISER_URL}
           className="text-[12.5px] no-underline transition-opacity hover:opacity-100"

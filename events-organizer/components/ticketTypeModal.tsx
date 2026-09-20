@@ -26,7 +26,7 @@ export interface TicketTypeRow {
 // tiers that actually appear on South African and international event
 // listings — Golden Circle in particular is standard at SA stadium concerts and
 // its absence would send organisers straight to "Custom".
-const PRESET_GROUPS: Array<{ group: string; options: string[] }> = [
+export const PRESET_GROUPS: Array<{ group: string; options: string[] }> = [
   {
     group: 'Release phases',
     options: [
@@ -102,7 +102,7 @@ const PRESET_GROUPS: Array<{ group: string; options: string[] }> = [
   },
 ];
 
-const CUSTOM = '__custom__';
+export const CUSTOM = '__custom__';
 
 const ALL_PRESETS = PRESET_GROUPS.flatMap(g => g.options);
 
