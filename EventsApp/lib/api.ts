@@ -979,10 +979,16 @@ export interface BookingDetail {
   event?: {
     title: string;
     start_time: string;
+    end_time?: string;
     venue_name: string;
     city: string;
     cover_image_url?: string | null;
     address?: string;
+    description?: string;
+    slug?: string;
+    organizer?: { business_name: string; slug?: string; verified?: boolean } | null;
+    info_items?: { key: string; label: string; value: string; value_type?: string }[];
+    lineup?: { id?: string; kind?: string; name: string; subtitle?: string | null; stage?: string | null; set_time?: string | null }[];
   };
 }
 
