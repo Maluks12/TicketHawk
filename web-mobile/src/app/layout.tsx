@@ -6,6 +6,7 @@ import Footer from '@/components/footer';
 import ThemedMain from '@/components/themedMain';
 import ThemeSync from '@/components/themesync';
 import ReturnPathTracker from '@/components/returnPathTracker';
+import ServiceBanner from '@/components/serviceBanner';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://ticket-hawk.com'),
@@ -104,6 +105,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             user there instead of router.back() landing them on whatever
             happened to precede the login page. */}
         <ReturnPathTracker />
+
+        {/* Maintenance / outage notice. Sits ABOVE the nav in normal flow:
+            NavBar is `sticky top-0`, so a banner in flow above it pushes the
+            page down at the top of a document and scrolls away after that,
+            leaving the nav to stick to the top edge exactly as before.
+            Renders nothing when the platform is healthy. */}
+        <ServiceBanner />
 
         <NavBar />
 

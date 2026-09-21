@@ -156,7 +156,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
+        {/* Height subtracts the service banner (components/serviceBanner.tsx),
+            which publishes --service-banner-h; 0px when no banner shows. */}
+        <div style={{ display: 'flex', height: 'calc(100dvh - var(--service-banner-h, 0px))', overflow: 'hidden', background: 'var(--bg)' }}>
 
           {/* Sidebar */}
           <aside style={{

@@ -761,7 +761,13 @@ select option:disabled { color: var(--text-faint); }
 .table-wrap { overflow-x: auto; }
 
 /* ── Sidebar / shell ─────────────────────────────────────────────────────── */
-.app-shell { display: flex; height: 100vh; height: 100dvh; overflow: hidden; background: var(--bg); }
+/* --service-banner-h is published by components/serviceBanner.tsx and is 0px
+   whenever no banner is showing, so this is the old 100dvh in the normal case. */
+.app-shell {
+  display: flex; overflow: hidden; background: var(--bg);
+  height: calc(100vh - var(--service-banner-h, 0px));
+  height: calc(100dvh - var(--service-banner-h, 0px));
+}
 
 .sidebar {
   width: var(--sidebar-w); flex-shrink: 0;
