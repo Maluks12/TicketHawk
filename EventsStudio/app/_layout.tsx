@@ -5,6 +5,7 @@ import { View } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { useStudioTheme } from '../components/studio/theme';
+import ServiceBanner from '../components/studio/serviceBanner';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TicketHawk Studio — root layout.
@@ -34,34 +35,40 @@ export default function RootLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: S.bg }}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: S.bg },
-          animation: 'slide_from_right',
-        }}
-      >
-        {/* Auth gate — decides where a launch lands. */}
-        <Stack.Screen name="index" options={{ animation: 'fade' }} />
+      {/* Maintenance / outage banner. WRAPS the navigator rather than sitting
+          on top of it: while it is showing it owns the notch, and hands the
+          screens below safe-area insets with top: 0 so none of them pads the
+          notch a second time. Renders nothing extra when healthy. */}
+      <ServiceBanner>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: S.bg },
+            animation: 'slide_from_right',
+          }}
+        >
+          {/* Auth gate — decides where a launch lands. */}
+          <Stack.Screen name="index" options={{ animation: 'fade' }} />
 
-        <Stack.Screen name="auth/login" options={{ animation: 'fade' }} />
+          <Stack.Screen name="auth/login" options={{ animation: 'fade' }} />
 
-        {/* Account creation. Studio needs its own sign-up so App Review (and
-            any organiser who installs Studio first) can get in without being
-            sent to another app. */}
-        <Stack.Screen name="auth/signup" options={{ animation: 'slide_from_right' }} />
+          {/* Account creation. Studio needs its own sign-up so App Review (and
+              any organiser who installs Studio first) can get in without being
+              sent to another app. */}
+          <Stack.Screen name="auth/signup" options={{ animation: 'slide_from_right' }} />
 
-        {/* Password reset request. Studio is the app people install at a venue
-            an hour before doors — the worst possible moment to discover the
-            only way back into a forgotten account is another app. */}
-        <Stack.Screen name="auth/forgot" options={{ animation: 'slide_from_right' }} />
+          {/* Password reset request. Studio is the app people install at a venue
+              an hour before doors — the worst possible moment to discover the
+              only way back into a forgotten account is another app. */}
+          <Stack.Screen name="auth/forgot" options={{ animation: 'slide_from_right' }} />
 
-        {/* Organiser Studio — dashboard, event drill-down, scanner, staff. */}
-        <Stack.Screen name="organiser" options={{ animation: 'fade' }} />
+          {/* Organiser Studio — dashboard, event drill-down, scanner, staff. */}
+          <Stack.Screen name="organiser" options={{ animation: 'fade' }} />
 
-        {/* Staff home — join-code redemption + "events I can scan". */}
-        <Stack.Screen name="staff/join" options={{ animation: 'fade' }} />
-      </Stack>
+          {/* Staff home — join-code redemption + "events I can scan". */}
+          <Stack.Screen name="staff/join" options={{ animation: 'fade' }} />
+        </Stack>
+      </ServiceBanner>
     </View>
   );
 }

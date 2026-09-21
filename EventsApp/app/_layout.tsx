@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
 import { usePushNotifications } from '../lib/usepush';
+import ServiceBanner from '../components/ServiceBanner';
 
 // ─── Splash control ──────────────────────────────────────────────────────────
 // Called at MODULE scope, not inside the component. By the time a component
@@ -78,67 +79,73 @@ export default function RootLayout() {
     loadUser();
   }, []);
 
+  // Maintenance / outage banner. WRAPS the navigator rather than sitting on
+  // top of it: while it is showing it owns the notch, and hands the screens
+  // below safe-area insets with top: 0 so none of them pads the notch a
+  // second time. Renders nothing extra when healthy.
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
+    <ServiceBanner>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
 
-      <Stack.Screen name="event/[id]" />
+        <Stack.Screen name="event/[id]" />
 
-      {/* Organiser public page. Registered explicitly for the same reason
-          profile/delete-account is: an unlisted route gets expo-router's
-          default presentation rather than the slide-from-right every other
-          pushed screen in this app uses, so it arrives feeling like a
-          different app. */}
-      <Stack.Screen
-        name="organiser/[slug]"
-        options={{ animation: 'slide_from_right' }}
-      />
+        {/* Organiser public page. Registered explicitly for the same reason
+            profile/delete-account is: an unlisted route gets expo-router's
+            default presentation rather than the slide-from-right every other
+            pushed screen in this app uses, so it arrives feeling like a
+            different app. */}
+        <Stack.Screen
+          name="organiser/[slug]"
+          options={{ animation: 'slide_from_right' }}
+        />
 
-      <Stack.Screen
-        name="category/[name]"
-        options={{ animation: 'slide_from_right' }}
-      />
+        <Stack.Screen
+          name="category/[name]"
+          options={{ animation: 'slide_from_right' }}
+        />
 
-      <Stack.Screen
-        name="event/purchase"
-        options={{ animation: 'slide_from_right' }}
-      />
+        <Stack.Screen
+          name="event/purchase"
+          options={{ animation: 'slide_from_right' }}
+        />
 
-      {/* Payment WebView screen — registered so expo-router knows about it */}
-      <Stack.Screen
-        name="payment/[id]"
-        options={{
-          animation: 'slide_from_bottom',
-          // Prevent swipe-to-dismiss mid-payment
-          gestureEnabled: false,
-        }}
-      />
+        {/* Payment WebView screen — registered so expo-router knows about it */}
+        <Stack.Screen
+          name="payment/[id]"
+          options={{
+            animation: 'slide_from_bottom',
+            // Prevent swipe-to-dismiss mid-payment
+            gestureEnabled: false,
+          }}
+        />
 
-      <Stack.Screen
-        name="auth/login"
-        options={{
-          presentation: 'modal',
-          animation: 'slide_from_bottom',
-        }}
-      />
+        <Stack.Screen
+          name="auth/login"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
 
-      <Stack.Screen
-        name="auth/forgot"
-        options={{ animation: 'slide_from_right' }}
-      />
+        <Stack.Screen
+          name="auth/forgot"
+          options={{ animation: 'slide_from_right' }}
+        />
 
-      <Stack.Screen
-        name="booking/[id]"
-        options={{ animation: 'slide_from_right' }}
-      />
+        <Stack.Screen
+          name="booking/[id]"
+          options={{ animation: 'slide_from_right' }}
+        />
 
-      {/* Account deletion (Apple 5.1.1(v)). Registered explicitly so it gets a
-          normal push animation rather than expo-router's default for an
-          unlisted route. */}
-      <Stack.Screen
-        name="profile/delete-account"
-        options={{ animation: 'slide_from_right' }}
-      />
-    </Stack>
+        {/* Account deletion (Apple 5.1.1(v)). Registered explicitly so it gets a
+            normal push animation rather than expo-router's default for an
+            unlisted route. */}
+        <Stack.Screen
+          name="profile/delete-account"
+          options={{ animation: 'slide_from_right' }}
+        />
+      </Stack>
+    </ServiceBanner>
   );
 }

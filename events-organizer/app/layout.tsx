@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { ThemeProvider, THEME_SCRIPT } from '../lib/theme';
+import ServiceBanner from '../components/serviceBanner';
 import { SITE_URL } from './site';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -111,7 +112,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          {/* Maintenance / outage notice, on every route — dashboard, login
+              and landing page alike. Renders nothing when healthy. It
+              publishes its height as --service-banner-h, which the
+              one-viewport-tall dashboard shell subtracts from 100dvh. */}
+          <ServiceBanner />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
