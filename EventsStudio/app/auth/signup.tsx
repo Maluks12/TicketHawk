@@ -43,14 +43,33 @@ import { STUDIO } from '../../components/studio/theme';
 const TERMS_URL   = 'https://ticket-hawk.com/terms';
 const PRIVACY_URL = 'https://ticket-hawk.com/privacy';
 
-// Mirrors the backend's `strong_password` binding. Validated here so the user
+// Mirrors the backend's `strong_password` binding (events-db
+// internal/utils/security.go -> ValidatePassword). Validated here so the user
 // finds out while typing rather than after a round trip.
+//
+// This list was wrong in both directions. It demanded a LOWERCASE letter,
+// which the server never asks for, so a perfectly valid "PASSWORD1!" was
+// rejected by Studio alone. And it never asked for a SPECIAL character, which
+// the server does require — so "Password1" passed this screen and came back
+// from /auth/register as a 400 with nothing a door-staff signup could act on.
+//
+// Special is anything that is not a letter, a digit or whitespace: the server
+// tests unicode.IsPunct || unicode.IsSymbol, and a plain space is neither.
+// Lengths count runes to match Go's len([]rune(pw)) rather than UTF-16 units.
+// The 32 printable ASCII punctuation/symbol characters, listed explicitly
+// rather than as /[^A-Za-z0-9\s]/. That negated form counts an accented LETTER
+// as a special character; the server tests unicode.IsPunct || unicode.IsSymbol,
+// and 'e-acute' is neither — so "Sebastien1" and "Cafe1234" passed the client
+// and came back a 400. Every character below is punct-or-symbol in Go.
+const SPECIAL_CHAR = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
 function passwordProblems(pw: string): string[] {
   const out: string[] = [];
-  if (pw.length < 8) out.push('8+ characters');
+  if ([...pw].length < 8) out.push('8+ characters');
   if (!/[A-Z]/.test(pw)) out.push('an uppercase letter');
-  if (!/[a-z]/.test(pw)) out.push('a lowercase letter');
   if (!/[0-9]/.test(pw)) out.push('a number');
+  if (!SPECIAL_CHAR.test(pw)) out.push('a special character');
+  if ([...pw].length > 128) out.push('128 characters or fewer');
   return out;
 }
 

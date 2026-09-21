@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useMemo, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, clearTokens } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
@@ -59,13 +60,36 @@ function Field({ placeholder, value, onChange, type = 'text', error, autoComplet
   );
 }
 
-/** Mirrors the backend's strong_password validator so users get instant feedback. */
+/**
+ * Mirrors the backend's strong_password validator (events-db
+ * internal/utils/security.go -> ValidatePassword) so users get instant
+ * feedback instead of a round-trip rejection.
+ *
+ * Two things were off here. The special-character test was /[^A-Za-z0-9]/,
+ * which counts a plain space; the server tests unicode.IsPunct ||
+ * unicode.IsSymbol, which does not. "Passwor1 " therefore passed this form and
+ * came back a 400 the user could do nothing with. And the length tests used
+ * pw.length (UTF-16 units) where Go counts runes, so an emoji password was
+ * measured as roughly twice its real length.
+ */
+// The 32 printable ASCII punctuation/symbol characters, listed explicitly
+// rather than as /[^A-Za-z0-9\s]/. That negated form counts an accented LETTER
+// as a special character; the server tests unicode.IsPunct || unicode.IsSymbol,
+// and 'e-acute' is neither — so "Sebastien1" and "Cafe1234" passed the client
+// and came back a 400. Every character below is punct-or-symbol in Go.
+const SPECIAL_CHAR = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
+const PASSWORD_RULES = [
+  { label: 'At least 8 characters',             test: (pw: string) => [...pw].length >= 8 },
+  { label: 'One capital letter (A\u2013Z)',       test: (pw: string) => /[A-Z]/.test(pw) },
+  { label: 'One number (0\u20139)',               test: (pw: string) => /[0-9]/.test(pw) },
+  { label: 'One special character (e.g. !@#$)', test: (pw: string) => SPECIAL_CHAR.test(pw) },
+];
+
 function passwordProblem(pw: string): string | null {
-  if (pw.length < 8) return 'Must be at least 8 characters';
-  if (!/[A-Z]/.test(pw)) return 'Must contain an uppercase letter';
-  if (!/[0-9]/.test(pw)) return 'Must contain a digit';
-  if (!/[^A-Za-z0-9]/.test(pw)) return 'Must contain a special character';
-  if (pw.length > 128) return 'Must be at most 128 characters';
+  if (!pw) return 'Please enter a password';
+  if ([...pw].length > 128) return 'Must be at most 128 characters';
+  if (PASSWORD_RULES.some((r) => !r.test(pw))) return 'Password does not meet all requirements';
   return null;
 }
 
@@ -196,7 +220,7 @@ function ResetPasswordInner() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: colors.text }}>Set your password</h1>
             <p style={{ margin: '0 0 4px', fontSize: 13, color: colors.subText, lineHeight: 1.5 }}>
-              Choose a new password for your TicketHawk account. It needs at least 8 characters, an uppercase letter, a digit, and a special character.
+              Choose a new password for your TicketHawk account.
             </p>
 
             {globalErr && (
@@ -207,6 +231,23 @@ function ResetPasswordInner() {
             )}
 
             <Field placeholder="New password" value={password} onChange={(v) => { setPassword(v); clearErr('password'); }} type="password" error={errors.password} autoComplete="new-password" />
+
+            {/* Live password requirements — the same block the signup form
+                shows. Both screens post to endpoints bound to the same
+                strong_password tag, so the rules a user sees must not depend
+                on which of the two they happen to be on. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 4px', marginTop: -2, marginBottom: 4 }}>
+              {PASSWORD_RULES.map((r) => {
+                const ok = password.length > 0 && r.test(password);
+                return (
+                  <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <CheckCircle2 size={15} color={ok ? '#22c55e' : (isDark ? 'rgba(255,255,255,0.28)' : 'rgba(10,10,10,0.25)')} />
+                    <span style={{ fontSize: 12.5, color: ok ? '#22c55e' : colors.subText }}>{r.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
             <Field placeholder="Confirm new password" value={confirm} onChange={(v) => { setConfirm(v); clearErr('confirm'); }} type="password" error={errors.confirm} autoComplete="new-password" />
 
             <button onClick={handleSet} disabled={loading} style={primaryBtn(loading)}>

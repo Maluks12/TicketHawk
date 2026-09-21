@@ -10,6 +10,7 @@ import {
   validateRequired,
   firstError,
 } from '../../../lib/validation';
+import PasswordChecklist from '../../../components/passwordChecklist';
 import { ThemeToggle } from '../../../lib/theme';
 import { ORGANISER_LEGAL_DOCS, legalLinkProps, CURRENT_LEGAL_VERSION } from '../../../lib/legalLinks';
 
@@ -306,7 +307,7 @@ export default function LoginPage() {
                         value={regPassword}
                         autoComplete="new-password"
                         onChange={e => setRegPassword(e.target.value)}
-                        placeholder="Min 8 chars" />
+                        placeholder="••••••••" />
                       <button type="button" className="eye-btn"
                         onClick={() => setShowRegPass(p => !p)}
                         aria-label={showRegPass ? 'Hide' : 'Show'}>
@@ -330,6 +331,17 @@ export default function LoginPage() {
                     </div>
                   </Field>
                 </div>
+
+                {/* ── Live password requirements ──────────────────────────
+                    The backend enforces strong_password (8+, uppercase,
+                    digit, special) but this form only ever checked length,
+                    so a weak password sailed past the client and came back
+                    as an opaque 400. Showing the rules up front — and
+                    ticking them as they're met — means the organiser knows
+                    what's wanted before they submit, not after. Same
+                    behaviour as the consumer web-mobile signup. */}
+                <PasswordChecklist password={regPassword} />
+
                 {/* ── Legal acceptance ────────────────────────────────────
                     One checkbox covering all four documents, each individually
                     linked. Grouping them is what keeps the form usable; linking
