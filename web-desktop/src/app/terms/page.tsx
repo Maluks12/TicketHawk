@@ -68,7 +68,7 @@ const sections: Section[] = [
       {
         kind: 'p',
         text:
-          '**Service fee.** We charge a service fee of R10 per ticket, capped at 20% of the ticket’s face value. This fee is shown to you at checkout before payment.',
+          '**Service fee.** We charge a service fee of up to R10 per ticket, capped at 20% of the ticket’s face value. The exact fee is shown to you at checkout before payment.',
       },
       {
         kind: 'p',

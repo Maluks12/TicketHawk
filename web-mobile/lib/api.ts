@@ -331,6 +331,9 @@ export interface Category {
 export interface CartSummary {
   total_items: number;
   total_amount: number;
+  // Buyer service fee checkout adds on top of total_amount, priced by the
+  // server with each organiser's own terms. Absent on an older API.
+  service_fee?: number;
   currency: string;
   items_by_event: CartEventGroup[];
 }
@@ -583,6 +586,38 @@ export async function loadMoreSectionEvents(
 export const getTicketTypes = async (eventId: string): Promise<TicketType[]> => {
   const res = await api.get<{ ticket_types: TicketType[]; count: number }>(`/v1/events/${eventId}/ticket-types`);
   return res.data.ticket_types ?? [];
+};
+
+// ── Buyer service fee ──────────────────────────────────────────────────────────
+// The service fee is set per ORGANISER (R10 per ticket as standard, lower for
+// organisers on custom terms), so it comes from the API rather than a constant.
+// Mirrors PublicServiceFeeTerms in events-db repository/organizer_fees_repository.go.
+export interface ServiceFeeTerms {
+  per_ticket: number; // ZAR per ticket, before the cap
+  max_rate: number;   // cap as a fraction of the ticket's face value
+}
+
+// Only used if the API response predates per-organiser fees.
+export const DEFAULT_SERVICE_FEE: ServiceFeeTerms = { per_ticket: 10, max_rate: 0.2 };
+
+// Same arithmetic as CalculateFees in events-db: per-ticket fee capped at
+// max_rate of the ticket price, times quantity, rounded to cents.
+export const serviceFeeFor = (unitPrice: number, quantity: number, terms: ServiceFeeTerms): number => {
+  if (unitPrice <= 0 || quantity <= 0) return 0;
+  return Math.round(Math.min(terms.per_ticket, terms.max_rate * unitPrice) * quantity * 100) / 100;
+};
+
+// Ticket types plus the service fee for this event's organiser, in one request.
+export const getTicketTypesWithFees = async (
+  eventId: string,
+): Promise<{ ticketTypes: TicketType[]; serviceFee: ServiceFeeTerms }> => {
+  const res = await api.get<{ ticket_types: TicketType[]; count: number; service_fee?: ServiceFeeTerms }>(
+    `/v1/events/${eventId}/ticket-types`,
+  );
+  return {
+    ticketTypes: res.data.ticket_types ?? [],
+    serviceFee: res.data.service_fee ?? DEFAULT_SERVICE_FEE,
+  };
 };
 
 // ── Bookings ───────────────────────────────────────────────────────────────────

@@ -125,12 +125,20 @@ func createBookingTx(
 		ticketTypeName = &ttName
 	}
 
+	// Fee terms are the organiser's negotiated rates, or the platform default
+	// when they have none (see migration 000093). Read inside the transaction
+	// so the booking is priced on the terms in force at the moment it is made.
+	terms, err := GetFeeTermsForEvent(ctx, tx, eventID)
+	if err != nil {
+		return nil, err
+	}
+
 	subtotal := unitPrice * float64(quantity)
-	serviceFee, commission := CalculateFees(subtotal, quantity)
-	platformFee := serviceFee  // buyer-paid service fee (R10 × qty)
-	organizerFee := commission // organizer-paid commission (6% × subtotal)
+	serviceFee, commission := CalculateFees(subtotal, quantity, terms)
+	platformFee := serviceFee  // buyer-paid service fee (per ticket × qty, capped)
+	organizerFee := commission // organizer-paid commission (rate × subtotal)
 	discountAmount := 0.0
-	// Buyer is charged the ticket price plus the service fee only. The 6%
+	// Buyer is charged the ticket price plus the service fee only. The
 	// commission is NOT added here — it comes out of the organizer's payout.
 	totalAmount := subtotal + platformFee - discountAmount
 
@@ -247,26 +255,47 @@ func CreateGuestBooking(pool *pgxpool.Pool, dto *models.CreateGuestBookingDTO, e
 //
 // Per ticket the platform takes two distinct fees with two distinct bearers:
 //
-//   • Service fee — R10.00 PER TICKET, paid by the BUYER, added on top of the
-//     ticket price (so it lands in total_amount). To avoid gouging cheap
-//     tickets, the per-ticket fee is CAPPED at MaxServiceFeeRate of the ticket's
-//     face value. The cap only ever bites below R50 (20% × R50 = R10), so any
-//     ticket R50+ pays the full flat R10. Stored in the `platform_fee` column.
+//   • Service fee — R10.00 PER TICKET by default, paid by the BUYER, added on
+//     top of the ticket price (so it lands in total_amount). To avoid gouging
+//     cheap tickets, the per-ticket fee is CAPPED at MaxServiceFeeRate of the
+//     ticket's face value. At the default the cap only bites below R50
+//     (20% × R50 = R10), so any ticket R50+ pays the full flat R10. Stored in
+//     the `platform_fee` column.
 //
 //        R200 → R10 (5%)    R50 → R10 (20%)    R30 → R6 (20%)    R10 → R2 (20%)
 //
-//   • Commission — 6% of the ticket subtotal, borne by the ORGANIZER. A
-//     percentage already scales with price, so it needs no cap. It is NOT added
-//     to total_amount (the buyer never pays it); instead it is deducted from the
-//     organizer's payout. Stored in the `organizer_fee` column.
+//   • Commission — 5% of the ticket subtotal by default, borne by the
+//     ORGANIZER. A percentage already scales with price, so it needs no cap. It
+//     is NOT added to total_amount (the buyer never pays it); instead it is
+//     deducted from the organizer's payout. Stored in the `organizer_fee`
+//     column.
+//
+// Both defaults can be overridden PER ORGANISER by a master admin
+// (organizers.custom_service_fee / custom_commission_pct, migration 000093).
+// The 20% cap is NOT overridable — it protects buyers of cheap tickets
+// whatever arrangement the organiser has.
 //
 // So:  buyer pays      = subtotal + service_fee
 //      organizer nets  = subtotal − commission
 //      platform earns  = service_fee + commission
 const (
-	ServiceFeePerTicket     = 10.00 // ZAR, buyer-paid, charged once per ticket (before the cap)
+	ServiceFeePerTicket     = 10.00 // ZAR, buyer-paid default, charged once per ticket (before the cap)
 	MaxServiceFeeRate       = 0.20  // service fee never exceeds this share of a ticket's face value
-	OrganizerCommissionRate = 0.06  // organizer-paid, fraction of the ticket subtotal
+	OrganizerCommissionRate = 0.05  // organizer-paid default, fraction of the ticket subtotal
+
+	// Limits on a per-organiser override. Mirrored by CHECK constraints in
+	// migration 000093 — change both together.
+	//
+	// The commission floor exists because the platform bears Paystack's
+	// processing fee (bearer "account" in the split), roughly 3.4% incl. VAT
+	// plus a flat fee per transaction. 4% keeps a margin above it.
+	//
+	// The service fee can be lowered for an organiser but never raised above
+	// the R10 default.
+	MinOrganizerCommissionPct = 4.00  // percent
+	MaxOrganizerCommissionPct = 10.00 // percent
+	MinServiceFeePerTicket    = 0.00  // ZAR
+	MaxServiceFeePerTicket    = 10.00 // ZAR
 )
 
 // round2 rounds a money amount to whole cents (2 decimal places).
@@ -276,18 +305,19 @@ func round2(v float64) float64 {
 
 // CalculateFees returns the buyer-paid service fee and the organizer-paid
 // commission for a single booking line of `quantity` tickets totalling
-// `subtotal`. The per-ticket service fee is the flat ServiceFeePerTicket, but
-// never more than MaxServiceFeeRate of the ticket's face value — so a R50 ticket
+// `subtotal`, priced on `terms` (see GetFeeTermsForEvent). The per-ticket
+// service fee is terms.ServiceFeePerTicket, but never more than
+// MaxServiceFeeRate of the ticket's face value — so at the default a R50 ticket
 // pays the full R10 while a R20 ticket pays R4 (20%) instead. Free lines
 // (subtotal == 0) incur neither fee.
-func CalculateFees(subtotal float64, quantity int) (serviceFee, commission float64) {
+func CalculateFees(subtotal float64, quantity int, terms FeeTerms) (serviceFee, commission float64) {
 	if subtotal <= 0 || quantity <= 0 {
 		return 0, 0
 	}
 	unitPrice := subtotal / float64(quantity)
-	perTicket := math.Min(ServiceFeePerTicket, MaxServiceFeeRate*unitPrice)
+	perTicket := math.Min(terms.ServiceFeePerTicket, MaxServiceFeeRate*unitPrice)
 	serviceFee = round2(perTicket * float64(quantity))
-	commission = round2(OrganizerCommissionRate * subtotal)
+	commission = round2(terms.CommissionRate * subtotal)
 	return serviceFee, commission
 }
 

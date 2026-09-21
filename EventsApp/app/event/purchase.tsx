@@ -23,8 +23,11 @@ import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
 import {
   api,
-  getTicketTypes,
+  getTicketTypesWithFees,
+  serviceFeeFor,
+  DEFAULT_SERVICE_FEE,
   createBooking,
+  type ServiceFeeTerms,
   type TicketType,
 } from '../../lib/api';
 import { startBookingPayment } from '../../lib/payments';
@@ -156,6 +159,7 @@ export default function TicketPurchaseScreen() {
   const { user } = useAuthStore();
 
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
+  const [serviceFeeTerms, setServiceFeeTerms] = useState<ServiceFeeTerms>(DEFAULT_SERVICE_FEE);
   const [loading, setLoading]         = useState(true);
   const [selectedId, setSelectedId]   = useState<string | null>(null);
   const [quantity, setQuantity]       = useState(1);
@@ -240,8 +244,9 @@ export default function TicketPurchaseScreen() {
   useEffect(() => {
     if (!event?.id) return;
     setLoading(true);
-    getTicketTypes(event.id)
-      .then((types) => {
+    getTicketTypesWithFees(event.id)
+      .then(({ ticketTypes: types, serviceFee }) => {
+        setServiceFeeTerms(serviceFee);
         if (types.length === 0 && event?.price != null) {
           // Flat-price event with no ticket types — show a GA fallback
           const fallback: TicketType = {
@@ -307,14 +312,12 @@ export default function TicketPurchaseScreen() {
     }
   }, [selectedType, quantity, event]);
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  // Mirror the backend fee model (CalculateFees in events-db): a R10 service fee
-  // per ticket, capped at 20% of the ticket's face value. This must match the
-  // server, because the real charge is the booking's total_amount from the API.
-  const SERVICE_FEE_PER_TICKET = 10;
-  const MAX_SERVICE_FEE_RATE   = 0.20;
+  // Service fee for THIS organiser (R10 per ticket as standard, lower on
+  // custom terms), capped at 20% of face value — the exact rule the backend
+  // charges with, fed by the terms returned alongside the ticket types. The
+  // real charge is still the booking's total_amount from the API.
   const unitPrice    = selectedType?.price ?? 0;
-  const perTicketFee = unitPrice > 0 ? Math.min(SERVICE_FEE_PER_TICKET, MAX_SERVICE_FEE_RATE * unitPrice) : 0;
-  const platformFee  = Math.round(perTicketFee * quantity * 100) / 100;
+  const platformFee  = serviceFeeFor(unitPrice, quantity, serviceFeeTerms);
   const grandTotal   = totalAmount + platformFee;
   // Seating maps are disabled for launch (like the merch tab). All events go
   // straight from ticket selection to the order summary. Flip this to true to

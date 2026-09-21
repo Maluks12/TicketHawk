@@ -164,7 +164,7 @@ export default function DashboardPage() {
         <Stat
           label="Commission" accent="var(--success)"
           value={fmtMoney(gmv?.commission ?? 0)}
-          sub="6% of ticket face value"
+          sub="Organiser-paid, 5% standard"
         />
         <Stat
           label="Merch revenue" accent="var(--text-3)"
