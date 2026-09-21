@@ -361,6 +361,18 @@ func main() {
 	})
 
 	// ==========================================
+	// Service Status (feeds the maintenance / outage banner in every client)
+	// ==========================================
+	// Addressed under /v1 because that is the base URL the dashboards already
+	// hold (NEXT_PUBLIC_API_URL ends in /v1), but registered HERE, next to
+	// /health, rather than on the v1 group below: the two are the same kind of
+	// thing read by different audiences — /health for infrastructure, this for
+	// people. Unauthenticated on purpose; a banner has to work for a signed-out
+	// visitor on the homepage. See internal/handlers/status_handler.go for how
+	// an operator declares a maintenance window.
+	router.GET("/v1/status", handlers.ServiceStatusHandler(pool, rdb))
+
+	// ==========================================
 	// Webhook Routes (intentionally not versioned — Paystack and PayPal call these)
 	// ==========================================
 	webhooks := router.Group("/webhooks")
