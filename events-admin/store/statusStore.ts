@@ -90,6 +90,8 @@ const PROBE_TIMEOUT_MS = 8_000;
  * would put a red bar on the page. Two in a row is.
  */
 const FAILURES_BEFORE_DOWN = 2;
+/** After a first failure, ask again this soon instead of waiting for the next poll. */
+const CONFIRM_MS = 3_000;
 /** How long "Back online" stays up before the banner removes itself. */
 const RECOVERED_MS = 4_000;
 
@@ -106,6 +108,16 @@ function statusUrl(): string {
 
 let consecutiveFailures = 0;
 let recoveredTimer: ReturnType<typeof setTimeout> | null = null;
+let confirmTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** One confirming probe, however many requests failed in the meantime. */
+function confirmSoon() {
+  if (confirmTimer) return;
+  confirmTimer = setTimeout(() => {
+    confirmTimer = null;
+    void probeNow();
+  }, CONFIRM_MS);
+}
 
 function isBad(s: ServiceState): boolean {
   return s === 'down' || s === 'offline' || s === 'degraded';
@@ -155,7 +167,14 @@ function noteFailure() {
   }
 
   consecutiveFailures += 1;
-  if (consecutiveFailures < FAILURES_BEFORE_DOWN) return;
+  if (consecutiveFailures < FAILURES_BEFORE_DOWN) {
+    // One failure is a rumour, not an outage — but it has to be confirmed in
+    // seconds. Left to the regular schedule, the confirming probe could be a
+    // whole healthy-poll interval away, and a screen that makes a single API
+    // call would sit on a failed request for up to a minute with no banner.
+    confirmSoon();
+    return;
+  }
 
   // Never overwrite a declared maintenance window with a generic failure — a
   // deploy that takes the API down mid-window is the window, not a new fault.

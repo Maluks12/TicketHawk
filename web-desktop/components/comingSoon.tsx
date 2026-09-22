@@ -3,14 +3,72 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAppTheme } from '@/themes/colors';
+import { useStatusStore, type ServiceState } from '@/store/statusStore';
 
 // ── ComingSoon ────────────────────────────────────────────────────────────────
-// Cover shown on the home feed when the API returns zero events. Purely
-// presentational: page.tsx mounts it when nothing loaded and unmounts it the
-// moment the first event comes back, so nothing here needs to know about the feed.
+// Cover shown on the home feed when nothing loaded. Purely presentational:
+// page.tsx mounts it when nothing loaded and unmounts it the moment the first
+// event comes back, so nothing here needs to know about the feed.
+//
+// "Nothing loaded" has two very different causes, and page.tsx cannot tell
+// them apart — a failed /v1/home leaves the feed empty exactly like a
+// successful one with zero events. The first cause is a launch message. The
+// second must never be one: telling buyers "nothing is on sale just yet" while
+// events ARE on sale and the API is simply unreachable is the worst possible
+// outage copy. So the wording comes from the service status store — the same
+// one the banner at the top of the page reads — and the two always agree.
+//
+// Recovery needs nothing extra: page.tsx already re-fetches every 45s while
+// this cover is up, and the first successful fetch both fills the feed and
+// clears the banner.
+
+type Copy = { headline: string; accent: string; body: string; live: string; dot: string };
+
+function copyFor(state: ServiceState, message: string): Copy {
+  switch (state) {
+    case 'maintenance':
+      return {
+        headline: 'Down for maintenance',
+        accent: '.',
+        body: message || "We're upgrading TicketHawk. Events will be back shortly — this page loads them on its own when we're done.",
+        live: 'Retrying automatically',
+        dot: '#FFB020',
+      };
+    case 'offline':
+      return {
+        headline: "You're offline",
+        accent: '.',
+        body: "Events can't load without a connection. Reconnect and this page fills in on its own.",
+        live: 'Waiting for a connection',
+        dot: '#8E8E93',
+      };
+    case 'down':
+    case 'degraded':
+      return {
+        headline: "Can't load events right now",
+        accent: '.',
+        body: "TicketHawk isn't responding at the moment. This page will load events on its own as soon as it's back.",
+        live: 'Retrying automatically',
+        dot: '#FF453A',
+      };
+    default:
+      return {
+        headline: 'Events coming soon',
+        accent: '!',
+        body: 'Nothing is on sale just yet. The first events land here as soon as organisers open their doors — this page updates on its own the moment they do.',
+        live: 'Watching for new events',
+        dot: '#FF2D55',
+      };
+  }
+}
+
 export default function ComingSoon({ onRefresh }: { onRefresh?: () => Promise<void> | void }) {
   const { colors, isDark } = useAppTheme();
   const [refreshing, setRefreshing] = useState(false);
+
+  const state   = useStatusStore((s) => s.state);
+  const message = useStatusStore((s) => s.message);
+  const copy    = copyFor(state, message);
 
   const border = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
 
@@ -37,19 +95,18 @@ export default function ComingSoon({ onRefresh }: { onRefresh?: () => Promise<vo
         className="mt-7 font-black uppercase"
         style={{ color: colors.text, fontSize: 'clamp(30px, 5.4vw, 54px)', lineHeight: 1.02, letterSpacing: '-1.2px' }}
       >
-        Events coming soon<span style={{ color: '#FF2D55' }}>!</span>
+        {copy.headline}<span style={{ color: copy.dot }}>{copy.accent}</span>
       </h1>
 
       <p className="mt-5 text-[14px] leading-[23px] max-w-[42ch]" style={{ color: colors.subText }}>
-        Nothing is on sale just yet. The first events land here as soon as organisers open their doors —
-        this page updates on its own the moment they do.
+        {copy.body}
       </p>
 
       {/* Live status */}
       <div className="mt-8 flex items-center gap-2.5">
-        <span className="th-cs-dot w-[7px] h-[7px] rounded-full shrink-0" style={{ backgroundColor: '#FF2D55' }} />
+        <span className="th-cs-dot w-[7px] h-[7px] rounded-full shrink-0" style={{ backgroundColor: copy.dot }} />
         <span className="text-[10.5px] font-extrabold tracking-[1.6px] uppercase" style={{ color: colors.subText }}>
-          Watching for new events
+          {copy.live}
         </span>
       </div>
 
