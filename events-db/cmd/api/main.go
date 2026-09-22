@@ -1550,6 +1550,19 @@ func main() {
 		admin.POST("/payouts/:id/retry",
 			middleware.RequireCapabilityOn(pool, models.CapActDangerous),
 			handlers.AdminRetryPayoutHandler(pool, payoutService))
+
+		// ── Per-organiser fee arrangements — MASTER ADMIN ONLY ────────────
+		//
+		// Commission and service fee overrides (migration 000093). Changing
+		// them changes where ticket money goes, so they are gated on
+		// is_master_admin, not on a console capability. Every change is
+		// audited in the same transaction as the update.
+		fees := admin.Group("/fees")
+		fees.Use(handlers.RequireMasterAdminForFees(pool))
+		{
+			fees.GET("/organizers", handlers.AdminListOrganizerFeesHandler(pool))
+			fees.PUT("/organizers/:id", handlers.AdminSetOrganizerFeesHandler(pool))
+		}
 	}
 
 	// ==========================================

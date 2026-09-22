@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef, use } from 'react';
 import { enabledPaymentMethods, defaultPaymentMethod, type PaymentMethodId } from '@/lib/paymentMethods';
 import { BadgeCheck, ShieldCheck, CreditCard, Landmark, Check, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { api, getTicketTypes, type TicketType, type Event } from '@/lib/api';
+import { api, getTicketTypesWithFees, serviceFeeFor, DEFAULT_SERVICE_FEE, type ServiceFeeTerms, type TicketType, type Event } from '@/lib/api';
 import { startBookingPayment, startGuestPayment, preopenGatewayPopup, discardPendingPopup, shouldRedirectInsteadOfPopup, type PaymentMethod } from '@/lib/payments';
 import { useAuthStore } from '@/store/authStore';
 import { useAppTheme } from '@/themes/colors';
@@ -81,6 +81,7 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
 
   const [event,          setEvent]          = useState<Event | null>(null);
   const [ticketTypes,    setTicketTypes]    = useState<TicketType[]>([]);
+  const [serviceFeeTerms, setServiceFeeTerms] = useState<ServiceFeeTerms>(DEFAULT_SERVICE_FEE);
   const [loading,        setLoading]        = useState(true);
   const [selectedId,     setSelectedId]     = useState<string | null>(null);
   const [quantity,       setQuantity]       = useState(1);
@@ -149,7 +150,8 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
         const ev: Event = evRes.data ?? evRes;
         setEvent(ev);
 
-        const types = await getTicketTypes(eventId);
+        const { ticketTypes: types, serviceFee } = await getTicketTypesWithFees(eventId);
+        setServiceFeeTerms(serviceFee);
         if (types.length === 0 && ev?.price != null) {
           const fallback: TicketType = {
             id: 'ga-fallback', event_id: eventId, name: 'GENERAL ADMISSION',
@@ -175,12 +177,10 @@ export default function EventPurchasePage({ params }: { params: Promise<{ id: st
 
   const selectedType = ticketTypes.find((t) => t.id === selectedId) ?? null;
   const totalAmount  = selectedType ? selectedType.price * quantity : 0;
-  // Service fee mirrors the backend: R10 per ticket capped at 20% of face
-  // value, rounded to cents. The old flat 5% estimate showed a total that
-  // didn't match what Paystack actually charged.
-  const platformFee  = totalAmount > 0
-    ? Math.round(Math.min(10, 0.2 * (selectedType?.price ?? 0)) * quantity * 100) / 100
-    : 0;
+  // Service fee for THIS organiser (R10 per ticket as standard, lower on
+  // custom terms), capped at 20% of face value — the exact rule the backend
+  // charges with, fed by the terms returned alongside the ticket types.
+  const platformFee  = serviceFeeFor(selectedType?.price ?? 0, quantity, serviceFeeTerms);
   const grandTotal   = totalAmount + platformFee;
   // Seating maps are disabled for launch (like the merch tab). All events go
   // straight from ticket selection to the order summary. Flip this to true to

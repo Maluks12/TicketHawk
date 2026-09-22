@@ -299,7 +299,7 @@ export default function AdminAnalyticsPage() {
           money
           rows={[
             ['Booking fees', gmv?.booking_fees ?? 0],
-            ['Commission (6%)', gmv?.commission ?? 0],
+            ['Commission', gmv?.commission ?? 0],
           ]}
         />
       </div>
@@ -437,7 +437,7 @@ function Breakdown({ title, sub, rows, money = false }: {
 function Definitions() {
   const items: [string, string][] = [
     ['GMV', 'Gross merchandise value — the total value transacted. Almost all of it belongs to organisers, not to us.'],
-    ['Our revenue', 'What TicketHawk keeps: the buyer-paid booking fee plus the 6% organiser commission. This is the business\u2019s actual income.'],
+    ['Our revenue', 'What TicketHawk keeps: the buyer-paid booking fee plus the organiser commission (5% standard, lower for organisers on custom terms). This is the business\u2019s actual income.'],
     ['Take rate', 'Our revenue divided by ticket GMV. The single number that says whether the model works.'],
     ['Organiser PSR', 'Post-split revenue — what organisers keep after our commission.'],
     ['Free vs paid tickets', 'Decided per booking by its unit price, not by the event\u2019s headline price. An event with a free tier and a VIP tier counts in both.'],

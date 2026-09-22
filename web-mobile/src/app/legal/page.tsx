@@ -49,7 +49,7 @@ const sections: Section[] = [
       {
         kind: 'p',
         text:
-          '**Commission.** We deduct a commission of 6% from your payout, calculated on gross ticket sales. This is separate from the service fee paid by the buyer.',
+          '**Commission.** We deduct a commission of 5% from your payout, calculated on gross ticket sales, unless a different rate has been agreed with you in writing. This is separate from the service fee paid by the buyer.',
       },
       {
         kind: 'p',

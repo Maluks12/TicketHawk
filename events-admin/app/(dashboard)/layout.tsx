@@ -19,7 +19,7 @@ import { useStaff, ROLE_LABEL, Capability } from '../../lib/permissions';
 // which still gates itself, which still calls an endpoint the server gates.
 // Three layers, and only the last one is the control.
 const NAV: Array<
-  | { type: 'item'; icon: React.ReactNode; label: string; href: string; badge?: boolean | string; exact?: boolean; need?: Capability }
+  | { type: 'item'; icon: React.ReactNode; label: string; href: string; badge?: boolean | string; exact?: boolean; need?: Capability; masterOnly?: boolean }
   | { type: 'divider' }
 > = [
   {
@@ -58,6 +58,13 @@ const NAV: Array<
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-14a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 5.234 6 6.09 6 7c0 .91.602 1.766 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V14a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 12.766 14 11.91 14 11c0-.91-.602-1.766-1.324-2.246A4.535 4.535 0 0011 8.092V6.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V4z" clipRule="evenodd"/></svg>,
   },
   {
+    // Master admin only — not a capability, the same axis as identity
+    // documents. Changing what an organiser pays moves money, so no staff
+    // role reaches it. The server re-checks is_master_admin on every call.
+    type: 'item', href: '/fees', masterOnly: true, label: 'Organiser Fees',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M17.707 9.293l-7-7A1 1 0 0010 2H4a2 2 0 00-2 2v6a1 1 0 00.293.707l7 7a1 1 0 001.414 0l7-7a1 1 0 000-1.414zM6.5 8a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" clipRule="evenodd"/></svg>,
+  },
+  {
     type: 'item', href: '/event-info', need: 'event.view' as Capability, label: 'Event Info Fields',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd"/></svg>,
   },
@@ -89,6 +96,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const loadCaps    = useStaff((s) => s.load);
   const staffRole   = useStaff((s) => s.role);
   const legacyAdmin = useStaff((s) => s.legacyAdmin);
+  const isMaster    = useStaff((s) => s.isMasterAdmin);
 
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => { if (!isLoading && !user) router.replace('/login'); }, [user, isLoading, router]);
@@ -137,9 +145,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Until capabilities have loaded, show nothing gated rather than everything.
   // The other order flashes the full sidebar to a read_only user for as long as
   // the request takes, which is exactly the set of links they may not use.
-  const permitted = NAV.filter(
-    (item) => item.type === 'divider' || !item.need || (capsLoaded && can(item.need)),
-  );
+  const permitted = NAV.filter((item) => {
+    if (item.type === 'divider') return true;
+    if (item.masterOnly) return capsLoaded && isMaster;
+    return !item.need || (capsLoaded && can(item.need));
+  });
   // Dropping items can strand a divider at either end or leave two adjacent,
   // which reads as a rendering fault rather than a permission boundary.
   const visibleNav = permitted.filter((item, i, arr) => {

@@ -41,7 +41,11 @@ func GetTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		if !ok {
 			// Same shape as a genuinely empty result, so probing ids cannot
 			// distinguish a missing event from one that has no tiers.
-			c.JSON(http.StatusOK, gin.H{"ticket_types": []*models.TicketType{}, "count": 0})
+			c.JSON(http.StatusOK, gin.H{
+				"ticket_types": []*models.TicketType{},
+				"count":        0,
+				"service_fee":  repository.PublicServiceFeeFor(repository.DefaultFeeTerms()),
+			})
 			return
 		}
 
@@ -59,9 +63,23 @@ func GetTicketTypesHandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			}
 		}
 
+		// The buyer service fee for THIS event's organiser, so the purchase
+		// page shows exactly what CalculateFees will charge instead of a
+		// hard-coded R10. Returned here rather than on the event payload
+		// because this endpoint is uncached — an admin change to an
+		// organiser's fee shows up on the next page load, not after a cache
+		// TTL. The commission is never included: it is the organiser's
+		// commercial term, not the buyer's.
+		terms, err := repository.GetFeeTermsForEvent(c.Request.Context(), pool, eventID)
+		if err != nil {
+			utils.InternalError(c, err, "failed to resolve service fee")
+			return
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"ticket_types": public,
 			"count":        len(public),
+			"service_fee":  repository.PublicServiceFeeFor(terms),
 		})
 	}
 }

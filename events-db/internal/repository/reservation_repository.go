@@ -384,10 +384,17 @@ func ConvertReservationsToBookings(
 			unitPrice = cartPrices[cartKey{r.eventID, ""}]
 		}
 
+		// Each reservation can belong to a different organiser, so the fee
+		// terms are resolved per line rather than once per cart.
+		terms, err := GetFeeTermsForEvent(ctx, tx, r.eventID)
+		if err != nil {
+			return nil, err
+		}
+
 		subtotal := unitPrice * float64(r.qty)
-		serviceFee, commission := CalculateFees(subtotal, r.qty)
-		platformFee := serviceFee  // buyer-paid service fee (R10 × qty)
-		organizerFee := commission // organizer-paid commission (6% × subtotal)
+		serviceFee, commission := CalculateFees(subtotal, r.qty, terms)
+		platformFee := serviceFee  // buyer-paid service fee (per ticket × qty, capped)
+		organizerFee := commission // organizer-paid commission (rate × subtotal)
 		// Buyer pays ticket price + service fee; commission is deducted from the
 		// organizer's payout, so it is not part of total_amount.
 		totalAmount := subtotal + platformFee

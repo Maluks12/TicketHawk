@@ -355,7 +355,8 @@ export default function FullKycPage() {
 
         <p style={{ fontSize: 13, color: 'var(--text-2)', margin: '0 0 12px', lineHeight: 1.5 }}>
           Where we send your ticket money. Settlement runs 48 hours after each
-          event completes, minus the 6% organiser commission. The account must
+          event completes, minus the organiser commission (5% unless you have
+          agreed a different rate with us). The account must
           be in your own name — we check it against your verified ID.
         </p>
 
