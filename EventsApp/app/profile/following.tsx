@@ -59,7 +59,7 @@ function EventCard({ item, index, onPress, onUnfollow, unfollowing }: CardProps)
         {item.cover_image_url ? (
           <Image
             source={{ uri: item.cover_image_url }}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             contentFit="cover"
             transition={180}
           />
@@ -67,13 +67,13 @@ function EventCard({ item, index, onPress, onUnfollow, unfollowing }: CardProps)
           <LinearGradient
             colors={[pal.top, pal.bottom]}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
         )}
         <LinearGradient
           colors={['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.62)', 'rgba(0,0,0,0.92)']}
           start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
 
         {/* Pill + unfollow heart */}
@@ -191,7 +191,7 @@ function OrganiserRow({ item, onPress, onUnfollow, unfollowing, colors }: {
         {item.logo_url ? (
           <Image
             source={{ uri: item.logo_url }}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             contentFit="cover"
             cachePolicy="memory-disk"
             recyclingKey={item.id}

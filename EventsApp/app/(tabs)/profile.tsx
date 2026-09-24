@@ -18,7 +18,7 @@ import { s, sheet } from '../../styles/profile';
 import { useThemeStore, ThemeMode } from '../../store/themeStore';
 import { useAppTheme } from '../../theme/colors';
 
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 
 // ─── Row ──────────────────────────────────────────────────────────────────────
 

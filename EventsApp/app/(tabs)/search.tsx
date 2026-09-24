@@ -69,11 +69,11 @@ const SuggestedRow = React.memo(({ item, onPress, colors, priority }: {
         {item.cover_image_url
           ? <CoverImage
               uri={item.cover_image_url}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               recyclingKey={item.id}
               priority={priority ?? 'normal'}
             />
-          : <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+          : <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
               <Ionicons name="ticket-outline" size={22} color={colors.iconColor} />
             </View>
         }
@@ -118,10 +118,10 @@ const OrganiserRow = React.memo(({ item, onPress, colors }: {
         {item.logo_url
           ? <CoverImage
               uri={item.logo_url}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               recyclingKey={item.id}
             />
-          : <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+          : <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
               <Ionicons name="business-outline" size={22} color={colors.iconColor} />
             </View>
         }

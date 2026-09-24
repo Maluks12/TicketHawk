@@ -149,7 +149,7 @@ export const sheet = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cardScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   } as any,
   cardTopRow: {
     flexDirection: 'row',

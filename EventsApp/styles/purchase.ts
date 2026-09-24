@@ -100,7 +100,7 @@ export const makePurchaseSheet = (dark: boolean) => {
   bannerPlaceholder:    { width: '100%', height: '100%', backgroundColor: '#1f1f2e', alignItems: 'center', justifyContent: 'center' },
   bannerPlaceholderIcon: { fontSize: 48 },
   bannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
   bannerMeta:   { position: 'absolute', bottom: 14, left: 16, right: 16 },

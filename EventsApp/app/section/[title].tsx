@@ -95,14 +95,14 @@ function SectionEventCard({ item, onPress }: { item: Event; onPress: () => void 
     <TouchableOpacity onPress={onPress} style={styles.card} activeOpacity={0.88}>
       <View style={styles.cardImageWrap}>
         {item.cover_image_url ? (
-          <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} />
+          <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFill} />
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#2a2a2a' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#2a2a2a' }]} />
         )}
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.86)']}
           locations={[0.3, 0.62, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <View style={styles.priceBadge}>
           <Text style={styles.priceBadgeText}>{formatPrice(item.price)}</Text>

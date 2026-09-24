@@ -53,6 +53,9 @@ const TICK_MS = 30_000;
 
 export default function StudioEventDetail() {
   const insets = useSafeAreaInsets();
+  // Measured, not guessed: the footer grew a second button and outgrew the old
+  // fixed 110px, which left the last card (Capacity) stuck behind it.
+  const [footerH, setFooterH] = useState(0);
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { S } = useStudioTheme();
@@ -184,7 +187,7 @@ export default function StudioEventDetail() {
         <>
           <ScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={{ padding: 16, paddingBottom: 110 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: footerH + 16 }}
             showsVerticalScrollIndicator={false}
           >
             {/* Title block. The date used to stand alone here, which is how a
@@ -383,7 +386,10 @@ export default function StudioEventDetail() {
               clock is not the authority, the server is, and blocking here would
               turn a wrong device time into a locked gate. The Schedule card
               above says what to expect; the scanner reports the server's word. */}
-          <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
+          <View
+            style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}
+            onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
+          >
             <TouchableOpacity
               style={[styles.scanBtn, styles.scanBtnSecondary]}
               activeOpacity={0.85}

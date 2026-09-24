@@ -753,7 +753,7 @@ export default function BookingDetailScreen() {
           {booking.event?.cover_image_url
             ? <ExpoImage
                 source={{ uri: booking.event.cover_image_url }}
-                style={StyleSheet.absoluteFillObject}
+                style={StyleSheet.absoluteFill}
                 contentFit="cover"
                 // memory-disk: reuse whatever the event and purchase screens
                 // already pulled down, and keep it across restarts.
@@ -784,7 +784,7 @@ export default function BookingDetailScreen() {
               'rgba(0,0,0,0.78)',
             ]}
             locations={[0, 0.30, 0.66, 1]}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
           <View className={s.heroContent} style={{ paddingTop: insets.top + 56 }}>
             <View className={s.statusBadge} style={{ borderColor: `${statusCol}44`, backgroundColor: `${statusCol}18` }}>

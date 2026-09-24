@@ -662,7 +662,7 @@ const styles = StyleSheet.create({
   ctaBtnDisabled:   { opacity: 0.5 },
   ctaBtnText:       { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 0.2 },
 
-  modalBackdrop:    { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalBackdrop:    { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.5)' },
   modalSheet:       { position: 'absolute', bottom: 0, left: 0, right: 0, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingBottom: 40, paddingHorizontal: 20 },
   modalHandle:      { width: 36, height: 4, borderRadius: 2, backgroundColor: '#ddd', alignSelf: 'center', marginTop: 12, marginBottom: 8 },
   modalHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },

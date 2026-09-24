@@ -3,7 +3,7 @@
     "name": "TicketHawk",
     "slug": "EventsApp",
     "scheme": "eventsapp",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -126,7 +126,9 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.1095131355111-6ctugf93micfuah5uvn9bn7k3gdas3kv"
         }
-      ]
+      ],
+      "expo-image",
+      "expo-status-bar"
     ],
     "extra": {
       "router": {},

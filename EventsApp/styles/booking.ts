@@ -201,7 +201,7 @@ const sheetDark = StyleSheet.create({
 
   // ── Hero ─────────────────────────────────────────────────────────────────
   heroFade: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 
   // ── QR card ──────────────────────────────────────────────────────────────
@@ -556,7 +556,7 @@ const sheetLight = StyleSheet.create({
 
   // ── Hero ─────────────────────────────────────────────────────────────────
   heroFade: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 
   // ── QR card ──────────────────────────────────────────────────────────────

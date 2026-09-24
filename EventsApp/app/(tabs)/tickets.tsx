@@ -112,7 +112,7 @@ const TicketCard = React.memo(({ booking, index, onPress }: { booking: Booking; 
       {booking.event?.cover_image_url && (
         <ExpoImage
           source={{ uri: booking.event.cover_image_url }}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           contentFit="cover"
           blurRadius={3}
           cachePolicy="memory-disk"
@@ -121,7 +121,7 @@ const TicketCard = React.memo(({ booking, index, onPress }: { booking: Booking; 
         />
       )}
       {booking.event?.cover_image_url && (
-        <LinearGradient colors={[`${pal.top}d8`, `${pal.bottom}f0`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
+        <LinearGradient colors={[`${pal.top}d8`, `${pal.bottom}f0`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
       )}
 
       {/* Top — location only */}

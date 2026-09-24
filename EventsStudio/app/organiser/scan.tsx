@@ -546,11 +546,11 @@ const useStyles = makeStyles((S) => ({
   },
   collisionTxt: { color: '#111', fontSize: 12.5, fontWeight: '700', flex: 1 },
 
-  finderWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  finderWrap: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   finder: { width: 244, height: 244, borderRadius: 24, borderWidth: 2, borderColor: 'rgba(255,255,255,0.85)' },
   finderHint: { color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 14, fontWeight: '600' },
 
-  resultWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: S.scrim, padding: 24 },
+  resultWrap: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: S.scrim, padding: 24 },
   // onCamera, not surface: `surface` is a translucent tint meant to sit on the
   // app background. Over a camera feed it let the picture through and the
   // verdict text became unreadable at exactly the wrong moment.

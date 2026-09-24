@@ -289,12 +289,12 @@ const CarouselCard = ({
           {heroImage ? (
             <ExpoImage
               source={{ uri: heroImage }}
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               contentFit="cover" cachePolicy="memory-disk" transition={150}
             />
           ) : (
             <View
-              style={[StyleSheet.absoluteFillObject, {
+              style={[StyleSheet.absoluteFill, {
                 backgroundColor: tc + '10',
                 alignItems: 'center',
                 justifyContent: 'center',

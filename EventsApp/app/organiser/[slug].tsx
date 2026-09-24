@@ -76,14 +76,14 @@ function OrganiserEventCard({ item, onPress, dimmed }: { item: Event; onPress: (
     <TouchableOpacity onPress={onPress} style={[styles.card, dimmed && { opacity: 0.62 }]} activeOpacity={0.88}>
       <View style={styles.cardImageWrap}>
         {item.cover_image_url ? (
-          <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFillObject} />
+          <CoverImage uri={item.cover_image_url} style={StyleSheet.absoluteFill} />
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#2a2a2a' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#2a2a2a' }]} />
         )}
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.86)']}
           locations={[0.3, 0.62, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
         <View style={styles.priceBadge}>
           <Text style={styles.priceBadgeText}>{formatPrice(item.price)}</Text>
@@ -265,7 +265,7 @@ export default function OrganiserScreen() {
         {organiser.cover_image_url ? (
           <ExpoImage
             source={{ uri: organiser.cover_image_url }}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             contentFit="cover"
             cachePolicy="memory-disk"
             placeholder={IMG_PLACEHOLDER}
@@ -275,12 +275,12 @@ export default function OrganiserScreen() {
             transition={160}
           />
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: isDark ? '#1a1a1a' : '#E8E8E8' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? '#1a1a1a' : '#E8E8E8' }]} />
         )}
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.25)', colors.background]}
           locations={[0.2, 0.6, 1]}
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
         />
       </View>
 
