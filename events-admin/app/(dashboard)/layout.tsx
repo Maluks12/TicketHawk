@@ -77,6 +77,13 @@ const NAV: Array<
     type: 'item', href: '/users', need: 'user.list' as Capability, label: 'All Users',
     icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>,
   },
+  {
+    // Master admin only, like Organiser Fees: disabling, banning and blocking
+    // accounts is gated on is_master_admin, not a console capability. The
+    // server re-checks it on every call.
+    type: 'item', href: '/restrictions', masterOnly: true, label: 'Account Controls',
+    icon: <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18"><path fillRule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clipRule="evenodd"/></svg>,
+  },
   { type: 'divider' },
   {
     type: 'item', href: '/oversold', need: 'event.view' as Capability, label: 'Oversold Orders', badge: true,
