@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"events-db/internal/accountguard"
 	"events-db/internal/models"
 	"events-db/internal/repository"
 	"events-db/internal/services"
@@ -24,6 +25,16 @@ func CreateGuestBookingHandler(pool *pgxpool.Pool, paymentService *services.Paym
 				"error":   "Validation failed",
 				"details": utils.FormatValidationErrors(err),
 			})
+			return
+		}
+
+		// A guest has no account to check — only the email they are buying
+		// with. If that address belongs to an account that may not buy tickets
+		// (disabled, banned, or blocked from buying by a master admin),
+		// checking out as a guest would walk straight around the restriction.
+		// The refusal is deliberately vague: see PurchaseBlockedBody.
+		if accountguard.PurchaseBlockedForEmail(dto.AttendeeEmail) {
+			c.JSON(http.StatusForbidden, accountguard.PurchaseBlockedBody())
 			return
 		}
 

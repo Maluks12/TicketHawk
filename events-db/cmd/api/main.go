@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"events-db/internal/accountguard"
 	"events-db/internal/cache"
 	"events-db/internal/config"
 	"events-db/internal/controllers"
@@ -68,6 +69,19 @@ func main() {
 	// ==========================================
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// ==========================================
+	// Account restrictions (migration 000094)
+	// ==========================================
+	// Loaded before anything serves requests, so a disable or ban already in
+	// the database is enforced from the first request after a deploy.
+	// Refreshed every 30s to pick up changes made outside this process; the
+	// console also reloads it the moment it writes a change.
+	if err := accountguard.Start(ctx, pool, 30*time.Second); err != nil {
+		log.Error().Err(err).Msg("account restrictions: first load failed — retrying every 30s; nobody is restricted until it succeeds")
+	} else {
+		log.Info().Msg("account restrictions loaded")
+	}
 
 	// ==========================================
 	// Initialize Rate Limit Manager
@@ -634,10 +648,12 @@ func main() {
 			"checkout"))
 	}
 	{
-		checkout.POST("/begin",     middleware.OptionalAuth(cfg), handlers.CheckoutBeginHandler(cartQuerier, reserveQuerier, eventRepo))
+		// RequireAccountFeature: a signed-in account blocked from buying is
+		// refused here. Guests pass; there is no account to check.
+		checkout.POST("/begin",     middleware.OptionalAuth(cfg), middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.CheckoutBeginHandler(cartQuerier, reserveQuerier, eventRepo))
 		checkout.POST("/heartbeat", middleware.OptionalAuth(cfg), handlers.CheckoutHeartbeatHandler(cartQuerier, reserveQuerier))
 		checkout.POST("/abandon",   middleware.OptionalAuth(cfg), handlers.CheckoutAbandonHandler(cartQuerier, reserveQuerier))
-		checkout.POST("/confirm",   middleware.OptionalAuth(cfg), handlers.CheckoutConfirmHandler(cartQuerier, reserveQuerier, bookingRepo, paymentService))
+		checkout.POST("/confirm",   middleware.OptionalAuth(cfg), middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.CheckoutConfirmHandler(cartQuerier, reserveQuerier, bookingRepo, paymentService))
 	}
 
 	// ==========================================
@@ -713,7 +729,10 @@ func main() {
 			"bookings"))
 	}
 	{
-		bookings.POST("",    handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
+		// Buying — creating a booking and starting or retrying its payment — is
+		// refused for an account a master admin has blocked from buying.
+		// Guest checkout (/guest/bookings) checks the buyer's email instead.
+		bookings.POST("",    middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.CreateBookingHandler(bookingRepo, eventRepo, paymentService, cfg))
 		bookings.GET("",     handlers.GetUserBookingsHandler(bookingRepo))
 		bookings.GET("/:id", handlers.GetBookingDetailsHandler(bookingRepo, pool))
 		bookings.POST("/:id/refund",                      handlers.RequestRefundHandler(pool, bookingRepo, eventRepo, paymentService, emailService))
@@ -730,13 +749,13 @@ func main() {
 			paymentRoutes.Use(middleware.RateLimitByUser(rateLimitManager,
 				ratelimit.BucketConfig{Capacity: 150, RefillRate: 3.0, TTL: 15 * time.Minute},
 				"payments"))
-			paymentRoutes.POST("/:id/payment",       handlers.CreatePaymentHandler(pool, paymentService))
+			paymentRoutes.POST("/:id/payment",       middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.CreatePaymentHandler(pool, paymentService))
 			paymentRoutes.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
-			paymentRoutes.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
+			paymentRoutes.POST("/:id/payment/retry", middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.RetryPaymentHandler(pool, paymentService))
 		} else {
-			bookings.POST("/:id/payment",       handlers.CreatePaymentHandler(pool, paymentService))
+			bookings.POST("/:id/payment",       middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.CreatePaymentHandler(pool, paymentService))
 			bookings.GET("/:id/payment",        handlers.GetPaymentStatusHandler(pool, paymentService))
-			bookings.POST("/:id/payment/retry", handlers.RetryPaymentHandler(pool, paymentService))
+			bookings.POST("/:id/payment/retry", middleware.RequireAccountFeature(models.RestrictBuyTickets), handlers.RetryPaymentHandler(pool, paymentService))
 		}
 	}
 
@@ -1563,6 +1582,25 @@ func main() {
 			fees.GET("/organizers", handlers.AdminListOrganizerFeesHandler(pool))
 			fees.PUT("/organizers/:id", handlers.AdminSetOrganizerFeesHandler(pool))
 		}
+
+		// ── Account restrictions — MASTER ADMIN ONLY ──────────────────────
+		//
+		// Disable for N days, ban, or block buying tickets, creating events,
+		// changing bank details and payouts (migration 000094). Gated on
+		// is_master_admin like the fee routes above. Every change is audited
+		// in the same transaction and pushed into the in-memory registry at
+		// once, so it applies to the account's very next request.
+		//
+		// /lift/:id rather than /:id/lift keeps every segment at this level
+		// static, so no wildcard can ever shadow "users".
+		restrictions := admin.Group("/restrictions")
+		restrictions.Use(handlers.RequireMasterAdminForRestrictions(pool))
+		{
+			restrictions.GET("/users",      handlers.AdminListRestrictableAccountsHandler(pool))
+			restrictions.GET("/users/:id",  handlers.AdminGetAccountRestrictionsHandler(pool))
+			restrictions.POST("/users/:id", handlers.AdminApplyAccountRestrictionHandler(pool))
+			restrictions.POST("/lift/:id",  handlers.AdminLiftAccountRestrictionHandler(pool))
+		}
 	}
 
 	// ==========================================
@@ -1591,7 +1629,9 @@ func main() {
 			"organiser"))
 	}
 	{
-		orgRoutes.POST("/events/:id/publish", handlers.PublishEventHandler(pool, eventCache))
+		// Blocking "create events" covers publishing too: a draft going live
+		// is an event appearing on the platform, whichever button did it.
+		orgRoutes.POST("/events/:id/publish", middleware.RequireAccountFeature(models.RestrictCreateEvents), handlers.PublishEventHandler(pool, eventCache))
 
 		// Offline spend configuration. ORGANISER-owned rather than staff: turning
 		// this on decides that vendor devices may hold a forgery-capable key and
@@ -1614,7 +1654,7 @@ func main() {
 		orgRoutes.POST("/events/:id/cashless/float",                 handlers.FloatReconciliationHandler(pool, true))
 		orgRoutes.POST("/events/:id/cancel",  handlers.CancelEventHandler(pool, eventCache, refundService))
 		orgRoutes.GET("/events",              handlers.GetOrganizerEventsHandler(pool))
-		orgRoutes.POST("/events/create", handlers.OrgCreateEventHandler(pool, eventCache))
+		orgRoutes.POST("/events/create", middleware.RequireAccountFeature(models.RestrictCreateEvents), handlers.OrgCreateEventHandler(pool, eventCache))
 
 		// ── Editing an existing event ──────────────────────────────────────
 		//
@@ -1672,7 +1712,7 @@ func main() {
 		orgRoutes.DELETE("/ticket-types/:typeId",  handlers.OrgDeleteTicketTypeHandler(pool, eventCache))
 		// ── Payouts ───────────────────────────────────────────────────────
 		orgRoutes.GET("/payouts/banks",    handlers.GetPayoutBanksHandler(payoutService))
-		orgRoutes.POST("/payouts/details", handlers.SetPayoutDetailsHandler(pool, payoutService))
+		orgRoutes.POST("/payouts/details", middleware.RequireAccountFeature(models.RestrictBankDetails), handlers.SetPayoutDetailsHandler(pool, payoutService))
 		orgRoutes.GET("/payouts/profile",  handlers.GetPayoutProfileHandler(pool))
 		orgRoutes.GET("/payouts/history",  handlers.GetPayoutHistoryHandler(pool))
 		

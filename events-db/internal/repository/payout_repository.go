@@ -477,9 +477,18 @@ func FetchPayableRows(pool *pgxpool.Pool, ctx context.Context, limit int) ([]Pen
 		            AND op.next_attempt_at IS NOT NULL
 		            AND op.next_attempt_at <= CURRENT_TIMESTAMP)
 		      )
-		  -- refund_clawback rows are debt owed TO the platform, never a
-		  -- transfer. They live in this table for the audit trail only.
 		  AND op.kind <> 'refund_clawback'
+		  AND (
+		        op.status = 'processing'
+		        OR (
+		            (o.payout_hold_until IS NULL OR o.payout_hold_until <= CURRENT_TIMESTAMP)
+		            AND NOT EXISTS (
+		                SELECT 1 FROM active_account_restrictions ar
+		                WHERE ar.user_id = o.user_id
+		                  AND ar.kind IN ('payouts', 'disable', 'ban')
+		            )
+		        )
+		      )
 		ORDER BY op.created_at ASC
 		LIMIT $1
 	`, limit)

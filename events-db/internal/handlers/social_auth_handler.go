@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"events-db/internal/accountguard"
 	"events-db/internal/config"
 	"events-db/internal/models"
 	"events-db/internal/repository"
@@ -92,6 +93,15 @@ func SocialSignInHandler(pool *pgxpool.Pool, cfg *config.Config, verifier *servi
 			return
 		}
 
+		// Same rule as password login: the provider has just proved who this
+		// is, so they may learn the account's standing, and a disabled or
+		// banned account gets no session. A brand-new account cannot be
+		// restricted, so this only ever refuses an existing one.
+		if lock, locked := accountguard.LockFor(result.User.ID); locked {
+			accountguard.AbortLocked(c, http.StatusForbidden, lock)
+			return
+		}
+
 		// Same session machinery as password login — one issuer, so refresh
 		// token rotation, TTL and revocation behave identically no matter how
 		// the user got in.
@@ -107,7 +117,7 @@ func SocialSignInHandler(pool *pgxpool.Pool, cfg *config.Config, verifier *servi
 			status = http.StatusCreated
 		}
 
-		c.JSON(status, gin.H{
+		resp := gin.H{
 			"access_token":  session.AccessToken,
 			"refresh_token": session.RefreshToken,
 			"expires_in":    session.ExpiresIn,
@@ -123,7 +133,13 @@ func SocialSignInHandler(pool *pgxpool.Pool, cfg *config.Config, verifier *servi
 				"last_name":  result.User.LastName,
 				"role":       result.User.Role,
 			},
-		})
+		}
+		// Feature blocks come back beside the tokens, exactly as they do for
+		// password login, so the app can show "Your account has been limited".
+		if acctStatus, limited := accountguard.LimitedStatus(result.User.ID); limited {
+			resp["account_status"] = acctStatus
+		}
+		c.JSON(status, resp)
 	}
 }
 

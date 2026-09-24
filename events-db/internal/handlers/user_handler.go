@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"events-db/internal/accountguard"
 	"events-db/internal/config"
 	"events-db/internal/models"
 	"events-db/internal/repository"
@@ -166,17 +167,36 @@ func LoginHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		// Checked AFTER the password, never before it. Answering "this account
+		// is banned" to anyone who types an email address would turn the login
+		// form into a lookup of who has been banned; only someone who has just
+		// proved they hold the account learns its standing.
+		//
+		// 403 rather than 401: every client's interceptor treats a 401 as "try
+		// a refresh", which on a login form would swallow the message.
+		if lock, locked := accountguard.LockFor(user.ID); locked {
+			accountguard.AbortLocked(c, http.StatusForbidden, lock)
+			return
+		}
+
 		session, err := issueSession(pool, cfg, user)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
+		resp := gin.H{
 			"access_token":  session.AccessToken,
 			"refresh_token": session.RefreshToken,
 			"expires_in":    session.ExpiresIn,
-		})
+		}
+		// Feature blocks don't stop sign-in. They come back beside the tokens
+		// so the app can show "Your account has been limited" straight away.
+		// Absent when nothing is blocked, so older clients see no change.
+		if status, limited := accountguard.LimitedStatus(user.ID); limited {
+			resp["account_status"] = status
+		}
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -361,6 +381,18 @@ func RefreshTokenHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc
 		tokenHash := utils.HashResetToken(input.RefreshToken)
 		userID, role, err := repository.GetAndRevokeRefreshToken(pool, tokenHash)
 		if err != nil {
+			// Ended by a disable or ban: say which, so the app shows the popup
+			// instead of a silent sign-out. If the restriction has since been
+			// lifted the session is still over — the account signs in again.
+			if errors.Is(err, repository.ErrRefreshTokenRestricted) {
+				if lock, locked := accountguard.LockFor(userID); locked {
+					accountguard.AbortLocked(c, http.StatusUnauthorized, lock)
+					return
+				}
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Your session has ended. Please sign in again."})
+				return
+			}
+
 			// FIX 2: a replayed (already-rotated) token means the whole
 			// session family was just revoked. Log it loudly — this is a
 			// strong signal of a stolen token — but keep the client-facing
@@ -371,6 +403,18 @@ func RefreshTokenHandler(pool *pgxpool.Pool, cfg *config.Config) gin.HandlerFunc
 					Msg("refresh token reuse detected — all user sessions revoked")
 			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired refresh token"})
+			return
+		}
+
+		// A token rotated moments before the account was locked can still
+		// arrive inside the rotation grace window and succeed above. Check the
+		// account before minting anything, and end whatever session it has left.
+		if lock, locked := accountguard.LockFor(userID); locked {
+			if rerr := repository.RevokeAllUserTokens(pool, userID, repository.RevokeReasonRestricted); rerr != nil {
+				log.Error().Err(rerr).Str("user_id", userID).
+					Msg("refresh: could not revoke the sessions of a locked-out account")
+			}
+			accountguard.AbortLocked(c, http.StatusUnauthorized, lock)
 			return
 		}
 

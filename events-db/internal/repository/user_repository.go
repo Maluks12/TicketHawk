@@ -18,6 +18,16 @@ var ErrUserNotFound = errors.New("user not found")
 // token being replayed, so all of the user's sessions have been revoked.
 var ErrRefreshTokenReused = errors.New("refresh token reuse detected")
 
+// ErrRefreshTokenRestricted signals a refresh token that was revoked because a
+// master admin disabled or banned the account (migration 000094). Not theft:
+// GetAndRevokeRefreshToken returns the owning user alongside it, and the
+// handler answers with the lockout rather than treating it as a replay.
+var ErrRefreshTokenRestricted = errors.New("refresh token revoked by an account restriction")
+
+// RevokeReasonRestricted is refresh_tokens.revoked_reason for sessions ended by
+// a disable or ban.
+const RevokeReasonRestricted = "account_restricted"
+
 func CreateUser(pool *pgxpool.Pool, user *models.User) (*models.User, error) {
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -230,6 +240,15 @@ func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID stri
 			return reusedUserID, reusedRole, nil
 		}
 
+		// Ended by a disable or ban. All of the account's tokens were revoked
+		// in the same statement, so there is no session family left to
+		// protect and nothing about this presentation suggests theft — it is
+		// simply the app finding out. Hand back the user so the handler can
+		// say why.
+		if reason != nil && *reason == RevokeReasonRestricted {
+			return reusedUserID, reusedRole, ErrRefreshTokenRestricted
+		}
+
 		// Anything else — a rotated token replayed long after, or a token
 		// killed by logout/password-reset/previous-reuse — is treated as
 		// theft: nuke the whole session family.
@@ -242,7 +261,9 @@ func GetAndRevokeRefreshToken(pool *pgxpool.Pool, tokenHash string) (userID stri
 }
 
 // RevokeAllUserTokens revokes every refresh token the user holds, recording
-// why. Reasons in use: 'logout', 'password_reset', 'reuse_detected'.
+// why. Reasons in use: 'logout', 'password_reset', 'reuse_detected',
+// 'account_restricted' (RevokeReasonRestricted — also written directly by
+// ApplyAccountRestriction, inside its own transaction).
 func RevokeAllUserTokens(pool *pgxpool.Pool, userID string, reason string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

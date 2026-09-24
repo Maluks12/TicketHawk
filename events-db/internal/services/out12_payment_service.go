@@ -186,13 +186,15 @@ func (s *PaymentService) splitForBooking(ctx context.Context, booking *models.Bo
 		WHERE e.id = $1
 		  AND o.payout_tier = 'instant'
 		  AND o.payout_enabled = TRUE
-		  -- status::text: the live enum has no 'active' label (legacy rows are
-		  -- 'approved'); a bare enum IN ('active', ...) would error at runtime.
 		  AND o.status::text IN ('active', 'approved')
 		  AND o.paystack_subaccount_code IS NOT NULL
-		  -- A subaccount Paystack has already rejected must not be attached
-		  -- again: initialize returns 404 and the whole checkout fails.
 		  AND o.subaccount_invalid_at IS NULL
+		  AND (o.payout_hold_until IS NULL OR o.payout_hold_until <= CURRENT_TIMESTAMP)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM active_account_restrictions ar
+		      WHERE ar.user_id = o.user_id
+		        AND ar.kind IN ('payouts', 'disable', 'ban')
+		  )
 	`, *booking.EventID).Scan(&subaccountCode, &eventStart)
 	if err != nil {
 		// No row = organizer is held-tier (the normal case) — not an error.
