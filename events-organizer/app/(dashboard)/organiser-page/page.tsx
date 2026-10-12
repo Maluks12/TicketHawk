@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import ImageCropper from '../../../components/imageCropper';
 // Only icons this project already imports elsewhere — node_modules is not
 // available to verify anything beyond that list, and a wrong name renders as a
 // blank box. Arrows and pluses are plain characters for the same reason.
@@ -46,6 +47,47 @@ const PLATFORM_PLACEHOLDER: Record<string, string> = {
   website:   'yourdomain.co.za',
 };
 
+// ── Cover crop ratio ─────────────────────────────────────────────────────────
+//
+// 3:1, and a compromise on purpose — the three surfaces that render this cover
+// disagree: web-desktop shows a 220px band across the full width (~6.5:1 on a
+// laptop), web-mobile 150px across a phone (~2.6:1), EventsApp 0.42 x screen
+// width (~2.4:1). No single ratio matches all three. 3:1 keeps nearly all of the
+// crop on phones and the middle band on desktop, which is why the hint tells the
+// organiser to keep anything important in the centre.
+const CROP_PROFILE_COVER = 3;
+
+// ── Unsaved-edit draft ───────────────────────────────────────────────────────
+//
+// Description, visibility and links are only written on Save, so anything typed
+// and not saved used to vanish on reload or on leaving the page. The unsaved
+// form is mirrored to localStorage (per organiser) and restored on return.
+// Local only — nothing reaches the public page until Save is pressed.
+interface PageDraft {
+  description: string;
+  enabled: boolean;
+  links: { platform: string; url: string }[];
+}
+const draftKey = (organiserId: string) => `org_page_draft:${organiserId}`;
+
+function readDraft(organiserId: string): PageDraft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(organiserId));
+    return raw ? JSON.parse(raw) as PageDraft : null;
+  } catch { return null; }
+}
+function writeDraft(organiserId: string, d: PageDraft | null) {
+  try {
+    if (d) localStorage.setItem(draftKey(organiserId), JSON.stringify(d));
+    else localStorage.removeItem(draftKey(organiserId));
+  } catch { /* storage blocked or full — the form still works, just unsaved */ }
+}
+
+const linksOf = (p: OwnerProfile) =>
+  (p.links ?? []).map(l => ({ platform: l.platform as string, url: l.url }));
+const sameLinks = (a: { platform: string; url: string }[], b: { platform: string; url: string }[]) =>
+  JSON.stringify(a) === JSON.stringify(b);
+
 export default function OrganiserPageEditor() {
   const toast = useToast();
   const coverInput = useRef<HTMLInputElement | null>(null);
@@ -62,15 +104,38 @@ export default function OrganiserPageEditor() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingLinks, setSavingLinks] = useState(false);
   const [uploading, setUploading] = useState<'cover' | 'logo' | null>(null);
+  // The picked cover file, waiting in the cropper. Null = cropper closed.
+  const [croppingCover, setCroppingCover] = useState<File | null>(null);
+  // True when the form was filled from a local draft rather than the server.
+  const [restoredDraft, setRestoredDraft] = useState(false);
 
+  // Runs ONCE on mount. It is the only thing that fills the form fields from
+  // the server — an image upload used to call it again, which overwrote any
+  // unsaved description, links or visibility change with the stored values.
   const load = useCallback(async () => {
     try {
       const [p, pf] = await Promise.all([getMyPublicProfile(), getLinkPlatforms()]);
       setProfile(p);
       setPlatforms(pf);
-      setDescription(p.description ?? '');
-      setEnabled(p.public_profile_enabled);
-      setLinks((p.links ?? []).map(l => ({ platform: l.platform, url: l.url })));
+
+      const server: PageDraft = {
+        description: p.description ?? '',
+        enabled: p.public_profile_enabled,
+        links: linksOf(p),
+      };
+      const draft = readDraft(p.id);
+      const differs = !!draft && (
+        draft.description !== server.description
+        || draft.enabled !== server.enabled
+        || !sameLinks(draft.links ?? [], server.links)
+      );
+      const use = differs && draft ? { ...server, ...draft, links: draft.links ?? server.links } : server;
+      if (!differs) writeDraft(p.id, null);
+      setRestoredDraft(differs);
+
+      setDescription(use.description);
+      setEnabled(use.enabled);
+      setLinks(use.links);
     } catch {
       toast('Could not load your public page', 'error');
     } finally {
@@ -80,6 +145,42 @@ export default function OrganiserPageEditor() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Dirty tracking ────────────────────────────────────────────────────────
+  // Measured against `profile`, which is always the last thing the server
+  // confirmed — so a successful save clears it without extra bookkeeping.
+  const aboutDirty = !!profile && (
+    description !== (profile.description ?? '') || enabled !== profile.public_profile_enabled
+  );
+  const linksDirty = !!profile && !sameLinks(links, linksOf(profile));
+  const dirty = aboutDirty || linksDirty;
+
+  // Mirror unsaved edits to storage. Writing to an external store is what an
+  // effect is for; no React state is set here.
+  const organiserId = profile?.id;
+  useEffect(() => {
+    if (!organiserId) return;
+    writeDraft(organiserId, dirty ? { description, enabled, links } : null);
+  }, [organiserId, dirty, description, enabled, links]);
+
+  // A browser reload or closing the tab with unsaved edits asks first. The
+  // draft above already survives it — this is so the organiser knows the
+  // change is not live yet, not only that it was kept.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  function discardDraft() {
+    if (!profile) return;
+    setDescription(profile.description ?? '');
+    setEnabled(profile.public_profile_enabled);
+    setLinks(linksOf(profile));
+    setRestoredDraft(false);
+    writeDraft(profile.id, null);
+  }
+
   async function saveProfile() {
     setSavingProfile(true);
     try {
@@ -88,6 +189,7 @@ export default function OrganiserPageEditor() {
         public_profile_enabled: enabled,
       });
       setProfile(updated);
+      setRestoredDraft(false);
       toast('Page saved', 'success');
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
@@ -110,6 +212,9 @@ export default function OrganiserPageEditor() {
       // Take the SERVER's version back. It normalises "@handle" into a full
       // URL, so showing what was typed would make the field look unsaved.
       setLinks(res.links.map(l => ({ platform: l.platform, url: l.url })));
+      // Move the saved baseline too, or the form would read as still dirty.
+      setProfile(p => (p ? { ...p, links: res.links } : p));
+      setRestoredDraft(false);
       toast('Links saved', 'success');
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
@@ -130,9 +235,14 @@ export default function OrganiserPageEditor() {
       if (!res.saved) {
         toast(res.error ?? 'Image uploaded but not saved — try again', 'error');
       } else {
+        // Patch ONLY the image on the profile. Reloading the whole profile here
+        // is what used to wipe an unsaved description and links.
+        setProfile(p => (p ? {
+          ...p,
+          ...(kind === 'cover' ? { cover_image_url: res.url } : { logo_url: res.url }),
+        } : p));
         toast(kind === 'cover' ? 'Cover updated' : 'Logo updated', 'success');
       }
-      await load();
     } catch {
       toast('Upload failed', 'error');
     } finally {
@@ -159,7 +269,25 @@ export default function OrganiserPageEditor() {
     <div style={{ padding: '1.5rem', maxWidth: 1080 }}>
       <input ref={coverInput} type="file" accept="image/jpeg,image/png,image/webp"
         style={{ display: 'none' }}
-        onChange={e => { onImage('cover', e.target.files?.[0] ?? null); e.target.value = ''; }} />
+        onChange={e => {
+          // Cover goes through the cropper first; the cropped file is what
+          // gets uploaded.
+          const f = e.target.files?.[0] ?? null;
+          e.target.value = '';
+          if (f) setCroppingCover(f);
+        }} />
+
+      {croppingCover && (
+        <ImageCropper
+          file={croppingCover}
+          aspect={CROP_PROFILE_COVER}
+          title="Crop your cover"
+          hint="Drag to reposition, scroll to zoom. Wide screens show the middle band, so keep text and faces centred."
+          maxOutputWidth={2400}
+          onCancel={() => setCroppingCover(null)}
+          onConfirm={f => { setCroppingCover(null); onImage('cover', f); }}
+        />
+      )}
       <input ref={logoInput} type="file" accept="image/jpeg,image/png,image/webp"
         style={{ display: 'none' }}
         onChange={e => { onImage('logo', e.target.files?.[0] ?? null); e.target.value = ''; }} />
@@ -220,6 +348,19 @@ export default function OrganiserPageEditor() {
           not exist yet in either web app — so it only ever rendered a 404 as a
           blank white rectangle. View live page in the header goes to the real
           thing once it does exist. */}
+      {restoredDraft && dirty && (
+        <div className="alert alert-info" style={{ marginBottom: 18, alignItems: 'center' }}>
+          <Warning size={16} weight="fill" />
+          <div style={{ flex: 1 }}>
+            Restored the unsaved changes from your last visit. They are not live
+            until you press Save.
+          </div>
+          <button type="button" className="btn btn-sm" onClick={discardDraft}>
+            Discard changes
+          </button>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gap: 18 }}>
 
           {/* ── Images ───────────────────────────────────────────────────── */}
@@ -228,7 +369,7 @@ export default function OrganiserPageEditor() {
             <div className="card-body" style={{ display: 'grid', gap: 16 }}>
               <div>
                 <label className="field-hint" style={{ display: 'block', marginBottom: 6 }}>
-                  Cover — the wide image across the top of your page
+                  Cover — the wide image across the top of your page (cropped to 3:1)
                 </label>
                 <button type="button" onClick={() => coverInput.current?.click()}
                   disabled={uploading !== null}
@@ -308,9 +449,14 @@ export default function OrganiserPageEditor() {
                 </small>
               </div>
 
-              <button type="button" className="btn btn-primary" disabled={savingProfile} onClick={saveProfile}>
-                {savingProfile ? 'Saving…' : 'Save'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button type="button" className="btn btn-primary" disabled={savingProfile} onClick={saveProfile}>
+                  {savingProfile ? 'Saving…' : 'Save'}
+                </button>
+                {aboutDirty && (
+                  <span style={{ fontSize: 12.5, color: 'var(--warning-fg)' }}>Unsaved changes</span>
+                )}
+              </div>
             </div>
           </section>
 
@@ -380,10 +526,15 @@ export default function OrganiserPageEditor() {
                 </div>
               )}
 
-              <button type="button" className="btn btn-primary" style={{ marginTop: 18 }}
-                disabled={savingLinks} onClick={saveLinks}>
-                {savingLinks ? 'Saving…' : 'Save links'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 18 }}>
+                <button type="button" className="btn btn-primary"
+                  disabled={savingLinks} onClick={saveLinks}>
+                  {savingLinks ? 'Saving…' : 'Save links'}
+                </button>
+                {linksDirty && (
+                  <span style={{ fontSize: 12.5, color: 'var(--warning-fg)' }}>Unsaved changes</span>
+                )}
+              </div>
             </div>
           </section>
       </div>

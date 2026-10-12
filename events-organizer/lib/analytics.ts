@@ -119,12 +119,15 @@ export async function getAnalyticsOverview(): Promise<AnalyticsOverview> {
 }
 
 export async function listEventAnalytics(): Promise<EventAnalyticsRow[]> {
-  const { data } = await api.get('/organiser/dashboard/analytics/events');
+  // /breakdown, not /events: URLs ending "/analytics/events" are on common
+  // ad/tracker blocklists, so the browser cancelled this call before it left —
+  // nothing in the server log, just a failed section. See main.go.
+  const { data } = await api.get('/organiser/dashboard/analytics/breakdown');
   return data?.events ?? [];
 }
 
 export async function getEventAnalytics(eventId: string): Promise<EventAnalytics> {
-  const { data } = await api.get(`/organiser/dashboard/analytics/events/${eventId}`);
+  const { data } = await api.get(`/organiser/dashboard/analytics/breakdown/${eventId}`);
   return data;
 }
 
