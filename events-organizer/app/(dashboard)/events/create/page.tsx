@@ -1251,7 +1251,11 @@ export default function CreateEventPage() {
     { done: !!venueName && !!address && !!city,  label: 'Set venue and city' },
     { done: !!startTime && !!endTime,        label: 'Set start and end times' },
     { done: !!expiresAt,                     label: 'Set a booking deadline' },
-    { done: isFree || parseFloat(effectivePrice) > 0, label: 'Set ticket pricing' },
+    // Tiers ARE the pricing once any exist, and a R0 tier (e.g. "Super Early
+    // Bird — Free") is a legitimate choice. effectivePrice follows the cheapest
+    // visible tier, so testing it for > 0 left this stuck unticked whenever the
+    // cheapest tier was free, however many paid tiers sat alongside it.
+    { done: isFree || ticketTypes.length > 0 || parseFloat(price) > 0, label: 'Set ticket pricing' },
     { done: !!coverImageUrl,                 label: 'Upload a cover image' },
   ];
 

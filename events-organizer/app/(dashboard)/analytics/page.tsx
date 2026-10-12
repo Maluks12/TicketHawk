@@ -71,7 +71,22 @@ export default function AnalyticsPage() {
   const [series, setSeries] = useState<SeriesResult | null>(null);
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // One error slot PER SOURCE, each overwritten by that source's latest
+  // attempt. A single shared slot was only ever set, never cleared — so one
+  // transient failure (a timeout, a cold API start) kept the red banner up
+  // over a page full of perfectly good numbers, and Refresh couldn't remove it.
+  type LoadError = 'NOT_DEPLOYED' | 'FAILED' | null;
+  const [staticError, setStaticError] = useState<LoadError>(null);
+  const [seriesError, setSeriesError] = useState<LoadError>(null);
+  const error: LoadError =
+    staticError === 'NOT_DEPLOYED' || seriesError === 'NOT_DEPLOYED'
+      ? 'NOT_DEPLOYED'
+      : (seriesError ?? staticError);
+
+  // `reloadNonce` exists only so the Refresh button can re-run BOTH loaders
+  // below without any control having changed.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   // Ranges are grain-specific — a minute grain has no "last 12 months" option.
   // Reconciling the two happens in the click handler below rather than in an
@@ -121,18 +136,16 @@ export default function AnalyticsPage() {
         const notDeployed = failures.some(
           f => httpStatus((f as PromiseRejectedResult).reason) === 404,
         );
-        setError(notDeployed ? 'NOT_DEPLOYED' : 'FAILED');
+        setStaticError(notDeployed ? 'NOT_DEPLOYED' : 'FAILED');
+      } else {
+        setStaticError(null);
       }
       setLoading(false);
     })();
     return () => { alive = false; };
-  }, []);
+  }, [reloadNonce]);
 
   // ── Series: refetches on every control change ───────────────────────────
-  // `reloadNonce` exists only so the Refresh button can re-run this effect
-  // without any control having changed.
-  const [reloadNonce, setReloadNonce] = useState(0);
-
   useEffect(() => {
     let alive = true;
     const range = RANGES[grain].find((r) => r.id === rangeId) ?? RANGES[grain][0];
@@ -146,12 +159,13 @@ export default function AnalyticsPage() {
       .then((res) => {
         if (!alive) return;
         setSeries(res);
+        setSeriesError(null);
         setLoadedKey(queryKey);
       })
       .catch((e) => {
         if (!alive) return;
         setSeries(null);
-        setError(prev => prev ?? (httpStatus(e) === 404 ? 'NOT_DEPLOYED' : 'FAILED'));
+        setSeriesError(httpStatus(e) === 404 ? 'NOT_DEPLOYED' : 'FAILED');
         // Mark the key loaded even on failure, otherwise seriesLoading stays
         // true forever and the charts sit dimmed with no explanation.
         setLoadedKey(queryKey);
@@ -226,7 +240,14 @@ export default function AnalyticsPage() {
           {error === 'FAILED' && (
             <div className="alert alert-danger">
               <Icon name="alert-triangle" size={17} />
-              <span>Could not load analytics. Check your connection and try Refresh.</span>
+              <span>
+                {seriesError
+                  ? 'Could not load analytics. Check your connection and try Refresh.'
+                  // The tiles and charts loaded — only the event breakdown /
+                  // averages didn't. Saying "could not load analytics" above a
+                  // page of numbers reads as a contradiction.
+                  : 'Some sections (event breakdown and averages) could not load. Try Refresh.'}
+              </span>
             </div>
           )}
 
