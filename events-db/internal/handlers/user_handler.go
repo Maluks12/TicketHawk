@@ -41,11 +41,11 @@ func init() {
 }
 
 type RegisterRequest struct {
-	Email       string  `json:"email"        binding:"required,email,max=255"`
-	Password    string  `json:"password"     binding:"required,strong_password,max=128"`
-	FirstName   string  `json:"first_name"   binding:"required,max=100"`
-	LastName    string  `json:"last_name"    binding:"required,max=100"`
-	PhoneNumber string  `json:"phone_number" binding:"required,max=20"`
+	Email       string `json:"email"        binding:"required,email,max=255"`
+	Password    string `json:"password"     binding:"required,strong_password,max=128"`
+	FirstName   string `json:"first_name"   binding:"required,max=100"`
+	LastName    string `json:"last_name"    binding:"required,max=100"`
+	PhoneNumber string `json:"phone_number" binding:"required,max=20"`
 
 	// DateOfBirth is deliberately absent.
 	//
@@ -91,6 +91,25 @@ func CreateUserhandler(pool *pgxpool.Pool) gin.HandlerFunc {
 			return
 		}
 
+		// One canonical form for every account, whichever client created it.
+		// The organiser dashboard used to post the address exactly as typed
+		// ("Jane@Gmail.com"), while the consumer apps lowercase before login —
+		// so an organiser-created account could never sign in on TicketHawk.
+		email := strings.ToLower(strings.TrimSpace(req.Email))
+
+		// The unique index is on the raw column, so "jane@gmail.com" would not
+		// collide with a legacy "Jane@Gmail.com" row and would silently create
+		// a second account for the same person. Check case-insensitively first.
+		taken, err := repository.EmailRegistered(pool, email)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
+			return
+		}
+		if taken {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Email already registered"})
+			return
+		}
+
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create account"})
@@ -98,7 +117,7 @@ func CreateUserhandler(pool *pgxpool.Pool) gin.HandlerFunc {
 		}
 
 		user := &models.User{
-			Email:       req.Email,
+			Email:       email,
 			Password:    string(hashedPassword),
 			Role:        models.RoleAttendee,
 			FirstName:   &req.FirstName,

@@ -268,7 +268,7 @@ export default function EventsPage() {
           </button>
         ))}
 
-        <div style={{ marginLeft: 'auto' }}>
+        <div className="filter-search" style={{ marginLeft: 'auto' }}>
           <div className="search-box">
             <svg viewBox="0 0 20 20" fill="var(--text-2)" width="14" height="14">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd"/>
@@ -347,7 +347,7 @@ export default function EventsPage() {
             </div>
           </div>
         ) : (
-          <table className="meta-table">
+          <table className="meta-table mobile-cards">
             <thead>
               <tr>
                 <th className="col-check">
@@ -379,11 +379,11 @@ export default function EventsPage() {
                 const views = e.views ?? 0;
                 return (
                   <tr key={e.id} style={{ background: selected.has(e.id) ? 'var(--accent-soft)' : undefined }}>
-                    <td>
+                    <td className="cell-hide-mobile">
                       <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)}
                         style={{ accentColor: 'var(--accent)', cursor: 'pointer' }} />
                     </td>
-                    <td>
+                    <td className="cell-primary">
                       <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--accent)', cursor: 'pointer' }}
                         onClick={() => router.push(`/event/${e.id}`)}>
                         {e.title}
@@ -392,16 +392,16 @@ export default function EventsPage() {
                         Created {fmtDateTime(e.created_at)}
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StatusPill status={e.status} />
                     </td>
-                    <td style={{ color: 'var(--text-2)' }}>
+                    <td data-label="Date" style={{ color: 'var(--text-2)' }}>
                       <div>{fmtDateTime(e.start_time)}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
                         ends {fmtDateTime(e.end_time)}
                       </div>
                     </td>
-                    <td style={{ color: 'var(--text-2)' }}>
+                    <td data-label="Location" style={{ color: 'var(--text-2)' }}>
                       {e.venue_name || e.address || e.city ? (
                         <>
                           {/* Venue name, else the street address, else the city
@@ -420,7 +420,7 @@ export default function EventsPage() {
                         </Link>
                       )}
                     </td>
-                    <td>
+                    <td data-label="Tickets sold">
                       <div style={{ fontWeight: 600 }}>
                         {ticketsSold.toLocaleString()}
                         {e.max_capacity && (
@@ -440,13 +440,13 @@ export default function EventsPage() {
                         </div>
                       )}
                     </td>
-                    <td style={{ color: 'var(--text-2)' }}>{views.toLocaleString()}</td>
-                    <td style={{ fontWeight: 600 }}>
+                    <td data-label="Views" style={{ color: 'var(--text-2)' }}>{views.toLocaleString()}</td>
+                    <td data-label="Price" style={{ fontWeight: 600 }}>
                       {e.price === 0 ? (
                         <span style={{ color: 'var(--success-fg)', fontSize: 13 }}>Free</span>
                       ) : fmtMoney(e.price, e.currency)}
                     </td>
-                    <td>
+                    <td className="cell-actions">
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
                         {/* A draft opens the create form in edit mode; anything
                             live goes to the read-only details page. */}

@@ -73,7 +73,7 @@ export default function EventCapacityRow({ eventId, status, value, ticketsSold, 
   };
 
   return (
-    <div style={{
+    <div className="kv-row" style={{
       display: 'flex', gap: 16, padding: '7px 0',
       borderBottom: '1px solid var(--surface-2)', fontSize: 13.5,
     }}>

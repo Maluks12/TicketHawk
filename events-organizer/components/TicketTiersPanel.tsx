@@ -238,7 +238,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
 
       {sorted.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
-        <table className="meta-table" style={{ width: '100%' }}>
+        <table className="meta-table mobile-cards" style={{ width: '100%' }}>
           <thead>
             <tr>
               <th>Tier</th><th>Price</th><th>Sold</th><th>Held</th>
@@ -253,8 +253,8 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
               if (editing) {
                 return (
                   <tr key={t.id}>
-                    <td colSpan={7} style={{ background: 'var(--surface-2)', padding: 12 }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
+                    <td colSpan={7} className="cell-primary" style={{ background: 'var(--surface-2)', padding: 12 }}>
+                      <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
                           <input style={inputStyle} value={String(draft.name ?? '')}
@@ -280,7 +280,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                           placeholder="Shown to buyers under the tier name"
                           onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
                       </div>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         <button className="btn btn-primary btn-sm" onClick={() => saveEdit(t)} disabled={busy}>
                           {busy ? 'Saving…' : 'Save'}
                         </button>
@@ -298,15 +298,15 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
 
               return (
                 <tr key={t.id} style={{ opacity: t.is_visible ? 1 : 0.55 }}>
-                  <td>
+                  <td className="cell-primary">
                     <div style={{ fontWeight: 600 }}>{t.name}</div>
                     {t.description && (
                       <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{t.description}</div>
                     )}
                   </td>
-                  <td>{money(t.price, currency)}</td>
-                  <td>{t.tickets_sold}</td>
-                  <td>
+                  <td data-label="Price">{money(t.price, currency)}</td>
+                  <td data-label="Sold">{t.tickets_sold}</td>
+                  <td data-label="Held">
                     {/* Reserved was invisible before. A tier that looks like it has
                         stock but will not sell is nearly always unpaid checkouts
                         holding the remainder, and without this column the
@@ -315,8 +315,8 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                       ? <span title="Held by checkouts in progress">{t.reserved_count}</span>
                       : '—'}
                   </td>
-                  <td>{available === null ? '∞' : available}</td>
-                  <td>
+                  <td data-label="Available">{available === null ? '∞' : available}</td>
+                  <td data-label="Status">
                     {soldOut ? (
                       <span style={{ color: 'var(--danger)', fontWeight: 700, fontSize: 12 }}>Sold out</span>
                     ) : !t.is_visible ? (
@@ -325,7 +325,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                       <span style={{ color: 'var(--success-fg)', fontWeight: 600, fontSize: 12 }}>On sale</span>
                     )}
                   </td>
-                  <td>
+                  <td className="cell-actions">
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button className="btn btn-sm" onClick={() => beginEdit(t)} disabled={busy}>Edit</button>
                       <button className="btn btn-sm" onClick={() => toggleVisible(t)} disabled={busy}>
@@ -347,7 +347,7 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
       {adding && (
         <div style={{ marginTop: 12, padding: 12, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-2)', marginBottom: 10 }}>New tier</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
+          <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
             <div style={{ minWidth: 0 }}>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
               <Select

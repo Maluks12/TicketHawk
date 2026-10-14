@@ -56,6 +56,26 @@ func CreateUser(pool *pgxpool.Pool, user *models.User) (*models.User, error) {
 	return user, nil
 }
 
+// EmailRegistered reports whether ANY account — deleted or not — already holds
+// this address, compared case-insensitively. Deleted accounts are anonymised to
+// 'deleted-<uuid>@deleted.invalid', so they never match a real address anyway;
+// leaving deleted_at out of the predicate mirrors the unique index, which also
+// covers every row.
+func EmailRegistered(pool *pgxpool.Pool, email string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var exists bool
+	err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users WHERE LOWER(email) = LOWER($1::text))`,
+		email,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("EmailRegistered: %w", err)
+	}
+	return exists, nil
+}
+
 func GetUserByEmail(pool *pgxpool.Pool, email string) (*models.User, error) {
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -69,11 +89,27 @@ func GetUserByEmail(pool *pgxpool.Pool, email string) (*models.User, error) {
 	// to keep deleted accounts out. If a future migration ever preserves the
 	// original address, this predicate is what stops that becoming a
 	// login-as-deleted-user bug.
+	//
+	// Case-insensitive. Email addresses are matched on LOWER(email) because the
+	// clients never agreed on casing: the consumer web apps and EventsApp
+	// lowercase before both register and login, but the organiser dashboard sent
+	// the address exactly as typed. An organiser who signed up as
+	// "Jane@Gmail.com" was stored that way, and every consumer login — which
+	// sends "jane@gmail.com" — missed the exact-match row and came back
+	// "Invalid credentials" even though the password was right.
+	//
+	// The ORDER BY only matters for legacy data: if two rows differ by case
+	// alone (possible before this fix, since the unique index is on the raw
+	// column), the exact-case match wins, then the older account — so the
+	// lookup is deterministic rather than whichever row the planner hits first.
+	// idx_users_email_lower (migration 000095) keeps this an index scan.
 	var query string = `
 		SELECT id, email, password, role, created_at
 		FROM users
-		WHERE email = $1
+		WHERE LOWER(email) = LOWER($1::text)
 		  AND deleted_at IS NULL
+		ORDER BY (email = $1::text) DESC, created_at ASC
+		LIMIT 1
 	`
 
 	var user models.User

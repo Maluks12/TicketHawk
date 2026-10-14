@@ -332,7 +332,7 @@ export default function EventDetailPage() {
             {' → '}
             <span>{ev.title}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div className="page-title">{ev.title}</div>
             <span className={`badge badge-${ev.status}`}>
               {ev.status.charAt(0).toUpperCase() + ev.status.slice(1)}
@@ -748,7 +748,7 @@ export default function EventDetailPage() {
                 <div className="empty-title">No bookings yet</div>
               </div>
             ) : (
-              <table className="meta-table">
+              <table className="meta-table mobile-cards">
                 <thead>
                   <tr>
                     <th>Booking #</th>
@@ -761,8 +761,8 @@ export default function EventDetailPage() {
                 <tbody>
                   {bookings.map(b => (
                     <tr key={b.id}>
-                      <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{b.booking_number}</td>
-                      <td>
+                      <td className="cell-primary" style={{ fontFamily: 'monospace', fontSize: 13 }}>{b.booking_number}</td>
+                      <td data-label="Attendee">
                         {b.attendee_name && b.attendee_name !== 'Guest' ? (
                           <div>
                             <div style={{ fontWeight: 600 }}>{b.attendee_name}</div>
@@ -774,12 +774,12 @@ export default function EventDetailPage() {
                           <span style={{ color: 'var(--text-3)' }}>Guest</span>
                         )}
                       </td>
-                      <td>
+                      <td data-label="Status">
                         <span className={`badge badge-${b.booking_status === 'confirmed' ? 'active' : b.booking_status === 'cancelled' ? 'cancelled' : 'pending'}`}>
                           {b.booking_status.charAt(0).toUpperCase() + b.booking_status.slice(1)}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 600 }}>
+                      <td data-label="Amount" style={{ fontWeight: 600 }}>
                         {fmtMoney(b.subtotal, b.currency)}
                         {b.ticket_quantity > 1 && (
                           <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-3)' }}>
@@ -787,7 +787,7 @@ export default function EventDetailPage() {
                           </div>
                         )}
                       </td>
-                      <td style={{ color: 'var(--text-2)', fontSize: 13 }}>{fmtDateTime(b.created_at)}</td>
+                      <td data-label="Date" style={{ color: 'var(--text-2)', fontSize: 13 }}>{fmtDateTime(b.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -860,7 +860,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div style={{
+    <div className="kv-row" style={{
       display: 'flex', gap: 16, padding: '7px 0',
       borderBottom: '1px solid var(--surface-2)', fontSize: 13.5,
     }}>
@@ -878,7 +878,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 
 function ChipRow({ label, items }: { label: string; items?: string[] }) {
   return (
-    <div style={{
+    <div className="kv-row" style={{
       display: 'flex', gap: 16, padding: '7px 0',
       borderBottom: '1px solid var(--surface-2)', fontSize: 13.5,
     }}>

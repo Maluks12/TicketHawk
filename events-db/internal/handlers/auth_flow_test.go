@@ -146,7 +146,8 @@ func createAuthTestTables(t *testing.T, pool *pgxpool.Pool) {
 			last_name    VARCHAR(100),
 			phone_number VARCHAR(50),
 			created_at   TIMESTAMPTZ DEFAULT NOW(),
-			updated_at   TIMESTAMPTZ DEFAULT NOW()
+			updated_at   TIMESTAMPTZ DEFAULT NOW(),
+			deleted_at   TIMESTAMPTZ
 		)`,
 		// NOTE: used_at (not the old boolean "used") — repository.ResetPassword
 		// checks used_at IS NULL and stamps used_at = NOW() on consumption.
@@ -424,6 +425,73 @@ func TestAuthRegister(t *testing.T) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Login
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Email casing — organiser signup vs consumer login
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The organiser dashboard posted the address exactly as typed while the
+// consumer apps lowercase before login, so "Jane@Example.com" registered on
+// the dashboard could never sign in on TicketHawk.
+
+func TestAuthEmailCaseInsensitive(t *testing.T) {
+	pool := setupAuthTestDB(t)
+	defer pool.Close()
+	cfg := authTestConfig()
+	r := buildAuthRouter(pool, cfg)
+
+	t.Run("register stores the address lowercased and trimmed", func(t *testing.T) {
+		cleanAuthTables(t, pool)
+		w := doRequest(r, http.MethodPost, "/auth/register", validRegisterPayload("Jane.Doe@Example.COM"))
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+		var stored string
+		require.NoError(t, pool.QueryRow(context.Background(),
+			"SELECT email FROM users").Scan(&stored))
+		assert.Equal(t, "jane.doe@example.com", stored)
+	})
+
+	t.Run("mixed-case signup can log in with the lowercased address", func(t *testing.T) {
+		cleanAuthTables(t, pool)
+		payload := validRegisterPayload("Mixed.Case@Example.com")
+		require.Equal(t, http.StatusCreated, doRequest(r, http.MethodPost, "/auth/register", payload).Code)
+
+		for _, email := range []string{"mixed.case@example.com", "Mixed.Case@Example.com", "MIXED.CASE@EXAMPLE.COM"} {
+			w := doRequest(r, http.MethodPost, "/auth/login", map[string]string{
+				"email": email, "password": payload["password"],
+			})
+			assert.Equal(t, http.StatusOK, w.Code, "login as %q: %s", email, w.Body.String())
+		}
+	})
+
+	t.Run("legacy row stored with capitals still logs in lowercased", func(t *testing.T) {
+		cleanAuthTables(t, pool)
+		const password = "LegacyPass1234!"
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+		require.NoError(t, err)
+		_, err = pool.Exec(context.Background(),
+			"INSERT INTO users (email, password, role) VALUES ($1, $2, 'attendee')",
+			"Legacy.User@Example.com", string(hash))
+		require.NoError(t, err)
+
+		w := doRequest(r, http.MethodPost, "/auth/login", map[string]string{
+			"email": "legacy.user@example.com", "password": password,
+		})
+		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("registering a case-variant of an existing address is rejected", func(t *testing.T) {
+		cleanAuthTables(t, pool)
+		_, err := pool.Exec(context.Background(),
+			"INSERT INTO users (email, password, role) VALUES ($1, 'x', 'attendee')",
+			"Taken@Example.com")
+		require.NoError(t, err)
+
+		w := doRequest(r, http.MethodPost, "/auth/register", validRegisterPayload("taken@example.com"))
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "Email already registered")
+	})
+}
 
 func TestAuthLogin(t *testing.T) {
 	pool := setupAuthTestDB(t)

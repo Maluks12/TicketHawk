@@ -433,7 +433,7 @@ function FormCard({
       background: 'var(--surface)', border: '1px solid var(--border)',
       borderRadius: 'var(--r-xl)',
     }}>
-      <header style={{
+      <header className="form-card-head" style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '16px 22px', borderBottom: '1px solid var(--border)',
       }}>
@@ -451,7 +451,7 @@ function FormCard({
           )}
         </div>
       </header>
-      <div style={{ padding: 22 }}>{children}</div>
+      <div className="form-card-body" style={{ padding: 22 }}>{children}</div>
     </section>
   );
 }
@@ -1340,7 +1340,7 @@ export default function CreateEventPage() {
             {/* Was `1fr 300px` capped at 980, which left the inputs ~660px wide
                 on any real monitor. minmax(0,…) on the main column is what stops
                 a long venue name blowing the grid out instead of ellipsing. */}
-            <div style={{
+            <div className="create-layout" style={{
               display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 360px',
               gap: 24, alignItems: 'start',
             }}>
@@ -1371,7 +1371,7 @@ export default function CreateEventPage() {
                   subtitle="All times are South African Standard Time (SAST)">
                   {/* Three across — these are the shortest fields on the page and
                       stacking them wasted the most space. */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Start time <Required /></label>
                       {/* min={nowLocal} — the picker already disables days
@@ -1413,7 +1413,7 @@ export default function CreateEventPage() {
                       asked to make. Every event is local, and offering seven
                       zones invited someone to pick the wrong one and shift
                       their own event by hours. */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 20 }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 20 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Ticket scanning window</label>
                       <Select
@@ -1430,7 +1430,7 @@ export default function CreateEventPage() {
                   </div>
 
                   {scanWindowMode === 'custom' && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+                    <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
                       <div className="field" style={{ marginBottom: 0 }}>
                         <label>Opens before start (minutes)</label>
                         <input type="number" min={0} max={10080} value={scanOpenMin}
@@ -1510,7 +1510,7 @@ export default function CreateEventPage() {
                     </div>
                   )}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.4fr 1fr', gap: 16 }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.4fr 1fr', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Venue name <Required /></label>
                       <input value={venueName} onChange={e => setVenueName(e.target.value)}
@@ -1542,7 +1542,7 @@ export default function CreateEventPage() {
                 <FormCard title="Tickets & pricing" icon={Ticket}
                   subtitle="Category, price and capacity">
                   <LockedFieldset locked={locked('price')} note="Category, price and capacity are locked on a live event — people have already paid against these terms. Ticket tiers below can still be changed.">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Category <Required /></label>
                       <Select
@@ -1630,7 +1630,7 @@ export default function CreateEventPage() {
                     </div>
                   )}
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 18, alignItems: 'end' }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 18, alignItems: 'end' }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Max capacity</label>
                       <input type="number" min="1" value={maxCapacity}
@@ -1748,7 +1748,7 @@ export default function CreateEventPage() {
                 {/* Media */}
                 <FormCard title="Media" icon={ImageSquare}
                   subtitle="Cover art for the feed, banner for the event page">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                     <ImageUploader
                       label="Cover image"
                       imageUrl={coverImageUrl}
@@ -1774,8 +1774,9 @@ export default function CreateEventPage() {
               {/* ── Right rail ────────────────────────────────────────────── */}
               <aside style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-                {/* Event type */}
-                <section style={{
+                {/* Event type — .create-type lifts it above the form on narrow
+                    screens (globals.css), since it decides what the form asks. */}
+                <section className="create-type" style={{
                   background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 'var(--r-xl)', padding: 20,
                 }}>

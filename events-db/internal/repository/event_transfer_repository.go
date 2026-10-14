@@ -96,7 +96,7 @@ func EnsureOrganizerAccount(pool *pgxpool.Pool, email, businessName, placeholder
 	//    to the same email.
 	var role models.UserRole
 	err = tx.QueryRow(ctx, `
-		SELECT id, role FROM users WHERE email = $1 FOR UPDATE
+		SELECT id, role FROM users WHERE LOWER(email) = LOWER($1::text) FOR UPDATE
 	`, email).Scan(&result.UserID, &role)
 
 	switch {

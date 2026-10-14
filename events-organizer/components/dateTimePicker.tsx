@@ -344,6 +344,8 @@ export default function DateTimePicker({
     boxShadow: 'var(--shadow-pop)',
     padding: 12,
     width: 300,
+    // Never wider than a small phone's screen (the calendar grid is fluid).
+    maxWidth: 'calc(100vw - 32px)',
     // A last resort, not the plan: on a short window even the better side may
     // not fit the whole month grid, and a scrollable popover beats a truncated
     // one. maxHeight is 0 until the first measurement, so it is only applied
@@ -666,7 +668,7 @@ function TimeField({
             ...(align === 'left' ? { left: 0 } : { right: 0 }),
             background: 'var(--bg-elevated)', border: '1px solid var(--border-2)',
             borderRadius: 'var(--r-lg)', boxShadow: 'var(--shadow-pop)',
-            padding: 12, width: 244,
+            padding: 12, width: 244, maxWidth: 'calc(100vw - 32px)',
             ...(placement.maxHeight
               ? { maxHeight: placement.maxHeight, overflowY: 'auto' as const }
               : {}),

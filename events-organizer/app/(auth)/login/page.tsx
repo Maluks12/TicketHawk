@@ -16,10 +16,22 @@ import { ORGANISER_LEGAL_DOCS, legalLinkProps, CURRENT_LEGAL_VERSION } from '../
 
 type Mode = 'login' | 'register';
 
+// One canonical form, matching the consumer apps (web-mobile, web-desktop and
+// EventsApp all trim + lowercase before register and login). The dashboard
+// used to send the address exactly as typed, so "Jane@Gmail.com" was stored
+// with capitals and every TicketHawk login — which sends "jane@gmail.com" —
+// came back "Invalid credentials". The backend now matches case-insensitively
+// too; this keeps new rows clean at the source.
+const normEmail = (e: string) => e.trim().toLowerCase();
+
 export default function LoginPage() {
   const router = useRouter();
-  const { login, user, hydrate, isLoading } = useOrgAuth();
+  const { login, logout, user, hydrate, isLoading } = useOrgAuth();
   const [mode, setMode] = useState<Mode>('login');
+  // Set the moment a login/register succeeds and we hand off to the router,
+  // so the "you're already signed in" notice below doesn't flash up for the
+  // account that was just signed in while the next page loads.
+  const [navigating, setNavigating] = useState(false);
 
   // Login
   const [email,       setEmail]       = useState('');
@@ -56,14 +68,25 @@ export default function LoginPage() {
       setMode('register');
     }
   }, []);
+  // A signed-in organiser/admin has nothing to do here — straight to the
+  // dashboard, as before.
+  //
+  // A signed-in account WITHOUT an organiser profile is no longer bounced to
+  // /onboarding. That auto-redirect made /login unreachable: anyone who had
+  // ever created an account in this browser was pinned to "Complete your
+  // profile" with no way back to the login form to use a different account.
+  // They now see the login form, with a notice offering to continue setup or
+  // sign out (below).
   useEffect(() => {
     if (isLoading || !user) return;
     if (user.role === 'organizer' || user.role === 'admin') {
       router.replace('/dashboard');
-    } else {
-      router.replace('/onboarding');
     }
   }, [user, isLoading, router]);
+
+  const pendingProfile =
+    !isLoading && !!user && !navigating && !submitting
+    && user.role !== 'organizer' && user.role !== 'admin';
 
   // ── Login ──────────────────────────────────────────────────────────────────
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
@@ -76,7 +99,11 @@ export default function LoginPage() {
 
     setError(''); setSubmitting(true);
     try {
-      const { role } = await login(email, password);
+      // Switching accounts: end the session already in this browser first, so
+      // its refresh token is revoked server-side rather than orphaned.
+      if (user) await logout();
+      const { role } = await login(normEmail(email), password);
+      setNavigating(true);
       // Organisers/admins go straight to the dashboard. Everyone else goes to
       // onboarding, where basic KYC (name + SA ID) grants the organiser role
       // and unlocks private free events. No more auto-register-organizer.
@@ -112,9 +139,11 @@ export default function LoginPage() {
 
     setError(''); setSubmitting(true);
     try {
+      if (user) await logout();
+      const em = normEmail(regEmail);
       await api.post('/auth/register', {
-        first_name: firstName, last_name: lastName,
-        email: regEmail, password: regPassword,
+        first_name: firstName.trim(), last_name: lastName.trim(),
+        email: em, password: regPassword,
         phone_number: phoneNumber.trim(),
         // Recorded at the moment of consent, with the version accepted. The
         // version is what lets a later material change re-prompt: without it,
@@ -123,7 +152,8 @@ export default function LoginPage() {
         accepted_legal_version: CURRENT_LEGAL_VERSION,
         accepted_legal_at: new Date().toISOString(),
       });
-      await login(regEmail, regPassword);
+      await login(em, regPassword);
+      setNavigating(true);
       // New account is a plain user — onboarding turns them into an organiser.
       router.replace('/onboarding');
     } catch (e: unknown) {
@@ -190,6 +220,40 @@ export default function LoginPage() {
           </div>
           <div style={{ fontSize: 14, color: 'var(--text-2)', marginTop: 4 }}>Organiser Dashboard</div>
         </div>
+
+        {/* ── Signed in, profile not finished ─────────────────────────────
+            Replaces the old hard redirect to /onboarding. The person decides:
+            carry on with this account, or sign out and use another — and the
+            login form stays usable underneath either way (logging in or
+            creating an account from here signs the old session out first). */}
+        {pendingProfile && user && (
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--r-xl)', padding: '14px 16px', marginBottom: 14,
+          }}>
+            <div style={{ fontSize: 13.5, color: 'var(--text)', lineHeight: 1.5 }}>
+              You&apos;re signed in as{' '}
+              <strong style={{ overflowWrap: 'anywhere' }}>{user.email || 'an account'}</strong>
+              , but its organiser profile isn&apos;t complete yet.
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => router.push('/onboarding')} style={{
+                flex: '1 1 140px', padding: '9px 12px', borderRadius: 'var(--r)',
+                background: 'var(--accent)', color: 'var(--on-accent)', border: 'none',
+                fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+                Complete profile
+              </button>
+              <button type="button" onClick={() => { void logout(); }} style={{
+                flex: '1 1 140px', padding: '9px 12px', borderRadius: 'var(--r)',
+                background: 'transparent', color: 'var(--text)', border: '1px solid var(--border-2)',
+                fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Card */}
         <div style={{ background: 'var(--surface)', borderRadius: 'var(--r-xl)', border: '1px solid var(--border)', overflow: 'hidden' }}>

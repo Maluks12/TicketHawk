@@ -234,7 +234,7 @@ export default function FullKycPage() {
           scrolling — and so the 640px column stops wasting two thirds of a
           desktop. alignItems:start keeps each card its natural height instead
           of stretching the shorter one. */}
-      <div style={{
+      <div className="rgrid" style={{
         display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
         gap: 18, alignItems: 'start',
       }}>
@@ -402,7 +402,7 @@ export default function FullKycPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 4 }}>
+            <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 4 }}>
               <div>
                 <label style={lbl}>Account holder name</label>
                 <input className="input" style={inp} value={accountName}

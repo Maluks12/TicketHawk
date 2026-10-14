@@ -561,14 +561,14 @@ export default function AnalyticsPage() {
 
 function ControlGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       <span style={{
         fontSize: 10, fontWeight: 800, letterSpacing: '.1em',
         textTransform: 'uppercase', color: 'var(--text-3)',
       }}>
         {label}
       </span>
-      <div style={{ display: 'flex', gap: 6 }}>{children}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{children}</div>
     </div>
   );
 }

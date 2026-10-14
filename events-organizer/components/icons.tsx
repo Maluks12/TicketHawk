@@ -22,7 +22,8 @@ export type IconName =
   | 'eye' | 'eye-off' | 'download' | 'upload' | 'refresh' | 'share'
   | 'map-pin' | 'clock' | 'tag' | 'image' | 'settings' | 'more-vertical'
   | 'arrow-left' | 'arrow-right' | 'copy' | 'link' | 'mail' | 'lock'
-  | 'bell' | 'filter' | 'layers' | 'activity' | 'pie-chart' | 'send';
+  | 'bell' | 'filter' | 'layers' | 'activity' | 'pie-chart' | 'send'
+  | 'menu';
 
 // Path data only — every glyph shares the wrapper below, so stroke width,
 // caps and the 24-unit viewBox can never drift between icons.
@@ -79,6 +80,7 @@ const PATHS: Record<IconName, ReactElement> = {
   'activity': <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
   'pie-chart': <><path d="M21.21 15.89A10 10 0 118 2.83" /><path d="M22 12A10 10 0 0012 2v10z" /></>,
   'send': <><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" /></>,
+  'menu': <path d="M3 6h18M3 12h18M3 18h18" />,
 };
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {

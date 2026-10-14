@@ -90,6 +90,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // what grants. Bounce them to /onboarding. Admin accounts are exempt — they
   // may legitimately have no organizer profile.
   const [kycChecked, setKycChecked] = useState(false);
+
+  // ── Mobile drawer ────────────────────────────────────────────────────────
+  // Below 768px the sidebar is off-canvas (globals.css) and this opens it.
+  // Desktop never sees the toggle, so the flag is inert there. Closed by every
+  // nav link, the scrim, the close button and Escape.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [navOpen]);
   useEffect(() => {
     if (!user) return;
     if ((user as { role?: string }).role === 'admin') { setKycChecked(true); return; }
@@ -133,9 +145,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             or not yet deployed, nobody is blocked out of their dashboard. */}
         <LegalGate onLogout={async () => { await logout(); router.replace('/login'); }} />
 
-        <div className="app-shell">
+        <div className={`app-shell${navOpen ? ' nav-open' : ''}`}>
+          {/* Mobile only: dims the page behind the open drawer; tap to close. */}
+          <div className="nav-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
+
           {/* ── Sidebar ──────────────────────────────────────────────────── */}
-          <aside className="sidebar">
+          <aside className="sidebar" id="dashboard-nav">
             <div className="sidebar-brand">
               {/* The real mark, not a calendar glyph standing in for one.
                   eslint-disable below: next/image wants width/height and a
@@ -166,6 +181,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <span className="brand-tag">STUDIO</span>
                 </div>
               </div>
+              {/* Mobile only (display:none on desktop). */}
+              <button type="button" className="btn-icon sidebar-close"
+                onClick={() => setNavOpen(false)} aria-label="Close menu">
+                <Icon name="x" size={18} />
+              </button>
             </div>
 
             <nav className="nav-scroll">
@@ -182,6 +202,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className={`nav-item${active ? ' active' : ''}`}
                     aria-current={active ? 'page' : undefined}
                     title={item.label}
+                    onClick={() => setNavOpen(false)}
                   >
                     <span className="nav-icon"><Icon name={item.icon} size={18} /></span>
                     <span className="nav-label">{item.label}</span>
@@ -218,6 +239,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* ── Main column ──────────────────────────────────────────────── */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <header className="topbar">
+              {/* Mobile only — opens the drawer. */}
+              <button type="button" className="btn-icon nav-toggle"
+                onClick={() => setNavOpen(true)}
+                aria-label="Open menu" aria-controls="dashboard-nav" aria-expanded={navOpen}>
+                <Icon name="menu" size={20} />
+              </button>
               <div className="crumb">
                 <Icon name="layers" size={15} />
                 <span>Studio</span>

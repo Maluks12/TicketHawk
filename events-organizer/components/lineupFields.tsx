@@ -207,7 +207,7 @@ export default function LineupFields({
 
               {/* Fields */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="field-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
+                <div className="field-row rgrid" style={{ gridTemplateColumns: '2fr 1fr' }}>
                   <div className="field" style={{ marginBottom: 14 }}>
                     <label>{e.kind === 'team' ? 'Team name' : 'Name'}</label>
                     <input
@@ -226,7 +226,7 @@ export default function LineupFields({
                 </div>
 
                 <div
-                  className="field-row"
+                  className="field-row rgrid"
                   style={{ gridTemplateColumns: e.kind === 'team' ? '1fr' : '1fr 1fr 130px' }}
                 >
                   <div className="field" style={{ marginBottom: 14 }}>

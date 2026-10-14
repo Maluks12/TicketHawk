@@ -14,13 +14,25 @@ import { submitBasicKyc, looksLikeSaId, getKycStatus } from '../../lib/kyc';
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { user, hydrate, isLoading } = useOrgAuth();
+  const { user, hydrate, isLoading, logout } = useOrgAuth();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [idNumber, setIdNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
+
+  // Back = leave this account. Signs the session out (revoking its refresh
+  // token server-side) and returns to the login form, so someone who landed
+  // here on the wrong account — or just wants to finish later — is never
+  // stuck on this screen. The profile can be completed any time by logging
+  // back in.
+  async function goBack() {
+    if (leaving) return;
+    setLeaving(true);
+    try { await logout(); } finally { router.replace('/login'); }
+  }
 
   useEffect(() => { hydrate(); }, [hydrate]);
   useEffect(() => {
@@ -80,8 +92,24 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px' }}>
       <div style={{ width: '100%', maxWidth: 460 }}>
+        {/* Back — signs out and returns to the login form. */}
+        <button type="button" onClick={goBack} disabled={leaving}
+          aria-label="Back to log in"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: 'none', border: 'none', padding: '6px 2px', marginBottom: 12,
+            color: 'var(--text-2)', fontSize: 13.5, fontWeight: 600,
+            cursor: leaving ? 'wait' : 'pointer', fontFamily: 'inherit',
+          }}>
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12.5 15l-5-5 5-5" />
+          </svg>
+          {leaving ? 'Signing out…' : 'Back'}
+        </button>
+
         {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 20 }}>
           {/* Same bug as the reset-password buttons, in icon form: this tile is
@@ -106,7 +134,7 @@ export default function OnboardingPage() {
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: '0 0 6px' }}>Complete your profile</h1>
           <p style={{ fontSize: 13.5, color: 'var(--text-2)', margin: '0 0 18px', lineHeight: 1.5 }}>
             To create and publish events we need to know who you are. This quick step
-            lets you create <strong>private free events</strong> right away — it&apos;s
+            lets you create <strong>private free events</strong>{' '}right away — it&apos;s
             instant and free. Paid and public events need full verification, which you
             can do later.
           </p>
@@ -154,6 +182,18 @@ export default function OnboardingPage() {
             and public listings in the TicketHawk feed.
           </p>
         </div>
+
+        {/* Which account this is, and the way out of it. */}
+        <p style={{ fontSize: 12.5, color: 'var(--text-2)', textAlign: 'center', margin: '14px 0 0', lineHeight: 1.6 }}>
+          Signed in as <strong style={{ color: 'var(--text)', overflowWrap: 'anywhere' }}>{user.email || 'this account'}</strong>
+          {' · '}
+          <button type="button" onClick={goBack} disabled={leaving} style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+            color: 'var(--mark)', fontWeight: 700, fontSize: 12.5, fontFamily: 'inherit',
+          }}>
+            Use a different account
+          </button>
+        </p>
       </div>
     </div>
   );

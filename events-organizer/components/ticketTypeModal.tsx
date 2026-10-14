@@ -301,7 +301,7 @@ function TicketTypeForm({
           </div>
 
           {/* Price / capacity / order */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+          <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
             <div className="field" style={{ marginBottom: 0 }}>
               <label htmlFor="tt-price">Price</label>
               <div style={{ position: 'relative' }}>

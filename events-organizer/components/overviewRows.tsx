@@ -111,7 +111,7 @@ function SummaryRow({
       flexWrap: 'wrap',
       overflow: 'hidden',
     }}>
-      <div style={{
+      <div className="ov-head" style={{
         padding: '16px 20px',
         borderRight: '1px solid var(--border)',
         minWidth: 230, flex: '0 1 280px',
@@ -139,7 +139,7 @@ function SummaryRow({
       {/* Same hairline-divided treatment as the analytics metric row, so the
           Overview and Analytics read as one system. */}
       {chips.map((c) => (
-        <div key={c.label} style={{
+        <div key={c.label} className="ov-chip" style={{
           padding: '16px 18px',
           borderRight: '1px solid var(--border)',
           flex: '1 1 110px', minWidth: 108,
@@ -164,7 +164,7 @@ function SummaryRow({
 
       <Link
         href={href}
-        className="btn btn-sm"
+        className="btn btn-sm ov-link"
         style={{
           alignSelf: 'center', margin: '0 16px',
           textDecoration: 'none', flexShrink: 0,
