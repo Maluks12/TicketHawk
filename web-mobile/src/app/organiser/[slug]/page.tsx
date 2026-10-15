@@ -10,6 +10,7 @@ import {
   getOrganizer, getOrganizerEvents, toggleOrganizerFollow,
   type Event, type PublicOrganizer, type OrganizerLink,
 } from '@/lib/api';
+import { SocialIcon, SOCIAL_LABEL } from '@/components/socialIcon';
 
 /**
  * Public organiser profile — mobile-web variant of the desktop page.
@@ -35,12 +36,6 @@ function formatTime(iso?: string | null) {
   if (!iso) return '';
   return new Date(iso).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
 }
-
-const SOCIAL_LABEL: Record<string, string> = {
-  instagram: 'Instagram', x: 'X', facebook: 'Facebook', tiktok: 'TikTok',
-  youtube: 'YouTube', linkedin: 'LinkedIn', whatsapp: 'WhatsApp',
-  spotify: 'Spotify', website: 'Website',
-};
 
 // Same card as the category page, so an organiser's events look identical to
 // the same events anywhere else on the site.
@@ -186,7 +181,9 @@ export default function OrganiserPage() {
     const bone = 'rgba(255,255,255,0.06)';
     return (
       <div className="min-h-screen" style={{ backgroundColor: colors.background }}>
-        <div className="w-full animate-pulse" style={{ height: 150, backgroundColor: bone }} />
+        <div className="mx-auto" style={{ maxWidth: 640 }}>
+          <div className="w-full animate-pulse" style={{ aspectRatio: '3 / 1', backgroundColor: bone }} />
+        </div>
         <div className="mx-auto px-5" style={{ maxWidth: 640 }}>
           <div className="flex flex-col items-center" style={{ marginTop: -44 }}>
             <div className="rounded-2xl animate-pulse" style={{ width: 88, height: 88, backgroundColor: bone, border: `3px solid ${colors.background}` }} />
@@ -222,23 +219,39 @@ export default function OrganiserPage() {
   const links: OrganizerLink[] = [...(organiser.links ?? [])].sort((a, b) => a.sort_order - b.sort_order);
   const border = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
   const subtle = isDark ? '#1c1c1c' : '#f0f0f4';
+  const label  = (p: string) => SOCIAL_LABEL[p as keyof typeof SOCIAL_LABEL] ?? p;
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: colors.background }}>
-      {/* Cover */}
-      <div className="relative w-full" style={{ height: 150, backgroundColor: subtle }}>
+      {/* Cover.
+          Rendered at the same 3:1 the dashboard crops to (CROP_PROFILE_COVER
+          in events-organizer/app/(dashboard)/organiser-page/page.tsx) instead
+          of a fixed 150px band, so the organiser's crop is shown whole rather
+          than having its top and bottom cut off. The fade is only over the
+          bottom quarter, where the logo overlaps it. */}
+      <div
+        className="relative w-full mx-auto"
+        style={
+          organiser.cover_image_url
+            ? { maxWidth: 640, aspectRatio: '3 / 1', backgroundColor: subtle }
+            : { maxWidth: 640, height: 120, backgroundColor: subtle }
+        }
+      >
         {organiser.cover_image_url && (
           <img src={organiser.cover_image_url} alt="" className="absolute inset-0 w-full h-full object-cover" />
         )}
         <div
           className="absolute inset-0"
-          style={{ background: `linear-gradient(to bottom, rgba(0,0,0,0.15), ${colors.background})` }}
+          style={{ background: `linear-gradient(to bottom, transparent 70%, ${colors.background})` }}
         />
       </div>
 
       <div className="mx-auto px-5" style={{ maxWidth: 640 }}>
-        {/* Identity — pulled up over the cover */}
-        <div className="flex flex-col items-center text-center" style={{ marginTop: -44 }}>
+        {/* Identity — pulled up over the cover. `relative z-10` is what puts
+            it on top: the cover above is a positioned element and this block
+            was not, so the cover (and its fade) painted OVER the top half of
+            the logo — only the bottom of it was visible. */}
+        <div className="relative z-10 flex flex-col items-center text-center" style={{ marginTop: -44 }}>
           {/* The organiser's own picture. Omitted entirely when they have not
               set one, rather than filled with a placeholder glyph — the slot is
               for a photo, and an icon is not a photo. */}
@@ -247,7 +260,9 @@ export default function OrganiserPage() {
               className="rounded-2xl overflow-hidden"
               style={{ width: 88, height: 88, backgroundColor: colors.cardBg, border: `3px solid ${colors.background}` }}
             >
-              <img src={organiser.logo_url} alt="" className="w-full h-full object-cover" />
+              {/* contain, not cover: logos are uploaded without a crop, so
+                  a wide wordmark in a square box lost its sides. */}
+              <img src={organiser.logo_url} alt="" className="w-full h-full object-contain" />
             </div>
           )}
 
@@ -286,18 +301,22 @@ export default function OrganiserPage() {
           </button>
 
           {links.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
+            // Bare marks, matching the app (EventsApp/app/organiser/[slug].tsx)
+            // rather than the grey text chips this used to be. The padding keeps
+            // the click/tap target at ~44px around the glyph.
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-5">
               {links.map(l => (
                 <a
                   key={l.platform}
                   href={l.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  aria-label={`${organiser.business_name} on ${SOCIAL_LABEL[l.platform] ?? l.platform}`}
-                  className="rounded-lg px-3.5 py-2 text-[12px] font-semibold transition-colors duration-150"
-                  style={{ backgroundColor: subtle, color: colors.text, textDecoration: 'none' }}
+                  aria-label={`${organiser.business_name} on ${label(l.platform)}`}
+                  title={label(l.platform)}
+                  className="flex items-center justify-center rounded-lg p-2 opacity-90 transition-opacity duration-150 hover:opacity-60"
+                  style={{ textDecoration: 'none' }}
                 >
-                  {SOCIAL_LABEL[l.platform] ?? l.platform}
+                  <SocialIcon platform={l.platform} size={28} color={colors.text} />
                 </a>
               ))}
             </div>
