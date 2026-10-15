@@ -73,9 +73,12 @@ function availabilityOf(t: TicketTier): { available: number | null; soldOut: boo
   return { available: av, soldOut: av <= 0 };
 }
 
+// Colours come from the .input class (globals.css). This object used to carry
+// only layout, so in the dark theme every tier input rendered as the
+// browser's default solid black box.
 const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '7px 9px', border: '1px solid var(--border)',
-  borderRadius: 6, fontSize: 13, fontFamily: 'inherit',
+  width: '100%', padding: '7px 9px',
+  fontSize: 13, fontFamily: 'inherit',
   // Without border-box, width 100% plus padding and border made every input
   // 20px wider than its grid column.
   boxSizing: 'border-box',
@@ -257,26 +260,26 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                       <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: 10 }}>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Name</label>
-                          <input style={inputStyle} value={String(draft.name ?? '')}
+                          <input className="input" style={inputStyle} value={String(draft.name ?? '')}
                             onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
                         </div>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Price</label>
-                          <input style={inputStyle} type="number" min={0} value={String(draft.price ?? '')}
+                          <input className="input" style={inputStyle} type="number" min={0} value={String(draft.price ?? '')}
                             onChange={(e) => setDraft({ ...draft, price: Number(e.target.value) })} />
                         </div>
                         <div>
                           <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>
                             Capacity <span style={{ fontWeight: 400 }}>(blank = unlimited)</span>
                           </label>
-                          <input style={inputStyle} type="number" min={t.tickets_sold + t.reserved_count}
+                          <input className="input" style={inputStyle} type="number" min={t.tickets_sold + t.reserved_count}
                             value={draft.capacity == null ? '' : String(draft.capacity)}
                             onChange={(e) => setDraft({ ...draft, capacity: e.target.value === '' ? null : Number(e.target.value) })} />
                         </div>
                       </div>
                       <div style={{ marginBottom: 10 }}>
                         <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Description</label>
-                        <input style={inputStyle} value={String(draft.description ?? '')}
+                        <input className="input" style={inputStyle} value={String(draft.description ?? '')}
                           placeholder="Shown to buyers under the tier name"
                           onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
                       </div>
@@ -361,27 +364,27 @@ export default function TicketTiersPanel({ eventId, tiers, currency = 'ZAR', onC
                 options={NAME_OPTIONS}
               />
               {newPreset === CUSTOM && (
-                <input style={{ ...inputStyle, marginTop: 6 }} value={newTier.name}
+                <input className="input" style={{ ...inputStyle, marginTop: 6 }} value={newTier.name}
                   placeholder="e.g. Sunrise Session" maxLength={60} autoFocus
                   onChange={(e) => setNewTier({ ...newTier, name: e.target.value })} />
               )}
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Price</label>
-              <input style={inputStyle} type="number" min={0} value={newTier.price} placeholder="0"
+              <input className="input" style={inputStyle} type="number" min={0} value={newTier.price} placeholder="0"
                 onChange={(e) => setNewTier({ ...newTier, price: e.target.value })} />
             </div>
             <div>
               <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>
                 Capacity <span style={{ fontWeight: 400 }}>(blank = unlimited)</span>
               </label>
-              <input style={inputStyle} type="number" min={1} value={newTier.capacity}
+              <input className="input" style={inputStyle} type="number" min={1} value={newTier.capacity}
                 onChange={(e) => setNewTier({ ...newTier, capacity: e.target.value })} />
             </div>
           </div>
           <div style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>Description</label>
-            <input style={inputStyle} value={newTier.description}
+            <input className="input" style={inputStyle} value={newTier.description}
               placeholder="Shown to buyers under the tier name"
               onChange={(e) => setNewTier({ ...newTier, description: e.target.value })} />
           </div>

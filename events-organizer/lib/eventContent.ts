@@ -1,5 +1,5 @@
 // ── Event content: information block, line-up, preview ────────────────────────
-import { api } from './api';
+import { api, authFetch } from './api';
 
 // ── Information ──────────────────────────────────────────────────────────────
 
@@ -150,11 +150,8 @@ export async function uploadLineupImage(file: File): Promise<string> {
   const fd = new FormData();
   fd.append('image', file);
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
-  const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-
-  const res = await fetch(`${baseURL}/organiser/upload`, { method: 'POST', headers, body: fd });
+  // authFetch = fetch + the interceptor's 401 → refresh → retry.
+  const res = await authFetch('/organiser/upload', { method: 'POST', body: fd });
   const json = await res.json().catch(() => null) as { image_url?: string; error?: string } | null;
 
   if (!res.ok) throw new Error(json?.error ?? `Upload failed (HTTP ${res.status})`);

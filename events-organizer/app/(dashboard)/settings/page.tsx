@@ -1,8 +1,9 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import { Warning, Info } from '@phosphor-icons/react';
-import { api } from '../../../lib/api';
+import { api, clearSession } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
+import { fmtMoney } from '../../../lib/utils';
 
 /**
  * Account settings.
@@ -218,6 +219,227 @@ export default function AccountSettingsPage() {
           </table>
         </div>
       </section>
+
+      <DeleteAccountSection />
     </div>
+  );
+}
+
+// ── Delete account ────────────────────────────────────────────────────────────
+//
+// Uses the same self-service endpoints as the TicketHawk app and web-mobile
+// (handlers/account_deletion_handler.go):
+//
+//   GET    /user/me/deletion-preview  → can_delete, organiser_hold, counts
+//   DELETE /user/me                   → { password, acknowledge_forfeit, reason }
+//
+// The backend owns every rule. It refuses while the organiser has live events
+// or unsettled payouts (409 organiser_hold), asks for a second confirmation
+// when the account holds upcoming tickets (409 tickets_will_be_lost), and
+// re-checks the password (401 password_incorrect). This screen only explains
+// those answers — it never decides deletability itself, so the dashboard and
+// the apps cannot disagree about whether an account can go.
+//
+// It is ONE TicketHawk account: deleting it here also removes the attendee
+// side (tickets, app sign-in), which is why the copy says so plainly.
+
+interface DeletionPreview {
+  can_delete: boolean;
+  organiser_hold: boolean;
+  upcoming_tickets: number;
+  upcoming_value: number;
+  live_events: number;
+  unsettled_payouts: number;
+}
+
+type ApiErr = {
+  response?: {
+    status?: number;
+    data?: {
+      error?: string; code?: string;
+      upcoming_tickets?: number; upcoming_value?: number;
+      live_events?: number; unsettled_payouts?: number;
+    };
+  };
+};
+
+function DeleteAccountSection() {
+  const [preview, setPreview] = useState<DeletionPreview | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const [password, setPassword] = useState('');
+  const [reason, setReason] = useState('');
+  const [ackTickets, setAckTickets] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPreview = useCallback(async () => {
+    try {
+      const { data } = await api.get<DeletionPreview>('/user/me/deletion-preview');
+      setPreview(data);
+      setPreviewFailed(false);
+    } catch {
+      setPreviewFailed(true);
+    }
+  }, []);
+
+  useEffect(() => { loadPreview(); }, [loadPreview]);
+
+  function openDialog() {
+    setPassword(''); setReason(''); setAckTickets(false); setError(null);
+    setOpen(true);
+  }
+
+  const hasTickets = (preview?.upcoming_tickets ?? 0) > 0;
+  const canSubmit = password.length > 0 && (!hasTickets || ackTickets) && !busy;
+
+  async function confirmDelete() {
+    if (!canSubmit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.delete('/user/me', {
+        data: {
+          password,
+          acknowledge_forfeit: ackTickets,
+          reason: reason.trim() || undefined,
+        },
+      });
+      // The server has already revoked every refresh token. Drop the local
+      // session and hard-navigate so no in-memory state survives the account.
+      clearSession();
+      window.location.replace('/login');
+    } catch (e: unknown) {
+      const res = (e as ApiErr).response;
+      const body = res?.data ?? {};
+      if (res?.status === 409 && body.code === 'tickets_will_be_lost') {
+        // Tickets appeared since the preview loaded — refresh it so the
+        // acknowledgement checkbox shows, and ask again.
+        setPreview(p => p ? {
+          ...p,
+          upcoming_tickets: body.upcoming_tickets ?? p.upcoming_tickets,
+          upcoming_value: body.upcoming_value ?? p.upcoming_value,
+        } : p);
+        setAckTickets(false);
+        setError('You still have tickets to upcoming events. Tick the box below to confirm you understand they will be lost.');
+      } else if (res?.status === 409 && body.code === 'organiser_hold') {
+        setOpen(false);
+        loadPreview();
+      } else if (body.code === 'reauth_social_required') {
+        setError('This account signs in with Google or Apple. Delete it from the TicketHawk app under Profile → Delete account.');
+      } else {
+        setError(body.error ?? 'Could not delete your account. Try again.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card" style={{ marginTop: 18, borderColor: 'var(--danger-border)' }}>
+      <div className="card-header">
+        <div className="card-title" style={{ color: 'var(--danger-fg)' }}>Delete account</div>
+      </div>
+      <div className="card-body">
+        <p style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 14 }}>
+          Permanently deletes your TicketHawk account — this organiser dashboard
+          <strong> and </strong>your sign-in on the TicketHawk app and website,
+          including any tickets you hold. Your personal details are erased;
+          financial records (bookings, payments, payouts) are kept but no
+          longer linked to you. This cannot be undone.
+        </p>
+
+        {previewFailed && (
+          <div className="alert alert-warning">
+            <span>Could not check whether your account can be deleted right now. Refresh to try again.</span>
+          </div>
+        )}
+
+        {preview?.organiser_hold && (
+          <div className="alert alert-warning">
+            <Warning size={16} weight="fill" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong>Not yet — your organiser account is still active.</strong>{' '}
+              {preview.live_events > 0 && (
+                <>You have {preview.live_events} live {preview.live_events === 1 ? 'event' : 'events'}; cancel or complete {preview.live_events === 1 ? 'it' : 'them'}. </>
+              )}
+              {preview.unsettled_payouts > 0 && (
+                <>{preview.unsettled_payouts} {preview.unsettled_payouts === 1 ? 'payout is' : 'payouts are'} still settling; wait for {preview.unsettled_payouts === 1 ? 'it' : 'them'} to clear. </>
+              )}
+              Buyers hold tickets to your events and money may still be owed, so
+              the account has to stay until those are finished.
+            </div>
+          </div>
+        )}
+
+        <button type="button" className="btn btn-danger"
+          disabled={!preview || preview.organiser_hold}
+          onClick={openDialog}>
+          Delete my account
+        </button>
+      </div>
+
+      {open && preview && (
+        <div className="modal-overlay" onMouseDown={(e) => {
+          if (e.target === e.currentTarget && !busy) setOpen(false);
+        }}>
+          <div className="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="del-title">
+            <div className="modal-header">
+              <div className="modal-title" id="del-title">Delete your account?</div>
+            </div>
+            <div className="modal-body">
+              <div className="alert alert-danger" style={{ fontSize: 13 }}>
+                <span>
+                  This removes your organiser dashboard and your TicketHawk app
+                  sign-in for good. It cannot be undone.
+                </span>
+              </div>
+
+              {hasTickets && (
+                <label className="check-row" style={{ alignItems: 'flex-start', marginBottom: 16 }}>
+                  <input type="checkbox" checked={ackTickets}
+                    onChange={(e) => setAckTickets(e.target.checked)} style={{ marginTop: 2 }} />
+                  <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+                    I understand my {preview.upcoming_tickets} upcoming{' '}
+                    {preview.upcoming_tickets === 1 ? 'ticket' : 'tickets'}
+                    {preview.upcoming_value > 0 ? ` (worth ${fmtMoney(preview.upcoming_value)})` : ''}{' '}
+                    will be lost.
+                  </span>
+                </label>
+              )}
+
+              <div className="field">
+                <label htmlFor="del-password">Your password</label>
+                <input id="del-password" type="password" autoComplete="current-password"
+                  value={password} onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') confirmDelete(); }} />
+                <div className="field-hint">Confirms it is really you.</div>
+              </div>
+
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="del-reason">Why are you leaving? <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional)</span></label>
+                <textarea id="del-reason" rows={2} maxLength={500}
+                  value={reason} onChange={(e) => setReason(e.target.value)} />
+              </div>
+
+              {error && (
+                <div className="alert alert-danger" style={{ marginTop: 14, marginBottom: 0, fontSize: 13 }}>
+                  <span>{error}</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" disabled={busy} onClick={() => setOpen(false)}>
+                Keep my account
+              </button>
+              <button type="button" className="btn btn-danger" disabled={!canSubmit} onClick={confirmDelete}>
+                {busy ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

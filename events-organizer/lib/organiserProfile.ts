@@ -8,7 +8,7 @@
 // name, business email, payout state. The two are genuinely different things,
 // which is why they are different paths rather than one endpoint with a mode
 // flag. Registering both on the same path panics gin at startup.
-import { api } from './api';
+import { api, authFetch } from './api';
 
 export type LinkPlatform =
   | 'instagram' | 'x' | 'facebook' | 'tiktok'
@@ -125,12 +125,9 @@ async function uploadProfileImage(
   const fd = new FormData();
   fd.append('image', file);
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
-  const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-
-  const res = await fetch(`${baseURL}/organiser/public-profile/media/${kind}`, {
-    method: 'POST', headers, body: fd,
+  // authFetch = fetch + the interceptor's 401 → refresh → retry.
+  const res = await authFetch(`/organiser/public-profile/media/${kind}`, {
+    method: 'POST', body: fd,
   });
   const json = await res.json().catch(() => null) as Record<string, unknown> | null;
 

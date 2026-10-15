@@ -108,6 +108,7 @@ export default function MaxPerAttendeeRow({ eventId, status, value, onChanged }:
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input
+                className="input"
                 type="number"
                 min={MIN}
                 max={MAX}
@@ -120,10 +121,7 @@ export default function MaxPerAttendeeRow({ eventId, status, value, onChanged }:
                   if (e.key === 'Enter') save();
                   if (e.key === 'Escape') setEditing(false);
                 }}
-                style={{
-                  width: 110, padding: '7px 9px', border: '1px solid var(--border)',
-                  borderRadius: 6, fontSize: 13, fontFamily: 'inherit',
-                }}
+                style={{ width: 110, flexShrink: 0, padding: '7px 9px', fontSize: 13 }}
               />
               <button className="btn btn-primary btn-sm" onClick={save} disabled={busy}>
                 {busy ? 'Saving…' : live ? 'Send for review' : 'Save'}

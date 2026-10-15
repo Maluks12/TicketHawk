@@ -648,7 +648,6 @@ export default function EventDetailPage() {
                 value={ev.max_tickets_per_user}
                 onChanged={fetchStats}
               />
-              <Row label="Waitlist"          value={ev.allow_waitlist ? 'Enabled' : 'Disabled'} />
 
               {/* Was a read-only table. The backend has always exposed full tier
                   CRUD; the dashboard just never called it, so a typo’d price or a

@@ -61,8 +61,10 @@ const LOW_RES_W = 800;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
-/** Where the image sits in the frame: scale plus a top-left offset in stage px. */
-interface View { scale: number; x: number; y: number }
+/** Where the image sits in the frame: scale plus a top-left offset in stage px.
+ *  `sw` records the stage width the offsets were measured against, so a view
+ *  taken at one stage size is never applied to another (see `cur`). */
+interface View { scale: number; x: number; y: number; sw?: number }
 
 /** Swap the extension on a filename, keeping the stem. */
 function renameTo(name: string, ext: string): string {
@@ -120,6 +122,27 @@ export default function ImageCropper({
   const [view, setView] = useState<View | null>(null);
 
   const stageRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Available width ───────────────────────────────────────────────────────
+  // The stage used to be a fixed 520px wide, which on a phone ran straight off
+  // the right edge of the modal and the screen — the crop frame, the image and
+  // the grid all overflowed. It now takes the smaller of 520px and the width
+  // the modal body actually has, measured by a ResizeObserver (state is set
+  // from the observer callback, not synchronously in the effect). The initial
+  // guess from the window width means the first paint is already close.
+  const fitRef = useRef<HTMLDivElement | null>(null);
+  const [availW, setAvailW] = useState<number>(() =>
+    typeof window === 'undefined' ? STAGE_MAX_W : Math.max(200, window.innerWidth - 64));
+  useEffect(() => {
+    const el = fitRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = Math.floor(entry.contentRect.width);
+      if (w > 0) setAvailW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [failed]);
   const dragRef = useRef<{ px: number; py: number; ox: number; oy: number } | null>(null);
 
   const img = loaded?.img ?? null;
@@ -132,13 +155,17 @@ export default function ImageCropper({
   // The URL is created INSIDE the effect and revoked by its cleanup, so a
   // StrictMode double-invoke in development gets a fresh URL on the second run
   // rather than a revoked one.
+  // `alive` guards the callbacks: revoking the URL in cleanup makes the
+  // abandoned <img> fire onerror, which used to flip the modal to "That image
+  // could not be read" whenever the effect re-ran (StrictMode in development).
   useEffect(() => {
+    let alive = true;
     const url = URL.createObjectURL(file);
     const el = new Image();
-    el.onload = () => setLoaded({ url, img: el });
-    el.onerror = () => setFailed(true);
+    el.onload = () => { if (alive) setLoaded({ url, img: el }); };
+    el.onerror = () => { if (alive) setFailed(true); };
     el.src = url;
-    return () => URL.revokeObjectURL(url);
+    return () => { alive = false; URL.revokeObjectURL(url); };
   }, [file]);
 
   useEffect(() => {
@@ -149,11 +176,15 @@ export default function ImageCropper({
 
   // ── Stage geometry ────────────────────────────────────────────────────────
   const stage = useMemo(() => {
-    if (aspect >= STAGE_MAX_W / STAGE_MAX_H) {
-      return { w: STAGE_MAX_W, h: Math.round(STAGE_MAX_W / aspect) };
+    const maxW = Math.min(STAGE_MAX_W, availW);
+    // Height scales down with width so the frame keeps its proportions on a
+    // narrow screen instead of getting taller than it is wide.
+    const maxH = Math.round(STAGE_MAX_H * (maxW / STAGE_MAX_W));
+    if (aspect >= maxW / maxH) {
+      return { w: maxW, h: Math.round(maxW / aspect) };
     }
-    return { w: Math.round(STAGE_MAX_H * aspect), h: STAGE_MAX_H };
-  }, [aspect]);
+    return { w: Math.round(maxH * aspect), h: maxH };
+  }, [aspect, availW]);
 
   // The opening view: smallest scale that still fills the frame, centred. Also
   // the floor every other scale is clamped against, which is what makes gaps at
@@ -169,7 +200,10 @@ export default function ImageCropper({
     };
   }, [img, stage]);
 
-  const cur = view ?? fit;
+  // A view measured against a different stage width (the phone rotated, the
+  // window resized) is dropped in favour of the fresh fit rather than applied
+  // with offsets that no longer line up.
+  const cur = view && view.sw === stage.w ? view : fit;
 
   const clampView = useCallback((v: View): View => {
     if (!img) return v;
@@ -179,6 +213,7 @@ export default function ImageCropper({
       scale: v.scale,
       x: clamp(v.x, stage.w - w, 0),
       y: clamp(v.y, stage.h - h, 0),
+      sw: stage.w,
     };
   }, [img, stage]);
 
@@ -328,7 +363,7 @@ export default function ImageCropper({
               <div>That image could not be read. Try a different file, or a JPEG or PNG export of it.</div>
             </div>
           ) : (
-            <>
+            <div ref={fitRef} style={{ width: '100%' }}>
               <div
                 ref={stageRef}
                 onPointerDown={onPointerDown}
@@ -437,7 +472,7 @@ export default function ImageCropper({
                         : `Exports at ${outW} x ${outH}`}
                 </span>
               </div>
-            </>
+            </div>
           )}
         </div>
 

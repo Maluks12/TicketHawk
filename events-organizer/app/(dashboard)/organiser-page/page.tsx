@@ -482,15 +482,16 @@ export default function OrganiserPageEditor() {
 
               <div style={{ display: 'grid', gap: 10 }}>
                 {links.map((l, i) => (
-                  <div key={`${l.platform}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <div style={{
+                  <div key={`${l.platform}-${i}`} className="link-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div className="link-row-label" style={{
                       width: 104, flexShrink: 0, fontSize: 12.5, fontWeight: 600,
                       color: 'var(--text-2)',
                     }}>
                       {PLATFORM_LABEL[l.platform] ?? l.platform}
                     </div>
                     <input
-                      style={{ flex: 1 }}
+                      className="input"
+                      style={{ flex: 1, minWidth: 0, padding: '7px 10px', fontSize: 13 }}
                       value={l.url}
                       placeholder={PLATFORM_PLACEHOLDER[l.platform]}
                       onChange={e => setLinks(ls => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))}

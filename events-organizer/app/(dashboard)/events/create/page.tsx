@@ -8,7 +8,7 @@ import {
   FloppyDisk, NotePencil, LockKey, UploadSimple, Info, SealCheck, EyeSlash, Warning,
   type Icon as PhosphorIcon,
 } from '@phosphor-icons/react';
-import { api } from '../../../../lib/api';
+import { api, authFetch } from '../../../../lib/api';
 import { useToast } from '../../../../lib/toast';
 import { useConfirm } from '../../../../lib/confirm';
 import { validateRequired, validateMinLength, firstError } from '../../../../lib/validation';
@@ -70,7 +70,9 @@ interface EventDraft {
   // silently turning a "Public event" into a private one on restore.
   eventType?: 'private_free' | 'private_paid' | 'public';
   isFree: boolean; price: string; currency: string;
-  maxCapacity: string; maxTicketsPerUser: string; allowWaitlist: boolean;
+  // allowWaitlist removed with the waitlist option. Older saved drafts may
+  // still carry the key; restoreDraft simply never reads it.
+  maxCapacity: string; maxTicketsPerUser: string;
   venueName: string; address: string; city: string;
   // Google Places selection saved with the draft, so restoring a draft keeps
   // the venue pinned rather than silently falling back to a text search.
@@ -591,7 +593,6 @@ export default function CreateEventPage() {
   const [currency,            setCurrency]            = useState('ZAR');
   const [maxCapacity,         setMaxCapacity]         = useState('');
   const [maxTicketsPerUser,   setMaxTicketsPerUser]   = useState('');
-  const [allowWaitlist,       setAllowWaitlist]       = useState(false);
   const [venueName,           setVenueName]           = useState('');
   const [address,             setAddress]             = useState('');
   const [city,                setCity]                = useState('');
@@ -777,7 +778,6 @@ export default function CreateEventPage() {
         setCurrency(ev.currency ?? 'ZAR');
         setMaxCapacity(ev.max_capacity != null ? String(ev.max_capacity) : '');
         setMaxTicketsPerUser(ev.max_tickets_per_user != null ? String(ev.max_tickets_per_user) : '');
-        setAllowWaitlist(!!ev.allow_waitlist);
         setVenueName(ev.venue_name ?? '');
         setAddress(ev.address ?? '');
         setCity(ev.city ?? '');
@@ -835,7 +835,7 @@ export default function CreateEventPage() {
         savedAt: new Date().toISOString(),
         title, description, categoryId, timezone, startTime, endTime, expiresAt,
         eventType,
-        isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
+        isFree, price, currency, maxCapacity, maxTicketsPerUser,
         venueName, address, city, placeId, latitude, longitude, placeLabel, pinnedAt, venueType, tags, performers, teams, ticketTypes,
         coverImageUrl, bannerImageUrl,
         // Included so a refresh mid-form does not lose a line-up somebody has
@@ -851,7 +851,7 @@ export default function CreateEventPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, categoryId, timezone, startTime, endTime, expiresAt,
       eventType,
-      isFree, price, currency, maxCapacity, maxTicketsPerUser, allowWaitlist,
+      isFree, price, currency, maxCapacity, maxTicketsPerUser,
       venueName, address, city, placeId, latitude, longitude, placeLabel, pinnedAt, venueType, tags, performers, teams, ticketTypes,
       coverImageUrl, bannerImageUrl,
       lineup, infoChosen, infoValues, submitting]);
@@ -883,7 +883,6 @@ export default function CreateEventPage() {
     setCurrency(d.currency ?? 'ZAR');
     setMaxCapacity(d.maxCapacity ?? '');
     setMaxTicketsPerUser(d.maxTicketsPerUser ?? '');
-    setAllowWaitlist(d.allowWaitlist ?? false);
     setVenueName(d.venueName ?? '');
     setAddress(d.address ?? '');
     setCity(d.city ?? '');
@@ -925,10 +924,10 @@ export default function CreateEventPage() {
     try {
       const fd    = new FormData();
       fd.append('image', file);
-      const token   = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
-      const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      const res  = await fetch(`${baseURL}/organiser/upload`, { method: 'POST', headers, body: fd });
+      // authFetch refreshes an expired access token and retries once — the
+      // plain fetch here did not, which is where "invalid or expired token"
+      // came from after ~15 minutes on this form.
+      const res  = await authFetch('/organiser/upload', { method: 'POST', body: fd });
       const json = await res.json().catch(() => null) as { image_url?: string; error?: string } | null;
       if (!res.ok) throw new Error(json?.error ?? `Upload failed (HTTP ${res.status})`);
       const url = json?.image_url ?? null;
@@ -1024,7 +1023,11 @@ export default function CreateEventPage() {
         expires_at:   new Date(expiresAt).toISOString(),
         price:        isFree ? 0 : parseFloat(effectivePrice) || 0,
         currency,
-        allow_waitlist:       allowWaitlist,
+        // allow_waitlist is deliberately NOT sent any more — the option is
+        // gone from the dashboard. Omitted on create, the create DTO's plain
+        // bool reads false; omitted on edit, the update DTO's *bool is nil
+        // and the stored value is left alone, so editing an event never files
+        // a spurious waitlist change for review.
         tags,
         performers,
         teams,
@@ -1575,7 +1578,7 @@ export default function CreateEventPage() {
                             }}>
                               <input type="radio" name="pricing" checked={on}
                                 onChange={() => setIsFree(free)}
-                                style={{ accentColor: 'var(--accent-deep)' }} />
+                                style={{ accentColor: 'var(--accent-deep)', width: 16, height: 16, padding: 0, margin: 0, flexShrink: 0 }} />
                               <span style={{
                                 fontWeight: on ? 700 : 600, fontSize: 13.5,
                                 color: on ? 'var(--accent)' : 'var(--text-2)',
@@ -1630,7 +1633,7 @@ export default function CreateEventPage() {
                     </div>
                   )}
 
-                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 18, alignItems: 'end' }}>
+                  <div className="rgrid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 18, alignItems: 'end' }}>
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Max capacity</label>
                       <input type="number" min="1" value={maxCapacity}
@@ -1643,11 +1646,6 @@ export default function CreateEventPage() {
                         onChange={e => setMaxTicketsPerUser(e.target.value)} placeholder="No limit" style={inp} />
                       <div className="field-hint">Blank = no limit</div>
                     </div>
-                    <label className="check-row" style={{ paddingBottom: 11 }}>
-                      <input type="checkbox" checked={allowWaitlist}
-                        onChange={e => setAllowWaitlist(e.target.checked)} />
-                      <span style={{ fontSize: 13 }}>Allow waitlist when sold out</span>
-                    </label>
                   </div>
 
                   </LockedFieldset>

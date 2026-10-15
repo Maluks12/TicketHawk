@@ -140,6 +140,47 @@ api.interceptors.response.use(
   }
 );
 
+// ── authFetch: raw fetch WITH the same 401 → refresh → retry ────────────────
+//
+// Image uploads use fetch rather than the axios instance so the browser sets
+// the multipart boundary itself. But that also skipped the response
+// interceptor above, so they never refreshed the 15-minute access token: an
+// organiser who spent more than 15 minutes on the create form (or left the
+// tab open) picked an image and got the API's 401 "invalid or expired token"
+// as a toast, while every other call on the page silently refreshed.
+//
+// This mirrors the interceptor for fetch: attach the current token, and on a
+// 401 swap it through the SAME single-flight refreshAccessToken() (so a
+// concurrent axios refresh is shared, never duplicated — the backend treats a
+// replayed refresh token as theft) and replay the request once. FormData
+// bodies can be sent again as-is. A failed refresh ends the session exactly
+// as the interceptor does.
+export async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const baseURL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+  const url = `${baseURL}${path}`;
+
+  const send = (token: string | null) => {
+    const headers = new Headers(init.headers);
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    return fetch(url, { ...init, headers });
+  };
+
+  const token = typeof window !== 'undefined' ? localStorage.getItem('evt_token') : null;
+  const res = await send(token);
+  if (res.status !== 401 || typeof window === 'undefined') return res;
+  if (!localStorage.getItem('evt_refresh')) return res;
+
+  let fresh: string;
+  try {
+    fresh = await refreshAccessToken();
+  } catch {
+    clearSession();
+    window.location.href = '/login';
+    return res;
+  }
+  return send(fresh);
+}
+
 export function clearSession() {
   localStorage.removeItem('evt_token');
   localStorage.removeItem('evt_refresh');

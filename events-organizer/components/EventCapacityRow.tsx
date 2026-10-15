@@ -100,6 +100,7 @@ export default function EventCapacityRow({ eventId, status, value, ticketsSold, 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input
+                className="input"
                 type="number"
                 min={Math.max(1, ticketsSold)}
                 step={1}
@@ -111,10 +112,7 @@ export default function EventCapacityRow({ eventId, status, value, ticketsSold, 
                   if (e.key === 'Enter') save();
                   if (e.key === 'Escape') setEditing(false);
                 }}
-                style={{
-                  width: 130, padding: '7px 9px', border: '1px solid var(--border)',
-                  borderRadius: 6, fontSize: 13, fontFamily: 'inherit',
-                }}
+                style={{ width: 130, flexShrink: 0, padding: '7px 9px', fontSize: 13 }}
               />
               <button className="btn btn-primary btn-sm" onClick={save} disabled={busy}>
                 {busy ? 'Saving…' : 'Save'}

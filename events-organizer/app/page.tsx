@@ -299,8 +299,13 @@ export default function OrganiserLanding() {
             <a href="#audiences">Events</a>
           </div>
           <div className="thl-navcta">
-            <Link href="/login" className="thl-btn thl-btn-ghost thl-hidephone">Log in</Link>
-            <Link href="/login?mode=register" className="thl-btn thl-btn-pink">Start selling</Link>
+            {/* On phones the header has room for one button, and it used to be
+                "Start selling" — so opening the site on a phone and tapping the
+                only button there landed returning organisers on Create account.
+                The phone header now shows Log in; sign-up stays one tap away in
+                the hero ("Start selling") and on the login card itself. */}
+            <Link href="/login" className="thl-btn thl-btn-ghost">Log in</Link>
+            <Link href="/login?mode=register" className="thl-btn thl-btn-pink thl-hidephone">Start selling</Link>
           </div>
         </div>
       </nav>
