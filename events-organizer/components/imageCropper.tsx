@@ -22,6 +22,7 @@
 // organisers start doing this on tablets.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isBackdropPress } from '../lib/backdrop';
 import {
   Crop, Check, X, MagnifyingGlassPlus, MagnifyingGlassMinus,
   ArrowsOutCardinal, ArrowCounterClockwise, Warning,
@@ -332,7 +333,7 @@ export default function ImageCropper({
   return (
     <div
       className="modal-overlay"
-      onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}
+      onMouseDown={e => { if (isBackdropPress(e)) onCancel(); }}
     >
       <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-header">

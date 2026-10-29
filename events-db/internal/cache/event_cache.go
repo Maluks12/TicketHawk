@@ -58,6 +58,7 @@ func keyThisWeekend(limit int) string   { return fmt.Sprintf("events:this_weeken
 func keyCategory(categoryID, limit int) string {
 	return fmt.Sprintf("events:category:%d:l%d", categoryID, limit)
 }
+
 // keyFilter is used for date-only (no location) filter results.
 // Custom date ranges are not cached because they are too varied.
 func keyFilter(datePreset string) string    { return fmt.Sprintf("filter:date:%s", datePreset) }
@@ -270,6 +271,13 @@ func (c *EventCache) BustOnPublish(ctx context.Context) {
 	c.delPattern(ctx, "events:recently_added:*")
 	c.delPattern(ctx, "events:this_weekend:*")
 	c.delPattern(ctx, "filter:date:*")
+}
+
+// BustHome — call when something that only the home feed's ASSEMBLY depends on
+// changes, such as event-collection membership: the events themselves are
+// unchanged, so the per-section event caches stay valid.
+func (c *EventCache) BustHome(ctx context.Context) {
+	c.del(ctx, keyHome())
 }
 
 // BustOnFeaturedChange — call when is_featured changes.

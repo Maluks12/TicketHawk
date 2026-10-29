@@ -1,5 +1,6 @@
 'use client';
 import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { isBackdropPress } from './backdrop';
 import { X } from '@phosphor-icons/react';
 
 interface ConfirmState { title: string; msg: string; cb: () => Promise<void>; }
@@ -24,7 +25,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <Ctx.Provider value={openConfirm}>
       {children}
       {state && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setState(null); }}>
+        <div className="modal-overlay" onClick={(e) => { if (isBackdropPress(e)) setState(null); }}>
           <div className="modal modal-sm">
             <div className="modal-header">
               <div className="modal-title">{state.title}</div>

@@ -309,6 +309,28 @@ export interface Event {
   max_capacity?: number;
   max_tickets_per_user?: number | null;
   venue_type?: 'stadium' | 'auditorium' | 'none' | null;
+  // Event collections. On the HOME FEED this event stands in for a whole
+  // collection (a tour's dates folded into one card) — render it as a
+  // collection card that opens /collections/[slug]. On the event page it
+  // powers "Part of … · See all dates". Absent everywhere else.
+  collection?: EventCollectionRef;
+}
+
+/** Summary of an event collection, attached to an Event (see Event.collection). */
+export interface EventCollectionRef {
+  id: string;
+  slug: string;
+  title: string;
+  cover_image_url?: string | null;
+  /** Live public dates in the collection — always 2 or more. */
+  event_count: number;
+  first_start: string;
+  last_start: string;
+  /** Cheapest live date. 0 means at least one date is free. */
+  min_price: number;
+  currency: string;
+  /** Distinct cities, in date order. */
+  cities: string[];
 }
 
 export interface HomeSection {
@@ -1029,6 +1051,21 @@ export const getOrganizerEvents = (
   api.get<{ data: Event[]; scope: string; next_cursor?: string }>(
     `/v1/organisers/${slugOrId}/events?scope=${scope}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
   );
+
+/** GET /v1/event-collections/:slug — collection + its upcoming public dates.
+ *  `events` can be empty once the last date has passed; the page says so. */
+export interface PublicEventCollection {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string | null;
+  cover_image_url?: string | null;
+  organizer?: PublicOrganizer;
+  events: Event[];
+}
+
+export const getEventCollection = (slugOrId: string) =>
+  api.get<PublicEventCollection>(`/v1/event-collections/${encodeURIComponent(slugOrId)}`);
 
 export async function toggleOrganizerFollow(slugOrId: string): Promise<OrganizerFollowResponse> {
   const res = await api.post<OrganizerFollowResponse>(`/v1/organisers/${slugOrId}/follow`);

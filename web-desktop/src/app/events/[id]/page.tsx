@@ -7,6 +7,7 @@ import { ArrowUpRight } from '@phosphor-icons/react';
 import { useRouter, useParams } from 'next/navigation';
 import { api, toggleFollow, getFollowStatus, type Event, type EventInfoItem, type LineupEntry, type PublicOrganizer } from '@/lib/api';
 import { useAppTheme } from '@/themes/colors';
+import { collectionDateRange, collectionHref } from '@/lib/eventCollections';
 import { useAuthStore } from '@/store/authStore';
 
 // ── Information: the three summary fields ────────────────────────────────────
@@ -339,6 +340,28 @@ export default function EventDetailPage() {
   // CTA bar that replaces it carries only Get Tickets and Follow. Anything that
   // lives solely in the sidebar simply does not exist on a phone, which is what
   // happened to this block. CSS decides which copy is visible; only one ever is.
+  // ── Collection ──────────────────────────────────────────────────────────────
+  // Set by the API only when this event is one of 2+ live dates in an event
+  // collection. Same row style as the organiser block, and rendered beside it
+  // in both copies (sidebar + narrow viewport) for the same reason.
+  const col = event.collection;
+  const collectionBlock = !col ? null : (
+    <Link className="sb-org sb-org-link" href={collectionHref(col)} prefetch>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, color: colors.subText, textTransform: 'uppercase' }}>
+          Part of a collection
+        </p>
+        <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 700, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {col.title}
+        </p>
+        <p style={{ margin: '2px 0 0', fontSize: 12, color: colors.subText }}>
+          See all {col.event_count} dates · {collectionDateRange(col)}
+        </p>
+      </div>
+      <ChevronRight size={16} color={colors.subText} style={{ flexShrink: 0 }} />
+    </Link>
+  );
+
   const organiserBlock = !organiserName ? null : (
     organiserHref ? (
       <Link className="sb-org sb-org-link" href={organiserHref} prefetch>
@@ -859,8 +882,9 @@ export default function EventDetailPage() {
           {/* Organiser, narrow-viewport copy. Hidden by default; shown only at
               the breakpoint where .ed-sidebar disappears, so exactly one of the
               two copies is ever on screen. */}
-          {organiserBlock && (
+          {(organiserBlock || collectionBlock) && (
             <div className="ed-card ed-org-mobile">
+              {collectionBlock}
               {organiserBlock}
             </div>
           )}
@@ -889,6 +913,7 @@ export default function EventDetailPage() {
               )}
             </div>
 
+            {collectionBlock}
             {organiserBlock}
 
             {/* Gap above the CTA. Was flex:1 to push the button to the foot of a

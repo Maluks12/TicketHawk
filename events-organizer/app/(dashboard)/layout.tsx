@@ -10,9 +10,10 @@
 //     the shell follows light/dark with everything else.
 //   • Feather-style stroke icons (components/icons.tsx) replacing the solid
 //     20-unit glyphs, matching the mobile Studio's icon language.
-//   • A real desktop frame: fixed full-height sidebar + top bar with the
-//     current section, a theme switch and the scan shortcut, and a single
-//     scroll region for page content.
+//   • A real desktop frame: fixed full-height sidebar (light/dark switch at
+//     the bottom, above the account strip) and a single scroll region for
+//     page content. There is no top bar on desktop — each page's own header
+//     already names the section. Phones keep a slim bar for the menu button.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
@@ -41,6 +42,9 @@ const NAV: NavEntry[] = [
   { type: 'section', label: 'Dashboard' },
   { type: 'item', href: '/dashboard', exact: true, label: 'Overview', icon: 'grid' },
   { type: 'item', href: '/events', label: 'My Events', icon: 'ticket' },
+  // Event collections — a tour's dates as ONE card on the home feed. Next to
+  // My Events because it is built from them.
+  { type: 'item', href: '/collections', label: 'Collections', icon: 'layers' },
   // Deep analytics — reach, retention, PSR and door numbers at minute/hour/day
   // resolution. Kept OFF the Overview and behind its own route so the
   // dashboard's first screen stays a summary rather than a control panel.
@@ -211,8 +215,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               })}
             </nav>
 
-            {/* User strip */}
+            {/* Light / dark switch, then the user strip */}
             <div className="sidebar-foot">
+              <div className="sidebar-theme">
+                <span className="sidebar-theme-label">Theme</span>
+                <ThemeToggle />
+                {/* Icon-rail width (769–900px) has no room for the pair. */}
+                <span className="theme-compact"><ThemeToggle compact /></span>
+              </div>
               <div className="user-strip">
                 <div className="avatar">{initials}</div>
                 <div className="user-text" style={{ flex: 1, minWidth: 0 }}>
@@ -238,8 +248,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* ── Main column ──────────────────────────────────────────────── */}
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Phones only (hidden on desktop in globals.css): the menu
+                button that opens the drawer, and the current section. */}
             <header className="topbar">
-              {/* Mobile only — opens the drawer. */}
               <button type="button" className="btn-icon nav-toggle"
                 onClick={() => setNavOpen(true)}
                 aria-label="Open menu" aria-controls="dashboard-nav" aria-expanded={navOpen}>
@@ -250,9 +261,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <span>Studio</span>
                 <Icon name="chevron-right" size={13} />
                 <strong>{sectionLabel}</strong>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <ThemeToggle />
               </div>
             </header>
 

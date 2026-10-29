@@ -16,6 +16,7 @@
 // that rate, so it can't disagree with the same rate elsewhere in the product.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
+import { isBackdropPress } from '@/lib/backdrop';
 import Link from 'next/link';
 import { Icon } from '@/components/icons';
 import { LineChart, BarChart, Funnel, Legend, Series } from '@/components/charts';
@@ -643,7 +644,7 @@ function ChartCard({
       {expanded && (
         <div
           className="modal-overlay"
-          onMouseDown={e => { if (e.target === e.currentTarget) setExpanded(false); }}
+          onMouseDown={e => { if (isBackdropPress(e)) setExpanded(false); }}
           style={{ alignItems: 'stretch', padding: 24, zIndex: 1500 }}
         >
           <div className="modal" style={{

@@ -13,6 +13,7 @@
 // place where a tier's rules live rather than two that can drift.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
+import { isBackdropPress } from '../lib/backdrop';
 import { X, Warning, Ticket, Check } from '@phosphor-icons/react';
 import Select, { SelectOption } from './select';
 
@@ -242,7 +243,7 @@ function TicketTypeForm({
   return (
     <div
       className="modal-overlay"
-      onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}
+      onMouseDown={e => { if (isBackdropPress(e)) onCancel(); }}
     >
       <div className="modal" role="dialog" aria-modal="true" aria-label="Ticket type">
         <div className="modal-header">

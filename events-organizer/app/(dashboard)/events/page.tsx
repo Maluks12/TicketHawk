@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { isBackdropPress } from '../../../lib/backdrop';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
@@ -487,7 +488,7 @@ export default function EventsPage() {
 
       {cancelId && (
         <div className="modal-overlay" onMouseDown={(e) => {
-          if (e.target === e.currentTarget) setCancelId(null);
+          if (isBackdropPress(e)) setCancelId(null);
         }}>
           <div className="modal modal-sm" role="dialog" aria-modal="true">
             <div className="modal-header">

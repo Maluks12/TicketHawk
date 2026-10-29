@@ -17,6 +17,8 @@ import { Image } from 'expo-image';
 import { prefetchImages, prefetchFullImages } from '../../lib/img';
 import ComingSoon from '../../components/ComingSoon';
 import { CoverImage } from '../../components/CoverImage';
+import { CollectionBadge } from '../../components/CollectionBadge';
+import { asCardEvent, collectionDateRange, collectionHref } from '../../lib/eventCollections';
 import { useState, useEffect, useCallback, useRef, useMemo, memo, forwardRef, useImperativeHandle } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -222,8 +224,12 @@ const fmtCardDate = (iso?: string | null) => {
 };
 
 // ─── PERF: React.memo + expo-image (memory-disk cache, blur-up transition) ───
-const EventCard = memo(({ item, onPress, colors, priority }: { item: Event; onPress: (e: Event) => void; colors: any; priority?: 'low' | 'normal' | 'high' }) => (
-  <TouchableOpacity className={s.hCard} onPress={() => onPress(item)}>
+const EventCard = memo(({ item: raw, onPress, colors, priority }: { item: Event; onPress: (e: Event) => void; colors: any; priority?: 'low' | 'normal' | 'high' }) => {
+  // A collection's stand-in event renders as the collection (see asCardEvent);
+  // onPress still receives the raw event so the handler can route by it.
+  const item = asCardEvent(raw);
+  return (
+  <TouchableOpacity className={s.hCard} onPress={() => onPress(raw)}>
     <View className={s.hCardImageArea} style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
         <CoverImage
@@ -243,17 +249,21 @@ const EventCard = memo(({ item, onPress, colors, priority }: { item: Event; onPr
       <View className={s.hCardPriceBadge}>
         <Text className={s.hCardPriceBadgeText}>{formatPrice(item.price, item.currency)}</Text>
       </View>
+      {raw.collection && <CollectionBadge collection={raw.collection} />}
     </View>
     <View className={s.hCardBody}>
-      <Text className={s.hCardCat} style={{ color: colors.subText }} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
+      <Text className={s.hCardCat} style={{ color: colors.subText }} numberOfLines={1}>{raw.collection ? collectionDateRange(raw.collection) : fmtCardDate(item.start_time)}</Text>
       <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
       <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
   </TouchableOpacity>
-));
+  );
+});
 
-const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: (e: Event) => void; colors: any }) => (
-  <TouchableOpacity className={s.hCard} onPress={() => onPress(item)}>
+const Top10Card = memo(({ item: raw, rank, onPress, colors }: { item: Event; rank: number; onPress: (e: Event) => void; colors: any }) => {
+  const item = asCardEvent(raw);
+  return (
+  <TouchableOpacity className={s.hCard} onPress={() => onPress(raw)}>
     <View className={s.hCardImageArea}>
       {item.cover_image_url && (
         <CoverImage
@@ -273,18 +283,20 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       <View className={s.hCardPriceBadge}>
         <Text className={s.hCardPriceBadgeText}>{formatPrice(item.price, item.currency)}</Text>
       </View>
+      {raw.collection && <CollectionBadge collection={raw.collection} />}
     </View>
     <View className={s.hCardBody}>
       {/* colors.subText is required, not optional: hCardCat carries no colour
           of its own, so without it the date falls back to RN's default black
           and vanishes on the dark theme. EventCard has always had this; the
           Top 10 variant was the one that missed it. */}
-      <Text className={s.hCardCat} style={{ color: colors.subText }} numberOfLines={1}>{fmtCardDate(item.start_time)}</Text>
+      <Text className={s.hCardCat} style={{ color: colors.subText }} numberOfLines={1}>{raw.collection ? collectionDateRange(raw.collection) : fmtCardDate(item.start_time)}</Text>
       <Text className={s.hCardTitle} style={{ color: colors.text }} numberOfLines={2}>{item.title}</Text>
       <Text className={s.hCardMeta} style={{ color: colors.subText }} numberOfLines={1}>{item.venue_name}</Text>
     </View>
   </TouchableOpacity>
-));
+  );
+});
 
 // ─── PERF: React.memo — section rows skip re-render unless section data changes
 // Removes entries with a duplicate `id`, keeping first occurrence and order.
@@ -761,6 +773,8 @@ export default function Index() {
 
   // PERF: stable reference so EventCard/SectionRow don't re-render unnecessarily
   const handleEventPress = useCallback((event: Event) => {
+    // A folded collection opens its own screen, not the standing-in date.
+    if (event.collection) { router.push(collectionHref(event.collection) as any); return; }
     setSelectedEvent(event);
     // The detail screen renders the full-size banner, but only the thumbnail was
     // warmed for this card -- so kick the real download off now and let it run
@@ -771,6 +785,8 @@ export default function Index() {
 
   // GET TICKETS skips the details page and lands directly on ticket selection.
   const handleGetTickets = useCallback((event: Event) => {
+    // Several dates, several sets of tickets — the buyer picks a date first.
+    if (event.collection) { router.push(collectionHref(event.collection) as any); return; }
     setSelectedEvent(event);
     prefetchFullImages([event.banner_image_url ?? event.cover_image_url]);
     router.push('/event/purchase');

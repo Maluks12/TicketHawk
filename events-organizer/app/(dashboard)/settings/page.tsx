@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { isBackdropPress } from '../../../lib/backdrop';
 import { Warning, Info } from '@phosphor-icons/react';
 import { api, clearSession } from '../../../lib/api';
 import { useToast } from '../../../lib/toast';
@@ -382,7 +383,7 @@ function DeleteAccountSection() {
 
       {open && preview && (
         <div className="modal-overlay" onMouseDown={(e) => {
-          if (e.target === e.currentTarget && !busy) setOpen(false);
+          if (isBackdropPress(e) && !busy) setOpen(false);
         }}>
           <div className="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="del-title">
             <div className="modal-header">

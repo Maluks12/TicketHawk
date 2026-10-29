@@ -855,7 +855,9 @@ select option:disabled { color: var(--text-faint); }
 
 .topbar {
   height: var(--topbar-h); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  /* Desktop has no top bar: the page header names the section and the theme
+     switch lives in the sidebar. Shown again at 768px for the menu button. */
+  display: none; align-items: center; justify-content: space-between; gap: 16px;
   padding: 0 24px; border-bottom: 1px solid var(--border);
   background: var(--bg-elevated);
 }
@@ -877,6 +879,17 @@ select option:disabled { color: var(--text-faint); }
 .theme-toggle button:hover { color: var(--text); }
 .theme-toggle button.on { background: var(--mark-soft); color: var(--mark); }
 
+/* Theme switch at the bottom of the sidebar, above the user strip. */
+.sidebar-theme {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 0 4px 0 10px; margin-bottom: 10px;
+}
+.sidebar-theme-label {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+.sidebar-theme .theme-compact { display: none; }
+
 /* ── Narrow viewports ────────────────────────────────────────────────────── */
 @media (max-width: 1180px) {
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -889,6 +902,9 @@ select option:disabled { color: var(--text-faint); }
   .nav-item .nav-label { display: none; }
   .nav-section { text-align: center; font-size: 0; padding: 10px 0 4px; }
   .user-strip { justify-content: center; padding: 8px; }
+  .sidebar-theme { justify-content: center; padding: 0; }
+  .sidebar-theme-label, .sidebar-theme .theme-toggle { display: none; }
+  .sidebar-theme .theme-compact { display: inline-flex; }
   .page-header, .page-content { padding-left: 18px; padding-right: 18px; }
   .field-row, .objective-grid { grid-template-columns: 1fr; }
 }
@@ -1016,10 +1032,13 @@ select option:disabled { color: var(--text-faint); }
   .nav-item .nav-label { display: inline; }
   .nav-section { text-align: left; font-size: 9.5px; padding: 14px 10px 7px; }
   .user-strip { justify-content: flex-start; padding: 9px 10px; }
+  .sidebar-theme { justify-content: space-between; padding: 0 4px 0 10px; }
+  .sidebar-theme-label, .sidebar-theme .theme-toggle { display: inline-flex; }
+  .sidebar-theme .theme-compact { display: none; }
   .sidebar-close { display: inline-flex; margin-left: auto; }
 
   .nav-toggle { display: inline-flex; }
-  .topbar { padding: 0 10px 0 6px; gap: 8px; }
+  .topbar { display: flex; padding: 0 10px 0 6px; gap: 8px; }
   .crumb { min-width: 0; flex: 1; }
   .crumb > :not(strong) { display: none; }
   .crumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }

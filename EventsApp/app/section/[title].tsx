@@ -23,6 +23,8 @@ import {
 import { useEventStore } from '../../store/eventStore';
 import { useAppTheme } from '../../theme/colors';
 import { CoverImage } from '../../components/CoverImage';
+import { CollectionBadge } from '../../components/CollectionBadge';
+import { asCardEvent, collectionDateRange, collectionHref } from '../../lib/eventCollections';
 import { prefetchFullImages } from '../../lib/img';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -90,7 +92,9 @@ const EDITORIAL_FILTERS: Record<string, (e: Event) => boolean> = {
 
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
-function SectionEventCard({ item, onPress }: { item: Event; onPress: () => void }) {
+function SectionEventCard({ item: raw, onPress }: { item: Event; onPress: () => void }) {
+  // A collection's stand-in event renders as the collection (see asCardEvent).
+  const item = asCardEvent(raw);
   return (
     <TouchableOpacity onPress={onPress} style={styles.card} activeOpacity={0.88}>
       <View style={styles.cardImageWrap}>
@@ -107,10 +111,14 @@ function SectionEventCard({ item, onPress }: { item: Event; onPress: () => void 
         <View style={styles.priceBadge}>
           <Text style={styles.priceBadgeText}>{formatPrice(item.price)}</Text>
         </View>
+        {/* Top-left: the title block fills the bottom of this card. */}
+        {raw.collection && <CollectionBadge collection={raw.collection} position="top-left" />}
         <View style={styles.cardBody}>
           <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
           <Text style={styles.cardMeta} numberOfLines={1}>
-            {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
+            {raw.collection
+              ? collectionDateRange(raw.collection)
+              : `${formatCardDate(item.start_time)}${item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}`}
           </Text>
           {item.venue_name ? (
             <Text style={styles.cardVenue} numberOfLines={1}>
@@ -183,6 +191,8 @@ export default function SectionScreen() {
   }, [sectionMeta, allEvents, dbCategories]);
 
   const handleEventPress = (event: Event) => {
+    // A folded collection opens its own screen, not the standing-in date.
+    if (event.collection) { router.push(collectionHref(event.collection) as any); return; }
     setSelectedEvent(event);
     // The detail screen renders the FULL-size banner, but only the card
     // thumbnail was warmed for this list — so start the real download now and

@@ -16,6 +16,8 @@ import FilterModal, {
 import { useAppTheme } from '@/themes/colors';
 import { CoverImage } from '@/components/coverImage';
 import ComingSoon from '@/components/comingSoon';
+import { CollectionBadge } from '@/components/collectionBadge';
+import { asCardEvent, collectionDateRange, collectionHref } from '@/lib/eventCollections';
 
 // LIVE only while the event is actually running: start <= now <= end.
 // Events without an end_time are assumed live for 4 hours after start.
@@ -171,7 +173,10 @@ const eventCardEqual = (a: any, b: any) =>
 // that fixed height (so short titles no longer leave a gap above the venue)
 // exposed it. `self-start` opts the button out of stretching, so it sizes to
 // its content and there is nothing to centre.
-const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => (
+const EventCard = memo(({ item: raw, onPress, colors }: { item: Event; onPress: () => void; colors: any }) => {
+  // A collection's stand-in event renders as the collection (see asCardEvent).
+  const item = asCardEvent(raw);
+  return (
   <button onClick={onPress} className="shrink-0 self-start text-left" style={{ width: CARD_W }}>
     <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden" style={{ backgroundColor: colors.sectionCardBg }}>
       {item.cover_image_url && (
@@ -186,19 +191,23 @@ const EventCard = memo(({ item, onPress, colors }: { item: Event; onPress: () =>
       <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 h-[18px] flex items-center">
         <span className="text-white text-[9px] font-bold leading-none">{formatPrice(item.price)}</span>
       </div>
+      {raw.collection && <CollectionBadge collection={raw.collection} compact />}
     </div>
     <div className="pt-2.5 px-0.5">
-      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{raw.collection ? collectionDateRange(raw.collection) : fmtCardDate(item.start_time)}</p>
       <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
-), eventCardEqual);
+  );
+}, eventCardEqual);
 EventCard.displayName = 'EventCard';
 // See eventCardEqual note above the memo wrappers.
 
 // ── CHANGE E: Top10Card — larger dimensions ───────────────────────────────────
-const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => (
+const Top10Card = memo(({ item: raw, rank, onPress, colors }: { item: Event; rank: number; onPress: () => void; colors: any }) => {
+  const item = asCardEvent(raw);
+  return (
   <button onClick={onPress} className="shrink-0 self-start text-left" style={{ width: CARD_W }}>
     <div className="relative w-full h-[130px] rounded-[14px] overflow-hidden">
       {item.cover_image_url && (
@@ -209,14 +218,16 @@ const Top10Card = memo(({ item, rank, onPress, colors }: { item: Event; rank: nu
       <div className="absolute top-2.5 right-2.5 bg-black/60 rounded-[5px] px-2.5 h-[18px] flex items-center">
         <span className="text-white text-[9px] font-bold leading-none">{formatPrice(item.price)}</span>
       </div>
+      {raw.collection && <CollectionBadge collection={raw.collection} compact />}
     </div>
     <div className="pt-2.5 px-0.5">
-      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{fmtCardDate(item.start_time)}</p>
+      <p className="text-[10px] font-semibold tracking-[0.5px] mb-0.5 truncate" style={{ color: colors.subText }}>{raw.collection ? collectionDateRange(raw.collection) : fmtCardDate(item.start_time)}</p>
       <p className="text-sm font-bold leading-[18px] mb-1 line-clamp-2" style={{ color: colors.text }}>{item.title}</p>
       <p className="text-[11px] truncate" style={{ color: colors.subText }}>{item.venue_name}</p>
     </div>
   </button>
-), eventCardEqual);
+  );
+}, eventCardEqual);
 Top10Card.displayName = 'Top10Card';
 
 // HeroCarousel — owns its own auto-advance timer so the 5s tick re-renders
@@ -583,6 +594,8 @@ export default function HomePage() {
   }, [homeSections, fetchSections]);
 
   const handleEventPress = useCallback((event: Event) => {
+    // A folded collection opens its own page, not the standing-in date.
+    if (event.collection) { router.push(collectionHref(event.collection)); return; }
     setSelectedEvent(event);
     router.push(`/events/${event.id}`);
   }, [setSelectedEvent, router]);

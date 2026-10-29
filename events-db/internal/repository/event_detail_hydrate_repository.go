@@ -104,6 +104,18 @@ func hydrateEventDetail(pool *pgxpool.Pool, event *models.Event) {
 	} else if len(entries) > 0 {
 		event.Lineup = entries
 	}
+
+	// ── Collection ───────────────────────────────────────────────────────────
+	//
+	// "Part of Afrochild Pop-Up Tour · See all 12 dates". Only set when the
+	// collection has two or more live dates — a collection of one is just this
+	// event, and a link to a page listing only itself would be noise.
+	if ref, err := collectionRefForEvent(pool, event.ID); err != nil {
+		log.Warn().Err(err).Str("event_id", event.ID).
+			Msg("event detail: collection failed to load")
+	} else if ref != nil {
+		event.Collection = ref
+	}
 }
 
 // HydrateEventDetail is the exported form, for callers outside this package

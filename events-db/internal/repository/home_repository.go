@@ -44,7 +44,7 @@ type HomeSectionsResult struct {
 //
 // Every section below used to carry:
 //
-//     AND (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE)
+//	AND (e.price > 0 OR e.listing_fee_paid = TRUE OR e.admin_promoted = TRUE)
 //
 // which meant a FREE event was invisible in the feed until its organiser paid a
 // listing fee or an admin promoted it. That was part of the paid-placement /
@@ -140,7 +140,14 @@ func runSections(pool *pgxpool.Pool, fetchers []sectionFetcher, sponsoredUserID 
 		}
 		out = append(out, r.section)
 	}
-	return out
+
+	// Event collections (migration 000096): within each section, the dates of
+	// one collection fold into a single card — the first of them, carrying a
+	// `collection` summary. This is the HOME FEED ONLY; search, categories and
+	// the map list every date. Done here because runSections is the one place
+	// both the shared (cached) and personal sections are assembled, so the
+	// cache stores the folded result and every visitor gets the same cards.
+	return foldHomeSections(pool, out)
 }
 
 // SharedHomeSections returns the non-personalised feed sections. These are

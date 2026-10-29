@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useEventStore } from '@/store/eventsStore';
 import { useAppTheme } from '@/themes/colors';
+import { CollectionBadge } from '@/components/collectionBadge';
+import { asCardEvent, collectionDateRange, collectionHref } from '@/lib/eventCollections';
 import {
   api,
   getEventsByCategory,
@@ -142,10 +144,14 @@ export default function SectionPage() {
 
           {/* ── MOBILE: single-column stacked cards with image overlay ── */}
           <div className="flex flex-col gap-4 max-w-2xl mx-auto md:hidden">
-            {events.map((item) => (
+            {events.map((raw) => { const item = asCardEvent(raw); return (
               <button
                 key={item.id}
-                onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
+                onClick={() => {
+                  // A folded collection opens its own page, not the standing-in date.
+                  if (raw.collection) { router.push(collectionHref(raw.collection)); return; }
+                  setSelectedEvent(raw); router.push(`/events/${raw.id}`);
+                }}
                 className="relative rounded-xl overflow-hidden w-full text-left shadow-lg"
                 style={{ aspectRatio: '1.92' }}
               >
@@ -162,10 +168,14 @@ export default function SectionPage() {
                 <div className="absolute top-3 right-3 bg-black/60 rounded px-2.5 py-1">
                   <span className="text-white text-xs font-bold">{formatPrice(item.price)}</span>
                 </div>
+                {/* Top-left here: the title and date fill the bottom of this card. */}
+                {raw.collection && <CollectionBadge collection={raw.collection} compact position="top-left" />}
                 <div className="absolute bottom-0 left-0 right-0 p-3.5">
                   <p className="text-white font-extrabold text-base leading-snug mb-1 line-clamp-2">{item.title}</p>
                   <p className="text-white/80 text-xs font-medium mb-0.5">
-                    {formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}
+                    {raw.collection
+                      ? collectionDateRange(raw.collection)
+                      : <>{formatCardDate(item.start_time)}{item.start_time ? `  ·  ${formatTime(item.start_time)}` : ''}</>}
                   </p>
                   {item.venue_name && (
                     <p className="text-white/65 text-xs truncate">
@@ -174,15 +184,19 @@ export default function SectionPage() {
                   )}
                 </div>
               </button>
-            ))}
+            ); })}
           </div>
 
           {/* ── DESKTOP: YouTube Explore-style grid ── */}
           <div className="hidden md:grid grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-10">
-            {events.map((item) => (
+            {events.map((raw) => { const item = asCardEvent(raw); return (
               <button
                 key={item.id}
-                onClick={() => { setSelectedEvent(item); router.push(`/events/${item.id}`); }}
+                onClick={() => {
+                  // A folded collection opens its own page, not the standing-in date.
+                  if (raw.collection) { router.push(collectionHref(raw.collection)); return; }
+                  setSelectedEvent(raw); router.push(`/events/${raw.id}`);
+                }}
                 className="text-left w-full group"
               >
                 {/* Thumbnail */}
@@ -203,6 +217,8 @@ export default function SectionPage() {
                   <div className="absolute bottom-2 right-2 bg-black/80 rounded px-2 py-0.5">
                     <span className="text-white text-[11px] font-bold">{formatPrice(item.price)}</span>
                   </div>
+                  {/* Price sits bottom-right on this card; the badge takes bottom-left. */}
+                  {raw.collection && <CollectionBadge collection={raw.collection} compact />}
                 </div>
 
                 {/* Text below thumbnail — YouTube style */}
@@ -214,8 +230,9 @@ export default function SectionPage() {
                     {item.title}
                   </p>
                   <p className="text-[13px] leading-[19px]" style={{ color: colors.subText }}>
-                    {formatCardDate(item.start_time)}
-                    {item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
+                    {raw.collection
+                      ? collectionDateRange(raw.collection)
+                      : <>{formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}</>}
                   </p>
                   {item.venue_name && (
                     <p className="text-[13px] leading-[19px] truncate" style={{ color: colors.subText }}>
@@ -224,7 +241,7 @@ export default function SectionPage() {
                   )}
                 </div>
               </button>
-            ))}
+            ); })}
           </div>
 
         </div>

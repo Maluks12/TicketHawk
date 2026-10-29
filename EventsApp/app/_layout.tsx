@@ -105,6 +105,14 @@ export default function RootLayout() {
           options={{ animation: 'slide_from_right' }}
         />
 
+        {/* Event collection — where a collection card on the home feed leads.
+            Registered for the same slide-from-right as every other pushed
+            screen; an unlisted route gets expo-router's default instead. */}
+        <Stack.Screen
+          name="collection/[slug]"
+          options={{ animation: 'slide_from_right' }}
+        />
+
         <Stack.Screen
           name="event/purchase"
           options={{ animation: 'slide_from_right' }}

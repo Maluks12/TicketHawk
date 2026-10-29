@@ -556,6 +556,21 @@ func main() {
 		organisersPublic.GET("/:slug/events", handlers.GetPublicOrganizerEventsHandler(pool))
 	}
 
+	// ── Event collections, public (migration 000096) ─────────────────────────
+	// The page a collection card on the home feed opens. Shares the
+	// "organisers-public" bucket: it is the same kind of browse-a-catalogue
+	// traffic, and a separate bucket would just be one more number to tune.
+	eventCollectionsPublic := v1.Group("/event-collections")
+	eventCollectionsPublic.Use(middleware.OptionalAuth(cfg))
+	if rateLimitManager != nil {
+		eventCollectionsPublic.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 120, RefillRate: 3.0, TTL: 15 * time.Minute},
+			"organisers-public"))
+	}
+	{
+		eventCollectionsPublic.GET("/:slug", handlers.GetPublicEventCollectionHandler(pool))
+	}
+
 	// American-spelling alias for the same two routes.
 	//
 	// This codebase is already inconsistent — admin routes say /organizers, the
@@ -1813,6 +1828,18 @@ func main() {
 		orgRoutes.PATCH("/public-profile", handlers.UpdateMyPublicProfileHandler(pool))
 		orgRoutes.PUT("/public-profile/links", handlers.ReplaceMyLinksHandler(pool))
 		orgRoutes.GET("/public-profile/link-platforms", handlers.GetLinkPlatformsHandler())
+
+		// ── Event collections (migration 000096) ───────────────────────────
+		// Groups of an organiser's events shown as ONE card on the home feed.
+		// "event-collections", not "collections": that path is merch.
+		// Ownership is enforced in the repository by organizer_id = user_id.
+		orgRoutes.GET("/event-collections", handlers.ListMyEventCollectionsHandler(pool))
+		orgRoutes.POST("/event-collections", handlers.CreateEventCollectionHandler(pool, eventCache))
+		orgRoutes.GET("/event-collections/:id", handlers.GetMyEventCollectionHandler(pool))
+		orgRoutes.PATCH("/event-collections/:id", handlers.UpdateEventCollectionHandler(pool, eventCache))
+		orgRoutes.DELETE("/event-collections/:id", handlers.DeleteEventCollectionHandler(pool, eventCache))
+		orgRoutes.PUT("/event-collections/:id/events", handlers.SetEventCollectionEventsHandler(pool, eventCache))
+		orgRoutes.DELETE("/event-collections/:id/cover", handlers.RemoveEventCollectionCoverHandler(pool, eventCache))
 	}
 
 	// ==========================================
@@ -1857,6 +1884,21 @@ func main() {
 	{
 		profileMedia.POST("/cover", handlers.UploadOrganizerCoverHandler(pool, imgService))
 		profileMedia.POST("/logo", handlers.UploadOrganizerLogoHandler(pool, imgService))
+	}
+
+	// Event collection cover — same tight upload bucket as the other organiser
+	// media, and the same reason: image uploads are the most expensive thing an
+	// organiser can ask of us. Ownership is checked before the upload is spent.
+	collectionMedia := v1.Group("/organiser/event-collections/:id")
+	collectionMedia.Use(middleware.AuthMiddleware(cfg), middleware.OrganizerOnlyMiddleware())
+	collectionMedia.Use(middleware.ExtendWriteTimeout(5 * time.Minute))
+	if rateLimitManager != nil {
+		collectionMedia.Use(middleware.RateLimitByUser(rateLimitManager,
+			ratelimit.BucketConfig{Capacity: 20, RefillRate: 1.0 / 60.0, TTL: 15 * time.Minute},
+			"media-upload"))
+	}
+	{
+		collectionMedia.POST("/cover", handlers.UploadEventCollectionCoverHandler(pool, imgService, eventCache))
 	}
 
 	// ==========================================

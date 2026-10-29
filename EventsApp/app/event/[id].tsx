@@ -34,6 +34,8 @@ import { buildEventShare } from '../../lib/shareLinks';
 import { LEGAL_URLS } from '../../lib/legalLinks';
 import { IMG_PLACEHOLDER, thumbUrl } from '../../lib/img';
 import { fmtPrice } from '../../lib/money';
+import { Ionicons } from '@expo/vector-icons';
+import { collectionDateRange, collectionHref } from '../../lib/eventCollections';
 
 // ─── Hero frame ───────────────────────────────────────────────────────────────
 // The hero no longer forces every image into one tall portrait box. The frame
@@ -923,6 +925,29 @@ export default function EventDetail() {
                     <CheckCircle size={15} color="#2f7cf6" weight="fill" />
                   )}
                 </View>
+              </View>
+              <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
+            </TouchableOpacity>
+          )}
+          {/* Part of an event collection (2+ live dates). Same row shape as
+              ORGANISED BY; opens the collection's list of every date. */}
+          {event.collection && (
+            <TouchableOpacity
+              className={s.metaItemRow}
+              onPress={() => router.push(collectionHref(event.collection!) as any)}
+              activeOpacity={0.75}
+            >
+              <View className={s.metaIconBox} style={{ backgroundColor: colors.sectionCardBg }}>
+                <Ionicons name="layers" size={19} color={colors.text} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text className={s.metaLabelText} style={{ color: colors.subText }}>PART OF A COLLECTION</Text>
+                <Text className={s.metaValueText} style={{ color: colors.text }} numberOfLines={1}>
+                  {event.collection.title}
+                </Text>
+                <Text style={{ color: colors.subText, fontSize: 12, marginTop: 1 }} numberOfLines={1}>
+                  See all {event.collection.event_count} dates · {collectionDateRange(event.collection)}
+                </Text>
               </View>
               <Text className={s.participantArrow} style={{ color: colors.subText }}>›</Text>
             </TouchableOpacity>

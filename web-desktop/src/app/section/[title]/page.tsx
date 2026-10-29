@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useEventStore } from '@/store/eventsStore';
 import { useAppTheme } from '@/themes/colors';
+import { CollectionBadge } from '@/components/collectionBadge';
+import { asCardEvent, collectionDateRange, collectionHref } from '@/lib/eventCollections';
 import {
   api,
   getEventsByCategory,
@@ -69,8 +71,10 @@ function SkeletonCard({ large = false }: { large?: boolean }) {
   );
 }
 
-function HeroCard({ item, onPress, colors, label }: { item: Event; onPress: (e: Event) => void; colors: any; label?: string }) {
+function HeroCard({ item: raw, onPress, colors, label }: { item: Event; onPress: (e: Event) => void; colors: any; label?: string }) {
   const [hovered, setHovered] = useState(false);
+  // A collection's stand-in event renders as the collection (see asCardEvent).
+  const item = asCardEvent(raw);
   return (
     <button
       onClick={() => onPress(item)}
@@ -99,6 +103,8 @@ function HeroCard({ item, onPress, colors, label }: { item: Event; onPress: (e: 
       >
         <span className="text-white text-xs font-black tracking-wide">{formatPrice(item.price)}</span>
       </div>
+      {/* Top-left: the title block fills the bottom of this card. */}
+      {raw.collection && <CollectionBadge collection={raw.collection} position="top-left" />}
       <div className="absolute bottom-0 left-0 right-0 p-4">
         <div className="flex items-center gap-2 mb-2">
           {label && (
@@ -125,7 +131,9 @@ function HeroCard({ item, onPress, colors, label }: { item: Event; onPress: (e: 
           {item.title}
         </p>
         <p className="text-white/70 text-sm font-medium">
-          {formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
+          {raw.collection
+            ? collectionDateRange(raw.collection)
+            : <>{formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}</>}
         </p>
         {item.venue_name && (
           <p className="text-white/45 text-xs mt-1 truncate">
@@ -143,6 +151,8 @@ function GridCard({
   item: Event; onPress: (e: Event) => void; colors: any; isDark: boolean; rank?: number;
 }) {
   const [hovered, setHovered] = useState(false);
+  const raw = item;
+  item = asCardEvent(raw);
   return (
     <button
       onClick={() => onPress(item)}
@@ -187,6 +197,8 @@ function GridCard({
         >
           <span className="text-white text-[10px] font-black tracking-wide">{formatPrice(item.price)}</span>
         </div>
+        {/* Price sits bottom-left on this card, so the badge goes bottom-right. */}
+        {raw.collection && <CollectionBadge collection={raw.collection} position="bottom-right" />}
       </div>
       <div style={{ paddingLeft: rank !== undefined ? '1.25rem' : 0 }}>
         <p
@@ -196,7 +208,9 @@ function GridCard({
           {item.title}
         </p>
         <p className="text-[12px] leading-[18px]" style={{ color: colors.subText }}>
-          {formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}
+          {raw.collection
+            ? collectionDateRange(raw.collection)
+            : <>{formatCardDate(item.start_time)}{item.start_time ? ` · ${formatTime(item.start_time)}` : ''}</>}
         </p>
         {item.venue_name && (
           <p className="text-[12px] leading-[18px] truncate" style={{ color: colors.subText }}>
@@ -266,7 +280,11 @@ export default function SectionPage() {
     setLoading(false);
   }, [sectionMeta, allEvents, dbCategories]);
 
-  const handlePress = (item: Event) => { setSelectedEvent(item); router.push(`/events/${item.id}`); };
+  const handlePress = (item: Event) => {
+    // A folded collection opens its own page, not the standing-in date.
+    if (item.collection) { router.push(collectionHref(item.collection)); return; }
+    setSelectedEvent(item); router.push(`/events/${item.id}`);
+  };
 
   const [hero, ...rest] = events;
 
