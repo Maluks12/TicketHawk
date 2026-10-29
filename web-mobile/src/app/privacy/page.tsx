@@ -40,6 +40,7 @@ const sections: Section[] = [
         items: [
           'Your name, email address and phone number when you create an account or buy a ticket as a guest.',
           'The name and email of anyone you assign a ticket to, so we can send them their claim link.',
+          'Your delivery address, if you order merchandise for delivery.',
           'Your South African ID number, and supporting identity information, if you register as an event Organizer and complete identity verification.',
           'Your bank account details, if you are an Organizer receiving payouts.',
         ],
@@ -67,6 +68,7 @@ const sections: Section[] = [
         items: [
           '**To issue and manage your tickets** — including generating your entry QR code and letting you transfer a ticket to someone else.',
           '**To take payment securely** through Paystack, and to process refunds.',
+          '**To deliver merchandise** you order, or arrange its collection.',
           '**To verify Organizer identity**, as required by the Financial Intelligence Centre Act (FICA), before an Organizer can receive payouts.',
           '**To let Organizers manage entry** at their own events.',
           '**To prevent fraud** and detect abuse of the Platform.',
@@ -82,6 +84,7 @@ const sections: Section[] = [
         kind: 'list',
         items: [
           '**The event Organizer.** When you buy a ticket, we share your name, email and ticket details with the Organizer of that event, so they can admit you and contact you about the event.',
+          '**Merchandise fulfilment.** If you order merchandise, we share your name, contact details and delivery address with the Organizer supplying it and with the courier delivering it, only so they can fulfil your order.',
           '**Our service providers.** We use sub-processors — including Amazon Web Services for hosting and Paystack for payments — who are bound by agreements requiring POPIA-level protection.',
           '**Law enforcement.** We will disclose data to the South African Police Service or the Financial Intelligence Centre where required by law, or where we suspect cyber fraud or money laundering.',
         ],

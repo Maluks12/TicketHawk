@@ -46,7 +46,7 @@ export const COMPANY = {
 
   // TODO: registered physical address. Required by ECTA s43(1)(c).
   // A PO box does not satisfy this — it must be a physical address.
-  physicalAddress: 'South Africa',
+  physicalAddress: '8 Orion Avenue, Sundowner, Randburg, 2161, South Africa',
 
   supportEmail: 'support@ticket-hawk.com',
   legalEmail: 'legal@ticket-hawk.com',
@@ -63,6 +63,32 @@ export const COMPANY = {
   informationOfficerEmail: 'privacy@ticket-hawk.com',
 
   website: 'https://ticket-hawk.com',
+
+  // Required by the acquiring bank's e-commerce checklist: the merchant's
+  // country of domicile and the transaction currency must both be stated on
+  // the live site. Shown in the footer of every page, on /about, and in the
+  // Terms of Use.
+  countryOfDomicile: 'South Africa',
+  currencyName: 'South African Rand',
+  currencyCode: 'ZAR',
+} as const;
+
+/**
+ * Merchandise delivery commitments, published on /delivery-policy and in the
+ * Terms of Use.
+ *
+ * TODO: confirm these with the organisers who fulfil merch orders. They are
+ * promises to buyers — if organisers routinely dispatch slower than this, change
+ * the number here rather than leave a published timeframe nobody meets.
+ *
+ * The 30-day outer limit is not a business choice: ECTA s46 requires an order
+ * to be executed within 30 days unless the parties agreed otherwise, and gives
+ * the buyer the right to cancel if it is not.
+ */
+export const MERCH_DELIVERY = {
+  dispatchWithin: '5 business days',
+  courierTransit: '2 to 7 business days',
+  outerLimitDays: 30,
 } as const;
 
 /** Rendered wherever a TODO value is still unset, so gaps are visible rather than silent. */
@@ -71,7 +97,7 @@ export const MISSING = '[to be confirmed]';
 export const val = (v: string | null): string => v ?? MISSING;
 
 /** Shown as "Last updated" on every document. Bump when the text changes. */
-export const LAST_UPDATED = '26 July 2026';
+export const LAST_UPDATED = '29 October 2026';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Refund schedule

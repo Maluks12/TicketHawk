@@ -922,7 +922,7 @@ export default function TicketPurchaseScreen() {
                       onPress={() => openLegal('terms')}
                       suppressHighlighting
                     >
-                      clause 7 of the Terms of Use
+                      clause 5 of the Terms of Use
                     </Text>
                     .
                   </Text>

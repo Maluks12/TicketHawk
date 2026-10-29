@@ -1,10 +1,14 @@
 'use client';
 
 import LegalDoc, { type Section } from '@/components/legal-doc';
-import { COMPANY, REFUND_BANDS, val } from '@/lib/legal';
+import { COMPANY, val } from '@/lib/legal';
+import { REFUND_SECTIONS, DELIVERY_SECTIONS, asClauseBlocks } from '@/lib/policies';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /terms — Terms of Service, EULA, Refund & Cancellation Policy, Acceptable Use.
+// /terms — Terms of Service, EULA, Refund & Cancellation Policy, Delivery
+// Policy, Acceptable Use. The refund and delivery clauses render from
+// lib/policies.ts, which also feeds the standalone /refund-policy and
+// /delivery-policy pages.
 //
 // These four documents are merged onto one page on purpose. They are all the
 // consumer-facing half of the contract, the app's checkout links here, and the
@@ -31,6 +35,7 @@ const sections: Section[] = [
           `**Supplier:** ${COMPANY.legalName}`,
           `**Registration number:** ${val(COMPANY.registrationNumber)}`,
           `**Physical address:** ${val(COMPANY.physicalAddress)}`,
+          `**Country of domicile:** ${COMPANY.countryOfDomicile}`,
           `**Contact email:** ${COMPANY.supportEmail}`,
           `**Website:** ${COMPANY.website}`,
         ],
@@ -60,6 +65,11 @@ const sections: Section[] = [
   {
     heading: '2. Purchases, pricing and fees',
     blocks: [
+      {
+        kind: 'p',
+        text:
+          `**Currency.** All prices on the Platform are shown in ${COMPANY.currencyName} (${COMPANY.currencyCode}), and every transaction — payments, fees and refunds — is processed in ${COMPANY.currencyName}.`,
+      },
       {
         kind: 'p',
         text:
@@ -153,42 +163,24 @@ const sections: Section[] = [
       {
         kind: 'p',
         text:
-          '**If you cancel.** Under Section 17 of the Consumer Protection Act you may cancel an advance booking. A reasonable cancellation fee applies, based on how much notice you give:',
+          'This policy is also published on its own page at ticket-hawk.com/refund-policy. Both say the same thing.',
       },
-      {
-        kind: 'table',
-        head: ['Notice given', 'You receive back'],
-        rows: REFUND_BANDS.map((b) => [b.window, b.refund] as [string, string]),
-      },
-      {
-        kind: 'p',
-        text:
-          'These percentages reflect our assessment of a reasonable cancellation fee, having regard to the notice given, the likelihood of resale, and standard practice for comparable events. The amount you will receive is shown to you before you confirm a refund request.',
-      },
-      {
-        kind: 'p',
-        text:
-          '**Service fees on your own cancellation.** Where you cancel your own booking, or do not attend, our booking and processing fees are not refunded. Our service — facilitating your purchase and issuing your ticket — is fully rendered once your ticket is issued.',
-      },
-      {
-        kind: 'p',
-        text:
-          '**Hospitalisation or death.** In accordance with Section 17 of the CPA, no cancellation fee applies if you cannot honour the booking because of hospitalisation or death. We may ask for supporting documentation.',
-      },
-      {
-        kind: 'p',
-        text:
-          '**If the Organizer cancels.** If an event is cancelled entirely, you receive a full refund of the ticket face value **and** the service fee. If an event is postponed or materially changed, you may keep your ticket or request that same full refund.',
-      },
-      {
-        kind: 'p',
-        text:
-          '**Cooling-off.** In accordance with Section 42(2)(b) of ECTA, the standard 7-day cooling-off period for online transactions does not apply to event tickets, as these are leisure services provided on a specific date.',
-      },
+      ...asClauseBlocks(REFUND_SECTIONS),
     ],
   },
   {
-    heading: '8. Acceptable use',
+    heading: '8. Delivery policy',
+    blocks: [
+      {
+        kind: 'p',
+        text:
+          'This policy is also published on its own page at ticket-hawk.com/delivery-policy. Both say the same thing.',
+      },
+      ...asClauseBlocks(DELIVERY_SECTIONS),
+    ],
+  },
+  {
+    heading: '9. Acceptable use',
     blocks: [
       {
         kind: 'p',
@@ -216,7 +208,7 @@ const sections: Section[] = [
     ],
   },
   {
-    heading: '9. Events outside anyone’s control',
+    heading: '10. Events outside anyone’s control',
     blocks: [
       {
         kind: 'p',
@@ -226,7 +218,7 @@ const sections: Section[] = [
     ],
   },
   {
-    heading: '10. Intellectual property',
+    heading: '11. Intellectual property',
     blocks: [
       {
         kind: 'p',
@@ -235,7 +227,7 @@ const sections: Section[] = [
     ],
   },
   {
-    heading: '11. Resolving a dispute',
+    heading: '12. Resolving a dispute',
     blocks: [
       {
         kind: 'p',
@@ -250,17 +242,17 @@ const sections: Section[] = [
     ],
   },
   {
-    heading: '12. Governing law',
+    heading: '13. Governing law',
     blocks: [
       {
         kind: 'p',
         text:
-          'These terms are governed by the laws of the Republic of South Africa. Subject to the section above, disputes not resolved through the CGSO, NCC or Tribunal are subject to the exclusive jurisdiction of the South African courts.',
+          `These terms are governed by the laws of the Republic of South Africa. ${COMPANY.legalName} is domiciled in ${COMPANY.countryOfDomicile}. Subject to the section above, disputes not resolved through the CGSO, NCC or Tribunal are subject to the exclusive jurisdiction of the South African courts.`,
       },
     ],
   },
   {
-    heading: '13. General',
+    heading: '14. General',
     blocks: [
       {
         kind: 'list',
@@ -281,10 +273,13 @@ export default function TermsPage() {
   return (
     <LegalDoc
       title="Terms of Use"
-      intro={`Welcome to TicketHawk, operated by ${COMPANY.legalName}. By using our website, downloading our app, or buying a ticket, you agree to these terms. They cover your purchase, our refund policy, and what we are and are not responsible for.`}
+      intro={`Welcome to TicketHawk, operated by ${COMPANY.legalName}. By using our website, downloading our app, or buying a ticket, you agree to these terms. They cover your purchase, our refund and delivery policies, and what we are and are not responsible for.`}
       sections={sections}
       seeAlso={[
         { href: '/privacy', label: 'Privacy Policy' },
+        { href: '/refund-policy', label: 'Refund Policy' },
+        { href: '/delivery-policy', label: 'Delivery Policy' },
+        { href: '/about', label: 'About us' },
         { href: '/legal', label: 'Legal & compliance' },
       ]}
     />

@@ -119,7 +119,10 @@ export async function GET() {
     urlTag(`${SITE_URL}/category`,   iso, 'daily',   '0.7'),
     urlTag(`${SITE_URL}/merch`,      iso, 'daily',   '0.5'),
     urlTag(`${SITE_URL}/support`,    iso, 'monthly', '0.3'),
+    urlTag(`${SITE_URL}/about`,      iso, 'yearly',  '0.3'),
     urlTag(`${SITE_URL}/terms`,      iso, 'yearly',  '0.2'),
+    urlTag(`${SITE_URL}/refund-policy`,   iso, 'yearly', '0.2'),
+    urlTag(`${SITE_URL}/delivery-policy`, iso, 'yearly', '0.2'),
     urlTag(`${SITE_URL}/privacy`,    iso, 'yearly',  '0.2'),
     urlTag(`${SITE_URL}/legal`,      iso, 'yearly',  '0.2'),
   ];

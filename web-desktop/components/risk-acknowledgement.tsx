@@ -26,7 +26,7 @@ import { useAppTheme } from '@/themes/colors';
 // Hence one checkbox, tied to one clause, naming what is being acknowledged.
 // NOT a checkbox for the whole terms document: general purchase terms are
 // adequately covered by the notice already displayed above the button, and
-// burying clause 7 inside a blanket "I agree to everything" tick would recreate
+// burying clause 5 inside a blanket "I agree to everything" tick would recreate
 // exactly the problem this is meant to solve.
 //
 // ── Rules for anyone editing this ────────────────────────────────────────────
@@ -107,13 +107,13 @@ export default function RiskAcknowledgement({
           the organiser and venue reserve the right of admission, and that age restrictions
           may apply — as set out in{' '}
           <Link
-            href="/terms"
+            href="/terms#risk-admission-and-liability"
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             style={{ color: '#ff2d55', textDecoration: 'underline' }}
           >
-            clause 7 of the Terms of Use
+            clause 5 of the Terms of Use
           </Link>
           .
         </span>

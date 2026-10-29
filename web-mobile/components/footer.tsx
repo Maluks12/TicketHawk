@@ -18,7 +18,7 @@ import { COMPANY } from '@/lib/legal';
 // the exact moment the buyer is deciding to pay.
 //
 // Those routes carry their own links to the legal documents (the s49
-// acknowledgement links to clause 7, and the notice above the button links to
+// acknowledgement links to clause 5, and the notice above the button links to
 // the Terms and Privacy Policy), so hiding the footer costs no reachability.
 // Matched as anchored patterns, not substrings. The first attempt used
 // endsWith/startsWith on path fragments, which both missed /events/[id] (its
@@ -41,10 +41,16 @@ export default function Footer() {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
   if (HIDE_FOOTER_PATTERNS.some((re) => re.test(path))) return null;
 
+  // About, Terms, Refund, Delivery and Privacy are each required, as a page
+  // reachable from the live site, by the acquiring bank's e-commerce
+  // checklist — keep all five here.
   const LEGAL_LINKS = [
-    { href: '/terms',   label: 'Terms of Use' },
-    { href: '/privacy', label: 'Privacy Policy' },
-    { href: '/legal',   label: 'Legal' },
+    { href: '/about',           label: 'About Us' },
+    { href: '/terms',           label: 'Terms of Use' },
+    { href: '/refund-policy',   label: 'Refund Policy' },
+    { href: '/delivery-policy', label: 'Delivery Policy' },
+    { href: '/privacy',         label: 'Privacy Policy' },
+    { href: '/legal',           label: 'Legal' },
     // Listed here as well as being the Support URL given to Apple and Google.
     // Both stores open that URL during review, and a support page reachable
     // only by typing it in reads as one made purely to satisfy the checklist.
@@ -112,6 +118,9 @@ export default function Footer() {
 
       <p className="text-[12px] text-center" style={{ color: colors.subText }}>
         TicketHawk is a product of {COMPANY.legalName}
+      </p>
+      <p className="text-[11px] text-center mt-1" style={{ color: colors.subText }}>
+        Registered in {COMPANY.countryOfDomicile} · Reg. no. {COMPANY.registrationNumber} · All prices in {COMPANY.currencyName} ({COMPANY.currencyCode})
       </p>
       <p
         className="text-[11px] text-center mt-1"
