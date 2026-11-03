@@ -255,7 +255,7 @@ export default function Footer() {
         TicketHawk is a product of {COMPANY.legalName}
       </p>
       <p className="text-[11px] text-center mt-1" style={{ color: colors.subText }}>
-        Registered in {COMPANY.countryOfDomicile} · Reg. no. {COMPANY.registrationNumber} · All prices in {COMPANY.currencyName} ({COMPANY.currencyCode})
+        Registered in {COMPANY.countryOfDomicile}
       </p>
       <p
         className="text-[11px] text-center mt-1"
